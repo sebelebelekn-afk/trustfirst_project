@@ -19,9 +19,7 @@ if not SECRET_KEY:
 
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = os.environ.get(
-    'ALLOWED_HOSTS', '127.0.0.1,localhost'
-).split(',')
+ALLOWED_HOSTS = ["*"]
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
