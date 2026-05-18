@@ -261,5 +261,5 @@ LOGGING = {
 # STATICFILES  (whitenoise for production serving)
 # ------------------------------------------------------------------
 if not DEBUG:
-    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+    STATICFILES_STORAGE = 'whitenoise.storage.StaticFilesStorage'
     MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')

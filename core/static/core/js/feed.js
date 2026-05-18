@@ -437,7 +437,17 @@ function nextAuthStep(stepId) {
     var step = document.getElementById(stepId);
     if (!step) { console.error('[Auth] Step not found:', stepId); return; }
     step.classList.add('active');
+    history.pushState({ authStep: stepId }, '', '');
 }
+
+window.addEventListener('popstate', function(e) {
+    var authWrapper = document.getElementById('auth-wrapper');
+    if (!authWrapper || authWrapper.style.display === 'none') return;
+    var stepId = (e.state && e.state.authStep) ? e.state.authStep : 'step-splash';
+    document.querySelectorAll('.auth-step').forEach(s => s.classList.remove('active'));
+    var step = document.getElementById(stepId);
+    if (step) step.classList.add('active');
+});
 
 function selectAccountType(type) {
     selectedAccountType = type;
@@ -15678,16 +15688,7 @@ function isGovEmail(email) {
 // VERIFICATION FLOW PER ACCOUNT TYPE
 // ============================================
 
-function nextAuthStep(stepId) {
-    document.querySelectorAll('.auth-step').forEach(function(s) {
-        s.classList.remove('active');
-    });
-    var target = document.getElementById(stepId);
-    if (target) {
-        target.classList.add('active');
-        target.style.display = 'block';
-    }
-}
+
 
 function startVerificationForType(accountType) {
     switch(accountType) {

@@ -23,7 +23,14 @@ function nextAuthStep(s){
   document.querySelectorAll('.auth-step').forEach(function(x){x.classList.remove('active');});
   var t=document.getElementById(s);
   if(t)t.classList.add('active');
+  if(s !== 'step-splash') history.pushState({ authStep: s }, '', '');
 }
+window.addEventListener('popstate', function(e){
+  var step = (e.state && e.state.authStep) ? e.state.authStep : 'step-splash';
+  document.querySelectorAll('.auth-step').forEach(function(x){x.classList.remove('active');});
+  var t = document.getElementById(step);
+  if(t) t.classList.add('active');
+});
 </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
