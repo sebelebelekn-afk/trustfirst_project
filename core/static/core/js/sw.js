@@ -1,7 +1,7 @@
 // ==========================================================================
 // TRUSTFIRST SERVICE WORKER — PWA + OFFLINE + CACHING
 // ==========================================================================
-const CACHE_VERSION = 'trustfirst-v2.1';
+const CACHE_VERSION = 'trustfirst-v2.3';
 const STATIC_CACHE = CACHE_VERSION + '-static';
 const DYNAMIC_CACHE = CACHE_VERSION + '-dynamic';
 const IMAGE_CACHE = CACHE_VERSION + '-images';
@@ -15,17 +15,7 @@ const MAX_IMAGE_CACHE = 100;
 
 // Install — Cache static shell
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(STATIC_CACHE).then((cache) => {
-      console.log('[SW] Caching static assets');
-      return Promise.allSettled(
-        STATIC_ASSETS.map(url => cache.add(url).catch(err => {
-          console.warn('[SW] Failed to cache:', url, err);
-        }))
-      );
-    })
-  .then(() => self.skipWaiting())
-  );
+  event.waitUntil(self.skipWaiting());
 });
 
 // Activate — Clean old caches
@@ -68,7 +58,17 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets — Cache First
+  // App shell (HTML pages + our own JS/CSS) — Network First so code updates
+  // reach users immediately when online, with cache fallback for offline.
+  if (
+    event.request.mode === 'navigate' ||
+    (url.origin === self.location.origin && url.pathname.match(/\.(js|css)$/))
+  ) {
+    event.respondWith(networkFirst(event.request, STATIC_CACHE));
+    return;
+  }
+
+  // Other static assets (fonts, etc.) — Cache First
   event.respondWith(cacheFirst(event.request, STATIC_CACHE));
 });
 

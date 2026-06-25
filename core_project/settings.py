@@ -19,7 +19,11 @@ if not SECRET_KEY:
 
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = ["*"]
+_allowed = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+_render_host = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
+if _render_host:
+    _allowed.append(_render_host)
+ALLOWED_HOSTS = [h.strip() for h in _allowed if h.strip()]
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -134,6 +138,12 @@ GIPHY_API_KEY                = os.environ.get('GIPHY_API_KEY', '')
 RESEND_API_KEY               = os.environ.get('RESEND_API_KEY', '')
 GOOGLE_CLOUD_VISION_API_KEY  = os.environ.get('GOOGLE_CLOUD_VISION_API_KEY', '')
 
+# Verification (Didit — replaces Stripe Identity), email (Brevo), voice (ElevenLabs)
+DIDIT_API_KEY                = os.environ.get('DIDIT_API_KEY', '')
+DIDIT_WORKFLOW_ID            = os.environ.get('DIDIT_WORKFLOW_ID', '')  # create a workflow in the Didit dashboard
+BREVO_API_KEY                = os.environ.get('BREVO_API_KEY', '')
+ELEVENLABS_API_KEY           = os.environ.get('ELEVENLABS_API_KEY', '')
+
 # ------------------------------------------------------------------
 # SECURITY HEADERS
 # ------------------------------------------------------------------
@@ -169,6 +179,8 @@ RATELIMIT_ENABLE = bool(os.environ.get("REDIS_URL"))
 # ------------------------------------------------------------------
 # CONTENT SECURITY POLICY  (single definition — no duplicates)
 # ------------------------------------------------------------------
+CSP_INCLUDE_NONCE_IN = ('script-src',)
+
 CSP_DEFAULT_SRC = ("'self'",)
 
 CSP_SCRIPT_SRC = (

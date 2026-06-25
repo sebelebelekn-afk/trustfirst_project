@@ -1,4 +1,4 @@
-window.addEventListener('unhandledrejection', function(e) {
+﻿window.addEventListener('unhandledrejection', function(e) {
     var msg = (e.reason && e.reason.message) ? e.reason.message : String(e.reason || '');
     if (msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('networkerror')) {
         console.warn('[Offline]', msg); return;
@@ -194,6 +194,13 @@ function isSleepModeActive() {
 }
 
 function showToast(message, duration = 3000) {
+    // Strip emojis/symbols from toasts for a clean, professional look (no caller changes needed)
+    try {
+        message = String(message)
+            .replace(/[\p{Extended_Pictographic}\p{Regional_Indicator}️‍←-⇿⌀-➿⬀-⯿]/gu, '')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
+    } catch (e) {}
     const existing = document.getElementById('toastNotif');
     if (existing) existing.remove();
 
@@ -248,6 +255,34 @@ let currentFeedPage = 1;
 let mediaStream = null;
 let isLoading = false;
 let maxPosts = 50;
+
+function renderSkeletonHTML(kind, count) {
+    count = count || 4;
+    if (kind === 'grid3') {
+        return Array.from({ length: count }).map(function() {
+            return '<div style="aspect-ratio:9/16;background:var(--skeleton-bg,#e8e8e8);border-radius:3px;animation:skeletonPulse 1.4s ease-in-out infinite;"></div>';
+        }).join('');
+    }
+    if (kind === 'message') {
+        return Array.from({ length: count }).map(function() {
+            return '<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;animation:skeletonPulse 1.4s ease-in-out infinite;"><div style="width:52px;height:52px;border-radius:50%;background:var(--skeleton-bg,#e8e8e8);flex-shrink:0;"></div><div style="flex:1;"><div style="height:14px;border-radius:6px;background:var(--skeleton-bg,#e8e8e8);width:50%;margin-bottom:7px;"></div><div style="height:12px;border-radius:6px;background:var(--skeleton-bg,#e8e8e8);width:70%;"></div></div><div style="width:40px;height:10px;border-radius:6px;background:var(--skeleton-bg,#e8e8e8);"></div></div>';
+        }).join('');
+    }
+    return Array.from({ length: count }).map(function() {
+        return '<div class="post-card" style="animation:skeletonPulse 1.4s ease-in-out infinite;"><div style="padding:16px;"><div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;"><div style="width:42px;height:42px;border-radius:50%;background:var(--skeleton-bg,#e8e8e8);flex-shrink:0;"></div><div style="flex:1;"><div style="height:12px;background:var(--skeleton-bg,#e8e8e8);border-radius:6px;margin-bottom:6px;width:60%;"></div><div style="height:10px;background:var(--skeleton-bg,#e8e8e8);border-radius:6px;width:40%;"></div></div></div><div style="height:14px;background:var(--skeleton-bg,#e8e8e8);border-radius:6px;margin-bottom:8px;"></div><div style="height:14px;background:var(--skeleton-bg,#e8e8e8);border-radius:6px;width:80%;"></div><div style="height:180px;background:var(--skeleton-bg,#e8e8e8);border-radius:14px;margin-top:12px;"></div></div></div>';
+    }).join('');
+}
+
+function showSkeleton(target, kind, count) {
+    var el = typeof target === 'string' ? document.getElementById(target) : target;
+    if (el) el.innerHTML = renderSkeletonHTML(kind, count);
+}
+
+function isTrustClipPost(post) {
+    if (!post) return false;
+    var type = String(post.post_type || post.content_type || post.kind || '').toLowerCase();
+    return type === 'trustclip' || type === 'trust_clip' || post.is_trustclip === true || !!post.trustclip_id;
+}
 
 async function toggleFeedFollow(btn) {
     if (!canPerformAction('follow a user')) return;
@@ -332,12 +367,6 @@ function secureSave(key, data) {
     try {
         localStorage.setItem('tf_' + key, JSON.stringify(data));
     } catch(e) { console.warn('[secureSave error]', e); }
-}
-function secureLoad(key) {
-    try {
-        var raw = localStorage.getItem('tf_' + key);
-        return raw ? JSON.parse(raw) : null;
-    } catch(e) { return null; }
 }
 function secureLoad(key) {
     try {
@@ -450,11 +479,71 @@ window.addEventListener('popstate', function(e) {
 });
 
 function selectAccountType(type) {
+    var birthDate = (document.getElementById('reg-birthdate') || {}).value || '';
+    if (birthDate && calculateAgeFromBirthDate(birthDate) < 18 && type !== 'child') {
+        showToast('Under-18 accounts use TrustFirst Kids and need a linked parent account.');
+        type = 'child';
+    }
     selectedAccountType = type;
     document.querySelectorAll('.acct-type-card').forEach(c => c.classList.remove('selected'));
-    document.querySelector(`[data-type="${type}"]`).classList.add('selected');
+    var card = document.querySelector(`[data-type="${type}"]`);
+    if (card) card.classList.add('selected');
     document.getElementById('acct-type-next').style.opacity = '1';
     document.getElementById('acct-type-next').style.pointerEvents = 'all';
+}
+
+function calculateAgeFromBirthDate(birthDateValue) {
+    var dob = new Date(birthDateValue + 'T00:00:00');
+    if (!birthDateValue || isNaN(dob.getTime())) return null;
+    var today = new Date();
+    var age = today.getFullYear() - dob.getFullYear();
+    var m = today.getMonth() - dob.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+    return age;
+}
+
+function handleBirthDateChange() {
+    var input = document.getElementById('reg-birthdate');
+    var status = document.getElementById('birthdate-status');
+    var age = calculateAgeFromBirthDate(input ? input.value : '');
+    if (!status) return;
+    if (age === null) {
+        status.textContent = '';
+        return;
+    }
+    if (age < 13 || age > 120) {
+        status.style.color = '#FF3B30';
+        status.textContent = 'Enter a valid birth date.';
+        return;
+    }
+    if (age < 18) {
+        status.style.color = '#34C759';
+        status.textContent = 'TrustFirst Kids account will be created. Parent link required next.';
+        selectAccountType('child');
+    } else {
+        status.style.color = '#888';
+        status.textContent = 'You can choose your account type on the next step.';
+    }
+}
+
+function proceedFromRegistrationDetails() {
+    var birthDate = (document.getElementById('reg-birthdate') || {}).value || '';
+    var age = calculateAgeFromBirthDate(birthDate);
+    if (age === null) {
+        showToast('Please enter your birth date.');
+        return;
+    }
+    if (age < 13 || age > 120) {
+        showToast('Please enter a valid birth date.');
+        return;
+    }
+    if (age < 18) {
+        selectedAccountType = 'child';
+        secureSave('pending_account_type', 'child');
+        nextAuthStep('step-parent-link');
+        return;
+    }
+    nextAuthStep('step-account-type');
 }
 
 function proceedAfterAccountType() {
@@ -574,12 +663,19 @@ async function completeRegistration(verified) {
     const username = (document.getElementById('reg-username')?.value || '').trim().toLowerCase();
     const password = document.getElementById('reg-pass')?.value || '';
     const confirmPass = document.getElementById('reg-confirm-pass')?.value || '';
+    const birthDate = (document.getElementById('reg-birthdate')?.value || '').trim();
+    const registrationAge = calculateAgeFromBirthDate(birthDate);
+    if (registrationAge !== null && registrationAge < 18) selectedAccountType = 'child';
+    var finalAccountType = selectedAccountType || 'personal';
+    var parentLink = secureLoad('parent_link_request') || {};
 
     // Client-side validation
     if (firstName.length < 2) return showAuthError('First name must be at least 2 characters', 'step-register');
     if (lastName.length < 1) return showAuthError('Please enter your last name', 'step-register');
     if (!email || !isValidEmail(email)) return showAuthError('Enter a valid email', 'step-register');
     if (!username || !isValidUsername(username)) return showAuthError('Username: 3-20 chars, letters/numbers/underscore only', 'step-register');
+    if (registrationAge === null || registrationAge < 13 || registrationAge > 120) return showAuthError('Please enter a valid birth date', 'step-register');
+    if (registrationAge < 18 && !parentLink.parent_id && !parentLink.parent_username) return showAuthError('A parent or guardian Trust-ID is required for under-18 accounts', 'step-parent-link');
 
     if (password !== confirmPass) return showAuthError('Passwords do not match.', 'step-register');
 
@@ -608,7 +704,9 @@ async function completeRegistration(verified) {
         const authData = await DB.signUp(email, password, {
             full_name: name,
             username: username,
-            account_type: selectedAccountType || 'personal'
+            account_type: finalAccountType,
+            birth_date: birthDate,
+            is_kid: finalAccountType === 'child'
         });
 
         if (!authData.user || (authData.user.identities && authData.user.identities.length === 0)) {
@@ -623,11 +721,14 @@ try {
         email: email,
         username: username,
         full_name: name,
-        account_type: selectedAccountType || 'personal',
+        account_type: finalAccountType,
+        birth_date: birthDate,
+        is_kid: finalAccountType === 'child',
         verified: verified,
-        badge_tier: getTierForType(selectedAccountType || 'personal'),
+        badge_tier: getTierForType(finalAccountType),
         trust_score: verified ? 85 : 20,
-        parent_id: selectedAccountType === 'child' ? secureLoad('pending_parent') : null
+        parent_id: finalAccountType === 'child' ? (parentLink.parent_id || null) : null,
+        parent_link_status: finalAccountType === 'child' ? 'pending' : null
     });
 } catch(profileErr) {
     console.error('[Profile Create Error]', profileErr);
@@ -671,10 +772,13 @@ try {
             phone: phoneVal,
             handle: '@' + username,
             username: username,
-            type: selectedAccountType || 'personal',
-            tier: getTierForType(selectedAccountType || 'personal'),
+            type: finalAccountType,
+            tier: getTierForType(finalAccountType),
             verified: verified,
-            trust_score: verified ? 85 : 20
+            trust_score: verified ? 85 : 20,
+            birth_date: birthDate,
+            is_kid: finalAccountType === 'child',
+            parent_id: finalAccountType === 'child' ? (parentLink.parent_id || null) : null
         };
         secureSave('current_user', currentUser);
 
@@ -862,6 +966,8 @@ localStorage.setItem('tf_burst', JSON.stringify(burstAttempts));
     showAuthError(msg, 'step-login');
 }
 }   // ← THIS is the missing closing brace for authenticateUser()
+window.__authenticateUserImpl = authenticateUser;
+if (window.__authenticateUserPending) { window.__authenticateUserPending = false; authenticateUser(); }
 
 // ---- SESSION RESTORATION ----
 async function restoreSession() {
@@ -1068,7 +1174,7 @@ function openRealOneModal() {
             if (window._sb && currentUser) {
                 var { data } = await window._sb
                     .from('follows')
-                    .select('following_id, profiles!follows_following_id_fkey(id,display_name,username,avatar_url)')
+                    .select('following_id, profiles!follows_following_id_fkey(id,username,avatar_url)')
                     .eq('follower_id', currentUser.id)
                     .limit(10);
                 people = (data || []).map(function(r) { return r.profiles; }).filter(Boolean);
@@ -1086,7 +1192,7 @@ function openRealOneModal() {
             return '<div style="display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:0.5px solid var(--border-color,#f0f0f0);">' +
                 avatarHtml +
                 '<div style="flex:1;min-width:0;">' +
-                    '<b style="font-size:15px;color:var(--text-primary,#000);">' + escapeHtml(p.display_name || p.username) + '</b>' +
+                    '<b style="font-size:15px;color:var(--text-primary,#000);">' + escapeHtml(p.username) + '</b>' +
                     '<br><small style="color:#888;">@' + escapeHtml(p.username) + '</small>' +
                 '</div>' +
                 (sent
@@ -1119,7 +1225,9 @@ function sendRealOneNudge(toId, toName, btn) {
 // APP INIT - Splash → Auth Check → Launch
 // ============================================
 window.addEventListener('DOMContentLoaded', async function() {
-    // Splash is already showing from the IIFE above
+    // Hide login/signup page immediately — prevent any flash
+    var htmlSplash = document.getElementById('splash');
+    if (htmlSplash) htmlSplash.style.display = 'none';
 
     // Wait for Supabase to load
     var waitForSB = function() {
@@ -1143,17 +1251,14 @@ window.addEventListener('DOMContentLoaded', async function() {
     }
 
     if (restored) {
-    setTimeout(function() {
+        // Already signed in — logo splash handles the min display time
         dismissSplash();
-        var htmlSplash = document.getElementById('splash');
-        if (htmlSplash) htmlSplash.remove();
         launchApp();
-    }, 2000);
-} else {
-        // Not logged in - show splash for 1.5 seconds then show login
+    } else {
+        // Not logged in — wait for logo, then reveal login form
         setTimeout(function() {
             dismissSplash();
-            // The login/splash screen in your HTML will be visible
+            if (htmlSplash) htmlSplash.style.display = '';
         }, 1500);
     }
 });
@@ -1219,8 +1324,9 @@ function launchApp() {
     initFeed();
     checkNetwork();
 
-
-
+    // Land on a clean home feed — closes any overlay left visible by default
+    // so nothing covers the app (feed/settings) after login.
+    try { navHome(); } catch (e) { if (e) console.warn('[launchApp] navHome', e); }
 
 
     // Start child account monitoring
@@ -1421,7 +1527,7 @@ async function searchUsersForMessage(query) {
                 return (u.name || '').toLowerCase().includes(query.toLowerCase()) ||
                        (u.handle || '').toLowerCase().includes(query.toLowerCase());
             })
-            .map(function(u) { return { full_name: u.name, username: u.handle.replace('@',''), badge_tier: u.tier, verified: true }; });
+            .map(function(u) { return { id: u.id || null, full_name: u.name, username: u.handle.replace('@',''), badge_tier: u.tier, verified: true }; });
     }
     if (!users.length) {
         results.innerHTML = '<p style="text-align:center; color:#aaa; font-size:13px; padding:30px 0;">No users found for "' + escapeHtml(query) + '"</p>';
@@ -1548,13 +1654,7 @@ async function initFeed() {
     feed.innerHTML = '';
     currentFeedPage = 1;
 
-    // Skeleton loader while fetching
-    for (var s = 0; s < 4; s++) {
-        var sk = document.createElement('div');
-        sk.className = 'post-card';
-        sk.innerHTML = '<div style="padding:16px;"><div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;"><div style="width:42px;height:42px;border-radius:50%;background:var(--bg-secondary,#f0f0f0);flex-shrink:0;"></div><div style="flex:1;"><div style="height:12px;background:var(--bg-secondary,#f0f0f0);border-radius:6px;margin-bottom:6px;width:60%;"></div><div style="height:10px;background:var(--bg-secondary,#f0f0f0);border-radius:6px;width:40%;"></div></div></div><div style="height:14px;background:var(--bg-secondary,#f0f0f0);border-radius:6px;margin-bottom:8px;"></div><div style="height:14px;background:var(--bg-secondary,#f0f0f0);border-radius:6px;width:80%;"></div></div>';
-        feed.appendChild(sk);
-    }
+    showSkeleton(feed, 'post', 4);
 
     try {
         var posts = await RealData.getFeed(1, 20);
@@ -1562,14 +1662,15 @@ async function initFeed() {
         if (!posts || posts.length === 0) {
             feed.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#aaa;"><i class="fa-regular fa-newspaper" style="font-size:40px;margin-bottom:16px;display:block;"></i><p style="font-weight:600;color:var(--text-primary,#000);margin-bottom:6px;">Nothing here yet</p><p style="font-size:13px;">Follow people to see their posts here.</p></div>';
         } else {
-            posts.forEach(function(p) { feed.appendChild(renderRealPostCard(p)); });
+            posts.filter(function(p) { return !isTrustClipPost(p); }).forEach(function(p) { feed.appendChild(renderRealPostCard(p)); });
         }
     } catch(e) {
         feed.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#aaa;"><p>Could not load posts. Pull to refresh.</p></div>';
         console.error('[initFeed]', e);
     }
 
-    fillProfileGrid();
+    var _pg1 = document.getElementById('profile-grid');
+    if (_pg1 && typeof loadProfilePosts === 'function') loadProfilePosts(_pg1);
     renderParentRequests();
 }
 
@@ -1781,15 +1882,17 @@ function launchMessageHub() {
     const nav = document.querySelector('.nav-container');
     if (nav) nav.style.display = 'none';
     openPage('msg-overlay');
-    // Always reset to Primary tab when opening
     document.querySelectorAll('.m-tab').forEach(function(t) { t.classList.remove('active'); });
     var primaryTab = document.querySelector('.m-tab');
     if (primaryTab) primaryTab.classList.add('active');
     fillMsgContent();
+    // Re-load on every open to reflect new messages
+    setTimeout(fillMsgContent, 600);
 }
 
 setMsgTab('primary', document.querySelector('.m-tab'));
 function closeMessageHub() {
+    if (window._vnAudio) { try { window._vnAudio.pause(); window._vnAudio.currentTime = 0; } catch(e){} window._vnAudio = null; window._vnActiveBubble = null; }
     closePage('msg-overlay');
     closePage('chat-interface');
     var nav = document.querySelector('.nav-container');
@@ -2133,6 +2236,53 @@ function renderMessageBubble(m) {
             '</div></div>';
     }
 
+    // ── CONTACT ───────────────────────────────────────────────────────────
+    if (msgType === 'contact') {
+        var contactName = m.contact_name || m.file_name || 'Contact';
+        var contactNumber = m.contact_number || m.ciphertext || '';
+        var cleanNumber = contactNumber.replace(/[^+\d]/g,'');
+        return '<div style="' + wrapStyle + '">' +
+            '<div' + bubbleAttr + ' style="background:' + (isSent ? '#007AFF' : 'rgba(0,0,0,0.07)') + ';border-radius:' + (isSent ? '20px 20px 4px 20px' : '20px 20px 20px 4px') + ';max-width:260px;' + align + 'overflow:hidden;position:relative;">' +
+                '<div style="display:flex;align-items:center;gap:12px;padding:14px 14px 10px;">' +
+                    '<div style="width:44px;height:44px;border-radius:50%;background:' + (isSent ? 'rgba(255,255,255,0.2)' : '#007AFF') + ';display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+                        '<i class="fa-solid fa-person" style="color:white;font-size:18px;"></i></div>' +
+                    '<div style="flex:1;min-width:0;">' +
+                        '<div style="color:' + (isSent ? 'white' : 'var(--text-primary,#000)') + ';font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(contactName) + '</div>' +
+                        (contactNumber ? '<div style="color:' + (isSent ? 'rgba(255,255,255,0.7)' : '#007AFF') + ';font-size:13px;margin-top:2px;">' + escapeHtml(contactNumber) + '</div>' : '') +
+                    '</div>' + failedBadge +
+                '</div>' +
+                (cleanNumber ? '<div onclick="window.location.href=\'tel:' + cleanNumber + '\'" style="border-top:0.5px solid ' + (isSent ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.08)') + ';padding:10px;text-align:center;cursor:pointer;">' +
+                    '<span style="color:' + (isSent ? 'white' : '#007AFF') + ';font-size:14px;font-weight:700;">Call</span></div>' : '') +
+            '</div>' + timeHtml + '</div>';
+    }
+
+    // ── AUDIO (music file) ────────────────────────────────────────────────
+    if (msgType === 'audio') {
+        var audioFileUrl = escapeHtml(m.media_url || m.ciphertext || '');
+        var audioFileName = m.file_name || 'Audio';
+        var audioDur = m.voice_duration_seconds || 0;
+        var aMins = Math.floor(audioDur / 60), aSecs = audioDur % 60;
+        var aDurStr = audioDur ? (aMins + ':' + (aSecs < 10 ? '0' : '') + aSecs) : '0:03';
+        var aBars = '';
+        var aHeights = [4,8,14,9,18,12,7,16,5,11,15,8,17,10,6,13,9,15,7,11];
+        aBars = aHeights.map(function(h){
+            return '<div style="width:3px;height:' + h + 'px;background:rgba(0,0,0,0.35);border-radius:2px;flex-shrink:0;"></div>';
+        }).join('');
+        return '<div style="' + wrapStyle + '">' +
+            '<div' + bubbleAttr + ' onclick="playVoiceNote(this,\'' + audioFileUrl + '\')" style="background:rgba(0,0,0,0.07);padding:10px 14px;border-radius:' + (isSent ? '20px 20px 4px 20px' : '20px 20px 20px 4px') + ';max-width:260px;' + align + 'display:flex;align-items:center;gap:10px;cursor:pointer;position:relative;">' +
+                '<div id="vn-play-' + msgId + '" style="width:38px;height:38px;border-radius:50%;background:#007AFF;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+                    '<i class="fa-solid fa-play" style="color:white;font-size:14px;margin-left:2px;"></i></div>' +
+                '<div style="flex:1;min-width:0;">' +
+                    '<div style="display:flex;align-items:flex-end;gap:2px;height:20px;overflow:hidden;">' + aBars + '</div>' +
+                    '<div style="display:flex;align-items:center;gap:4px;margin-top:4px;">' +
+                        '<small style="color:#888;font-size:11px;">' + aDurStr + '</small>' +
+                        '<span style="color:rgba(0,0,0,0.3);font-size:9px;">•</span>' +
+                        '<small style="color:#aaa;font-size:10px;">' + time + '</small>' +
+                    '</div>' +
+                '</div>' + failedBadge +
+            '</div></div>';
+    }
+
     // ── FALLBACK ──────────────────────────────────────────────────────────
     return '<div style="' + wrapStyle + '">' +
         '<div' + bubbleAttr + ' style="background:rgba(0,0,0,0.07);padding:11px 15px;border-radius:20px 20px 20px 4px;max-width:78%;font-size:15px;' + align + '">' +
@@ -2162,28 +2312,53 @@ if (handleEl) handleEl.textContent = '@' + userName.toLowerCase().replace(/\s+/g
         (async function() {
             try {
                 var uid = currentUser.id, oid = window._currentChatUserId;
-                // Find a conversation both users are in
+                var isSelf = (uid === oid);
+                var shared = null;
                 var { data: myC } = await window.sb.from('conversation_participants').select('conversation_id').eq('user_id', uid);
-                var { data: theirC } = await window.sb.from('conversation_participants').select('conversation_id').eq('user_id', oid);
                 var myIds = (myC||[]).map(function(p){ return p.conversation_id; });
-                var theirIds = (theirC||[]).map(function(p){ return p.conversation_id; });
-                var shared = myIds.find(function(id){ return theirIds.includes(id); });
-                var ex = shared ? { id: shared } : null;
-                if (ex) { currentConversationId = ex.id; }
+                if (isSelf) {
+                    // Self-chat: find a conversation where current user is the ONLY participant
+                    if (myIds.length) {
+                        var { data: othersInMine } = await window.sb.from('conversation_participants')
+                            .select('conversation_id').in('conversation_id', myIds).neq('user_id', uid);
+                        var withOthers = new Set((othersInMine||[]).map(function(p){ return p.conversation_id; }));
+                        shared = myIds.find(function(id){ return !withOthers.has(id); }) || null;
+                    }
+                } else {
+                    var { data: theirC } = await window.sb.from('conversation_participants').select('conversation_id').eq('user_id', oid);
+                    var theirIds = (theirC||[]).map(function(p){ return p.conversation_id; });
+                    shared = myIds.find(function(id){ return theirIds.includes(id); }) || null;
+                }
+                if (shared) { currentConversationId = shared; }
                 else {
-                    var { data: cr } = await window.sb.from('conversations').insert({
+                    var { data: cr, error: crErr } = await window.sb.from('conversations').insert({
                         type: 'direct',
                         created_by: uid,
-                        created_at: new Date().toISOString()
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
                     }).select('id').single();
+                    if (crErr) { console.error('[openChat] conversation insert failed:', crErr); showToast('Could not start chat – check Supabase RLS'); }
                     if (cr) {
-                        // Add both participants
-                        await window.sb.from('conversation_participants').insert([
-                            { conversation_id: cr.id, user_id: uid },
-                            { conversation_id: cr.id, user_id: oid }
-                        ]).catch(function(){});
+                        var _parts = [{ conversation_id: cr.id, user_id: uid, is_blocked: false }];
+                        if (!isSelf) _parts.push({ conversation_id: cr.id, user_id: oid, is_blocked: false });
+                        var { error: partsInsertErr } = await window.sb.from('conversation_participants').insert(_parts);
+                        if (partsInsertErr) console.error('[openChat] participants insert failed:', partsInsertErr);
                     }
                     if (cr) currentConversationId = cr.id;
+                }
+                // Reload messages now that conversation ID is resolved
+                if (currentConversationId) {
+                    var _body = document.getElementById('chat-body');
+                    if (_body) {
+                        DB.getMessages(currentConversationId).then(function(msgs) {
+                            var body = document.getElementById('chat-body');
+                            if (!body) return;
+                            body.innerHTML = msgs.length === 0
+                                ? '<div style="text-align:center;padding:40px 0;color:#aaa;font-size:14px;">No messages yet. Say hello!</div>'
+                                : msgs.map(function(m){ return renderMessageBubble(m); }).join('');
+                            body.scrollTop = body.scrollHeight;
+                        }).catch(function(){});
+                    }
                 }
             } catch(e) { console.warn('[openChat conv]', e); }
         })();
@@ -2200,10 +2375,10 @@ chatBody.appendChild(summaryCard);
 
 // Hydrate with real Supabase data
 if (window.sb && window._currentChatUserId) {
-    sb.from('profiles')
+    sb.from('users')
         .select('id,full_name,username,avatar_url,post_count,last_seen,verified,badge_tier')
         .eq('id', window._currentChatUserId)
-        .single()
+        .maybeSingle()
         .then(function(res) {
             var u = res.data || {};
             var name = u.full_name || u.username || userName;
@@ -2258,11 +2433,20 @@ if (window.sb && window._currentChatUserId) {
         return null;
     }
 
-    chatBody.innerHTML = '<div style="text-align:center;padding:40px 0;color:#aaa;font-size:14px;">Loading messages...</div>';
+    var _msgCacheKey = 'tf_msgs_cache_' + (currentConversationId || 'pending');
+    var _cachedMsgs = null;
+    try { _cachedMsgs = JSON.parse(localStorage.getItem(_msgCacheKey) || 'null'); } catch(e) {}
+    if (_cachedMsgs && _cachedMsgs.length) {
+        chatBody.innerHTML = _cachedMsgs.map(function(m){ return renderMessageBubble(m); }).join('');
+        chatBody.scrollTop = chatBody.scrollHeight;
+    } else {
+        chatBody.innerHTML = '<div style="text-align:center;padding:40px 0;color:#aaa;font-size:14px;">Loading messages...</div>';
+    }
     var _fetchProm = (window.sb && currentConversationId)
         ? DB.getMessages(currentConversationId)
         : Promise.resolve([]);
     _fetchProm.then(function(msgs) {
+        try { if (currentConversationId) localStorage.setItem('tf_msgs_cache_' + currentConversationId, JSON.stringify(msgs)); } catch(e) {}
         chatBody.innerHTML = msgs.length === 0
             ? '<div style="text-align:center;padding:40px 0;color:#aaa;font-size:14px;">No messages yet. Say hello!</div>'
             : msgs.map(function(m){ return renderMessageBubble(m); }).join('');
@@ -2337,88 +2521,874 @@ function openDocumentViewer(url, fileName) {
 }
 
 // ==========================================================================
-// PRE-SEND MEDIA EDITOR — shown before sending image/video in a chat
+// PRE-SEND MEDIA EDITOR
 // ==========================================================================
+var _pseState = {};
+
 function openPreSendEditor(file, onSend) {
-    var existing = document.getElementById('preSendEditor');
-    if (existing) existing.remove();
+    window._presendFile = file;
+    var ex = document.getElementById('preSendEditor');
+    if (ex) ex.remove();
+    _pseState = {
+        brightness:0,contrast:0,saturation:0,warmth:0,fade:0,
+        highlights:0,shadows:0,vignette:0,grain:0,sharpen:0,enhance:0,
+        tiltShift:'off',tiltShiftAmt:50,
+        colorTint:null,colorMode:'shadows',colorIntensity:50,
+        curveChannel:'all',
+        markupMode:'draw',drawColor:'#ff3b30',drawSize:5,
+        textFont:'San Francisco',
+        cropRatio:'orig',cropRotation:0,cropFlipH:false,cropFlipV:false,
+        activePanel:null
+    };
     var app = document.getElementById('app') || document.body;
     var isVideo = file && file.type && file.type.startsWith('video/');
     var localUrl = URL.createObjectURL(file);
-    var contactName = document.getElementById('chat-user-name') ? document.getElementById('chat-user-name').textContent : 'Chat';
-    var time = new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
+    var contactName = (document.getElementById('chat-user-name')||{textContent:'Chat'}).textContent;
+    var time = new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'});
+    var COLORS = ['#ff3b30','#ff9500','#ffcc00','#34c759','#5ac8fa','#ffffff','#ff2d78','#af52de'];
+    var EMOJIS = ['😂','🔥','❤️','😍','🥺','😭','🤣','💀','👀','🤩','😤','😎','💯','🚗','🏎️','🔑','🎶','✅','💥','⚡','🌟','👊','💪','🙌','🤝','👍','🙏','😏','🤔','😘','🫡','🫶','🎉','🏆','🤌','😅','🙂'];
+    var FONTS = ['San Francisco','Georgia','Courier New','Noteworthy','Snell Roundhand'];
+    var RATIOS = [['Original','orig'],['Square','1:1'],['3:2','3:2'],['4:3','4:3'],['16:9','16:9'],['5:4','5:4'],['5:3','5:3'],['7:5','7:5']];
+    var ADJ = ['Enhance','Brightness','Contrast','Saturation','Warmth','Fade','Highlights','Shadows','Vignette','Grain','Sharpen'];
 
-    var editor = document.createElement('div');
-    editor.id = 'preSendEditor';
-    editor.style.cssText = 'position:absolute;inset:0;z-index:19700;background:#000;display:flex;flex-direction:column;overflow:hidden;';
-
-    editor.innerHTML =
-        // Top bar
-        '<div style="position:absolute;top:0;left:0;right:0;z-index:10;background:linear-gradient(to bottom,rgba(0,0,0,0.7),transparent);padding:max(52px,env(safe-area-inset-top,52px)) 16px 20px;display:flex;align-items:center;justify-content:space-between;">' +
-            '<div onclick="document.getElementById(\'preSendEditor\').remove()" style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
-                '<i class="fa-solid fa-arrow-left" style="color:white;font-size:16px;"></i></div>' +
-            '<span style="color:white;font-size:15px;font-weight:700;">' + escapeHtml(contactName) + '</span>' +
-            '<div style="display:flex;align-items:center;gap:6px;">' +
-                '<small style="color:rgba(255,255,255,0.6);font-size:11px;">' + time + '</small>' +
-            '</div>' +
-        '</div>' +
-        // Media preview
-        '<div style="flex:1;display:flex;align-items:center;justify-content:center;position:relative;min-height:0;">' +
-            (isVideo
-                ? '<video src="' + localUrl + '" style="max-width:100%;max-height:100%;object-fit:contain;" playsinline muted autoplay loop></video>' +
-                  '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">' +
-                      '<div style="width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,0.2);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;">' +
-                          '<i class="fa-solid fa-play" style="color:white;font-size:22px;margin-left:4px;"></i></div></div>'
-                : '<img src="' + localUrl + '" style="max-width:100%;max-height:100%;object-fit:contain;">') +
-        '</div>' +
-        // Video scrubber (video only)
-        (isVideo ? '<div style="padding:0 16px 8px;"><div style="height:4px;background:rgba(255,255,255,0.2);border-radius:2px;overflow:hidden;">' +
-            '<div id="pse-scrub" style="height:100%;width:0%;background:white;border-radius:2px;transition:width 0.1s;"></div></div></div>' : '') +
-        // Caption input
-        '<div style="position:relative;padding:0 16px 8px;">' +
-            '<div style="display:flex;align-items:center;background:rgba(255,255,255,0.14);backdrop-filter:blur(20px);border-radius:25px;padding:10px 16px;gap:8px;">' +
-                '<input id="pse-caption" type="text" placeholder="Add a caption…" style="flex:1;background:transparent;border:none;outline:none;color:white;font-size:15px;-webkit-user-select:text;user-select:text;caret-color:white;" autocomplete="off">' +
-                '<div onclick="showToast(\'View once toggled\')" style="width:28px;height:28px;border-radius:50%;border:2px dashed rgba(255,255,255,0.5);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;">' +
-                    '<span style="color:white;font-size:11px;font-weight:800;">1</span></div>' +
-            '</div>' +
-        '</div>' +
-        // Bottom toolbar
-        '<div style="background:#000;padding:12px 16px max(24px,env(safe-area-inset-bottom,24px));display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">' +
-            '<div style="display:flex;gap:14px;align-items:center;">' +
-                '<button onclick="document.getElementById(\'preSendEditor\').remove()" style="width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,0.1);border:none;color:white;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">' +
-                    '<i class="fa-solid fa-arrow-left"></i></button>' +
-                '<button onclick="showToast(\'Crop coming soon\')" style="width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,0.1);border:none;color:white;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">' +
-                    '<i class="fa-solid fa-crop-simple"></i></button>' +
-                '<button onclick="showToast(\'Markup coming soon\')" style="width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,0.1);border:none;color:white;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">' +
-                    '<i class="fa-solid fa-a" style="font-size:18px;"></i></button>' +
-                '<button onclick="showToast(\'Adjustments coming soon\')" style="width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,0.1);border:none;color:white;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">' +
-                    '<i class="fa-solid fa-sliders"></i></button>' +
-                '<button id="pse-quality-btn" onclick="_togglePseQuality()" style="height:32px;padding:0 12px;border-radius:20px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);color:white;font-size:12px;font-weight:700;cursor:pointer;">HD</button>' +
-            '</div>' +
-            '<button id="pse-send-btn" style="width:52px;height:52px;border-radius:50%;background:#FF2D55;border:none;color:white;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px rgba(255,45,85,0.5);" onclick="_pseSend(\'' + localUrl + '\',file,' + (isVideo ? 'true' : 'false') + ')">' +
-                '<i class="fa-solid fa-arrow-up"></i></button>' +
-        '</div>';
-
-    app.appendChild(editor);
-}
-
-var _pseQualityHD = true;
-function _togglePseQuality() {
-    _pseQualityHD = !_pseQualityHD;
-    var btn = document.getElementById('pse-quality-btn');
-    if (btn) btn.textContent = _pseQualityHD ? 'HD' : 'SD';
-}
-
-function _pseSend(localUrl, file, isVideo) {
-    var caption = document.getElementById('pse-caption');
-    var captionText = caption ? caption.value.trim() : '';
-    document.getElementById('preSendEditor').remove();
-    // Call the real media send function with the file
-    if (typeof sendMediaInChat === 'function') {
-        sendMediaInChat(file, captionText);
-    } else {
-        showToast('Sending media…');
+    var el = document.createElement('div');
+    el.id = 'preSendEditor';
+    el.style.cssText = 'position:fixed;inset:0;z-index:19700;background:#000;display:flex;flex-direction:column;overflow:hidden;';
+    el.innerHTML = `
+<div style="position:absolute;top:0;left:0;right:0;z-index:20;background:linear-gradient(to bottom,rgba(0,0,0,.7),transparent);padding:max(52px,env(safe-area-inset-top,52px)) 16px 20px;display:flex;align-items:center;justify-content:space-between;">
+  <div onclick="document.getElementById('preSendEditor').remove()" style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-arrow-left" style="color:#fff;font-size:16px;"></i></div>
+  <span style="color:#fff;font-size:15px;font-weight:700;">${escapeHtml(contactName)}</span>
+  <small style="color:rgba(255,255,255,.6);font-size:11px;">${time}</small>
+</div>
+<div id="pse-media-area" style="flex:1;display:flex;align-items:center;justify-content:center;position:relative;min-height:0;overflow:hidden;">
+  <div id="pse-img-wrap" style="position:relative;display:inline-flex;align-items:center;justify-content:center;max-width:100%;max-height:100%;">
+    ${isVideo
+      ? `<video id="pse-media" src="${localUrl}" style="max-width:100%;max-height:calc(100vh - 220px);object-fit:contain;" playsinline muted autoplay loop></video>`
+      : `<img id="pse-media" src="${localUrl}" crossorigin="anonymous" style="max-width:100%;max-height:calc(100vh - 220px);object-fit:contain;display:block;pointer-events:none;user-select:none;">
+         <div id="pse-vignette-ov" style="position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 30%,rgba(0,0,0,.9) 100%);opacity:0;pointer-events:none;transition:opacity .08s;"></div>
+         <canvas id="pse-grain-cv" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:none;mix-blend-mode:overlay;"></canvas>
+         <div id="pse-tilt-ov" style="position:absolute;inset:0;pointer-events:none;"></div>
+         <div id="pse-color-ov" style="position:absolute;inset:0;pointer-events:none;"></div>
+         <canvas id="pse-draw-cv" style="position:absolute;inset:0;width:100%;height:100%;display:none;touch-action:none;"></canvas>
+         <div id="pse-ovr-els" style="position:absolute;inset:0;pointer-events:none;overflow:hidden;"></div>`
     }
+  </div>
+</div>
+<div style="padding:0 16px 8px;flex-shrink:0;">
+  <div style="display:flex;align-items:center;background:rgba(255,255,255,.14);backdrop-filter:blur(20px);border-radius:25px;padding:10px 16px;">
+    <input id="pse-caption" type="text" placeholder="Add a caption…" style="flex:1;background:transparent;border:none;outline:none;color:#fff;font-size:15px;caret-color:#fff;" autocomplete="off">
+  </div>
+</div>
+<div id="pse-toolbar" style="background:#111;padding:0 12px max(18px,env(safe-area-inset-bottom,18px));flex-shrink:0;">
+
+  <div id="pse-panel-adjust" style="display:none;flex-direction:column;max-height:200px;overflow-y:auto;-webkit-overflow-scrolling:touch;gap:12px;padding:12px 0 8px;">
+    ${ADJ.map(s=>`<div><div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:rgba(255,255,255,.7);font-size:12px;">${s}</span><span id="pse-v-${s.toLowerCase()}" style="color:#fff;font-size:12px;font-weight:600;min-width:28px;text-align:right;">0</span></div><input type="range" min="-100" max="100" value="0" oninput="_pseAdj(this,'${s.toLowerCase()}')" style="width:100%;-webkit-appearance:none;appearance:none;height:3px;background:rgba(255,255,255,.2);border-radius:2px;outline:none;cursor:pointer;accent-color:#fff;"></div>`).join('')}
+  </div>
+
+  <div id="pse-panel-color" style="display:none;padding:12px 0 8px;">
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <button id="pse-ct-s" onclick="_pseColorTab('shadows')" style="flex:1;padding:7px;border-radius:20px;background:rgba(255,255,255,.2);border:none;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Shadows</button>
+      <button id="pse-ct-h" onclick="_pseColorTab('highlights')" style="flex:1;padding:7px;border-radius:20px;background:rgba(255,255,255,.08);border:none;color:rgba(255,255,255,.5);font-size:13px;cursor:pointer;">Highlights</button>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-bottom:10px;">
+      ${['#fff','#ff3b30','#ff9500','#ffcc00','#34c759','#5ac8fa','#007aff','#af52de'].map((c,i)=>`<div id="pse-cp-${i}" onclick="_pseColorPick(${i},'${c}')" style="width:34px;height:34px;border-radius:50%;background:${c};cursor:pointer;border:3px solid ${i===0?'#fff':'transparent'};box-sizing:border-box;"></div>`).join('')}
+    </div>
+    <input type="range" min="0" max="100" value="50" id="pse-color-int" oninput="_pseColorInt(this.value)" style="width:100%;-webkit-appearance:none;appearance:none;height:3px;background:rgba(255,255,255,.2);border-radius:2px;outline:none;cursor:pointer;accent-color:#fff;">
+  </div>
+
+  <div id="pse-panel-tilt" style="display:none;padding:12px 0 8px;">
+    <div style="display:flex;gap:20px;justify-content:center;margin-bottom:12px;">
+      <div onclick="_pseTilt('off')" id="pse-tilt-off" style="display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;">
+        <div style="width:40px;height:40px;border-radius:8px;border:2px solid #007aff;display:flex;align-items:center;justify-content:center;"><i class="fa-regular fa-square" style="color:#007aff;font-size:16px;"></i></div>
+        <span style="color:#007aff;font-size:11px;font-weight:700;">Off</span>
+      </div>
+      <div onclick="_pseTilt('radial')" id="pse-tilt-radial" style="display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;">
+        <div style="width:40px;height:40px;border-radius:8px;border:2px solid rgba(255,255,255,.3);display:flex;align-items:center;justify-content:center;"><i class="fa-regular fa-circle" style="color:rgba(255,255,255,.5);font-size:16px;"></i></div>
+        <span style="color:rgba(255,255,255,.5);font-size:11px;">Radial</span>
+      </div>
+      <div onclick="_pseTilt('linear')" id="pse-tilt-linear" style="display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;">
+        <div style="width:40px;height:40px;border-radius:8px;border:2px solid rgba(255,255,255,.3);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-bars" style="color:rgba(255,255,255,.5);font-size:14px;"></i></div>
+        <span style="color:rgba(255,255,255,.5);font-size:11px;">Linear</span>
+      </div>
+    </div>
+    <div id="pse-tilt-sl-wrap" style="display:none;"><input type="range" min="0" max="100" value="50" id="pse-tilt-sl" oninput="_pseTiltAmt(this.value)" style="width:100%;-webkit-appearance:none;appearance:none;height:3px;background:rgba(255,255,255,.2);border-radius:2px;outline:none;cursor:pointer;accent-color:#fff;"></div>
+  </div>
+
+  <div id="pse-panel-curves" style="display:none;padding:12px 0 8px;">
+    <div style="display:flex;gap:8px;justify-content:center;margin-bottom:10px;">
+      ${['all','red','green','blue'].map((c,i)=>`<button id="pse-cc-${c}" onclick="_pseCrvCh('${c}')" style="padding:5px 14px;border-radius:14px;border:none;font-size:12px;cursor:pointer;background:${i===0?'rgba(255,255,255,.9)':'rgba(255,255,255,.1)'};color:${i===0?'#000':'rgba(255,255,255,.7)'};font-weight:${i===0?700:400};">${c[0].toUpperCase()+c.slice(1)}</button>`).join('')}
+    </div>
+    <canvas id="pse-crv-cv" width="300" height="130" style="width:100%;height:130px;border-radius:8px;background:rgba(255,255,255,.07);display:block;touch-action:none;cursor:crosshair;"></canvas>
+  </div>
+
+  <div id="pse-panel-markup" style="display:none;padding:12px 0 8px;">
+    <div style="display:flex;gap:8px;justify-content:center;margin-bottom:8px;">
+      <button id="pse-mk-draw-btn" onclick="_pseMkMode('draw')" style="padding:7px 18px;border-radius:18px;background:rgba(255,255,255,.9);border:none;color:#000;font-size:13px;font-weight:700;cursor:pointer;">Draw</button>
+      <button id="pse-mk-sticker-btn" onclick="_pseMkMode('sticker')" style="padding:7px 18px;border-radius:18px;background:rgba(255,255,255,.12);border:none;color:rgba(255,255,255,.7);font-size:13px;cursor:pointer;">Sticker</button>
+      <button id="pse-mk-text-btn" onclick="_pseMkMode('text')" style="padding:7px 18px;border-radius:18px;background:rgba(255,255,255,.12);border:none;color:rgba(255,255,255,.7);font-size:13px;cursor:pointer;">Text</button>
+    </div>
+    <div id="pse-mk-draw-ui">
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:8px;">
+        ${COLORS.map((c,i)=>`<div id="pse-dc-${i}" onclick="_pseDColor('${c}',${i})" style="width:28px;height:28px;border-radius:50%;background:${c};cursor:pointer;border:3px solid ${i===0?'#fff':'transparent'};box-sizing:border-box;"></div>`).join('')}
+      </div>
+      <input type="range" min="2" max="20" value="5" oninput="_pseState.drawSize=+this.value" style="width:100%;-webkit-appearance:none;appearance:none;height:3px;background:rgba(255,255,255,.2);border-radius:2px;outline:none;cursor:pointer;accent-color:#fff;">
+    </div>
+    <div id="pse-mk-sticker-ui" style="display:none;">
+      <div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center;max-height:90px;overflow-y:auto;-webkit-overflow-scrolling:touch;">
+        ${EMOJIS.map(e=>`<span onclick="_pseStkPick(this.dataset.e)" data-e="${e}" style="font-size:30px;cursor:pointer;line-height:1.3;">${e}</span>`).join('')}
+      </div>
+    </div>
+    <div id="pse-mk-text-ui" style="display:none;">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+        <input id="pse-txt-inp" type="text" placeholder="Type text…" style="flex:1;background:rgba(255,255,255,.1);border:none;border-radius:8px;padding:9px 12px;color:#fff;font-size:14px;outline:none;caret-color:#fff;">
+        <button onclick="_pseAddTxt()" style="padding:9px 14px;border-radius:8px;background:#007aff;border:none;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Add</button>
+      </div>
+      <div style="display:flex;gap:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;">
+        ${FONTS.map(f=>`<div onclick="_pseTxtFont('${f}')" data-font="${f}" style="padding:5px 10px;border-radius:12px;background:rgba(255,255,255,.1);color:#fff;font-size:11px;white-space:nowrap;cursor:pointer;flex-shrink:0;font-family:'${f}',sans-serif;">${f}</div>`).join('')}
+      </div>
+    </div>
+  </div>
+
+  <div id="pse-panel-crop" style="display:none;padding:12px 0 8px;">
+    <div style="display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:8px;justify-content:center;">
+      ${RATIOS.map(([l,r])=>`<div onclick="_pseCropR('${r}')" data-r="${r}" style="padding:5px 10px;border-radius:12px;background:rgba(255,255,255,.12);color:rgba(255,255,255,.7);font-size:11px;white-space:nowrap;cursor:pointer;flex-shrink:0;">${l}</div>`).join('')}
+    </div>
+    <div style="display:flex;gap:12px;justify-content:center;margin-bottom:8px;">
+      <div onclick="_pseCropRotBtn(-90)" style="width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-rotate-left" style="color:#fff;font-size:13px;"></i></div>
+      <div onclick="_pseCropFlip('h')" style="width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-left-right" style="color:#fff;font-size:13px;"></i></div>
+      <div onclick="_pseCropFlip('v')" style="width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-up-down" style="color:#fff;font-size:13px;"></i></div>
+      <div onclick="_pseCropReset()" style="padding:0 12px;height:34px;border-radius:17px;background:rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;cursor:pointer;color:rgba(255,255,255,.7);font-size:11px;">Reset</div>
+    </div>
+    <input type="range" min="-45" max="45" value="0" id="pse-crop-rot-sl" oninput="_pseCropRotSlide(this.value)" style="width:100%;-webkit-appearance:none;appearance:none;height:3px;background:rgba(255,255,255,.2);border-radius:2px;outline:none;cursor:pointer;accent-color:#fff;">
+  </div>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0 0;">
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button onclick="document.getElementById('preSendEditor').remove()" style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-arrow-left"></i></button>
+      <button id="pse-btn-crop" onclick="_psePT('crop')" style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;" title="Crop"><i class="fa-solid fa-crop-simple"></i></button>
+      <button id="pse-btn-adjust" onclick="_psePT('adjust')" style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;" title="Adjust"><i class="fa-solid fa-sliders"></i></button>
+      <button id="pse-btn-color" onclick="_psePT('color')" style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;" title="Color"><i class="fa-solid fa-droplet"></i></button>
+      <button id="pse-btn-tilt" onclick="_psePT('tilt')" style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;" title="Tilt Shift"><i class="fa-regular fa-circle-dot"></i></button>
+      <button id="pse-btn-curves" onclick="_psePT('curves')" style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;" title="Curves"><i class="fa-solid fa-wave-square"></i></button>
+      <button id="pse-btn-markup" onclick="_psePT('markup')" style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;" title="Markup"><i class="fa-solid fa-pen-to-square"></i></button>
+    </div>
+    <button onclick="_pseSend('${localUrl}',window._presendFile,${isVideo})" style="width:52px;height:52px;border-radius:50%;background:#FF2D55;border:none;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px rgba(255,45,85,.5);flex-shrink:0;"><i class="fa-solid fa-arrow-up"></i></button>
+  </div>
+</div>`;
+    app.appendChild(el);
+    if (!isVideo) requestAnimationFrame(function(){ _pseSyncDraw(); _pseCrvInit(); });
+}
+
+// ── Panel toggle ──────────────────────────────────────────────────────────────
+function _psePT(name) {
+    var all = ['adjust','color','tilt','curves','markup','crop'];
+    _pseState.activePanel = _pseState.activePanel === name ? null : name;
+    all.forEach(function(p) {
+        var panel = document.getElementById('pse-panel-' + p);
+        var btn   = document.getElementById('pse-btn-' + p);
+        var on    = p === _pseState.activePanel;
+        if (panel) {
+            panel.style.display = on ? (p === 'adjust' ? 'flex' : 'block') : 'none';
+            if (on && p === 'adjust') panel.style.flexDirection = 'column';
+        }
+        if (btn) btn.style.background = on ? 'rgba(255,255,255,.3)' : 'rgba(255,255,255,.1)';
+    });
+    var dc = document.getElementById('pse-draw-cv');
+    if (dc) dc.style.display = (_pseState.activePanel === 'markup' && _pseState.markupMode === 'draw') ? 'block' : 'none';
+}
+
+// ── Adjust sliders ────────────────────────────────────────────────────────────
+function _pseAdj(input, key) {
+    var v = parseInt(input.value);
+    _pseState[key] = v;
+    var lbl = document.getElementById('pse-v-' + key);
+    if (lbl) lbl.textContent = v > 0 ? '+' + v : '' + v;
+    _pseFilt();
+}
+
+function _pseFilt() {
+    var img = document.getElementById('pse-media');
+    if (!img) return;
+    var s = _pseState;
+    var brt = Math.max(0, 1 + (s.brightness + s.fade * 0.3 + s.enhance * 0.01) / 100).toFixed(3);
+    var ctr = Math.max(0, 1 + (s.contrast  - s.fade * 0.4 + s.sharpen * 0.25 + s.enhance * 0.01) / 100).toFixed(3);
+    var sat = Math.max(0, 1 + (s.saturation + s.enhance * 0.01) / 100).toFixed(3);
+    var parts = ['brightness(' + brt + ')','contrast(' + ctr + ')','saturate(' + sat + ')'];
+    if (s.warmth > 0) parts.push('sepia(' + Math.min(1, s.warmth / 200).toFixed(3) + ') hue-rotate(-10deg)');
+    else if (s.warmth < 0) parts.push('hue-rotate(' + (-s.warmth / 5).toFixed(1) + 'deg)');
+    if (s.highlights > 0) parts.push('brightness(' + (1 + s.highlights * 0.0025).toFixed(4) + ')');
+    if (s.shadows < 0)    parts.push('brightness(' + (1 + s.shadows    * 0.0018).toFixed(4) + ')');
+    img.style.filter = parts.join(' ');
+    var vig = document.getElementById('pse-vignette-ov');
+    if (vig) vig.style.opacity = (Math.max(0, s.vignette) / 100).toFixed(2);
+    _pseGrain();
+    _pseTiltV();
+    _pseColorV();
+}
+
+function _pseGrain() {
+    var gc  = document.getElementById('pse-grain-cv');
+    var img = document.getElementById('pse-media');
+    if (!gc || !img) return;
+    var s = _pseState;
+    gc.style.opacity = (Math.max(0, s.grain) / 100).toFixed(2);
+    if (s.grain <= 0) return;
+    var w = img.offsetWidth, h = img.offsetHeight;
+    if (!w || !h || (gc._w === w && gc._h === h)) return;
+    gc._w = w; gc._h = h; gc.width = w; gc.height = h;
+    var ctx = gc.getContext('2d');
+    var id  = ctx.createImageData(w, h);
+    for (var i = 0; i < id.data.length; i += 4) {
+        var n = Math.random() * 255 | 0;
+        id.data[i] = id.data[i+1] = id.data[i+2] = n; id.data[i+3] = 255;
+    }
+    ctx.putImageData(id, 0, 0);
+}
+
+// ── Color tint ────────────────────────────────────────────────────────────────
+var _pseColorSide = 'shadows';
+function _pseColorTab(side) {
+    _pseColorSide = side;
+    var s = document.getElementById('pse-ct-s'), h = document.getElementById('pse-ct-h');
+    if (s) { s.style.background = side==='shadows'?'rgba(255,255,255,.2)':'rgba(255,255,255,.08)'; s.style.color = side==='shadows'?'#fff':'rgba(255,255,255,.5)'; s.style.fontWeight = side==='shadows'?700:400; }
+    if (h) { h.style.background = side==='highlights'?'rgba(255,255,255,.2)':'rgba(255,255,255,.08)'; h.style.color = side==='highlights'?'#fff':'rgba(255,255,255,.5)'; h.style.fontWeight = side==='highlights'?700:400; }
+}
+function _pseColorPick(idx, color) {
+    _pseState.colorTint = (color === '#fff') ? null : color;
+    _pseState.colorMode = _pseColorSide;
+    for (var i = 0; i < 8; i++) { var e = document.getElementById('pse-cp-' + i); if (e) e.style.borderColor = i===idx?'#fff':'transparent'; }
+    _pseColorV();
+}
+function _pseColorInt(v) { _pseState.colorIntensity = parseInt(v); _pseColorV(); }
+function _pseColorV() {
+    var ov = document.getElementById('pse-color-ov');
+    if (!ov) return;
+    ov.innerHTML = '';
+    if (!_pseState.colorTint) return;
+    var op = (_pseState.colorIntensity / 100) * 0.4;
+    var d  = document.createElement('div');
+    d.style.cssText = 'position:absolute;inset:0;pointer-events:none;mix-blend-mode:color;';
+    d.style.background = _pseState.colorMode === 'shadows'
+        ? 'linear-gradient(135deg,' + _pseState.colorTint + ' 0%,transparent 65%)'
+        : 'linear-gradient(315deg,' + _pseState.colorTint + ' 0%,transparent 65%)';
+    d.style.opacity = op.toFixed(2);
+    ov.appendChild(d);
+}
+
+// ── Tilt shift ────────────────────────────────────────────────────────────────
+function _pseTilt(mode) {
+    _pseState.tiltShift = mode;
+    ['off','radial','linear'].forEach(function(m) {
+        var el  = document.getElementById('pse-tilt-' + m); if (!el) return;
+        var on  = m === mode;
+        var box = el.querySelector('div'), lbl = el.querySelector('span'), ico = el.querySelector('i');
+        if (box) box.style.borderColor = on ? '#007aff' : 'rgba(255,255,255,.3)';
+        if (lbl) { lbl.style.color = on ? '#007aff' : 'rgba(255,255,255,.5)'; lbl.style.fontWeight = on ? 700 : 400; }
+        if (ico) ico.style.color = on ? '#007aff' : 'rgba(255,255,255,.5)';
+    });
+    var slw = document.getElementById('pse-tilt-sl-wrap');
+    if (slw) slw.style.display = mode !== 'off' ? 'block' : 'none';
+    _pseTiltV();
+}
+function _pseTiltAmt(v) { _pseState.tiltShiftAmt = parseInt(v); _pseTiltV(); }
+function _pseTiltV() {
+    var ov = document.getElementById('pse-tilt-ov');
+    if (!ov) return;
+    ov.innerHTML = '';
+    if (_pseState.tiltShift === 'off') return;
+    var t = _pseState.tiltShiftAmt / 100;
+    var d = document.createElement('div');
+    d.style.cssText = 'position:absolute;inset:0;pointer-events:none;';
+    if (_pseState.tiltShift === 'radial') {
+        var r = Math.round(28 + t * 22);
+        d.style.backdropFilter = 'blur(6px)';
+        d.style.webkitBackdropFilter = 'blur(6px)';
+        var mask = 'radial-gradient(ellipse ' + r + '% ' + r + '% at 50% 50%,transparent 35%,black 65%)';
+        d.style.webkitMaskImage = mask; d.style.maskImage = mask;
+    } else {
+        var fp = Math.round(18 + t * 32), fb = Math.round(82 - t * 32);
+        d.style.backdropFilter = 'blur(6px)';
+        d.style.webkitBackdropFilter = 'blur(6px)';
+        var lmask = 'linear-gradient(to bottom,black 0%,transparent ' + fp + '%,transparent ' + fb + '%,black 100%)';
+        d.style.webkitMaskImage = lmask; d.style.maskImage = lmask;
+    }
+    ov.appendChild(d);
+}
+
+// ── Curves ────────────────────────────────────────────────────────────────────
+var _pseCrvPts = {
+    all:   [[0,0],[0.25,0.25],[0.5,0.5],[0.75,0.75],[1,1]],
+    red:   [[0,0],[0.5,0.5],[1,1]],
+    green: [[0,0],[0.5,0.5],[1,1]],
+    blue:  [[0,0],[0.5,0.5],[1,1]]
+};
+var _pseCrvDrag = null;
+function _pseCrvCh(ch) {
+    _pseState.curveChannel = ch;
+    ['all','red','green','blue'].forEach(function(c) {
+        var b = document.getElementById('pse-cc-' + c); if (!b) return;
+        var on = c === ch;
+        b.style.background  = on ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.1)';
+        b.style.color       = on ? '#000' : 'rgba(255,255,255,.7)';
+        b.style.fontWeight  = on ? 700 : 400;
+    });
+    _pseCrvDraw();
+}
+function _pseCrvInit() {
+    var cv = document.getElementById('pse-crv-cv'); if (!cv) return;
+    function gpos(e) {
+        var r = cv.getBoundingClientRect(), src = e.touches ? e.touches[0] : e;
+        return { x: Math.max(0,Math.min(1,(src.clientX-r.left)/r.width)), y: Math.max(0,Math.min(1,1-(src.clientY-r.top)/r.height)) };
+    }
+    function near(pos) {
+        var pts = _pseCrvPts[_pseState.curveChannel], best = -1, bd = 0.08;
+        pts.forEach(function(p,i){ var d=Math.hypot(p[0]-pos.x,p[1]-pos.y); if(d<bd){bd=d;best=i;} });
+        return best;
+    }
+    function start(e) {
+        e.preventDefault();
+        var pos = gpos(e), idx = near(pos);
+        var pts = _pseCrvPts[_pseState.curveChannel];
+        if (idx === -1) {
+            pts.push([pos.x, pos.y]);
+            pts.sort(function(a,b){return a[0]-b[0];});
+            idx = pts.findIndex(function(p){return Math.abs(p[0]-pos.x)<0.02 && Math.abs(p[1]-pos.y)<0.02;});
+        }
+        _pseCrvDrag = idx >= 0 ? idx : null;
+        _pseCrvDraw();
+    }
+    function move(e) {
+        if (_pseCrvDrag === null) return;
+        e.preventDefault();
+        var pos = gpos(e);
+        var pts = _pseCrvPts[_pseState.curveChannel];
+        var i   = _pseCrvDrag;
+        if (i === 0) pos.x = 0; else if (i === pts.length-1) pos.x = 1;
+        pts[i] = [pos.x, pos.y];
+        _pseCrvDraw();
+        _pseCrvApplyPreview();
+    }
+    function end() { _pseCrvDrag = null; }
+    cv.addEventListener('mousedown',  start);
+    cv.addEventListener('mousemove',  move);
+    cv.addEventListener('mouseup',    end);
+    cv.addEventListener('touchstart', start, {passive:false});
+    cv.addEventListener('touchmove',  move,  {passive:false});
+    cv.addEventListener('touchend',   end);
+    _pseCrvDraw();
+}
+function _pseCrvDraw() {
+    var cv = document.getElementById('pse-crv-cv'); if (!cv) return;
+    var ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
+    ctx.clearRect(0,0,W,H);
+    ctx.strokeStyle = 'rgba(255,255,255,.1)'; ctx.lineWidth = 1;
+    [0.25,0.5,0.75].forEach(function(t){
+        ctx.beginPath(); ctx.moveTo(t*W,0);    ctx.lineTo(t*W,H);    ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,(1-t)*H); ctx.lineTo(W,(1-t)*H); ctx.stroke();
+    });
+    ctx.strokeStyle = 'rgba(255,255,255,.15)';
+    ctx.beginPath(); ctx.moveTo(0,H); ctx.lineTo(W,0); ctx.stroke();
+    var ch  = _pseState.curveChannel;
+    var clr = ch==='red'?'#ff3b30':ch==='green'?'#34c759':ch==='blue'?'#007aff':'#fff';
+    var pts = _pseCrvPts[ch];
+    ctx.strokeStyle = clr; ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    pts.forEach(function(p,i){ var x=p[0]*W,y=(1-p[1])*H; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+    ctx.stroke();
+    pts.forEach(function(p){
+        var x=p[0]*W, y=(1-p[1])*H;
+        ctx.beginPath(); ctx.arc(x,y,5,0,Math.PI*2);
+        ctx.fillStyle=clr; ctx.fill();
+        ctx.strokeStyle='#fff'; ctx.lineWidth=1.5; ctx.stroke();
+    });
+}
+function _pseCrvApplyPreview() {
+    // CSS approximation for live preview; pixel-accurate on canvas at send time
+    var pts = _pseCrvPts[_pseState.curveChannel];
+    var mid = pts.reduce(function(a,p){return a+(p[1]-p[0]);},0) / pts.length;
+    var img = document.getElementById('pse-media'); if (!img) return;
+    var cur = img.style.filter || '';
+    cur = cur.replace(/\s*brightness\([^)]*\)\s*$/, '');
+    img.style.filter = cur + ' brightness(' + (1 + mid * 0.35).toFixed(3) + ')';
+}
+
+// ── Markup – draw ─────────────────────────────────────────────────────────────
+function _pseSyncDraw() {
+    var img = document.getElementById('pse-media');
+    var dc  = document.getElementById('pse-draw-cv');
+    if (!img || !dc) return;
+    var w = img.offsetWidth, h = img.offsetHeight;
+    if (!w || !h) return;
+    if (dc.width !== w || dc.height !== h) { dc.width = w; dc.height = h; }
+    dc.style.width = '100%'; dc.style.height = '100%';
+    if (dc._init) return;
+    dc._init = true;
+    var drawing = false, last = null;
+    function pt(e) {
+        var r   = dc.getBoundingClientRect(), src = e.touches ? e.touches[0] : e;
+        return { x:(src.clientX-r.left)*(dc.width/r.width), y:(src.clientY-r.top)*(dc.height/r.height) };
+    }
+    function ds(e){ e.preventDefault(); if (_pseState.markupMode!=='draw') return; drawing=true; last=pt(e); }
+    function dm(e){
+        e.preventDefault(); if (!drawing) return;
+        var p=pt(e), ctx=dc.getContext('2d');
+        ctx.strokeStyle=_pseState.drawColor; ctx.lineWidth=_pseState.drawSize;
+        ctx.lineCap='round'; ctx.lineJoin='round';
+        ctx.beginPath(); ctx.moveTo(last.x,last.y); ctx.lineTo(p.x,p.y); ctx.stroke();
+        last=p;
+    }
+    function de(){ drawing=false; last=null; }
+    dc.addEventListener('mousedown',  ds); dc.addEventListener('mousemove',  dm); dc.addEventListener('mouseup',    de);
+    dc.addEventListener('touchstart', ds,{passive:false}); dc.addEventListener('touchmove',  dm,{passive:false}); dc.addEventListener('touchend',   de);
+}
+function _pseDColor(c, idx) {
+    _pseState.drawColor = c;
+    for (var i=0;i<8;i++){ var e=document.getElementById('pse-dc-'+i); if(e) e.style.borderColor = i===idx?'#fff':'transparent'; }
+}
+
+// ── Markup – mode switch ──────────────────────────────────────────────────────
+function _pseMkMode(mode) {
+    _pseState.markupMode = mode;
+    ['draw','sticker','text'].forEach(function(m){
+        var btn=document.getElementById('pse-mk-'+m+'-btn');
+        var ui =document.getElementById('pse-mk-'+m+'-ui');
+        var on = m===mode;
+        if (btn){ btn.style.background=on?'rgba(255,255,255,.9)':'rgba(255,255,255,.12)'; btn.style.color=on?'#000':'rgba(255,255,255,.7)'; btn.style.fontWeight=on?700:400; }
+        if (ui)  ui.style.display = on ? 'block' : 'none';
+    });
+    var dc = document.getElementById('pse-draw-cv');
+    if (dc) dc.style.display = mode==='draw' ? 'block' : 'none';
+}
+
+function _pseMakeDraggable(el) {
+    var sx,sy,ox,oy;
+    function start(e){ e.stopPropagation(); e.preventDefault(); var src=e.touches?e.touches[0]:e; sx=src.clientX;sy=src.clientY;ox=parseFloat(el.style.left)||0;oy=parseFloat(el.style.top)||0; }
+    function move(e){ e.preventDefault(); var src=e.touches?e.touches[0]:e; el.style.left=(ox+src.clientX-sx)+'px'; el.style.top=(oy+src.clientY-sy)+'px'; }
+    el.addEventListener('mousedown', start,{passive:false}); el.addEventListener('mousemove', move,{passive:false});
+    el.addEventListener('touchstart',start,{passive:false}); el.addEventListener('touchmove', move,{passive:false});
+}
+
+// ── Markup – sticker ─────────────────────────────────────────────────────────
+function _pseStkPick(emoji) {
+    var ov=document.getElementById('pse-ovr-els'), wrap=document.getElementById('pse-img-wrap');
+    if (!ov||!wrap) return;
+    ov.style.pointerEvents='auto';
+    var e=document.createElement('div');
+    e.style.cssText='position:absolute;font-size:40px;cursor:move;user-select:none;touch-action:none;line-height:1;z-index:10;';
+    e.style.left=(wrap.offsetWidth/2-25)+'px'; e.style.top=(wrap.offsetHeight/2-25)+'px';
+    e.textContent=emoji;
+    _pseMakeDraggable(e);
+    ov.appendChild(e);
+}
+
+// ── Markup – text ─────────────────────────────────────────────────────────────
+var _pseTFont='San Francisco';
+function _pseTxtFont(f){
+    _pseTFont=f;
+    document.querySelectorAll('#pse-mk-text-ui [data-font]').forEach(function(el){ el.style.background=el.dataset.font===f?'rgba(255,255,255,.35)':'rgba(255,255,255,.1)'; });
+}
+function _pseAddTxt(){
+    var inp=document.getElementById('pse-txt-inp');
+    if (!inp||!inp.value.trim()) return;
+    var txt=inp.value.trim(); inp.value='';
+    var ov=document.getElementById('pse-ovr-els'), wrap=document.getElementById('pse-img-wrap');
+    if (!ov||!wrap) return;
+    ov.style.pointerEvents='auto';
+    var e=document.createElement('div');
+    e.style.cssText='position:absolute;color:#fff;font-size:22px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,.8);cursor:move;user-select:none;touch-action:none;white-space:nowrap;z-index:10;';
+    e.style.fontFamily="'"+_pseTFont+"',sans-serif";
+    e.style.left=(wrap.offsetWidth/2-50)+'px'; e.style.top=(wrap.offsetHeight/2-15)+'px';
+    e.textContent=txt;
+    _pseMakeDraggable(e);
+    ov.appendChild(e);
+}
+
+// ── Crop ──────────────────────────────────────────────────────────────────────
+function _pseCropR(ratio){
+    _pseState.cropRatio=ratio;
+    document.querySelectorAll('#pse-panel-crop [data-r]').forEach(function(el){
+        var on=el.dataset.r===ratio;
+        el.style.background=on?'rgba(255,255,255,.35)':'rgba(255,255,255,.12)';
+        el.style.color=on?'#fff':'rgba(255,255,255,.7)';
+    });
+    _pseCropApply();
+}
+function _pseCropRotBtn(deg){ _pseState.cropRotation=((_pseState.cropRotation+deg)%360+360)%360; _pseCropApply(); }
+function _pseCropRotSlide(v){ _pseState.cropRotation=parseInt(v); _pseCropApply(); }
+function _pseCropFlip(dir){ if(dir==='h')_pseState.cropFlipH=!_pseState.cropFlipH; else _pseState.cropFlipV=!_pseState.cropFlipV; _pseCropApply(); }
+function _pseCropReset(){ _pseState.cropRotation=0; _pseState.cropFlipH=false; _pseState.cropFlipV=false; var sl=document.getElementById('pse-crop-rot-sl'); if(sl)sl.value=0; _pseCropApply(); }
+function _pseCropApply(){
+    var img=document.getElementById('pse-media'), wrap=document.getElementById('pse-img-wrap');
+    if (!img||!wrap) return;
+    img.style.transform='rotate('+_pseState.cropRotation+'deg) scaleX('+(_pseState.cropFlipH?-1:1)+') scaleY('+(_pseState.cropFlipV?-1:1)+')';
+    if (_pseState.cropRatio!=='orig'){
+        var p=_pseState.cropRatio.split(':');
+        wrap.style.aspectRatio=p[0]+'/'+p[1]; wrap.style.overflow='hidden';
+        img.style.width='100%'; img.style.height='100%'; img.style.objectFit='cover'; img.style.maxWidth=''; img.style.maxHeight='';
+    } else {
+        wrap.style.aspectRatio=''; wrap.style.overflow='';
+        img.style.width=''; img.style.height=''; img.style.objectFit='contain';
+        img.style.maxWidth='100%'; img.style.maxHeight='calc(100vh - 220px)';
+    }
+}
+
+// ── Flatten to canvas then send ───────────────────────────────────────────────
+async function _pseFlatten(file){
+    return new Promise(function(resolve){
+        var img=document.getElementById('pse-media');
+        if (!img){resolve(file);return;}
+        var nW=img.naturalWidth||img.offsetWidth, nH=img.naturalHeight||img.offsetHeight;
+        var oW=nW, oH=nH;
+        if (_pseState.cropRatio!=='orig'){
+            var rp=_pseState.cropRatio.split(':'), ar=parseFloat(rp[0])/parseFloat(rp[1]);
+            if (nW/nH>ar) oW=Math.round(nH*ar); else oH=Math.round(nW/ar);
+        }
+        var cv=document.createElement('canvas'); cv.width=oW; cv.height=oH;
+        var ctx=cv.getContext('2d'), s=_pseState;
+        var brt=Math.max(0,1+(s.brightness+s.fade*0.3)/100).toFixed(3);
+        var ctr=Math.max(0,1+(s.contrast-s.fade*0.4+s.sharpen*0.25)/100).toFixed(3);
+        var sat=Math.max(0,1+s.saturation/100).toFixed(3);
+        var fstr='brightness('+brt+') contrast('+ctr+') saturate('+sat+')';
+        if (s.warmth>0) fstr+=' sepia('+Math.min(1,s.warmth/200).toFixed(3)+') hue-rotate(-10deg)';
+        ctx.filter=fstr;
+        ctx.save();
+        ctx.translate(oW/2,oH/2);
+        ctx.rotate(s.cropRotation*Math.PI/180);
+        if (s.cropFlipH) ctx.scale(-1,1);
+        if (s.cropFlipV) ctx.scale(1,-1);
+        ctx.drawImage(img,(nW-oW)/2,(nH-oH)/2,oW,oH,-oW/2,-oH/2,oW,oH);
+        ctx.restore(); ctx.filter='none';
+        // Vignette
+        if (s.vignette>0){
+            var g=ctx.createRadialGradient(oW/2,oH/2,oW*0.15,oW/2,oH/2,oW*0.7);
+            g.addColorStop(0,'transparent'); g.addColorStop(1,'rgba(0,0,0,'+(s.vignette/100).toFixed(2)+')');
+            ctx.fillStyle=g; ctx.fillRect(0,0,oW,oH);
+        }
+        // Grain
+        if (s.grain>0){
+            var id2=ctx.createImageData(oW,oH);
+            for(var gi=0;gi<id2.data.length;gi+=4){var n2=Math.random()*255|0;id2.data[gi]=id2.data[gi+1]=id2.data[gi+2]=n2;id2.data[gi+3]=55;}
+            ctx.putImageData(id2,0,0);
+        }
+        // Draw strokes
+        var dc=document.getElementById('pse-draw-cv');
+        if (dc&&dc.width>0) ctx.drawImage(dc,0,0,oW,oH);
+        // Stickers & text
+        var ov=document.getElementById('pse-ovr-els');
+        if (ov&&ov.children.length){
+            var wrap=document.getElementById('pse-img-wrap');
+            var sx2=oW/(wrap?wrap.offsetWidth:oW), sy2=oH/(wrap?wrap.offsetHeight:oH);
+            Array.from(ov.children).forEach(function(c){
+                var x=(parseFloat(c.style.left)||0)*sx2, y=(parseFloat(c.style.top)||0)*sy2;
+                var fs=parseFloat(window.getComputedStyle(c).fontSize)*sx2;
+                ctx.font=fs+'px '+(c.style.fontFamily||'Arial');
+                ctx.fillStyle=c.style.color||'#fff';
+                ctx.shadowColor='rgba(0,0,0,.7)'; ctx.shadowBlur=4;
+                ctx.fillText(c.textContent,x,y+fs);
+                ctx.shadowBlur=0;
+            });
+        }
+        cv.toBlob(function(blob){
+            resolve(new File([blob],file.name||'photo.jpg',{type:'image/jpeg'}));
+        },'image/jpeg',0.92);
+    });
+}
+
+async function _pseSend(localUrl, file, isVideo){
+    var caption=document.getElementById('pse-caption');
+    var captionText=caption?caption.value.trim():'';
+    var sendFile=file;
+    if (!isVideo&&file instanceof File){
+        try{ sendFile=await _pseFlatten(file); }catch(e){ sendFile=file; }
+    }
+    var ed=document.getElementById('preSendEditor'); if(ed) ed.remove();
+    if (typeof sendMediaInChat==='function'&&sendFile instanceof File){
+        sendMediaInChat(sendFile,captionText);
+    } else if (localUrl){
+        var chatBody=document.getElementById('chat-body'); if(!chatBody) return;
+        var msgType=isVideo?'video':'image';
+        var m={id:'tmp_'+Date.now(),sender_id:currentUser?currentUser.id:null,message_type:msgType,media_url:localUrl,status:'sent',created_at:new Date().toISOString()};
+        chatBody.insertAdjacentHTML('beforeend',renderMessageBubble(m));
+        chatBody.scrollTop=chatBody.scrollHeight;
+    }
+}
+
+function openChatCamera() {
+    var existing = document.getElementById('chatCameraPage');
+    if (existing) { closeChatCamera(); return; }
+    var page = document.createElement('div');
+    page.id = 'chatCameraPage';
+    page.style.cssText = 'position:fixed;inset:0;z-index:19800;background:#000;overflow:hidden;';
+    page.innerHTML = `
+        <video id="chatCamPreview" autoplay playsinline muted
+            style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;"></video>
+        <div style="position:absolute;top:0;left:0;right:0;height:160px;
+            background:linear-gradient(to bottom,rgba(0,0,0,0.65),transparent);
+            z-index:2;pointer-events:none;"></div>
+        <div style="position:absolute;bottom:0;left:0;right:0;height:320px;
+            background:linear-gradient(to top,rgba(0,0,0,0.78),transparent);
+            z-index:2;pointer-events:none;"></div>
+
+        <!-- Top bar -->
+        <div style="position:absolute;top:0;left:0;right:0;z-index:10;
+            padding:max(52px,env(safe-area-inset-top,52px)) 16px 12px;
+            display:flex;align-items:center;justify-content:space-between;">
+            <div onclick="closeChatCamera()"
+                style="width:40px;height:40px;border-radius:50%;background:rgba(0,0,0,0.45);
+                border:0.5px solid rgba(255,255,255,0.2);display:flex;align-items:center;
+                justify-content:center;cursor:pointer;">
+                <i class="fa-solid fa-xmark" style="color:white;font-size:18px;"></i>
+            </div>
+            <div style="display:flex;gap:10px;">
+                <div onclick="showToast('Filters coming soon')"
+                    style="width:40px;height:40px;border-radius:50%;background:rgba(0,0,0,0.45);
+                    border:0.5px solid rgba(255,255,255,0.2);display:flex;align-items:center;
+                    justify-content:center;cursor:pointer;">
+                    <i class="fa-solid fa-wand-sparkles" style="color:rgba(255,255,255,0.75);font-size:15px;"></i>
+                </div>
+                <div onclick="toggleChatCamFlash()"
+                    style="width:40px;height:40px;border-radius:50%;background:rgba(0,0,0,0.45);
+                    border:0.5px solid rgba(255,255,255,0.2);display:flex;align-items:center;
+                    justify-content:center;cursor:pointer;">
+                    <i id="chatCamFlashIcon" class="fa-solid fa-bolt-slash"
+                        style="color:rgba(255,255,255,0.55);font-size:16px;"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent media row -->
+        <div id="chatCamThumbRow"
+            style="position:absolute;bottom:200px;left:0;right:0;z-index:10;
+            display:flex;gap:5px;padding:0 10px;overflow-x:auto;
+            scrollbar-width:none;-webkit-overflow-scrolling:touch;"></div>
+
+        <!-- Controls -->
+        <div style="position:absolute;bottom:100px;left:0;right:0;z-index:10;
+            display:flex;align-items:center;justify-content:space-between;padding:0 32px;">
+            <div onclick="document.getElementById('chatCamFileInput').click()"
+                style="width:54px;height:54px;border-radius:14px;background:rgba(255,255,255,0.18);
+                border:2px solid rgba(255,255,255,0.35);overflow:hidden;display:flex;
+                align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"
+                id="chatCamGalleryBtn">
+                <i id="chatCamGalleryIcon" class="fa-regular fa-image" style="color:white;font-size:22px;"></i>
+            </div>
+            <input id="chatCamFileInput" type="file" accept="image/*,video/*"
+                style="display:none;" onchange="chatCamGalleryPick(this)">
+            <div onclick="chatCamCapture()"
+                style="width:80px;height:80px;border-radius:50%;border:5px solid white;
+                display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;">
+                <div id="chatCamShutterInner"
+                    style="width:64px;height:64px;border-radius:50%;background:white;transition:all 0.25s;"></div>
+            </div>
+            <div onclick="flipChatCam()"
+                style="width:54px;height:54px;border-radius:50%;background:rgba(0,0,0,0.45);
+                border:0.5px solid rgba(255,255,255,0.2);display:flex;align-items:center;
+                justify-content:center;cursor:pointer;flex-shrink:0;">
+                <i class="fa-solid fa-rotate" style="color:white;font-size:22px;"></i>
+            </div>
+        </div>
+
+        <!-- Mode tabs -->
+        <div style="position:absolute;bottom:max(20px,env(safe-area-inset-bottom,20px));
+            left:0;right:0;z-index:10;display:flex;align-items:center;
+            justify-content:center;gap:28px;">
+            <span id="chatCamTabVid" onclick="setChatCamMode('video')"
+                style="color:rgba(255,255,255,0.5);font-size:13px;font-weight:600;
+                letter-spacing:0.8px;cursor:pointer;padding-bottom:2px;">VIDEO</span>
+            <span id="chatCamTabPhoto" onclick="setChatCamMode('photo')"
+                style="color:#FFB300;font-size:13px;font-weight:700;letter-spacing:0.8px;
+                cursor:pointer;border-bottom:2px solid #FFB300;padding-bottom:2px;">PHOTO</span>
+            <span id="chatCamTabNote" onclick="setChatCamMode('note')"
+                style="color:rgba(255,255,255,0.5);font-size:13px;font-weight:600;
+                letter-spacing:0.8px;cursor:pointer;padding-bottom:2px;">VIDEO NOTE</span>
+        </div>
+    `;
+    document.body.appendChild(page);
+    window._chatCamMode = 'photo';
+    window._chatCamFront = true;
+    window._chatCamStream = null;
+    window._chatCamRecording = false;
+    window._chatCamRecorder = null;
+    _startChatCamStream();
+    _loadChatCamThumbs();
+}
+
+function _startChatCamStream() {
+    navigator.mediaDevices.getUserMedia({
+        video: { facingMode: window._chatCamFront ? 'user' : 'environment',
+                 width: { ideal: 1080 }, height: { ideal: 1920 } },
+        audio: true
+    }).then(function(stream) {
+        window._chatCamStream = stream;
+        var vid = document.getElementById('chatCamPreview');
+        if (vid) {
+            vid.srcObject = stream;
+            vid.style.transform = window._chatCamFront ? 'scaleX(-1)' : '';
+        }
+    }).catch(function() { showToast('Camera permission needed'); });
+}
+
+function closeChatCamera() {
+    if (window._chatCamStream) {
+        window._chatCamStream.getTracks().forEach(function(t) { t.stop(); });
+        window._chatCamStream = null;
+    }
+    var page = document.getElementById('chatCameraPage');
+    if (page) page.remove();
+}
+
+function flipChatCam() {
+    window._chatCamFront = !window._chatCamFront;
+    if (window._chatCamStream) {
+        window._chatCamStream.getTracks().forEach(function(t) { t.stop(); });
+    }
+    _startChatCamStream();
+}
+
+function toggleChatCamFlash() {
+    var icon = document.getElementById('chatCamFlashIcon');
+    if (!icon) return;
+    var on = icon.classList.contains('fa-bolt-slash');
+    if (on) {
+        icon.classList.replace('fa-bolt-slash', 'fa-bolt');
+        icon.style.color = '#FFD60A';
+    } else {
+        icon.classList.replace('fa-bolt', 'fa-bolt-slash');
+        icon.style.color = 'rgba(255,255,255,0.55)';
+    }
+    if (window._chatCamStream) {
+        var track = window._chatCamStream.getVideoTracks()[0];
+        if (track && track.getCapabilities && track.getCapabilities().torch) {
+            track.applyConstraints({ advanced: [{ torch: on }] });
+        }
+    }
+}
+
+function setChatCamMode(mode) {
+    window._chatCamMode = mode;
+    var tabs = { video: 'chatCamTabVid', photo: 'chatCamTabPhoto', note: 'chatCamTabNote' };
+    Object.keys(tabs).forEach(function(m) {
+        var el = document.getElementById(tabs[m]);
+        if (!el) return;
+        var active = m === mode;
+        el.style.color = active ? '#FFB300' : 'rgba(255,255,255,0.5)';
+        el.style.borderBottom = active ? '2px solid #FFB300' : 'none';
+        el.style.fontWeight = active ? '700' : '600';
+    });
+    var inner = document.getElementById('chatCamShutterInner');
+    if (inner) {
+        if (mode === 'video') {
+            inner.style.background = '#FF3B30';
+            inner.style.borderRadius = '10px';
+            inner.style.width = '36px';
+            inner.style.height = '36px';
+        } else {
+            inner.style.background = 'white';
+            inner.style.borderRadius = '50%';
+            inner.style.width = '64px';
+            inner.style.height = '64px';
+        }
+    }
+}
+
+function chatCamCapture() {
+    var mode = window._chatCamMode || 'photo';
+    if (mode === 'note') {
+        closeChatCamera();
+        if (typeof openCircularVideoRecorder === 'function') openCircularVideoRecorder();
+        return;
+    }
+    if (mode === 'video') {
+        if (!window._chatCamRecording) {
+            if (!window._chatCamStream) { showToast('Camera not ready'); return; }
+            var chunks = [];
+            var mime = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
+            var rec = new MediaRecorder(window._chatCamStream, { mimeType: mime });
+            rec.ondataavailable = function(e) { if (e.data.size > 0) chunks.push(e.data); };
+            rec.onstop = function() {
+                var ext = mime.includes('mp4') ? '.mp4' : '.webm';
+                var file = new File([new Blob(chunks, { type: mime })],
+                    'video_' + Date.now() + ext, { type: mime });
+                closeChatCamera();
+                openPreSendEditor(file, null);
+            };
+            rec.start();
+            window._chatCamRecorder = rec;
+            window._chatCamRecording = true;
+            showToast('Recording… tap again to stop');
+        } else {
+            if (window._chatCamRecorder && window._chatCamRecorder.state !== 'inactive') {
+                window._chatCamRecorder.stop();
+            }
+            window._chatCamRecording = false;
+        }
+        return;
+    }
+    // Photo
+    var vid = document.getElementById('chatCamPreview');
+    if (!vid || !window._chatCamStream) { showToast('Camera not ready'); return; }
+    var canvas = document.createElement('canvas');
+    canvas.width = vid.videoWidth || 1080;
+    canvas.height = vid.videoHeight || 1920;
+    var ctx = canvas.getContext('2d');
+    if (window._chatCamFront) { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
+    ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(function(blob) {
+        if (!blob) { showToast('Could not capture'); return; }
+        var file = new File([blob], 'photo_' + Date.now() + '.jpg', { type: 'image/jpeg' });
+        closeChatCamera();
+        openPreSendEditor(file, null);
+    }, 'image/jpeg', 0.92);
+}
+
+function chatCamGalleryPick(input) {
+    var file = input && input.files && input.files[0];
+    if (!file) return;
+    closeChatCamera();
+    openPreSendEditor(file, null);
+}
+
+function _loadChatCamThumbs() {
+    if (!window.sb || !currentUser) return;
+    var row = document.getElementById('chatCamThumbRow');
+    if (!row) return;
+    sb.from('messages')
+        .select('media_url,message_type,ciphertext')
+        .eq('sender_id', currentUser.id)
+        .in('message_type', ['image', 'video'])
+        .order('inserted_at', { ascending: false })
+        .limit(12)
+        .then(function(res) {
+            var items = (res.data || []).filter(function(m) {
+                return m.media_url || m.ciphertext;
+            });
+            if (!items.length) return;
+            var r = document.getElementById('chatCamThumbRow');
+            if (!r) return;
+            r.innerHTML = items.map(function(m) {
+                var url = m.media_url || m.ciphertext;
+                var isVid = m.message_type === 'video';
+                return '<div onclick="chatCamPickThumb(\'' + url + '\',\'' + m.message_type + '\')"' +
+                    ' style="flex-shrink:0;width:70px;height:88px;border-radius:10px;overflow:hidden;' +
+                    'border:2px solid rgba(255,255,255,0.18);cursor:pointer;position:relative;background:#111;">' +
+                    (isVid
+                        ? '<video src="' + url + '" style="width:100%;height:100%;object-fit:cover;" muted playsinline></video>' +
+                          '<div style="position:absolute;bottom:4px;left:5px;background:rgba(0,0,0,0.55);border-radius:4px;padding:1px 5px;">' +
+                          '<i class="fa-solid fa-video" style="color:white;font-size:9px;"></i></div>'
+                        : '<img src="' + url + '" style="width:100%;height:100%;object-fit:cover;" loading="lazy">') +
+                    '</div>';
+            }).join('');
+        }).catch(function() {});
+}
+
+function chatCamPickThumb(url, type) {
+    closeChatCamera();
+    fetch(url).then(function(r) { return r.blob(); }).then(function(blob) {
+        var ext = type === 'video' ? '.mp4' : '.jpg';
+        var file = new File([blob], 'media_' + Date.now() + ext,
+            { type: blob.type || (type === 'video' ? 'video/mp4' : 'image/jpeg') });
+        openPreSendEditor(file, null);
+    }).catch(function() { showToast('Could not open media'); });
 }
 
 function _openMsgRow(el) {
@@ -2457,25 +3427,51 @@ function sendMessageNew() {
         chatBody.scrollTop = chatBody.scrollHeight;
     }
     input.value = '';
-    document.getElementById('chat-send-btn').style.opacity = '0.4';
+    document.getElementById('chat-send-btn').style.opacity = '0';
     document.getElementById('chat-send-btn').style.pointerEvents = 'none';
+    document.getElementById('voice-btn').style.display = 'flex';
     if (typeof triggerHaptic === 'function') triggerHaptic(12);
-    if (window.sb && currentUser && currentConversationId) {
-    sb.from('messages').insert({
-        conversation_id: currentConversationId,
-        sender_id: currentUser.id,
-        ciphertext: text,
-        message_type: 'text',
-        inserted_at: new Date().toISOString()
-    }).then(function(res) {
-        if (res.error) {
-            showToast('Message failed to send');
-            // Remove the optimistically-added bubble
-            var pending = document.querySelector('.msg-bubble[data-pending="true"]');
-            if (pending) pending.remove();
-        }
-    });
-}
+    if (window.sb && currentUser) {
+        // Wait for conversation ID if it's still being created by openChat()
+        var checkConvInterval = setInterval(function() {
+            if (currentConversationId) {
+                clearInterval(checkConvInterval);
+                (async function() {
+                    var msgPayload = { ciphertext: text, nonce: null };
+                    try {
+                        var recipId = window._currentChatUserId || currentUser.id;
+                        msgPayload = await E2E.encryptMessage(text, recipId);
+                    } catch(encErr) {
+                        console.warn('[sendMessage] E2E encrypt skipped, sending plain:', encErr);
+                    }
+                    var res = await sb.from('messages').insert({
+                        conversation_id: currentConversationId,
+                        sender_id: currentUser.id,
+                        ciphertext: msgPayload.ciphertext,
+                        nonce: msgPayload.nonce,
+                        message_type: 'text',
+                        created_at: new Date().toISOString(),
+                        inserted_at: new Date().toISOString()
+                    });
+                    if (res.error) {
+                        showToast('Message failed to send');
+                        var pending = document.querySelector('.msg-bubble[data-pending="true"]');
+                        if (pending) pending.remove();
+                    } else {
+                        sb.from('conversations').update({ updated_at: new Date().toISOString() })
+                            .eq('id', currentConversationId)
+                            .then(function() {
+                                var msgList = document.getElementById('chat-list-content');
+                                if (msgList && typeof fillMsgContent === 'function') fillMsgContent();
+                            });
+                    }
+                })();
+            }
+        }, 100); // Checks every 100ms
+
+        // Timeout after 5 seconds to prevent infinite loops if DB fails
+        setTimeout(function() { if (checkConvInterval) { clearInterval(checkConvInterval); if (!currentConversationId) showToast('Message not sent'); } }, 5000);
+    }
 }
 function sendMessage() { sendMessageNew(); }
 
@@ -2801,14 +3797,15 @@ async function sendVoiceMessage(audioBlob, duration) {
                     .getPublicUrl(`voice-messages/${fileName}`);
 
                 // Send message record
-                const message = await DB.sendEncryptedMessage({
-                    conversation_id: currentConversationId,
-                    sender_id: session.user.id,
-                    ciphertext: publicUrl, // Store URL as "ciphertext"
-                    nonce: 'voice_message',
-                    message_type: 'voice',
-                    voice_duration_seconds: duration
-                });
+                const { data: message, error: msgErr } = await window.sb.from('messages').insert({
+    conversation_id: currentConversationId,
+    sender_id: session.user.id,
+    media_url: publicUrl,
+    message_type: 'voice',
+    voice_duration_seconds: duration,
+    created_at: new Date().toISOString()
+}).select('id').single();
+if (msgErr) throw msgErr;
 
                 // Display in chat
                 appendVoiceMessageToChat(publicUrl, duration, true, message);
@@ -3245,7 +4242,7 @@ function epCopyUrl() {
     else showToast('Link copied!');
 }
 
-function saveEditProfile() {
+async function saveEditProfile() {
     var nameEl = document.getElementById('epNameInput');
     var usernameEl = document.getElementById('epUsernameInput');
     var bioEl = document.getElementById('epBioInput');
@@ -3257,6 +4254,20 @@ function saveEditProfile() {
     secureSave('user_bio', bio);
     var bioDisplay = document.getElementById('profile-bio');
     if (bioDisplay) bioDisplay.textContent = bio;
+    var avatarInput = document.getElementById('epAvatarInput');
+    if (avatarInput && avatarInput.files && avatarInput.files.length && window.sb && currentUser) {
+        try {
+            var file = avatarInput.files[0];
+            var compressed = typeof compressImage === 'function' ? await compressImage(file, 500, 0.85) : file;
+            var fileName = currentUser.id + '/avatar_' + Date.now() + '.jpg';
+            var uploadResult = await sb.storage.from('avatars').upload(fileName, compressed, { cacheControl: '3600', upsert: true });
+            if (!uploadResult.error) {
+                var publicUrl = sb.storage.from('avatars').getPublicUrl(fileName).data.publicUrl;
+                await sb.from('users').update({ avatar_url: publicUrl, updated_at: new Date().toISOString() }).eq('id', currentUser.id);
+                updateAvatarsOnPage(publicUrl);
+            }
+        } catch(e) { console.warn('[saveEditProfile avatar]', e); }
+    }
     var ov = document.getElementById('editProfileOverlay');
     if (ov) ov.remove();
     showToast('Profile saved');
@@ -3318,12 +4329,15 @@ function fillProfileGrid() {
     }
 }
 
+var _profileTabGen = 0; // generation counter to cancel stale async updates
 function switchprofiletab(tabName, element) {
     document.querySelectorAll('.p-tab').forEach(function(t) { t.classList.remove('active'); });
     if (element) element.classList.add('active');
     triggerHaptic(15);
     var grid = document.getElementById('profile-grid');
     if (!grid) return;
+    _profileTabGen++; // invalidate any in-flight async updates
+    grid.dataset.tabGen = _profileTabGen;
     switch (tabName) {
         case 'posts':
             grid.style.display = 'block';
@@ -3360,13 +4374,15 @@ function switchprofiletab(tabName, element) {
 window.switchProfileTab = switchprofiletab;
 
 async function loadProfilePosts(container) {
-    container.innerHTML = '<div style="text-align:center; padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF; font-size:20px;"></i></div>';
+    var myGen = _profileTabGen;
+    container.innerHTML = [0,1,2].map(function(){return '<div style="padding:16px;border-bottom:1px solid var(--border-color,#f5f5f5);animation:skeletonPulse 1.4s ease-in-out infinite;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div style="width:42px;height:42px;border-radius:50%;background:var(--skeleton-bg,#e8e8e8);flex-shrink:0;"></div><div style="flex:1;"><div style="height:13px;border-radius:6px;background:var(--skeleton-bg,#e8e8e8);width:55%;margin-bottom:6px;"></div><div style="height:11px;border-radius:6px;background:var(--skeleton-bg,#e8e8e8);width:35%;"></div></div></div><div style="height:180px;border-radius:14px;background:var(--skeleton-bg,#e8e8e8);margin-bottom:10px;"></div><div style="display:flex;gap:20px;"><div style="height:12px;border-radius:6px;background:var(--skeleton-bg,#e8e8e8);width:25%;"></div><div style="height:12px;border-radius:6px;background:var(--skeleton-bg,#e8e8e8);width:18%;"></div></div></div>';}).join('');
     if (window.sb && currentUser && currentUser.id) {
         try {
             var r = await sb.from('posts')
-                .select('*, users:user_id(id,full_name,username,avatar_url,badge_tier,verified)')
-                .eq('user_id', currentUser.id).eq('status', 'published')
-                .order('created_at', { ascending: false }).limit(20);
+    .select('*, users:user_id(id,full_name,username,avatar_url,badge_tier,verified), quoted_post:quoted_post_id(*, users:user_id(id,full_name,username,avatar_url,badge_tier,verified))')
+    .eq('user_id', currentUser.id).eq('status', 'published')
+    .order('created_at', { ascending: false }).limit(20);
+            if (_profileTabGen !== myGen) return; // tab switched, discard
             if (r.data && r.data.length > 0) {
                 container.innerHTML = '';
                 r.data.forEach(function(p) {
@@ -3376,6 +4392,7 @@ async function loadProfilePosts(container) {
             }
         } catch(e) { console.warn('[ProfilePosts]', e); }
     }
+    if (_profileTabGen !== myGen) return;
     container.innerHTML = '<div style="text-align:center; padding:60px 20px; color:#888;">' +
         '<i class="fa-solid fa-pen-to-square" style="font-size:40px; color:#ccc; display:block; margin-bottom:15px;"></i>' +
         '<b style="color:var(--text-primary,#333); display:block; margin-bottom:8px;">No posts yet</b>' +
@@ -3415,10 +4432,12 @@ function loadProfileReels(container) {
             .limit(18)
             .then(function(r) {
                 if (r.data && r.data.length > 0) {
-                    r.data.forEach(function(clip) {
-                        var thumb = clip.thumbnail_url || clip.media_url || '';
-                        container.innerHTML += '<div onclick="navGoTo(\'reels\')" style="aspect-ratio:9/16;background:#111;overflow:hidden;position:relative;cursor:pointer;border-radius:3px;">' +
-                            (thumb ? '<img src="' + escapeHtml(thumb) + '" style="width:100%;height:100%;object-fit:cover;opacity:0.85;">' : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-play" style="color:rgba(255,255,255,0.3);font-size:24px;"></i></div>') +
+                    window._profileClips = r.data.map(function(c){ return { id: c.id, videoUrl: c.media_url, media_url: c.media_url, thumbnail_url: c.thumbnail_url, view_count: c.view_count, username: '@' + (currentUser && currentUser.username || 'me') }; });
+                    r.data.forEach(function(clip, clipIdx) {
+                        var thumb = clip.thumbnail_url || '';
+        var videoUrl = clip.media_url || '';
+        container.innerHTML += '<div onclick="openProfileClipViewer('+clipIdx+')" style="aspect-ratio:9/16;background:#111;overflow:hidden;position:relative;cursor:pointer;border-radius:3px;">' +
+            (thumb ? '<img src="' + escapeHtml(thumb) + '" style="width:100%;height:100%;object-fit:cover;opacity:0.85;">' : '<video src="'+escapeHtml(videoUrl)+'" style="width:100%;height:100%;object-fit:cover;opacity:0.85;" muted playsinline preload="metadata" onloadeddata="this.currentTime=0"></video>') +
                             '<div style="position:absolute;bottom:6px;left:6px;color:white;font-size:10px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,0.9);"><i class="fa-solid fa-play"></i> ' + (clip.view_count || 0) + '</div></div>';
                     });
                 } else if (!totalDraftCount) {
@@ -3433,7 +4452,8 @@ function loadProfileReels(container) {
 }
 
 async function loadProfileReposts(container) {
-    container.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:20px;"></i></div>';
+    var myGen = _profileTabGen;
+    container.innerHTML = renderSkeletonHTML('post', 3);
     if (window.sb && currentUser && currentUser.id) {
         try {
             var r = await sb.from('reposts')
@@ -3441,6 +4461,7 @@ async function loadProfileReposts(container) {
                 .eq('user_id', currentUser.id)
                 .order('created_at', { ascending: false })
                 .limit(20);
+            if (_profileTabGen !== myGen) return;
             if (r.data && r.data.length > 0) {
                 container.innerHTML = '';
                 var repostVideos = r.data.filter(function(row){ return row.posts && (row.posts.media_type === 'video' || row.posts.post_type === 'video'); }).map(function(row){ return row.posts; });
@@ -3464,6 +4485,7 @@ async function loadProfileReposts(container) {
             }
         } catch(e) { console.warn('[ProfileReposts]', e); }
     }
+    if (_profileTabGen !== myGen) return;
     container.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#888;"><i class="fa-solid fa-retweet" style="font-size:40px;color:#ccc;display:block;margin-bottom:15px;"></i><b style="display:block;margin-bottom:8px;">No reposts yet</b><p style="font-size:13px;">Content you repost appears here</p></div>';
 }
 
@@ -3710,7 +4732,7 @@ function triggerThought() {
     overlay.innerHTML = `
         <!-- Floating glass header island -->
         <div style="position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:space-between;padding:54px 20px 16px;background:rgba(255,255,255,0.8);backdrop-filter:blur(30px);border-bottom:0.5px solid rgba(0,0,0,0.08);">
-            <button onclick="closeThoughts()" style="background:rgba(0,0,0,0.06);border:none;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;color:#888;">✕</button>
+            <button onclick="closeThoughts()" style="background:rgba(0,0,0,0.06);border:none;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;color:#888;"><i class="fa-solid fa-xmark"></i></button>
             <span style="font-size:15px;font-weight:700;color:#000;">New Note</span>
             <button id="thoughtShareBtn" onclick="shareThought()" disabled style="background:linear-gradient(135deg,#007AFF,#00C7FF);border:none;border-radius:25px;padding:8px 20px;color:white;font-size:14px;font-weight:800;cursor:pointer;opacity:0.35;transition:opacity 0.3s,box-shadow 0.3s;">Share</button>
         </div>
@@ -4376,7 +5398,27 @@ function selectRealMusicTrack(trackName, artistName, artUrl, previewUrl) {
     if (mArtist) mArtist.textContent = artistName;
 
    closeMusicHub();
-openSoundtrackSheet({ name: trackName, artist: artistName, artUrl: artUrl, previewUrl: previewUrl });
+    // If opened from story post area music button, apply to story
+    if (window._spMusicModalActive) {
+        window._spMusicModalActive = false;
+        window._spMusicOnly = false; // image/video + music -> show media, no spinning disc
+        if (typeof storyOnSongChosen === 'function') {
+            storyOnSongChosen({ name: trackName, artist: artistName, artUrl: artUrl, previewUrl: previewUrl });
+        } else {
+            spApplyMusic({ name: trackName, artist: artistName, artUrl: artUrl, previewUrl: previewUrl });
+        }
+        return;
+    }
+    if (window._storyPickerMusicPending) {
+        window._storyPickerMusicPending = false;
+        window._spMusicOnly = true; // music-only story -> spinning album-cover disc
+        // Use album art as story background (music-only story, image 6 style)
+        var _bgUrl = artUrl || 'https://ui-avatars.com/api/?name=Music&background=1c1c1e&color=fff&size=800';
+        window._spPendingMusicInfo = { name: trackName, artist: artistName, artUrl: artUrl, previewUrl: previewUrl };
+        openStoryPostArea({ type: 'image/jpeg', name: 'music-story' }, _bgUrl);
+        return;
+    }
+    openSoundtrackSheet({ name: trackName, artist: artistName, artUrl: artUrl, previewUrl: previewUrl });
     triggerHaptic(20);
 
     // Enable share button now that music is selected
@@ -5325,7 +6367,8 @@ document.getElementById('feed-panels').addEventListener('dblclick', function (e)
         var profileOverlay = document.getElementById('profile-overlay');
         addPullToRefresh(profileOverlay, function() {
             if (typeof loadMyProfile === 'function') loadMyProfile();
-            if (typeof fillProfileGrid === 'function') fillProfileGrid();
+            var _pg2 = document.getElementById('profile-grid');
+            if (_pg2 && typeof loadProfilePosts === 'function') loadProfilePosts(_pg2);
         });
     }, 1000);
 })();
@@ -5362,36 +6405,36 @@ async function loadActivityData() {
         // Load likes
         var lRes = await window._sb
             .from('likes')
-            .select('created_at, posts(id,text_content,user_id,profiles(display_name,username))')
+            .select('created_at, posts(id,text_content,user_id,users:user_id(full_name,username))')
             .eq('user_id', currentUser.id)
             .order('created_at', { ascending: false })
             .limit(30);
         activityData.likes = (lRes.data || []).map(function(r) {
-            var name = r.posts?.profiles?.display_name || r.posts?.profiles?.username || 'Someone';
+            var name = r.posts?.users?.full_name || r.posts?.users?.username || 'Someone';
             return { user: name, action: 'You liked their post', time: timeAgo(r.created_at), icon: 'fa-heart', color: '#e91e63' };
         });
 
         // Load reposts
         var rRes = await window._sb
             .from('reposts')
-            .select('created_at, posts(id,text_content,profiles(display_name,username))')
+            .select('created_at, posts(id,text_content,users:user_id(full_name,username))')
             .eq('user_id', currentUser.id)
             .order('created_at', { ascending: false })
             .limit(30);
         activityData.reposts = (rRes.data || []).map(function(r) {
-            var name = r.posts?.profiles?.display_name || r.posts?.profiles?.username || 'Someone';
+            var name = r.posts?.users?.full_name || r.posts?.users?.username || 'Someone';
             return { user: name, action: 'You reposted their post', time: timeAgo(r.created_at), icon: 'fa-retweet', color: '#34C759' };
         });
 
         // Load bookmarks
         var bRes = await window._sb
             .from('bookmarks')
-            .select('created_at, posts(id,text_content,profiles(display_name,username))')
+            .select('created_at, posts(id,text_content,users:user_id(full_name,username))')
             .eq('user_id', currentUser.id)
             .order('created_at', { ascending: false })
             .limit(30);
         activityData.bookmarks = (bRes.data || []).map(function(r) {
-            var name = r.posts?.profiles?.display_name || r.posts?.profiles?.username || 'Someone';
+            var name = r.posts?.users?.full_name || r.posts?.users?.username || 'Someone';
             var caption = r.posts?.text_content ? r.posts.text_content.slice(0,30) : 'a post';
             return { user: name, action: 'Saved "' + caption + '"', time: timeAgo(r.created_at), icon: 'fa-bookmark', color: '#007AFF' };
         });
@@ -5412,16 +6455,16 @@ function timeAgo(iso) {
 }
 
 async function loadWatchHistory() {
-    if (!window._sb || !currentUser) return;
-    const { data } = await window._sb
+    if (!window.sb || !currentUser) return;
+    const { data } = await window.sb
         .from('watch_history')
-        .select('post_id, watched_at, posts(caption)')
+        .select('post_id, watched_at, trustclips(caption)')
         .eq('user_id', currentUser.id)
         .order('watched_at', { ascending: false })
         .limit(30);
     activityData.history = (data || []).map(row => ({
         postId: row.post_id,
-        action: row.posts?.caption ? `Watched "${row.posts.caption.slice(0,30)}"` : 'Watched a clip',
+        action: row.trustclips?.caption ? `Watched "${row.trustclips.caption.slice(0,30)}"` : 'Watched a clip',
         time: row.watched_at,
         icon: 'fa-play',
         color: '#FF9500',
@@ -5599,8 +6642,8 @@ function simulateRealtimeSearch() {
                 area.innerHTML += usersPlaceholder;
                 if (window.sb) {
                     sb.from('users')
-                      .select('id,full_name,username,avatar_url,verified')
-                      .or('full_name.ilike.%'+searchTerm+'%,username.ilike.%'+searchTerm+'%')
+                      .select('id,name,username,avatar_url,verified')
+.or('name.ilike.%'+searchTerm+'%,username.ilike.%'+searchTerm+'%')
                       .limit(8)
                       .then(function(r) {
                           var el = document.getElementById('searchUsersGrid'); if (!el) return;
@@ -5635,12 +6678,17 @@ if (matchedTags.length > 0) {
 
             // Posts
             if (currentSearchTab === 'all' || currentSearchTab === 'posts') {
-                area.innerHTML += '<div class="search-result-section"><h4>Posts</h4><div id="searchPostsGrid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:2px;"><div style="grid-column:1/-1;text-align:center;padding:20px;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;"></i></div></div></div>';
+                area.innerHTML += '<div class="search-result-section"><h4>Posts</h4><div id="searchPostsGrid" style="display:block;"></div></div>';
                 if (window.sb) {
-                    sb.from('posts').select('id,media_url,thumbnail_url').or('text_content.ilike.%'+searchTerm+'%,tags.cs.{'+searchTerm+'}').eq('status','published').eq('is_hidden',false).limit(9)
+                    sb.from('posts').select('*, users:user_id(id,full_name,username,avatar_url,badge_tier,verified), quoted_post:quoted_post_id(*, users:user_id(id,full_name,username,avatar_url,badge_tier,verified))').ilike('text_content', '%'+searchTerm+'%').eq('status','published').neq('is_hidden',true).limit(9)
                     .then(function(r){
                         var el=document.getElementById('searchPostsGrid'); if(!el)return;
-                        el.innerHTML = (r.data&&r.data.length) ? r.data.map(function(p){var t=p.thumbnail_url||p.media_url||'';return '<div style="aspect-ratio:1;background:#eee;overflow:hidden;">'+(t?'<img src="'+escapeHtml(t)+'" style="width:100%;height:100%;object-fit:cover;">':'<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-align-left" style="color:#ccc;"></i></div>')+'</div>';}).join('') : '<div style="grid-column:1/-1;text-align:center;padding:20px;color:#888;font-size:13px;">No posts found</div>';
+                        if (r.data && r.data.length) {
+                            el.innerHTML = '';
+                            r.data.forEach(function(p){ if(typeof renderRealPostCard==='function') el.appendChild(renderRealPostCard(p)); });
+                        } else {
+                            el.innerHTML = '<div style="text-align:center;padding:20px;color:#888;font-size:13px;">No posts found</div>';
+                        }
                     });
                 }
             }
@@ -5946,25 +6994,38 @@ async function setup2FA(method) {
             window._totpFactorId = data.id;
             var qrBox = document.getElementById('twofa-qr-box');
             var secretLabel = document.getElementById('twofa-secret-label');
-            if (qrBox && data.totp?.qr_code) {
+            if (qrBox && (data.totp?.uri || data.totp?.qr_code)) {
     qrBox.style.background = 'white';
     qrBox.style.border = '2px solid #eee';
     qrBox.style.padding = '12px';
     qrBox.style.boxSizing = 'border-box';
     qrBox.style.overflow = 'hidden';
-    qrBox.innerHTML = data.totp.qr_code;
+    qrBox.innerHTML = '';
+    if (data.totp.uri && typeof QRCode !== 'undefined') {
+                // Render a real scannable QR from the otpauth:// URI using the loaded qrcodejs lib
+                try {
+                    new QRCode(qrBox, { text: data.totp.uri, width: 156, height: 156, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+                } catch (_e) {
+                    qrBox.innerHTML = (data.totp.qr_code && data.totp.qr_code.startsWith('data:'))
+                        ? '<img src="' + data.totp.qr_code + '" style="width:100%;height:100%;object-fit:contain;border-radius:8px;" alt="Scan QR">'
+                        : (data.totp.qr_code || '');
+                }
+            } else if (data.totp.qr_code && data.totp.qr_code.startsWith('data:')) {
+                qrBox.innerHTML = '<img src="' + data.totp.qr_code + '" style="width:100%;height:100%;object-fit:contain;border-radius:8px;" alt="Scan QR">';
+            } else {
+                qrBox.innerHTML = data.totp.qr_code;
+            }
     var svgEl = qrBox.querySelector('svg');
     if (svgEl) {
-        // Override SVG's own attributes, not just CSS
-        svgEl.setAttribute('width', '156');
-        svgEl.setAttribute('height', '156');
-        svgEl.style.cssText = 'width:100%;height:100%;display:block;';
-        // Ensure viewBox is set so the QR scales correctly
+        // Set viewBox BEFORE overriding width/height so we capture the natural size
         if (!svgEl.getAttribute('viewBox')) {
             var nativeW = svgEl.getAttribute('width') || '200';
             var nativeH = svgEl.getAttribute('height') || '200';
             svgEl.setAttribute('viewBox', '0 0 ' + nativeW + ' ' + nativeH);
         }
+        svgEl.setAttribute('width', '156');
+        svgEl.setAttribute('height', '156');
+        svgEl.style.cssText = 'width:100%;height:100%;display:block;';
     }
 }
             if (secretLabel && data.totp?.secret) {
@@ -6091,7 +7152,7 @@ function setLanguage(code) {
     // Thought input language
     var thoughtInput = document.getElementById('thoughtInput');
     var thoughtPhrases = {
-        ar: 'ما الذي تفكر فيه؟', fr: 'À quoi pensez-vous ?',
+        ar: 'ما الذي ØªÙÙƒØ± ÙÙŠÙ‡ØŸ', fr: 'À quoi pensez-vous ?',
         es: '¿Qué estás pensando?', zu: 'Ucabangani?',
         pt: 'O que você está pensando?'
     };
@@ -6127,55 +7188,6 @@ function setLanguage(code) {
 // ==========================================================================
 // TRUST SCORE
 // ==========================================================================
-function renderTrustScore() {
-    const score = currentUser?.verified ? 85 : 20;
-    const factors = [
-        { name: 'Identity Verified', value: currentUser?.verified ? 100 : 0, color: '#34C759' },
-        { name: 'Account Age', value: 70, color: '#007AFF' },
-        { name: 'Community Standing', value: 90, color: '#FFD700' },
-        { name: 'Content Quality', value: 80, color: '#FF9500' },
-        { name: 'Report History', value: 95, color: '#34C759' },
-    ];
-
-    const circumference = 2 * Math.PI * 50;
-    const offset = circumference - (score / 100) * circumference;
-
-    let html = `
-        <div style="text-align:center; margin-bottom:30px;">
-            <div class="trust-score-ring">
-                <svg width="120" height="120">
-                    <circle cx="60" cy="60" r="50" fill="none" stroke="#f0f0f0" stroke-width="8"/>
-                    <circle cx="60" cy="60" r="50" fill="none" stroke="#007AFF" stroke-width="8"
-                        stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"
-                        stroke-linecap="round" style="transition:stroke-dashoffset 1.5s ease;"/>
-                </svg>
-                <div class="trust-score-number">${score}</div>
-            </div>
-            <h3>Your Trust Score</h3>
-            <p style="color:#888; font-size:13px; margin-top:5px;">${score >= 80 ? 'Excellent standing' : score >= 50 ? 'Good standing' : 'Build trust by verifying your identity'}</p>
-        </div>
-        <div class="settings-card" style="padding:20px;">
-            <h4 style="margin-bottom:15px;">Score Breakdown</h4>`;
-
-    factors.forEach(f => {
-        html += `
-            <div class="trust-factor">
-                <span style="font-size:14px; font-weight:600;">${f.name}</span>
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <div class="trust-bar"><div class="trust-bar-fill" style="width:${f.value}%; background:${f.color};"></div></div>
-                    <span style="font-size:13px; font-weight:700; color:${f.color};">${f.value}</span>
-                </div>
-            </div>`;
-    });
-
-    html += `</div>
-        <div style="margin-top:20px; background:rgba(0,122,255,0.05); border:1px solid rgba(0,122,255,0.1); border-radius:16px; padding:15px; text-align:center;">
-            <p style="font-size:13px; color:#555;"><i class="fa-solid fa-lightbulb" style="color:#FFD700;"></i> <b>Tip:</b> Verify your identity and maintain positive interactions to increase your score.</p>
-        </div>`;
-
-    document.getElementById('trust-score-content').innerHTML = html;
-}
-
 // ==========================================================================
 // LOCAL CIRCLES
 // ==========================================================================
@@ -6850,52 +7862,269 @@ let storyTimer = null;
 let currentStoryUser = null;
 let currentStoryIndex = 0;
 const STORY_DURATION = 5000;
+function _getStoryDuration(story) {
+    if (story && story.sound_url) return 15000;
+    return STORY_DURATION;
+}
 
-function openStoryViewer(userName) {
-    currentStoryUser = userName;
+var _storyItems = [];
+function openStoryViewer(userId) {
+    currentStoryUser = userId;
     currentStoryIndex = 0;
+    _storyItems = [];
     document.getElementById('story-viewer').style.display = 'flex';
-    document.getElementById('story-avatar').src = `https://picsum.photos/seed/${userName}/40/40`;
-    document.getElementById('story-username').textContent = userName;
-    document.getElementById('story-time').textContent = '2h ago';
 
-    // Create progress segments
-    const progress = document.getElementById('story-progress');
-    const numStories = 3;
-    progress.innerHTML = '';
-    for (let i = 0; i < numStories; i++) {
-        progress.innerHTML += `<div class="story-seg"><div class="story-seg-fill" id="seg-${i}"></div></div>`;
+    // Show TrustCircle star for own stories
+    var tcStar = document.getElementById('storyViewerTrustStar');
+    if (tcStar) tcStar.style.display = 'none';
+
+    // Show loading state
+    var content = document.getElementById('story-content');
+    if (content) content.innerHTML = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#000;"><div style="width:32px;height:32px;border:3px solid rgba(255,255,255,0.2);border-top-color:white;border-radius:50%;animation:spin 0.8s linear infinite;"></div></div>';
+
+    // Fetch real stories from Supabase
+    var since = new Date(Date.now() - 86400000).toISOString();
+    if (window.sb) {
+        sb.from('stories')
+            .select('id,user_id,media_url,media_type,caption,created_at,audience,sound_name,sound_url,users:user_id(full_name,username,avatar_url)')
+            .eq('user_id', userId)
+            .gte('created_at', since)
+            .order('created_at', { ascending: true })
+            .then(function(res) {
+                var stories = res.data || [];
+                if (stories.length === 0) {
+                    // Fallback to localStorage for own stories
+                    if (currentUser && userId === currentUser.id) {
+                        try {
+                            var local = JSON.parse(localStorage.getItem('tf_my_stories') || '[]');
+                            stories = local.filter(function(s){ return s.url; }).map(function(s){
+                                return { id: s.id, media_url: s.url, media_type: s.type && s.type.startsWith('video') ? 'video' : 'image', caption: s.caption || '', created_at: s.created_at || new Date().toISOString(), audience: s.audience || 'everyone', users: { full_name: currentUser.full_name, username: currentUser.username, avatar_url: currentUser.avatar_url } };
+                            });
+                        } catch(e) {}
+                    }
+                }
+                if (stories.length === 0) {
+                    if (content) content.innerHTML = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a1a2e,#16213e);"><p style="color:rgba(255,255,255,0.4);font-size:14px;">No stories</p></div>';
+                    return;
+                }
+                _storyItems = stories;
+                var u = stories[0].users || {};
+                var name = u.full_name || u.username || 'User';
+                var avatar = u.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(name.charAt(0)) + '&background=007AFF&color=fff&size=100';
+                var imgEl = document.getElementById('story-avatar');
+                var nameEl = document.getElementById('story-username');
+                var timeEl = document.getElementById('story-time');
+                if (imgEl) imgEl.src = avatar;
+                if (nameEl) nameEl.textContent = name;
+                if (timeEl) { var diff = Date.now() - new Date(stories[0].created_at).getTime(); var hrs = Math.floor(diff/3600000); timeEl.textContent = hrs > 0 ? hrs + 'h ago' : Math.floor(diff/60000) + 'm ago'; }
+                // Build progress segments
+                var progress = document.getElementById('story-progress');
+                if (progress) {
+                    progress.innerHTML = '';
+                    for (var i = 0; i < stories.length; i++) {
+                        progress.innerHTML += '<div class="story-seg"><div class="story-seg-fill" id="seg-' + i + '"></div></div>';
+                    }
+                }
+                showStorySegment();
+
+                // Show correct bottom bar
+                var isOwn = !!(currentUser && userId === currentUser.id);
+                var ownerBar = document.getElementById('story-owner-bar');
+                var replyBar = document.getElementById('story-reply-bar-viewer');
+                if (isOwn) {
+                    if (ownerBar) ownerBar.style.display = 'flex';
+                    if (replyBar) replyBar.style.display = 'none';
+                    // Seed initial view count
+                    if (window.sb && stories[0]) {
+                        sb.from('story_views').select('id', { count: 'exact', head: true })
+                            .eq('story_id', stories[0].id)
+                            .then(function(vr) {
+                                var countEl = document.getElementById('storyViewsCount');
+                                if (countEl) countEl.textContent = String(vr.count || 0);
+                            }).catch(function(){});
+                    }
+                } else {
+                    if (ownerBar) ownerBar.style.display = 'none';
+                    if (replyBar) replyBar.style.display = 'flex';
+                    // Log view
+                    if (window.sb && currentUser && stories[0]) {
+                        sb.from('story_views').upsert(
+                            { story_id: stories[0].id, viewer_id: currentUser.id, viewed_at: new Date().toISOString() },
+                            { onConflict: 'story_id,viewer_id' }
+                        ).catch(function(){});
+                    }
+                }
+            }).catch(function() {
+                if (content) content.innerHTML = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a1a2e,#16213e);"><p style="color:rgba(255,255,255,0.4);font-size:14px;">Could not load story</p></div>';
+            });
+    } else {
+        if (content) content.innerHTML = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a1a2e,#16213e);"><p style="color:rgba(255,255,255,0.4);font-size:14px;">Not signed in</p></div>';
     }
-
-    showStorySegment();
 }
 
 function showStorySegment() {
-    const content = document.getElementById('story-content');
-    content.innerHTML = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a1a2e,#16213e);"><p style="color:rgba(255,255,255,0.4);font-size:14px;">No story content</p></div>';
+    var content = document.getElementById('story-content');
+    var story = _storyItems && _storyItems[currentStoryIndex];
+    console.debug('[showStorySegment] index:', currentStoryIndex, 'story:', story);
+
+    if (!story) {
+        if (content) content.innerHTML = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a1a2e,#16213e);"><p style="color:rgba(255,255,255,0.4);font-size:14px;">No story content</p></div>';
+        return;
+    }
+
+    var mediaUrl = story.media_url || '';
+    var mediaType = story.media_type || 'image';
+    var caption = story.caption || '';
+    console.debug('[showStorySegment] media_url:', mediaUrl, '| media_type:', mediaType);
+
+    var captionHtml = caption
+        ? '<div style="position:absolute;bottom:90px;left:0;right:0;padding:12px 20px;text-align:center;pointer-events:none;"><p style="color:white;font-size:16px;font-weight:600;text-shadow:0 1px 6px rgba(0,0,0,0.9);">' + escapeHtml(caption) + '</p></div>'
+        : '';
+
+    if (!mediaUrl) {
+        console.warn('[showStorySegment] No media_url for story:', story);
+        if (content) content.innerHTML = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a1a2e,#16213e);"><p style="color:rgba(255,255,255,0.4);font-size:14px;">No media</p></div>';
+    } else if (mediaType === 'video') {
+        if (content) content.innerHTML = '<video src="' + escapeHtml(mediaUrl) + '" autoplay muted playsinline style="width:100%;height:100%;object-fit:cover;" onended="nextStorySegment()" onerror="console.error(\'[Stories] Video failed:\',this.src)"></video>' + captionHtml;
+    } else {
+        if (content) content.innerHTML = '<img src="' + escapeHtml(mediaUrl) + '" style="width:100%;height:100%;object-fit:cover;" onerror="console.error(\'[Stories] Image failed:\',this.src)">' + captionHtml;
+    }
+
+    // ── Music story: spinning disc + waveform + audio ──
+    var _soundPill = document.getElementById('story-sound-pill');
+    var _soundName = document.getElementById('story-sound-name');
+    if (window._storyAudio) { try { window._storyAudio.pause(); window._storyAudio.src = ''; } catch(e){} window._storyAudio = null; }
+    if (story.sound_name && story.sound_url) {
+        if (_soundPill) _soundPill.style.display = 'block';
+        if (_soundName) _soundName.textContent = story.sound_name;
+        // Spinning album-cover disc ONLY for music-only stories (music_style='disc').
+        // Image/video + music keeps the media visible with the sound pill — no spinning disc.
+        var existingDisc = document.getElementById('storyDiscOverlay');
+        if (existingDisc) existingDisc.remove();
+        if (story.music_style === 'disc') {
+        var discEl = document.createElement('div');
+        discEl.id = 'storyDiscOverlay';
+        discEl.style.cssText = 'position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;';
+        discEl.innerHTML = '<div id="storyDiscWrap" style="position:relative;width:220px;height:220px;border-radius:50%;overflow:hidden;box-shadow:0 16px 60px rgba(0,0,0,0.7);animation:discSpin 4s linear infinite;" title="' + escapeHtml(story.sound_name) + '">' +
+            '<img src="' + escapeHtml(story.media_url || '') + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.src=\'https://ui-avatars.com/api/?name=Music&background=111&color=fff&size=300\'">' +
+            '<div style="position:absolute;inset:0;border-radius:50%;border:3px solid rgba(255,255,255,0.12);"></div>' +
+            '<div style="position:absolute;inset:0;background:radial-gradient(circle at 50%,rgba(0,0,0,0.6) 22%,transparent 55%);"></div>' +
+            '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:28px;height:28px;border-radius:50%;background:#111;border:3px solid rgba(255,255,255,0.25);"></div>' +
+        '</div>' +
+        '<div style="margin-top:20px;color:#fff;font-size:14px;font-weight:700;text-shadow:0 1px 8px rgba(0,0,0,0.8);">' + escapeHtml(story.sound_name) + '</div>';
+        var sc2 = document.getElementById('story-content');
+        if (sc2) sc2.appendChild(discEl);
+        discEl.style.pointerEvents = 'auto';
+        // Touch-spin haptic + DJ rewind
+        var _discWrap = document.getElementById('storyDiscWrap');
+        var _discTouchStart = 0, _discAngle = 0, _discLastAngle = 0;
+        var _djRewindSound = null;
+        discEl.addEventListener('touchstart', function(ev) {
+            _discTouchStart = ev.touches[0].clientX;
+            var anim = _discWrap.style.animation;
+            _discWrap.style.animationPlayState = 'paused';
+        }, {passive:true});
+        discEl.addEventListener('touchmove', function(ev) {
+            var dx = ev.touches[0].clientX - _discTouchStart;
+            _discLastAngle = dx * 1.2;
+            _discWrap.style.transform = 'rotate(' + _discLastAngle + 'deg)';
+            _discWrap.style.animation = 'none';
+            triggerHaptic && triggerHaptic(5);
+            // Show floating music notes
+            var note = document.createElement('div');
+            note.textContent = ['♩','♪','♫','♬'][Math.floor(Math.random()*4)];
+            note.style.cssText = 'position:absolute;color:rgba(255,255,255,0.85);font-size:22px;pointer-events:none;left:' + (30+Math.random()*40) + '%;top:' + (20+Math.random()*50) + '%;animation:floatNote 1s ease-out forwards;z-index:20;';
+            discEl.appendChild(note);
+            setTimeout(function(){ note.remove(); }, 1000);
+        }, {passive:true});
+        discEl.addEventListener('touchend', function() {
+            _discWrap.style.transform = '';
+            _discWrap.style.animation = 'discSpin 4s linear infinite';
+            if (window._storyAudio && window._storyAudio.paused) window._storyAudio.play().catch(function(){});
+        }, {passive:true});
+        } // end music-only spinning disc
+        // Play audio (for both music-only and image/video + music).
+        // Respect the clip window chosen in the music editor: start at
+        // sound_start and loop within [start, start+duration].
+        window._storyAudio = new Audio(story.sound_url);
+        window._storyAudio.loop = true;
+        window._storyAudio.volume = 0.75;
+        var _clipStart = (typeof story.sound_start === 'number') ? story.sound_start : 0;
+        var _clipDur = (typeof story.sound_duration === 'number') ? story.sound_duration : 0;
+        if (_clipStart > 0) {
+            window._storyAudio.addEventListener('loadedmetadata', function() {
+                try { window._storyAudio.currentTime = _clipStart; } catch(e){}
+            }, { once: true });
+        }
+        if (_clipDur > 0) {
+            window._storyAudio.addEventListener('timeupdate', function() {
+                if (this.currentTime >= _clipStart + _clipDur) {
+                    try { this.currentTime = _clipStart; } catch(e){}
+                }
+            });
+        }
+        window._storyAudio.play().catch(function(){});
+    } else {
+        if (_soundPill) _soundPill.style.display = 'none';
+        var existingDisc2 = document.getElementById('storyDiscOverlay');
+        if (existingDisc2) existingDisc2.remove();
+    }
+
+    // Audience badge per segment
+    var isOwn = !!(currentUser && currentStoryUser === currentUser.id);
+    var badge = document.getElementById('storyAudienceBadge');
+    var badgeLabel = document.getElementById('storyAudienceLabel');
+    var badgeIcon = document.getElementById('storyAudienceIcon');
+    var aud = story.audience || 'everyone';
+    if (badge && badgeLabel) {
+        if (aud === 'trustcircle') {
+            badge.style.display = 'flex';
+            badgeLabel.textContent = 'TrustCircle';
+            if (badgeIcon) { badgeIcon.className = 'fa-solid fa-star'; badgeIcon.style.color = '#007AFF'; }
+        } else if (isOwn) {
+            badge.style.display = 'flex';
+            badgeLabel.textContent = 'Everyone';
+            if (badgeIcon) { badgeIcon.className = 'fa-solid fa-globe'; badgeIcon.style.color = 'rgba(255,255,255,0.7)'; }
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+
+    // Update views count for own story segments
+    if (isOwn && window.sb && story.id) {
+        sb.from('story_views').select('id', { count: 'exact', head: true }).eq('story_id', story.id)
+            .then(function(vr) {
+                var countEl = document.getElementById('storyViewsCount');
+                if (countEl) countEl.textContent = String(vr.count || 0);
+            }).catch(function(){});
+    }
 
     // Reset all segments
-    document.querySelectorAll('.story-seg-fill').forEach((s, i) => {
+    document.querySelectorAll('.story-seg-fill').forEach(function(s, i) {
         s.style.transition = 'none';
         s.style.width = i < currentStoryIndex ? '100%' : '0%';
     });
 
-    // Animate current segment
-    setTimeout(() => {
-        const seg = document.getElementById(`seg-${currentStoryIndex}`);
+    // Animate progress bar
+    setTimeout(function() {
+        var seg = document.getElementById('seg-' + currentStoryIndex);
         if (seg) {
-            seg.style.transition = `width ${STORY_DURATION}ms linear`;
+            var _sdAnim = _getStoryDuration(_storyItems && _storyItems[currentStoryIndex]);
+            seg.style.transition = 'width ' + _sdAnim + 'ms linear';
             seg.style.width = '100%';
         }
     }, 50);
 
     clearTimeout(storyTimer);
-    storyTimer = setTimeout(nextStorySegment, STORY_DURATION);
+    if (mediaType !== 'video') {
+        var _sd = _getStoryDuration(_storyItems && _storyItems[currentStoryIndex]);
+        storyTimer = setTimeout(nextStorySegment, _sd);
+    }
 }
 
 function nextStorySegment() {
     currentStoryIndex++;
-    if (currentStoryIndex >= 3) {
+    if (currentStoryIndex >= (_storyItems.length || 3)) {
         closeStoryViewer();
         return;
     }
@@ -6904,17 +8133,355 @@ function nextStorySegment() {
 
 function closeStoryViewer() {
     clearTimeout(storyTimer);
+    if (window._storyAudio) { try { window._storyAudio.pause(); window._storyAudio.src = ''; } catch(e){} window._storyAudio = null; }
+    var disc = document.getElementById('storyDiscOverlay'); if (disc) disc.remove();
     document.getElementById('story-viewer').style.display = 'none';
 }
 
-// Swipe-up on story content opens interaction overlay
-document.getElementById('story-content').addEventListener('touchstart', function(e){
-    this._sy = e.touches[0].clientY;
-}, {passive:true});
-document.getElementById('story-content').addEventListener('touchend', function(e){
-    var dy = this._sy - e.changedTouches[0].clientY;
-    if (dy > 60) openStoryInteractionOverlay();
-}, {passive:true});
+function openStorySoundHub() {
+    var story = _storyItems && _storyItems[currentStoryIndex];
+    if (!story || !story.sound_name) return;
+    openSoundHub(story.sound_name, story.sound_url || null);
+}
+
+// ─── STORY OWNER FUNCTIONS ───────────────────────────────────────────────────
+
+function openStoryUserProfile() {
+    var uid = currentStoryUser;
+    if (!uid) return;
+    closeStoryViewer();
+    if (typeof openProfile === 'function') openProfile(uid);
+}
+
+function openStoryViewers() {
+    var story = _storyItems && _storyItems[currentStoryIndex];
+    if (!story) return;
+    clearTimeout(storyTimer);
+
+    var panel = document.createElement('div');
+    panel.id = 'storyViewersPanel';
+    panel.style.cssText = 'position:absolute;bottom:0;left:0;right:0;z-index:9100;' +
+        'background:rgba(255,255,255,0.97);backdrop-filter:blur(40px) saturate(200%);' +
+        '-webkit-backdrop-filter:blur(40px) saturate(200%);' +
+        'border-radius:28px 28px 0 0;' +
+        'max-height:75vh;overflow:hidden;display:flex;flex-direction:column;' +
+        'animation:slideUpOverlay 0.35s cubic-bezier(0.32,0.72,0,1);';
+
+    var thumbHtml = story.media_type === 'video'
+        ? '<video src="' + escapeHtml(story.media_url || '') + '" style="width:100%;height:100%;object-fit:cover;" muted></video>'
+        : '<img src="' + escapeHtml(story.media_url || '') + '" style="width:100%;height:100%;object-fit:cover;">';
+
+    panel.innerHTML =
+        '<div style="width:36px;height:4px;background:rgba(0,0,0,0.15);border-radius:2px;margin:12px auto 8px;flex-shrink:0;"></div>' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:0 16px 12px;flex-shrink:0;">' +
+            '<div style="width:52px;height:68px;border-radius:10px;overflow:hidden;background:#eee;flex-shrink:0;">' + thumbHtml + '</div>' +
+            '<i class="fa-solid fa-xmark" onclick="closeStoryViewersPanel()" style="color:#000;font-size:22px;cursor:pointer;padding:8px;"></i>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;padding:0 8px;border-bottom:1px solid #f0f0f0;flex-shrink:0;">' +
+            '<div id="svTabInsights" onclick="switchViewersTab(\'insights\')" style="display:flex;align-items:center;gap:6px;padding:12px 16px;border-bottom:2px solid #007AFF;cursor:pointer;">' +
+                '<i class="fa-solid fa-chart-bar" style="color:#007AFF;font-size:20px;"></i>' +
+            '</div>' +
+            '<div id="svTabViewers" onclick="switchViewersTab(\'viewers\')" style="display:flex;align-items:center;gap:6px;padding:12px 16px;border-bottom:2px solid transparent;cursor:pointer;">' +
+                '<i class="fa-regular fa-user" style="color:#aaa;font-size:20px;"></i>' +
+            '</div>' +
+            '<div style="flex:1;"></div>' +
+            '<i class="fa-regular fa-trash-can" onclick="closeStoryViewersPanel();confirmDeleteStory();" style="color:#FF3B30;font-size:20px;cursor:pointer;padding:12px;"></i>' +
+        '</div>' +
+        '<div id="svInsightsPane" style="flex:1;overflow-y:auto;padding:40px 20px;text-align:center;">' +
+            '<div style="width:80px;height:80px;border-radius:50%;border:2px solid #000;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;">' +
+                '<i class="fa-solid fa-chart-bar" style="font-size:30px;color:#000;"></i>' +
+            '</div>' +
+            '<h3 style="font-size:20px;font-weight:800;color:#000;margin-bottom:8px;">Insights</h3>' +
+            '<p style="font-size:14px;color:#888;line-height:1.5;">You\'ll see insights here once they become available.</p>' +
+        '</div>' +
+        '<div id="svViewersPane" style="flex:1;overflow-y:auto;display:none;">' +
+            '<div id="svViewersList" style="padding:0;"></div>' +
+        '</div>';
+
+    var viewer = document.getElementById('story-viewer');
+    if (viewer) viewer.appendChild(panel);
+
+    if (window.sb && story.id) {
+        sb.from('story_views')
+            .select('viewer_id,viewed_at,profiles:viewer_id(full_name,username,avatar_url)')
+            .eq('story_id', story.id)
+            .order('viewed_at', { ascending: false })
+            .then(function(vr) {
+                var viewers = vr.data || [];
+                var countEl = document.getElementById('storyViewsCount');
+                if (countEl) countEl.textContent = String(viewers.length);
+                var list = document.getElementById('svViewersList');
+                if (!list) return;
+                if (viewers.length === 0) {
+                    list.innerHTML = '<div style="text-align:center;padding:48px 20px;color:#888;"><i class="fa-regular fa-eye" style="font-size:40px;color:#ddd;display:block;margin-bottom:14px;"></i><p style="font-size:14px;">No views yet</p></div>';
+                    return;
+                }
+                list.innerHTML = viewers.map(function(v) {
+                    var p = v.profiles || {};
+                    var name = p.full_name || p.username || 'User';
+                    var avatar = p.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(name.charAt(0)) + '&background=007AFF&color=fff&size=100';
+                    var diff = Date.now() - new Date(v.viewed_at).getTime();
+                    var timeStr = diff < 3600000 ? Math.floor(diff/60000) + 'm ago' : Math.floor(diff/3600000) + 'h ago';
+                    return '<div style="display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:0.5px solid #f5f5f5;cursor:pointer;" onclick="closeStoryViewersPanel();openProfile(\'' + escapeHtml(v.viewer_id || '') + '\')">' +
+                        '<img src="' + escapeHtml(avatar) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
+                        '<div style="flex:1;"><div style="font-size:15px;font-weight:700;color:#000;">' + escapeHtml(name) + '</div>' +
+                        '<div style="font-size:12px;color:#888;">' + timeStr + '</div></div>' +
+                    '</div>';
+                }).join('');
+            }).catch(function(err) { console.warn('[StoryViewers] fetch failed:', err); });
+    }
+}
+
+function switchViewersTab(tab) {
+    var ip = document.getElementById('svInsightsPane');
+    var vp = document.getElementById('svViewersPane');
+    var it = document.getElementById('svTabInsights');
+    var vt = document.getElementById('svTabViewers');
+    if (!ip || !vp) return;
+    if (tab === 'insights') {
+        ip.style.display = 'block'; vp.style.display = 'none';
+        it.style.borderBottomColor = '#007AFF'; it.querySelector('i').style.color = '#007AFF';
+        vt.style.borderBottomColor = 'transparent'; vt.querySelector('i').style.color = '#aaa';
+    } else {
+        ip.style.display = 'none'; vp.style.display = 'block';
+        it.style.borderBottomColor = 'transparent'; it.querySelector('i').style.color = '#aaa';
+        vt.style.borderBottomColor = '#007AFF'; vt.querySelector('i').style.color = '#007AFF';
+    }
+}
+
+function closeStoryViewersPanel() {
+    var panel = document.getElementById('storyViewersPanel');
+    if (panel) panel.remove();
+    showStorySegment();
+}
+
+function openStoryOwnerMenu() {
+    var existing = document.getElementById('storyOwnerMenu');
+    if (existing) { existing.remove(); showStorySegment(); return; }
+    clearTimeout(storyTimer);
+
+    var menu = document.createElement('div');
+    menu.id = 'storyOwnerMenu';
+    menu.style.cssText =
+        'position:absolute;bottom:90px;right:20px;z-index:9200;min-width:230px;' +
+        'background:rgba(28,28,32,0.88);backdrop-filter:blur(60px) saturate(200%);' +
+        '-webkit-backdrop-filter:blur(60px) saturate(200%);' +
+        'border-radius:20px;border:0.5px solid rgba(255,255,255,0.14);' +
+        'box-shadow:0 16px 48px rgba(0,0,0,0.65);overflow:hidden;' +
+        'animation:jellyPop 0.25s cubic-bezier(0.68,-0.55,0.27,1.55);';
+
+    var _cOff = localStorage.getItem('tf-story-comments-off') === '1';
+    var items = [
+        { icon:'fa-solid fa-box-archive',    label:'Archive',                                         fn:'archiveCurrentStory()' },
+        { icon:'fa-solid fa-file-lines',      label:'Share as post',                                   fn:'shareStoryAsPost()' },
+        { icon:'fa-regular fa-paper-plane',   label:'Send',                                            fn:'openStorySendModal()' },
+        { icon:'fa-solid fa-gear',            label:'Story settings',                                  fn:'openStorySettings()' },
+        { icon:'fa-solid fa-face-meh',        label:'Turn off reactions',                              fn:'toggleStoryReactions()' },
+        { icon:'fa-solid fa-comment-slash',   label: _cOff ? 'Turn on commenting' : 'Turn off commenting', fn:'toggleStoryCommenting()' }
+    ];
+
+    menu.innerHTML = items.map(function(item, i) {
+        var border = i < items.length - 1 ? 'border-bottom:0.5px solid rgba(255,255,255,0.08);' : '';
+        return '<div onclick="document.getElementById(\'storyOwnerMenu\').remove();' + item.fn + '" ' +
+            'style="display:flex;align-items:center;gap:14px;padding:15px 18px;cursor:pointer;' + border + 'transition:background 0.15s;" ' +
+            'onmouseover="this.style.background=\'rgba(255,255,255,0.07)\'" onmouseout="this.style.background=\'transparent\'">' +
+            '<i class="' + item.icon + '" style="color:white;font-size:17px;width:20px;text-align:center;"></i>' +
+            '<span style="color:white;font-size:15px;font-weight:600;">' + item.label + '</span>' +
+        '</div>';
+    }).join('');
+
+    var dismissFn = function(e) {
+        var m = document.getElementById('storyOwnerMenu');
+        if (m && !m.contains(e.target)) { m.remove(); document.removeEventListener('click', dismissFn, true); showStorySegment(); }
+    };
+    setTimeout(function() { document.addEventListener('click', dismissFn, true); }, 100);
+
+    var viewer = document.getElementById('story-viewer');
+    if (viewer) viewer.appendChild(menu);
+}
+
+function confirmDeleteStory() {
+    var panel = document.getElementById('storyViewersPanel'); if (panel) panel.remove();
+    var menu  = document.getElementById('storyOwnerMenu');   if (menu)  menu.remove();
+    clearTimeout(storyTimer);
+
+    var backdrop = document.createElement('div');
+    backdrop.id = 'storyDeleteBackdrop';
+    backdrop.style.cssText = 'position:absolute;inset:0;z-index:9300;background:rgba(0,0,0,0.5);display:flex;align-items:flex-end;justify-content:center;padding-bottom:40px;animation:fadeIn 0.2s ease;';
+
+    backdrop.innerHTML =
+        '<div style="background:rgba(242,242,247,0.97);backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border-radius:20px;width:calc(100% - 40px);max-width:380px;overflow:hidden;animation:jellyPop 0.3s cubic-bezier(0.68,-0.55,0.27,1.55);">' +
+            '<div style="padding:26px 22px 14px;text-align:center;border-bottom:0.5px solid rgba(0,0,0,0.08);">' +
+                '<h3 style="font-size:17px;font-weight:800;color:#000;margin:0 0 10px;">Delete this story?</h3>' +
+                '<p style="font-size:13px;color:#555;line-height:1.55;margin:0;">You can restore unarchived stories for 24 hours, or 30 days for archived stories, from <b>Recently deleted</b> in Your activity. After that, it will be permanently deleted.</p>' +
+            '</div>' +
+            '<div onclick="executeDeleteStory()" style="padding:17px;text-align:center;cursor:pointer;border-bottom:0.5px solid rgba(0,0,0,0.08);font-size:17px;font-weight:600;color:#FF3B30;">Delete</div>' +
+            '<div onclick="document.getElementById(\'storyDeleteBackdrop\').remove();showStorySegment();" style="padding:17px;text-align:center;cursor:pointer;font-size:17px;color:#007AFF;">Cancel</div>' +
+        '</div>';
+
+    var viewer = document.getElementById('story-viewer');
+    if (viewer) viewer.appendChild(backdrop);
+}
+
+async function executeDeleteStory() {
+    var bd = document.getElementById('storyDeleteBackdrop');
+    if (bd) bd.remove();
+    var story = _storyItems && _storyItems[currentStoryIndex];
+    if (!story) { closeStoryViewer(); return; }
+
+    if (window.sb && currentUser) {
+        try {
+            await sb.from('stories').update({ deleted_at: new Date().toISOString(), is_deleted: true })
+                .eq('id', story.id).eq('user_id', currentUser.id);
+        } catch(e) { console.warn('[Story] Delete failed:', e); }
+        try {
+            await sb.from('recently_deleted_stories').insert({
+                original_story_id: story.id, user_id: currentUser.id,
+                media_url: story.media_url, media_type: story.media_type,
+                caption: story.caption || null,
+                deleted_at: new Date().toISOString(),
+                expires_at: new Date(Date.now() + 86400000 * 30).toISOString()
+            });
+        } catch(e) {}
+    }
+    try {
+        var stored = JSON.parse(localStorage.getItem('tf_my_stories') || '[]');
+        localStorage.setItem('tf_my_stories', JSON.stringify(stored.filter(function(s){ return s.id !== story.id; })));
+    } catch(e) {}
+
+    showToast('Story deleted');
+    _storyItems.splice(currentStoryIndex, 1);
+    if (_storyItems.length === 0) {
+        closeStoryViewer();
+        if (typeof loadStories === 'function') loadStories();
+    } else {
+        currentStoryIndex = Math.min(currentStoryIndex, _storyItems.length - 1);
+        var progress = document.getElementById('story-progress');
+        if (progress) {
+            progress.innerHTML = '';
+            for (var i = 0; i < _storyItems.length; i++) {
+                progress.innerHTML += '<div class="story-seg"><div class="story-seg-fill" id="seg-' + i + '"></div></div>';
+            }
+        }
+        showStorySegment();
+    }
+}
+
+function saveCurrentStory() {
+    var story = _storyItems && _storyItems[currentStoryIndex];
+    if (!story || !story.media_url) { showToast('Nothing to save'); return; }
+    var a = document.createElement('a');
+    a.href = story.media_url;
+    a.download = 'story_' + Date.now() + (story.media_type === 'video' ? '.mp4' : '.jpg');
+    a.target = '_blank';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    showToast('Saving to device...');
+}
+
+async function archiveCurrentStory() {
+    var story = _storyItems && _storyItems[currentStoryIndex];
+    if (!story) return;
+    if (window.sb && currentUser) {
+        try {
+            await sb.from('stories').update({ is_archived: true }).eq('id', story.id).eq('user_id', currentUser.id);
+            showToast('Story archived');
+            _storyItems.splice(currentStoryIndex, 1);
+            if (_storyItems.length === 0) { closeStoryViewer(); if (typeof loadStories === 'function') loadStories(); }
+            else { currentStoryIndex = Math.min(currentStoryIndex, _storyItems.length - 1); showStorySegment(); }
+        } catch(e) { showToast('Could not archive'); }
+    }
+}
+
+function shareStoryAsPost() {
+    var story = _storyItems && _storyItems[currentStoryIndex];
+    if (!story || !story.media_url) { showToast('Nothing to share'); return; }
+    closeStoryViewer();
+    window._composerMediaUrl  = story.media_url;
+    window._composerMediaType = story.media_type || 'image';
+    if (typeof openPage === 'function') openPage('composer-overlay');
+    setTimeout(function() {
+        var input = document.getElementById('composer-text-input') || document.querySelector('#composer-overlay textarea');
+        if (input && story.caption) { input.value = story.caption; input.dispatchEvent(new Event('input')); }
+        var preview = document.getElementById('composer-media-preview') || document.getElementById('composerImagePreview');
+        if (preview) {
+            preview.innerHTML = story.media_type === 'video'
+                ? '<video src="'+story.media_url+'" style="width:100%;max-height:260px;border-radius:12px;object-fit:cover;" autoplay loop muted playsinline></video>'
+                : '<img src="'+story.media_url+'" style="width:100%;max-height:260px;border-radius:12px;object-fit:cover;">';
+            preview.style.display = 'block';
+        }
+    }, 200);
+}
+
+function openStorySettings() {
+    if (typeof openStoryPrivacySettings === 'function') openStoryPrivacySettings();
+}
+
+function toggleStoryReactions() {
+    showToast('Reactions toggled');
+}
+
+function toggleStoryCommenting() {
+    var off = localStorage.getItem('tf-story-comments-off') === '1';
+    var next = off ? '0' : '1';
+    localStorage.setItem('tf-story-comments-off', next);
+    var replyBar = document.getElementById('story-reply-bar-viewer');
+    if (replyBar) replyBar.style.display = next === '1' ? 'none' : '';
+    showToast(next === '1' ? 'Commenting turned off' : 'Commenting turned on');
+    triggerHaptic(15);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Story touch: hold=pause, swipe-up=overlay, pinch=zoom+fade ──
+(function() {
+    var sc = document.getElementById('story-content');
+    var _sy = 0, _holdTimer = null, _paused = false;
+    var _pinching = false, _dist0 = 0;
+    var _UI_IDS = ['story-user-bar','story-progress','story-owner-bar','story-reply-bar-viewer','storyAudienceBadge'];
+
+    function _pinchDist(e) { var dx=e.touches[0].clientX-e.touches[1].clientX, dy=e.touches[0].clientY-e.touches[1].clientY; return Math.sqrt(dx*dx+dy*dy); }
+    function _fadeUI(val) { _UI_IDS.forEach(function(id){ var el=document.getElementById(id); if(el) el.style.opacity = val; el && (el.style.transition = 'opacity 0.25s'); }); }
+    function _pauseStory() { if(_paused) return; _paused=true; clearTimeout(storyTimer); var vid=sc.querySelector('video'); if(vid) vid.pause(); }
+    function _resumeStory() { if(!_paused) return; _paused=false; var vid=sc.querySelector('video'); if(vid) vid.play(); else showStorySegment && showStorySegment(); }
+
+    sc.addEventListener('touchstart', function(e) {
+        if (e.touches.length === 2) {
+            _pinching = true;
+            _dist0 = _pinchDist(e);
+            e.preventDefault();
+            return;
+        }
+        _sy = e.touches[0].clientY;
+        _holdTimer = setTimeout(function() { _holdTimer = null; _pauseStory(); }, 180);
+    }, {passive:false});
+
+    sc.addEventListener('touchmove', function(e) {
+        if (e.touches.length === 2 && _pinching) {
+            var scale = Math.min(Math.max(_pinchDist(e) / _dist0, 1), 3);
+            sc.style.transform = 'scale('+scale+')';
+            sc.style.transformOrigin = 'center center';
+            sc.style.transition = 'none';
+            _fadeUI(Math.max(0, 1 - (scale - 1) * 1.2));
+            _pauseStory();
+            e.preventDefault();
+        }
+    }, {passive:false});
+
+    sc.addEventListener('touchend', function(e) {
+        if (_pinching) {
+            _pinching = false;
+            sc.style.transition = 'transform 0.3s cubic-bezier(0.32,0.72,0,1)';
+            sc.style.transform = 'scale(1)';
+            _fadeUI(1);
+            setTimeout(function() { _resumeStory(); }, 320);
+            return;
+        }
+        if (_holdTimer) { clearTimeout(_holdTimer); _holdTimer = null; }
+        else if (_paused) { _resumeStory(); return; }
+        var dy = _sy - e.changedTouches[0].clientY;
+        if (dy > 60) openStoryInteractionOverlay();
+    }, {passive:true});
+})();
 
 function openStoryInteractionOverlay() {
     var existing = document.getElementById('storyInteractionOverlay');
@@ -6955,7 +8522,13 @@ function openStoryInteractionOverlay() {
 
 
     overlay.innerHTML =
-        '<div style="width:36px;height:4px;background:rgba(255,255,255,0.18);border-radius:2px;margin:0 auto 18px;"></div>' +
+        '<style>' +
+        '@keyframes stickerWiggle{0%,100%{transform:rotate(-8deg) scale(1)}50%{transform:rotate(8deg) scale(1.1)}}' +
+        '@keyframes stickerBounce{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-7px) scale(1.18)}}' +
+        '@keyframes stickerFloat{0%,100%{transform:translateY(0) rotate(0)}33%{transform:translateY(-5px) rotate(-5deg)}66%{transform:translateY(-2px) rotate(5deg)}}' +
+        '@keyframes stickerPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.22)}}' +
+        '</style>' +
+        '<div style=\"width:36px;height:4px;background:rgba(255,255,255,0.18);border-radius:2px;margin:0 auto 18px;\"></div>' +
 
         // Toggle row
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">' +
@@ -6989,6 +8562,15 @@ function openStoryInteractionOverlay() {
     // Zone 3 — keyboard
     var inp = document.getElementById('storyMsgInput');
     if (inp) setTimeout(function(){ inp.focus(); }, 200);
+
+    // Close on tap outside overlay
+    setTimeout(function() {
+        function _outsideClose(e) {
+            var ov = document.getElementById('storyInteractionOverlay');
+            if (ov && !ov.contains(e.target)) { ov.remove(); document.removeEventListener('click', _outsideClose, true); }
+        }
+        document.addEventListener('click', _outsideClose, true);
+    }, 350);
 }
 
 function storyToggleMode(mode) {
@@ -7001,14 +8583,18 @@ function storyToggleMode(mode) {
     document.getElementById('stickerToggleBtn').style.background= mode==='sticker'?'#007AFF':'transparent';
     document.getElementById('emojiToggleBtn').style.color    = mode==='emoji'?'white':'rgba(255,255,255,0.5)';
     document.getElementById('stickerToggleBtn').style.color  = mode==='sticker'?'white':'rgba(255,255,255,0.5)';
-    grid.innerHTML = set.map(function(e){
-        return '<div onclick="sendStoryReaction(\'' + e + '\')" style="width:42px;height:42px;border-radius:14px;background:rgba(255,255,255,0.08);border:0.5px solid rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;animation:popIn 0.3s ease;">' + e + '</div>';
+    var _sAnims = ['stickerWiggle','stickerBounce','stickerFloat','stickerPulse','stickerBounce','stickerWiggle','stickerPulse','stickerFloat'];
+    grid.innerHTML = set.map(function(e, i){
+        var anim = mode === 'sticker'
+            ? 'popIn 0.3s '+(i*0.05)+'s ease backwards, '+_sAnims[i % _sAnims.length]+' 1.8s '+(0.3+i*0.12)+'s ease-in-out infinite'
+            : 'popIn 0.3s '+(i*0.04)+'s ease backwards';
+        return '<div onclick="sendStoryReaction(\'' + e + '\')" style="width:42px;height:42px;border-radius:14px;background:rgba(255,255,255,0.08);border:0.5px solid rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;animation:'+anim+';">' + e + '</div>';
     }).join('');
 }
 
 function sendStoryReaction(emoji) {
     document.getElementById('storyInteractionOverlay')?.remove();
-    showToast('Sent ' + emoji);
+    showToast('Reaction sent');
     triggerHaptic(20);
 }
 
@@ -7017,6 +8603,117 @@ function sendStoryMessage(text) {
     document.getElementById('storyInteractionOverlay')?.remove();
     showToast('Message sent!');
     triggerHaptic(15);
+}
+
+function openStorySendModal() {
+    var existing = document.getElementById('storySendModal'); if (existing) existing.remove();
+    var story = _storyItems && _storyItems[currentStoryIndex];
+    var shareUrl = story ? story.media_url : window.location.href;
+    var modal = document.createElement('div');
+    modal.id = 'storySendModal';
+    modal.style.cssText = 'position:absolute;inset:0;z-index:9500;display:flex;flex-direction:column;justify-content:flex-end;';
+    var _startY = 0, _dragging = false;
+    modal.innerHTML =
+        '<div onclick="document.getElementById(\'storySendModal\').remove()" style="flex:1;"></div>' +
+        '<div id="storySendSheet" style="background:rgba(18,18,22,0.97);backdrop-filter:blur(60px) saturate(200%);-webkit-backdrop-filter:blur(60px) saturate(200%);border-radius:28px 28px 0 0;border-top:0.5px solid rgba(255,255,255,0.12);padding:0 0 max(36px,env(safe-area-inset-bottom,36px));max-height:80vh;display:flex;flex-direction:column;animation:slideUpOverlay 0.38s cubic-bezier(0.32,0.72,0,1);">' +
+            '<div id="storySendDrag" style="padding:10px 0 4px;text-align:center;cursor:grab;flex-shrink:0;"><div style="width:36px;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;display:inline-block;"></div></div>' +
+            '<b style="color:white;font-size:17px;font-weight:800;text-align:center;padding:4px 0 14px;display:block;flex-shrink:0;">Send to</b>' +
+            '<div style="margin:0 16px 14px;background:rgba(255,255,255,0.07);border-radius:14px;display:flex;align-items:center;padding:0 14px;gap:8px;border:0.5px solid rgba(255,255,255,0.1);flex-shrink:0;">' +
+                '<i class="fa-solid fa-magnifying-glass" style="color:rgba(255,255,255,0.4);font-size:14px;"></i>' +
+                '<input id="storySendSearch" type="text" placeholder="Search..." style="flex:1;background:transparent;border:none;outline:none;color:white;font-size:15px;padding:11px 0;caret-color:#007AFF;" oninput="storySendFilter(this.value)">' +
+            '</div>' +
+            '<div id="storySendList" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 16px 12px;">' +
+                '<div style="text-align:center;padding:30px 0;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:18px;"></i></div>' +
+            '</div>' +
+            '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px 16px 0;flex-shrink:0;">' +
+                '<div onclick="storySendNative(\''+shareUrl+'\')" style="display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;">' +
+                    '<div style="width:52px;height:52px;border-radius:16px;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-share-nodes" style="color:white;font-size:20px;"></i></div>' +
+                    '<small style="color:rgba(255,255,255,0.7);font-size:11px;font-weight:600;">Share</small>' +
+                '</div>' +
+                '<div onclick="storySendCopy(\''+shareUrl+'\')" style="display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;">' +
+                    '<div style="width:52px;height:52px;border-radius:16px;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-link" style="color:white;font-size:20px;"></i></div>' +
+                    '<small style="color:rgba(255,255,255,0.7);font-size:11px;font-weight:600;">Copy link</small>' +
+                '</div>' +
+                '<div onclick="storySendSMS(\''+shareUrl+'\')" style="display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;">' +
+                    '<div style="width:52px;height:52px;border-radius:16px;background:rgba(43,190,80,0.25);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-comment" style="color:#2BBE50;font-size:20px;"></i></div>' +
+                    '<small style="color:rgba(255,255,255,0.7);font-size:11px;font-weight:600;">Messages</small>' +
+                '</div>' +
+                '<div onclick="storySendTwitter(\''+shareUrl+'\')" style="display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;">' +
+                    '<div style="width:52px;height:52px;border-radius:16px;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;"><i class="fa-brands fa-x-twitter" style="color:white;font-size:20px;"></i></div>' +
+                    '<small style="color:rgba(255,255,255,0.7);font-size:11px;font-weight:600;">X</small>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+    var viewer = document.getElementById('story-viewer');
+    (viewer || document.getElementById('app') || document.body).appendChild(modal);
+
+    // Swipe down to close
+    var sheet = modal.querySelector('#storySendSheet');
+    var drag  = modal.querySelector('#storySendDrag');
+    drag.addEventListener('touchstart', function(e){ _startY = e.touches[0].clientY; _dragging = true; sheet.style.transition = 'none'; }, {passive:true});
+    drag.addEventListener('touchmove', function(e){ if(!_dragging) return; var dy = e.touches[0].clientY - _startY; if(dy > 0) sheet.style.transform = 'translateY('+dy+'px)'; }, {passive:true});
+    drag.addEventListener('touchend', function(e){ _dragging = false; sheet.style.transition = 'transform 0.3s'; var dy = e.changedTouches[0].clientY - _startY; if(dy > 80) { sheet.style.transform = 'translateY(100%)'; setTimeout(function(){ modal.remove(); }, 280); } else { sheet.style.transform = ''; } }, {passive:true});
+
+    // Load recently contacted
+    window._storySendShareUrl = shareUrl;
+    (async function() {
+        var list = document.getElementById('storySendList');
+        if (!list || !window.sb || !currentUser) { if(list) list.innerHTML = '<p style="color:rgba(255,255,255,0.4);text-align:center;padding:20px 0;">Sign in to send</p>'; return; }
+        try {
+            var { data: parts } = await window.sb.from('conversation_participants').select('conversation_id').eq('user_id', currentUser.id).limit(30);
+            var convIds = (parts||[]).map(function(p){ return p.conversation_id; });
+            if (!convIds.length) { list.innerHTML = '<p style="color:rgba(255,255,255,0.4);text-align:center;padding:20px 0;">No recent chats</p>'; return; }
+            var { data: others } = await window.sb.from('conversation_participants').select('conversation_id,user_id,users:user_id(id,full_name,username,avatar_url)').in('conversation_id', convIds).neq('user_id', currentUser.id).limit(30);
+            var seen = new Set(); var users = [];
+            (others||[]).forEach(function(p){ if(p.users && !seen.has(p.users.id)){ seen.add(p.users.id); users.push({ convId: p.conversation_id, user: p.users }); } });
+            window._storySendUsers = users;
+            storySendRender(list, users);
+        } catch(e) { list.innerHTML = '<p style="color:rgba(255,255,255,0.4);text-align:center;padding:20px 0;">Could not load</p>'; }
+    })();
+}
+function storySendRender(list, users) {
+    if (!users.length) { list.innerHTML = '<p style="color:rgba(255,255,255,0.4);text-align:center;padding:20px 0;">No recent chats</p>'; return; }
+    list.innerHTML = users.map(function(item) {
+        var u = item.user;
+        var av = u.avatar_url || 'https://ui-avatars.com/api/?name='+encodeURIComponent(u.full_name||u.username||'U')+'&background=007AFF&color=fff&size=80';
+        return '<div onclick="storySendToPerson(\''+escapeHtml(u.id)+'\',\''+escapeHtml(u.full_name||u.username||'User')+'\')" style="display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:0.5px solid rgba(255,255,255,0.06);cursor:pointer;">' +
+            '<img src="'+escapeHtml(av)+'" style="width:46px;height:46px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
+            '<div style="flex:1;"><b style="color:white;font-size:15px;">'+escapeHtml(u.full_name||u.username||'User')+'</b></div>' +
+            '<div style="background:rgba(0,122,255,0.18);border-radius:20px;padding:6px 16px;border:0.5px solid rgba(0,122,255,0.35);"><span style="color:#007AFF;font-size:13px;font-weight:700;">Send</span></div>' +
+        '</div>';
+    }).join('');
+}
+function storySendFilter(q) {
+    var list = document.getElementById('storySendList'); if (!list) return;
+    var lower = q.toLowerCase();
+    var filtered = (window._storySendUsers||[]).filter(function(item){ var u = item.user; return (u.full_name||'').toLowerCase().includes(lower)||(u.username||'').toLowerCase().includes(lower); });
+    storySendRender(list, filtered);
+}
+function storySendToPerson(userId, name) {
+    document.getElementById('storySendModal')?.remove();
+    if (typeof openChat === 'function') openChat(name);
+    setTimeout(function() {
+        var inp = document.getElementById('msg-input') || document.querySelector('#chat-body + * input') || document.querySelector('[id*="chat"] input[type="text"]');
+        if (inp) { inp.value = window._storySendShareUrl || ''; inp.dispatchEvent(new Event('input')); }
+    }, 400);
+    showToast('Story link ready to send');
+}
+function storySendNative(url) {
+    document.getElementById('storySendModal')?.remove();
+    if (navigator.share) { navigator.share({ url: url }).catch(function(){}); }
+    else { storySendCopy(url); }
+}
+function storySendCopy(url) {
+    navigator.clipboard.writeText(url).then(function(){ showToast('Link copied'); }).catch(function(){ showToast('Copied'); });
+    document.getElementById('storySendModal')?.remove();
+}
+function storySendSMS(url) {
+    document.getElementById('storySendModal')?.remove();
+    window.open('sms:?body='+encodeURIComponent(url), '_blank');
+}
+function storySendTwitter(url) {
+    document.getElementById('storySendModal')?.remove();
+    window.open('https://twitter.com/intent/tweet?url='+encodeURIComponent(url), '_blank');
 }
 
 // ==========================================================================
@@ -7476,7 +9173,7 @@ function setMsgTab(tabName, element) {
         fillMsgContent();
 
     } else if (tabName === 'requests') {
-        content.innerHTML = '<div style="text-align:center;padding:30px 0;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:20px;"></i></div>';
+content.innerHTML = [0,1,2,3].map(function(){return '<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;animation:skeletonPulse 1.4s ease-in-out infinite;"><div style="width:52px;height:52px;border-radius:50%;background:var(--skeleton-bg,#e8e8e8);flex-shrink:0;"></div><div style="flex:1;"><div style="height:14px;border-radius:6px;background:var(--skeleton-bg,#e8e8e8);width:50%;margin-bottom:7px;"></div><div style="height:12px;border-radius:6px;background:var(--skeleton-bg,#e8e8e8);width:70%;"></div></div><div style="width:40px;height:10px;border-radius:6px;background:var(--skeleton-bg,#e8e8e8);"></div></div>';}).join('');
         (async function() {
             if (!window.sb || !currentUser) {
                 content.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#888;"><i class="fa-regular fa-envelope-open" style="font-size:40px;color:#ccc;display:block;margin-bottom:15px;"></i><b style="color:var(--text-primary,#333);display:block;margin-bottom:8px;">Message Requests</b><p style="font-size:13px;">Sign in to see requests</p></div>';
@@ -7549,7 +9246,7 @@ function setMsgTab(tabName, element) {
         })();
 
     } else if (tabName === 'channels') {
-        content.innerHTML = '<div style="text-align:center;padding:40px 0;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:20px;"></i></div>';
+        content.innerHTML = renderSkeletonHTML('message', 4);
         (async function() {
             var html = '<div style="padding:10px 20px 4px;font-size:11px;font-weight:800;color:#888;text-transform:uppercase;letter-spacing:0.06em;">Channels</div>';
             if (window.sb) {
@@ -7608,27 +9305,80 @@ function setMsgTab(tabName, element) {
 // ==========================================================================
 // FIX: Story Circles to Apple Blue + Make Clickable
 // ==========================================================================
+function _renderConvoList(convos, list) {
+    list.innerHTML = '';
+    if (!convos || !convos.length) {
+        list.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#888;"><i class="fa-regular fa-comment" style="font-size:36px;color:#ccc;display:block;margin-bottom:12px;"></i>No messages yet</div>';
+        return;
+    }
+    convos.forEach(function(c) {
+        var other = c._other || {};
+        var name = other.full_name || other.username || 'Unknown';
+        var avatar = other.avatar_url || '';
+        var tier = other.badge_tier || '';
+        var verified = other.verified || false;
+        var lastMsg = c.last_message || '';
+        var unread = 0;
+        var statusLabel = 'Tap to message';
+        if (other.last_seen) {
+            var diff = Date.now() - new Date(other.last_seen).getTime();
+            if (diff < 3 * 60 * 1000) { statusLabel = '<span style="color:#34C759;font-weight:700;">● Active now</span>'; }
+            else if (diff < 60 * 60 * 1000) { statusLabel = 'Active ' + Math.floor(diff / 60000) + 'm ago'; }
+            else if (diff < 24 * 3600 * 1000) { statusLabel = 'Active ' + Math.floor(diff / 3600000) + 'h ago'; }
+        }
+        if (lastMsg) statusLabel = escapeHtml(lastMsg.length > 36 ? lastMsg.substring(0, 36) + '…' : lastMsg);
+        var avatarHtml = avatar
+            ? '<img src="' + escapeHtml(avatar) + '" style="width:50px;height:50px;border-radius:50%;object-fit:cover;" onerror="this.style.display=\'none\';this.nextSibling.style.display=\'flex\'">' +
+              '<div style="display:none;width:50px;height:50px;border-radius:50%;background:#007AFF;align-items:center;justify-content:center;color:white;font-size:18px;font-weight:700;">' + escapeHtml(name.charAt(0).toUpperCase()) + '</div>'
+            : '<div style="width:50px;height:50px;border-radius:50%;background:#007AFF;display:flex;align-items:center;justify-content:center;color:white;font-size:18px;font-weight:700;">' + escapeHtml(name.charAt(0).toUpperCase()) + '</div>';
+        list.innerHTML += '<div class="msg-row" data-uid="' + escapeHtml(other.id||'') + '" data-cid="' + escapeHtml(c.id||'') + '" data-name="' + escapeHtml(name||'User') + '" onclick="_openMsgRow(this)" style="position:relative;">' +
+            '<div style="position:relative;flex-shrink:0;">' + avatarHtml + '</div>' +
+            '<div style="flex:1;padding-left:4px;min-width:0;">' +
+                '<div style="display:flex;align-items:center;gap:4px;">' +
+                    '<b style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(name) + '</b>' +
+                    (verified ? ' <i class="fa-solid fa-circle-check ' + escapeHtml(tier) + '" style="font-size:10px;"></i>' : '') +
+                '</div>' +
+                '<small style="color:#888;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + statusLabel + '</small>' +
+            '</div>' +
+            (unread > 0 ? '<div style="min-width:20px;height:20px;border-radius:10px;background:#007AFF;color:white;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;flex-shrink:0;">' + unread + '</div>' : '') +
+            '<i class="fa-solid fa-camera" style="color:#007AFF;margin-left:8px;flex-shrink:0;" onclick="event.stopPropagation();openLiquidGlassCameraFromChat(\'' + escapeHtml(other.id||'') + '\',\'' + escapeHtml(name||'') + '\')"></i>' +
+        '</div>';
+    });
+}
+
 async function fillMsgContent() {
     var stories = document.getElementById('msg-stories');
     var list = document.getElementById('chat-list-content');
     if (!stories || !list) return;
-    stories.innerHTML = '';
-    list.innerHTML = '<div style="text-align:center;padding:40px 0;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:20px;"></i></div>';
+    list.innerHTML = renderSkeletonHTML('message', 4);
 
     // ── Stories row ──────────────────────────────────────
     // "Your Story" button
-    stories.innerHTML = '<div class="story-item" onclick="openStoryPicker()">' +
-        '<div style="width:68px;height:68px;border-radius:50%;padding:3px;background:rgba(0,0,0,0.08);display:flex;align-items:center;justify-content:center;position:relative;">' +
+    (async function() {
+    var myStoryClick = 'openStoryPicker()';
+    var myStory = null;
+    if (window.sb && currentUser) {
+        try {
+            var since = new Date(Date.now() - 86400000).toISOString();
+            var { data: _ms } = await sb.from('stories').select('id').eq('user_id', currentUser.id).gte('created_at', since).limit(1).maybeSingle();
+            myStory = _ms;
+            if (myStory) myStoryClick = 'openStoryViewer(\'' + currentUser.id + '\')';
+        } catch(e) {}
+    }
+    var _ringBg = myStory ? 'background:linear-gradient(135deg,#007AFF,#5856D6);' : 'background:rgba(0,0,0,0.08);';
+    stories.innerHTML = '';
+    stories.innerHTML = '<div class="story-item" onclick="' + myStoryClick + '">' +
+        '<div style="width:68px;height:68px;border-radius:50%;padding:3px;' + _ringBg + 'display:flex;align-items:center;justify-content:center;position:relative;">' +
         '<img src="' + (currentUser && currentUser.avatar_url ? currentUser.avatar_url : 'https://ui-avatars.com/api/?name=' + encodeURIComponent((currentUser && currentUser.username) || 'U') + '&background=007AFF&color=fff&size=100') + '" class="story-pic" style="width:62px;height:62px;">' +
         '<div style="position:absolute;bottom:0;right:0;width:22px;height:22px;border-radius:50%;background:#007AFF;border:2px solid white;display:flex;align-items:center;justify-content:center;">' +
         '<i class="fa-solid fa-plus" style="color:white;font-size:10px;"></i></div></div>' +
         '<small style="font-size:11px;">Your Story</small></div>';
-
-    // Map button
     stories.innerHTML += '<div class="story-item" onclick="openTrustMap()" style="margin-left:4px;">' +
         '<div style="width:68px;height:68px;border-radius:50%;background:rgba(0,122,255,0.1);border:2px solid rgba(0,122,255,0.25);display:flex;align-items:center;justify-content:center;">' +
         '<i class="fa-solid fa-earth-americas" style="font-size:26px;color:#007AFF;"></i></div>' +
         '<small style="font-size:11px;">Map</small></div>';
+    // continue with Map and other stories...
+})();
 
     // Load real stories from Supabase (24h window, people you follow)
     if (window.sb && currentUser) {
@@ -7652,7 +9402,9 @@ async function fillMsgContent() {
     }
 
     // ── Conversations list ────────────────────────────────
-    list.innerHTML = '';
+    var _cachedConvos = null;
+    try { _cachedConvos = JSON.parse(localStorage.getItem('tf_convos_cache') || 'null'); } catch(e) {}
+    if (_cachedConvos && _cachedConvos.length) { _renderConvoList(_cachedConvos, list); } else { list.innerHTML = ''; }
     if (!window.sb || !currentUser) {
         list.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#888;font-size:13px;">Sign in to see messages</div>';
         return;
@@ -7663,7 +9415,7 @@ async function fillMsgContent() {
         var { data: myParts, error: partsErr } = await sb.from('conversation_participants')
             .select('conversation_id')
             .eq('user_id', currentUser.id)
-            .eq('is_blocked', false);
+            .not('is_blocked', 'is', true);
         if (partsErr) throw partsErr;
         var myConvIds = (myParts || []).map(function(p){ return p.conversation_id; });
 
@@ -7702,6 +9454,9 @@ async function fillMsgContent() {
                     .in('id', uniqueOtherIds);
                 (uRows || []).forEach(function(u){ userMap[u.id] = u; });
             }
+            if (!userMap[currentUser.id]) {
+                userMap[currentUser.id] = { id: currentUser.id, full_name: currentUser.name || currentUser.full_name || currentUser.username, username: currentUser.username, avatar_url: currentUser.avatar_url, badge_tier: currentUser.tier || currentUser.badge_tier, verified: currentUser.verified };
+            }
 
             // Step 5: get last message per conversation
             var lastMsgMap = {};
@@ -7721,7 +9476,7 @@ async function fillMsgContent() {
             });
 
             convos = rawConvos.map(function(c) {
-                var otherId = otherIdByConv[c.id];
+                var otherId = otherIdByConv[c.id] || currentUser.id;
                 c._other = userMap[otherId] || {};
                 c.last_message = lastMsgMap[c.id] || '';
                 return c;
@@ -7730,51 +9485,12 @@ async function fillMsgContent() {
 
         if (!convos || convos.length === 0) {
             list.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#888;"><i class="fa-regular fa-comment" style="font-size:36px;color:#ccc;display:block;margin-bottom:12px;"></i>No messages yet</div>';
+            try { localStorage.removeItem('tf_convos_cache'); } catch(e) {}
             return;
         }
 
-        convos.forEach(function(c) {
-            var other = c._other || {};
-            var name = other.full_name || other.username || 'Unknown';
-            var handle = other.username ? '@' + other.username : '';
-            var avatar = other.avatar_url || '';
-            var tier = other.badge_tier || '';
-            var verified = other.verified || false;
-            var lastMsg = c.last_message || '';
-            var unread = 0;
-
-            // Real last-seen / active status
-            var statusLabel = 'Tap to message';
-            if (other.last_seen) {
-                var diff = Date.now() - new Date(other.last_seen).getTime();
-                if (diff < 3 * 60 * 1000) {
-                    statusLabel = '<span style="color:#34C759;font-weight:700;">● Active now</span>';
-                } else if (diff < 60 * 60 * 1000) {
-                    statusLabel = 'Active ' + Math.floor(diff / 60000) + 'm ago';
-                } else if (diff < 24 * 3600 * 1000) {
-                    statusLabel = 'Active ' + Math.floor(diff / 3600000) + 'h ago';
-                }
-            }
-            if (lastMsg) statusLabel = escapeHtml(lastMsg.length > 36 ? lastMsg.substring(0, 36) + '…' : lastMsg);
-
-            var avatarHtml = avatar
-                ? '<img src="' + escapeHtml(avatar) + '" style="width:50px;height:50px;border-radius:50%;object-fit:cover;" onerror="this.style.display=\'none\';this.nextSibling.style.display=\'flex\'">' +
-                  '<div style="display:none;width:50px;height:50px;border-radius:50%;background:#007AFF;align-items:center;justify-content:center;color:white;font-size:18px;font-weight:700;">' + escapeHtml(name.charAt(0).toUpperCase()) + '</div>'
-                : '<div style="width:50px;height:50px;border-radius:50%;background:#007AFF;display:flex;align-items:center;justify-content:center;color:white;font-size:18px;font-weight:700;">' + escapeHtml(name.charAt(0).toUpperCase()) + '</div>';
-
-            list.innerHTML += '<div class="msg-row" data-uid="' + escapeHtml(other.id||'') + '" data-cid="' + escapeHtml(c.id||'') + '" data-name="' + escapeHtml(name||'User') + '" onclick="_openMsgRow(this)" style="position:relative;">' +
-                '<div style="position:relative;flex-shrink:0;">' + avatarHtml + '</div>' +
-                '<div style="flex:1;padding-left:4px;min-width:0;">' +
-                    '<div style="display:flex;align-items:center;gap:4px;">' +
-                        '<b style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(name) + '</b>' +
-                        (verified ? ' <i class="fa-solid fa-circle-check ' + escapeHtml(tier) + '" style="font-size:10px;"></i>' : '') +
-                    '</div>' +
-                    '<small style="color:#888;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + statusLabel + '</small>' +
-                '</div>' +
-                (unread > 0 ? '<div style="min-width:20px;height:20px;border-radius:10px;background:#007AFF;color:white;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;flex-shrink:0;">' + unread + '</div>' : '') +
-                '<i class="fa-solid fa-camera" style="color:#ccc;margin-left:8px;flex-shrink:0;" onclick="event.stopPropagation();startCamera()"></i>' +
-            '</div>';
-        });
+        try { localStorage.setItem('tf_convos_cache', JSON.stringify(convos)); } catch(e) {}
+        _renderConvoList(convos, list);
     } catch(e) {
         console.error('[fillMsgContent]', e);
         list.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#888;font-size:13px;">Could not load messages</div>';
@@ -7897,10 +9613,10 @@ function ctv_heart(btn) {
 // ==========================================================================
 async function initReels() {
     const c = document.getElementById('reel-scroller');
-    if (c.children.length > 0) return;
+    if (c.children.length > 0) c.innerHTML = ''; // force refresh
     try {
         var reelResp = await window.sb.from('posts')
-            .select('id, video_url, user_id, profiles(username, avatar_url, is_verified), like_count, comment_count, caption, sound_name')
+            .select('id, video_url, user_id, users:user_id(username, avatar_url, id_verified), like_count, comment_count, caption, sound_name')
             .not('video_url', 'is', null)
             .order('created_at', { ascending: false })
             .limit(20);
@@ -7911,11 +9627,11 @@ async function initReels() {
             return;
         }
         reels.forEach(function(post) {
-            var profile = post.profiles || {};
+            var profile = post.users || {};
             var username = profile.username || 'user';
             var avatar = profile.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(username) + '&background=007AFF&color=fff&size=80');
             var likes = post.like_count > 999 ? (post.like_count/1000).toFixed(1)+'K' : (post.like_count || 0);
-            var verified = profile.is_verified ? '<i class="fa-solid fa-circle-check verify-blue" style="font-size:12px;"></i>' : '';
+            var verified = profile.id_verified ? '<i class="fa-solid fa-circle-check verify-blue" style="font-size:12px;"></i>' : '';
             c.innerHTML += `
             <div class="reel-page">
                 <video src="${post.video_url}" class="reel-video" autoplay muted loop playsinline preload="auto" style="width:100%;height:100%;object-fit:cover;opacity:1;" onclick="this.paused?this.play():this.pause()"></video>
@@ -7934,7 +9650,7 @@ async function initReels() {
                         </div>
                     </div>
                     <div class="reel-sidebar">
-                        <div class="reel-action" onclick="toggleReelLike(this,'${post.id}')"><i class="fa-regular fa-heart"></i><br><span>${likes}</span></div>
+                        <div class="reel-action" onclick="toggleReelLike(this,'${post.id}')"><i class="fa-regular fa-heart"></i><br><span onclick="event.stopPropagation();openReelLikesModal('${post.id}','${likes}','${post.view_count||0}')" style="cursor:pointer;">${likes}</span></div>
                         <div class="reel-action" onclick="openComments('${post.id}')"><i class="fa-solid fa-comment-dots"></i><br>${post.comment_count || 0}</div>
                         <div class="reel-action" onclick="openShare()"><i class="fa-solid fa-share"></i><br>Share</div>
                         <div class="reel-action" onclick="toggleReelBookmark(this,'${post.id}')"><i class="fa-regular fa-bookmark"></i><br>Save</div>
@@ -7943,8 +9659,24 @@ async function initReels() {
             </div>`;
         });
     } catch(e) {
-        c.innerHTML = '<div style="color:rgba(255,255,255,0.4);text-align:center;padding:40px;font-size:14px;">Could not load reels.</div>';
+        c.innerHTML = '<div style="color:rgba(255,255,255,0.4);text-align:center;padding:40px;font-size:14px;">Could not load clips.</div>';
     }
+    // Prepend locally posted clips
+    try {
+        var localClips = JSON.parse(localStorage.getItem('tf-trust-clips') || '[]');
+        localClips.forEach(function(clip) {
+            var src = clip.videoSrc || '';
+            if (!src) return;
+            var div = document.createElement('div');
+            div.className = 'reel-page';
+            div.innerHTML = '<video src="'+escapeHtml(src)+'" class="reel-video" autoplay muted loop playsinline preload="auto" style="width:100%;height:100%;object-fit:cover;" onclick="this.paused?this.play():this.pause()"></video>' +
+                '<div class="reel-ui"><div><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">' +
+                '<b style="font-weight:900;">You</b></div>' +
+                '<p style="margin:8px 0;font-size:14px;">'+escapeHtml(clip.caption||'')+'</p></div>' +
+                '<div class="reel-sidebar"><div class="reel-action"><i class="fa-regular fa-heart"></i><br><span>0</span></div></div></div>';
+            c.insertBefore(div, c.firstChild);
+        });
+    } catch(e) {}
     // Auto-play video when it enters viewport
     // Replace the setTimeout autoplay block at the bottom of initReels:
 setTimeout(function() {
@@ -8176,7 +9908,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (opt.textContent.includes('Story')) {
             opt.onclick = function() {
                 togglePlusMenu();
-                startCamera();
+                setTimeout(openStoryPicker, 50);
             };
         }
     });
@@ -8757,15 +10489,43 @@ function initRealtimeSubscriptions() {
 }
 
 function handleNewMessage(message) {
-    // Decrypt and display in UI if chat is open
-    if (currentChatUser && document.getElementById('chat-interface').style.display === 'block') {
-        // Decrypt using E2E module then append to chat
-        E2E.decryptMessage(message.ciphertext, message.nonce, message.sender_id)
-            .then(plaintext => {
-                appendMessageToChat(plaintext, message.message_type, false, message);
-            })
-            .catch(err => console.error('[E2E] Decrypt failed:', err));
+    console.debug('[handleNewMessage] Received message:', message);
+
+    // Don't double-render your own messages — already shown as temp bubble
+    if (currentUser && message.sender_id === currentUser.id) {
+        console.debug('[handleNewMessage] Own message, skipping realtime render');
+        return;
     }
+
+    if (!currentChatUser || document.getElementById('chat-interface').style.display !== 'block') {
+        console.debug('[handleNewMessage] Chat not open, skipping');
+        return;
+    }
+
+    function _appendToChat(text) {
+        var chatBody = document.getElementById('chat-body');
+        if (chatBody) {
+            var msgObj = Object.assign({}, message, { content: text });
+            chatBody.insertAdjacentHTML('beforeend', renderMessageBubble(msgObj));
+            chatBody.scrollTop = chatBody.scrollHeight;
+        }
+    }
+
+    // If no nonce, message is plain text — skip E2E
+    if (!message.nonce) {
+        console.debug('[handleNewMessage] No nonce — treating as plain text');
+        _appendToChat(message.ciphertext || '');
+        return;
+    }
+
+    E2E.decryptMessage(message.ciphertext, message.nonce, message.sender_id)
+        .then(function(plaintext) {
+            console.debug('[handleNewMessage] Decrypted OK, appending to chat');
+            _appendToChat(plaintext);
+        })
+        .catch(function(err) {
+            console.error('[handleNewMessage] E2E decrypt failed:', err, '| raw message:', message);
+        });
 }
 
 async function handleScreenshotNotification(event) {
@@ -8850,7 +10610,14 @@ const DataLayer = {
   async getMessages(conversationId) {
     if (SUPABASE_CONFIG.enabled && navigator.onLine) {
       const remote = await SupabaseAPI.fetchMessages(conversationId);
-      if (remote) return remote;
+      if (remote) {
+        // Cache fetched messages locally (IndexedDB) so the hub can show them
+        // instantly and offline next time — mirrors how posts are cached in getFeed.
+        for (const m of remote) {
+          try { await DB.add('messages', { ...m, conversationId: conversationId, synced: true }); } catch (e) { /* already cached */ }
+        }
+        return remote;
+      }
     }
     return DB.query('messages', 'conversationId', IDBKeyRange.only(conversationId));
   },
@@ -9111,7 +10878,12 @@ const VideoCompressor = {
 
 // Delegate to handleMediaSelected which handles both image and video
 document.getElementById('file-input').onchange = function(e) {
-  if (typeof handleMediaSelected === 'function') handleMediaSelected(e.target);
+  // Route to chat or composer depending on context
+  if (typeof handleChatMediaPick === 'function') {
+      handleChatMediaPick(e.target);
+  } else if (typeof handleMediaSelected === 'function') {
+      handleMediaSelected(e.target);
+  }
 };
 
 // AI Content Detection (heuristic-based)
@@ -9309,11 +11081,8 @@ if ('serviceWorker' in navigator) {
 }
 
 function showUpdateBanner() {
-  const banner = document.createElement('div');
-  banner.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:#007AFF;color:white;padding:12px;text-align:center;z-index:99999;font-weight:700;font-size:14px;cursor:pointer;';
-  banner.innerHTML = '🔄 New version available — Tap to refresh';
-  banner.onclick = () => location.reload();
-  document.body.appendChild(banner);
+  // Silent updates — no intrusive "new version" banner. The new service worker
+  // is already active and will serve the latest assets on the next navigation.
 }
 
 // Install prompt
@@ -9583,7 +11352,7 @@ function openStoryPicker() {
                 '<i class="fa-solid fa-xmark" style="font-size:15px;color:' + textCol + ';"></i>',
             '</button>',
             '<span style="font-size:15px;font-weight:700;color:' + textCol + ';">Create Story</span>',
-            '<button onclick="openLiquidGlassCamera();document.getElementById(\'storyPickerOverlay\').remove();" ',
+            '<button onclick=\"var _sp=document.getElementById(\'storyPickerOverlay\');if(_sp)_sp.remove();requestAnimationFrame(function(){requestAnimationFrame(function(){openLiquidGlassCamera();});});\" ',
                 'style="background:rgba(0,122,255,0.12);border:0.5px solid rgba(0,122,255,0.25);',
                 'border-radius:25px;padding:7px 16px;cursor:pointer;',
                 'font-size:13px;font-weight:700;color:#007AFF;">Camera</button>',
@@ -9668,13 +11437,121 @@ function storyPickerDropYours() {
 }
 
 function storyPickerMusic() {
-    // Keep story picker open; open music hub attached to body
-    var hub = document.createElement('div');
-    hub.id = 'thoughtMusicHub';
-    hub.style.cssText = 'position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;z-index:19000;border-radius:28px 28px 0 0;background:rgba(255,255,255,0.82);backdrop-filter:blur(60px) saturate(200%);-webkit-backdrop-filter:blur(60px) saturate(200%);border-top:0.5px solid rgba(255,255,255,0.9);box-shadow:0 -20px 60px rgba(0,0,0,0.2);animation:slideUpOverlay 0.35s cubic-bezier(0.32,0.72,0,1);display:flex;flex-direction:column;max-height:85%;overflow:hidden;';
-    // reuse same innerHTML construction from openThoughtMusicPicker
-    document.body.appendChild(hub);
-    openThoughtMusicPickerInto(hub);
+    window._storyPickerMusicPending = true;
+    openThoughtMusicPicker();
+}
+
+function openStoryVideoTrim(file, url) {
+    var existing = document.getElementById('storyVideoTrimScreen');
+    if (existing) existing.remove();
+    var screen = document.createElement('div');
+    screen.id = 'storyVideoTrimScreen';
+    screen.style.cssText = 'position:absolute;inset:0;z-index:9700;display:flex;flex-direction:column;background:#000;';
+    screen.innerHTML =
+        '<div style="position:absolute;top:0;left:0;right:0;z-index:20;padding:max(52px,env(safe-area-inset-top,52px)) 24px 16px;display:flex;align-items:center;justify-content:space-between;">' +
+            '<button id="storyTrimBack" style="background:none;border:none;color:white;font-size:17px;font-weight:500;cursor:pointer;padding:8px 0;">Back</button>' +
+            '<button id="storyTrimDone" style="background:none;border:none;color:white;font-size:17px;font-weight:700;cursor:pointer;padding:8px 0;">Done</button>' +
+        '</div>' +
+        '<div style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;">' +
+            '<video id="storyTrimVideo" src="'+url+'" style="width:100%;height:100%;object-fit:cover;" autoplay loop playsinline muted></video>' +
+        '</div>' +
+        '<div style="flex-shrink:0;padding:10px 16px 0;background:#111;">' +
+            '<div style="position:relative;height:60px;border-radius:10px;overflow:hidden;background:#222;">' +
+                '<div id="storyTrimStrip" style="display:flex;height:60px;overflow:hidden;pointer-events:none;"></div>' +
+                // Left handle
+                '<div id="trimHandleLeft" style="position:absolute;top:0;bottom:0;left:0;width:20px;background:rgba(255,200,0,0.85);border-radius:8px 0 0 8px;cursor:ew-resize;z-index:10;display:flex;align-items:center;justify-content:center;touch-action:none;">' +
+                    '<div style="width:3px;height:24px;background:white;border-radius:2px;"></div>' +
+                '</div>' +
+                // Right handle
+                '<div id="trimHandleRight" style="position:absolute;top:0;bottom:0;right:0;width:20px;background:rgba(255,200,0,0.85);border-radius:0 8px 8px 0;cursor:ew-resize;z-index:10;display:flex;align-items:center;justify-content:center;touch-action:none;">' +
+                    '<div style="width:3px;height:24px;background:white;border-radius:2px;"></div>' +
+                '</div>' +
+                // Yellow border overlay
+                '<div id="trimBorderOverlay" style="position:absolute;inset:0;border:3px solid rgba(255,200,0,0.85);border-radius:10px;pointer-events:none;z-index:9;"></div>' +
+            '</div>' +
+            '<p id="trimDurationLabel" style="color:rgba(255,255,255,0.5);font-size:11px;text-align:center;margin:6px 0 0;">Full video</p>' +
+        '</div>' +
+        '<div style="flex-shrink:0;height:max(28px,env(safe-area-inset-bottom,28px));background:#000;"></div>';
+    (document.getElementById('app') || document.body).appendChild(screen);
+    document.getElementById('storyTrimBack').onclick = function() {
+        screen.remove();
+        openStoryPicker();
+    };
+    document.getElementById('storyTrimDone').onclick = function() {
+        screen.remove();
+        openStoryPostArea(file, url);
+    };
+    var vid = document.getElementById('storyTrimVideo');
+    var strip = document.getElementById('storyTrimStrip');
+    vid.addEventListener('loadedmetadata', function() {
+        var duration = vid.duration;
+        if (!duration || !isFinite(duration)) return;
+        var numFrames = Math.min(Math.max(Math.ceil(duration * 3), 8), 30);
+        var frameW = 48;
+        var spacer1 = document.createElement('div');
+        spacer1.style.cssText = 'flex-shrink:0;width:50%;background:#111;';
+        strip.appendChild(spacer1);
+        for (var i = 0; i < numFrames; i++) {
+            var canvas = document.createElement('canvas');
+            canvas.width = frameW; canvas.height = 80;
+            canvas.style.cssText = 'flex-shrink:0;width:'+frameW+'px;height:80px;display:block;';
+            strip.appendChild(canvas);
+            (function(c, t) {
+                var tv = document.createElement('video');
+                tv.src = url; tv.muted = true; tv.preload = 'metadata'; tv.playsInline = true;
+                tv.addEventListener('seeked', function() {
+                    try { c.getContext('2d').drawImage(tv, 0, 0, frameW, 80); } catch(e) {
+                        var ctx = c.getContext('2d'); ctx.fillStyle='#222'; ctx.fillRect(0,0,frameW,80);
+                    }
+                    tv.src = '';
+                }, { once: true });
+                tv.addEventListener('loadedmetadata', function() { tv.currentTime = t; });
+            })(canvas, (i / numFrames) * duration);
+        }
+        var spacer2 = document.createElement('div');
+        spacer2.style.cssText = 'flex-shrink:0;width:50%;background:#111;';
+        strip.appendChild(spacer2);
+        // Trim handle dragging
+        var container = strip.parentElement;
+        var containerW = container.offsetWidth;
+        var leftHandle = document.getElementById('trimHandleLeft');
+        var rightHandle = document.getElementById('trimHandleRight');
+        var trimLabel = document.getElementById('trimDurationLabel');
+        var leftPct = 0, rightPct = 1;
+
+        function updateTrimOverlay() {
+            var lPx = leftPct * containerW;
+            var rPx = rightPct * containerW;
+            leftHandle.style.left = lPx + 'px';
+            rightHandle.style.right = (containerW - rPx) + 'px';
+            var trimDur = (rightPct - leftPct) * duration;
+            if (trimLabel) trimLabel.textContent = trimDur.toFixed(1) + 's selected';
+            vid.currentTime = leftPct * duration;
+        }
+
+        function makeDraggable(handle, isLeft) {
+            var dragging = false;
+            handle.addEventListener('touchstart', function(e){ dragging = true; e.preventDefault(); }, {passive:false});
+            handle.addEventListener('touchmove', function(e){
+                if (!dragging) return;
+                e.preventDefault();
+                var rect = container.getBoundingClientRect();
+                var x = e.touches[0].clientX - rect.left;
+                var pct = Math.max(0, Math.min(1, x / containerW));
+                if (isLeft) { leftPct = Math.min(pct, rightPct - 0.05); }
+                else { rightPct = Math.max(pct, leftPct + 0.05); }
+                updateTrimOverlay();
+            }, {passive:false});
+            handle.addEventListener('touchend', function(){ dragging = false; });
+        }
+        makeDraggable(leftHandle, true);
+        makeDraggable(rightHandle, false);
+        updateTrimOverlay();
+
+        // Store trim on Done
+        window._storyTrimStart = function() { return leftPct; };
+        window._storyTrimEnd   = function() { return rightPct; };
+    });
 }
 
 function storyPickerUseRecent() {
@@ -9687,21 +11564,57 @@ function storyPickerLoadFiles(files) {
     var thumbs = document.getElementById('storyPickerThumbs');
     if (!thumbs || !files || !files.length) return;
     thumbs.innerHTML = '';
-    Array.from(files).slice(0, 11).forEach(function(file) {
-        var url = URL.createObjectURL(file);
-        var isVid = file.type.startsWith('video/');
+    window._spFiles = Array.from(files).slice(0, 20).map(function(f) {
+        return { file: f, url: URL.createObjectURL(f), selected: true, isVid: f.type.startsWith('video/') };
+    });
+    window._spFiles.forEach(function(item, i) {
         var div = document.createElement('div');
         div.style.cssText = 'aspect-ratio:9/16;border-radius:8px;overflow:hidden;cursor:pointer;position:relative;background:#222;flex-shrink:0;width:calc((100% - 24px)/4);';
-        div.innerHTML = isVid
-            ? '<video src="'+url+'" style="width:100%;height:100%;object-fit:cover;" muted playsinline preload="metadata"></video>'
-            : '<img src="'+url+'" style="width:100%;height:100%;object-fit:cover;" loading="lazy">';
-        div.onclick = function() {
-            document.getElementById('storyPickerOverlay')?.remove();
-            if (typeof openLiquidGlassCamera === 'function') openLiquidGlassCamera();
-            else showToast('Opening story editor...');
-        };
+        div.innerHTML = (item.isVid
+            ? '<video src="'+item.url+'" style="width:100%;height:100%;object-fit:cover;" muted playsinline preload="metadata"></video>'
+            : '<img src="'+item.url+'" style="width:100%;height:100%;object-fit:cover;" loading="lazy">')
+            + '<div id="spChk'+i+'" style="position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;background:#007AFF;border:2px solid white;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-check" style="color:white;font-size:9px;"></i></div>';
+        (function(idx) {
+            div.onclick = function() {
+                window._spFiles[idx].selected = !window._spFiles[idx].selected;
+                var chk = document.getElementById('spChk'+idx);
+                if (chk) chk.style.background = window._spFiles[idx].selected ? '#007AFF' : 'rgba(0,0,0,0.35)';
+                spUpdateNextBtn();
+            };
+        })(i);
         thumbs.appendChild(div);
     });
+    spUpdateNextBtn();
+}
+
+function spUpdateNextBtn() {
+    var overlay = document.getElementById('storyPickerOverlay');
+    if (!overlay) return;
+    var old = document.getElementById('spNextBtn');
+    if (old) old.remove();
+    var sel = (window._spFiles || []).filter(function(f){ return f.selected; });
+    if (!sel.length) return;
+    var btn = document.createElement('button');
+    btn.id = 'spNextBtn';
+    btn.style.cssText = 'position:absolute;bottom:max(32px,env(safe-area-inset-bottom,32px));right:20px;z-index:50;background:#007AFF;border:none;border-radius:50px;padding:14px 28px;color:white;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;box-shadow:0 4px 20px rgba(0,122,255,0.45);';
+    btn.innerHTML = 'Next <i class="fa-solid fa-arrow-right"></i>';
+    btn.onclick = function() {
+        var chosen = (window._spFiles || []).filter(function(f){ return f.selected; });
+        if (!chosen.length) return;
+        document.getElementById('storyPickerOverlay')?.remove();
+        if (chosen.length > 1) {
+            chosen.forEach(function(item) { submitStoryPost(item.url, item.isVid, 'everyone'); });
+            showToast(chosen.length + ' stories posted to Your Story');
+        } else {
+            var item = chosen[0];
+            if (item.isVid) {
+                openStoryVideoTrim(item.file, item.url);
+            } else {
+                openStoryPostArea(item.file, item.url);
+            }
+        }
+    };
+    overlay.appendChild(btn);
 }
 
 // ============================================================
@@ -9962,7 +11875,7 @@ function openStoryPrivacySettings() {
 
         // Sections
         privacyRow('Viewing', 'Who can see your story', 'everyone', 'viewing',
-            [{value:'everyone',label:'Everyone'},{value:'followers',label:'Followers only'},{value:'close',label:'Close Friends'}]) +
+            [{value:'everyone',label:'Everyone'},{value:'followers',label:'Followers only'},{value:'trustcircle',label:'TrustCircle'}]) +
 
         privacyRow('Replying', 'Who can reply to your story', 'everyone', 'replying',
             [{value:'everyone',label:'Everyone'},{value:'followers',label:'People you follow'},{value:'off',label:'Off'}]) +
@@ -9985,15 +11898,98 @@ function openStoryPrivacySettings() {
         '</div>' +
 
         // Hide from
-        '<div onclick="showToast(\'Close Friends coming soon\')" style="display:flex;align-items:center;justify-content:space-between;padding:16px 24px;cursor:pointer;" onmouseover="this.style.background=\'rgba(255,255,255,0.04)\'" onmouseout="this.style.background=\'\'">' +
-            '<div><b style="color:white;font-size:15px;">Hide story from...</b><br><small style="color:rgba(255,255,255,0.4);font-size:12px;">Manage who is excluded</small></div>' +
-            '<i class="fa-solid fa-chevron-right" style="color:rgba(255,255,255,0.25);font-size:13px;"></i>' +
+        '<div onclick=\"openHideStoryFromModal()\" style=\"display:flex;align-items:center;justify-content:space-between;padding:16px 24px;cursor:pointer;\" onmouseover=\"this.style.background=\'rgba(255,255,255,0.04)\'\" onmouseout=\"this.style.background=\'\">' +
+            '<div><b style=\"color:white;font-size:15px;\">Hide story from...</b><br><small style=\"color:rgba(255,255,255,0.4);font-size:12px;\">Manage who is excluded</small></div>' +
+            '<i class=\"fa-solid fa-chevron-right\" style=\"color:rgba(255,255,255,0.25);font-size:13px;\"></i>' +
         '</div>' +
 
         '<div style="height:40px;"></div></div>';
 
     modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
     (document.getElementById('app') || document.body).appendChild(modal);
+}
+
+function openHideStoryFromModal() {
+    var existing = document.getElementById('hideStoryFromModal'); if (existing) existing.remove();
+    var modal = document.createElement('div');
+    modal.id = 'hideStoryFromModal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:9700;background:rgba(0,0,0,0.65);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);display:flex;flex-direction:column;animation:fadeIn 0.2s ease;';
+    var _hsfSelected = new Set();
+    modal.innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:54px 20px 12px;">' +
+            '<button id="hsfClose" style="width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,0.12);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-xmark" style="color:white;font-size:15px;"></i></button>' +
+            '<b style="color:white;font-size:17px;font-weight:800;">Hide story from</b>' +
+            '<button id="hsfSave" style="width:34px;height:34px;border-radius:50%;background:rgba(0,122,255,0.25);backdrop-filter:blur(20px);border:0.5px solid rgba(0,122,255,0.45);display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-check" style="color:#007AFF;font-size:15px;"></i></button>' +
+        '</div>' +
+        '<div style="padding:0 20px 16px;">' +
+            '<p style="color:rgba(255,255,255,0.55);font-size:13px;line-height:1.6;margin:0;">Hide all stories and videos you add to your story from specific people. This will also hide your live videos.</p>' +
+        '</div>' +
+        '<div style="margin:0 20px 16px;background:rgba(255,255,255,0.08);border-radius:14px;display:flex;align-items:center;padding:0 14px;gap:8px;border:0.5px solid rgba(255,255,255,0.12);">' +
+            '<i class="fa-solid fa-magnifying-glass" style="color:rgba(255,255,255,0.4);font-size:14px;"></i>' +
+            '<input id="hsfSearch" type="text" placeholder="Search followers..." style="flex:1;background:transparent;border:none;outline:none;color:white;font-size:15px;padding:12px 0;caret-color:#007AFF;" oninput="hsfFilter(this.value)">' +
+        '</div>' +
+        '<div id="hsfList" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 20px 40px;">' +
+            '<div style="text-align:center;padding:40px 0;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:20px;"></i></div>' +
+        '</div>';
+    document.body.appendChild(modal);
+    modal.querySelector('#hsfClose').onclick = function(){ modal.remove(); };
+    modal.querySelector('#hsfSave').onclick = async function() {
+        if (!window.sb || !currentUser) { modal.remove(); return; }
+        var sel = Array.from(modal.querySelectorAll('[data-hsf-uid][data-selected="true"]')).map(function(el){ return el.getAttribute('data-hsf-uid'); });
+        try {
+            await window.sb.from('hide_story_from').delete().eq('owner_id', currentUser.id);
+            if (sel.length) {
+                await window.sb.from('hide_story_from').insert(sel.map(function(uid){ return { owner_id: currentUser.id, hidden_user_id: uid }; }));
+            }
+            showToast('Saved'); triggerHaptic(15);
+        } catch(e) { showToast('Saved locally'); }
+        modal.remove();
+    };
+    window._hsfAllUsers = [];
+    (async function() {
+        var list = modal.querySelector('#hsfList');
+        if (!window.sb || !currentUser) { list.innerHTML = '<p style="color:rgba(255,255,255,0.4);text-align:center;padding:30px 0;">Sign in first</p>'; return; }
+        try {
+            var { data: follows } = await window.sb.from('follows').select('follower_id, users:follower_id(id,full_name,username,avatar_url)').eq('following_id', currentUser.id).limit(100);
+            var { data: existing } = await window.sb.from('hide_story_from').select('hidden_user_id').eq('owner_id', currentUser.id);
+            var hiddenIds = new Set((existing||[]).map(function(r){ return r.hidden_user_id; }));
+            var users = (follows||[]).map(function(f){ return f.users; }).filter(Boolean);
+            window._hsfAllUsers = users;
+            window._hsfHiddenIds = hiddenIds;
+            hsfRender(list, users, hiddenIds);
+        } catch(e) { list.innerHTML = '<p style="color:rgba(255,255,255,0.4);text-align:center;padding:30px 0;">Could not load followers</p>'; }
+    })();
+}
+function hsfRender(list, users, hiddenIds) {
+    if (!users.length) { list.innerHTML = '<p style="color:rgba(255,255,255,0.4);text-align:center;padding:30px 0;">No followers yet</p>'; return; }
+    list.innerHTML = users.map(function(u) {
+        var sel = hiddenIds.has(u.id);
+        var av = u.avatar_url || 'https://ui-avatars.com/api/?name='+encodeURIComponent(u.full_name||u.username||'U')+'&background=007AFF&color=fff&size=80';
+        return '<div data-hsf-uid="'+u.id+'" data-selected="'+sel+'" onclick="hsfToggle(this)" style="display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:0.5px solid rgba(255,255,255,0.06);cursor:pointer;">' +
+            '<img src="'+escapeHtml(av)+'" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=007AFF&color=fff&size=80\'">' +
+            '<div style="flex:1;"><b style="color:white;font-size:15px;display:block;">'+escapeHtml(u.full_name||u.username||'User')+'</b><small style="color:rgba(255,255,255,0.4);font-size:12px;">@'+escapeHtml(u.username||'')+'</small></div>' +
+            '<div class="hsf-check" style="width:24px;height:24px;border-radius:50%;border:2px solid '+(sel?'#007AFF':'rgba(255,255,255,0.3)')+';background:'+(sel?'#007AFF':'transparent')+';display:flex;align-items:center;justify-content:center;transition:all 0.2s;">' +
+                (sel?'<i class="fa-solid fa-check" style="color:white;font-size:11px;"></i>':'') +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+function hsfToggle(row) {
+    var sel = row.getAttribute('data-selected') === 'true';
+    row.setAttribute('data-selected', sel ? 'false' : 'true');
+    var chk = row.querySelector('.hsf-check');
+    if (chk) {
+        chk.style.borderColor = sel ? 'rgba(255,255,255,0.3)' : '#007AFF';
+        chk.style.background  = sel ? 'transparent' : '#007AFF';
+        chk.innerHTML = sel ? '' : '<i class="fa-solid fa-check" style="color:white;font-size:11px;"></i>';
+    }
+}
+function hsfFilter(q) {
+    var list = document.getElementById('hsfList');
+    if (!list) return;
+    var lower = q.toLowerCase();
+    var filtered = (window._hsfAllUsers||[]).filter(function(u){ return (u.full_name||'').toLowerCase().includes(lower)||(u.username||'').toLowerCase().includes(lower); });
+    hsfRender(list, filtered, window._hsfHiddenIds || new Set());
 }
 
 // ── TrustClips Saving sub-menu ──
@@ -10445,7 +12441,7 @@ const DeviceFingerprint = {
     // Detect device type
     getDeviceType() {
         const ua = navigator.userAgent;
-        if (/tablet|ipad|playbook|silk/i.test(ua)) return 'tablet';
+        if (/tablet|ipad|playbook|silk/i.test(ua) || (navigator.maxTouchPoints > 1 && ua.includes('Mac'))) return 'tablet';
         if (/mobile|iphone|ipod|android|blackberry|opera mini|iemobile/i.test(ua)) return 'mobile';
         return 'desktop';
     },
@@ -10851,7 +12847,10 @@ const DeviceTrustManager = {
     },
 
     async revokeDevice(deviceId) {
-        if (!confirm('Remove this device? You\'ll need to log in again on that device.')) return;
+        var _self = this;
+        _showConfirmModal('Remove Device', "You'll need to log in again on that device.", function() { _self._doRevokeDevice(deviceId); });
+    },
+    async _doRevokeDevice(deviceId) {
 
         try {
             await DB.removeDevice(deviceId);
@@ -11210,13 +13209,13 @@ function openShareMenu(postId) {
             <h3 style="font-size:18px; font-weight:700; margin-bottom:20px; color:var(--text-primary);">Share</h3>
             <div style="display:flex; gap:20px; overflow-x:auto; padding-bottom:16px;">
                 ${['Copy Link', 'Message', 'WhatsApp', 'Twitter', 'Instagram', 'More'].map((label, i) => {
-                    const icons = ['🔗', '💬', '📱', '🐦', '📷', '•••'];
+                    const icons = ['<i class="fa-solid fa-link"></i>','<i class="fa-solid fa-message"></i>','<i class="fa-brands fa-whatsapp"></i>','<i class="fa-brands fa-x-twitter"></i>','<i class="fa-brands fa-instagram"></i>','<i class="fa-solid fa-ellipsis"></i>'];
                     return `
                         <div onclick="handleShare('${label.toLowerCase()}', '${postId}')" style="
                             display:flex; flex-direction:column; align-items:center; gap:8px; cursor:pointer; min-width:64px;
                         ">
                             <div style="width:56px; height:56px; border-radius:50%; background:var(--bg-secondary);
-                                display:flex; align-items:center; justify-content:center; font-size:24px;">
+                                display:flex; align-items:center; justify-content:center; font-size:22px; color:var(--text-primary);">
                                 ${icons[i]}
                             </div>
                             <span style="font-size:11px; color:var(--text-secondary);">${label}</span>
@@ -11321,16 +13320,16 @@ const TRANSLATIONS = {
         supportCenter: 'Centre d\'aide', searchTopics: 'Rechercher des sujets...',
     },
     ar: {
-        settings: 'الإعدادات', profile: 'الملف الشخصي', darkMode: 'الوضع الداكن',
+        settings: 'الإعدادات', profile: 'Ø§Ù„Ù…Ù„Ù الشخصي', darkMode: 'الوضع الداكن',
         language: 'اللغة', privacy: 'الخصوصية', security: 'الأمان',
         notifications: 'الإشعارات', help: 'المساعدة والدعم', about: 'حول',
         logout: 'تسجيل الخروج', home: 'الرئيسية', search: 'بحث', create: 'إنشاء',
         reels: 'ريلز', messages: 'الرسائل', followers: 'المتابعون',
-        following: 'المتابَعون', posts: 'المنشورات', editProfile: 'تعديل الملف',
+        following: 'المتابَعون', posts: 'المنشورات', editProfile: 'تعديل Ø§Ù„Ù…Ù„Ù',
         verified: 'موثق', getVerified: 'توثيق الحساب',
         comments: 'التعليقات', likes: 'الإعجابات', share: 'مشاركة',
-        bookmark: 'حفظ', report: 'إبلاغ', block: 'حظر',
-        supportCenter: 'مركز الدعم', searchTopics: 'البحث في المواضيع...',
+        bookmark: 'Ø­ÙØ¸', report: 'إبلاغ', block: 'حظر',
+        supportCenter: 'مركز الدعم', searchTopics: 'البحث ÙÙŠ المواضيع...',
     },
     zu: {
         settings: 'Izilungiselelo', profile: 'Iphrofayela', darkMode: 'Imodi Emnyama',
@@ -11357,28 +13356,28 @@ const TRANSLATIONS = {
         supportCenter: 'Central de Ajuda', searchTopics: 'Pesquisar tópicos...',
     },
     hi: {
-        settings: 'सेटिंग्स', profile: 'प्रोफ़ाइल', darkMode: 'डार्क मोड',
-        language: 'भाषा', privacy: 'गोपनीयता', security: 'सुरक्षा',
-        notifications: 'सूचनाएं', help: 'सहायता', about: 'के बारे में',
-        logout: 'लॉग आउट', home: 'होम', search: 'खोजें', create: 'बनाएं',
-        reels: 'रील्स', messages: 'संदेश', followers: 'फ़ॉलोअर्स',
-        following: 'फ़ॉलोइंग', posts: 'पोस्ट', editProfile: 'प्रोफ़ाइल संपादित करें',
-        verified: 'सत्यापित', getVerified: 'सत्यापित हों',
-        comments: 'टिप्पणियां', likes: 'पसंद', share: 'साझा करें',
-        bookmark: 'बुकमार्क', report: 'रिपोर्ट', block: 'ब्लॉक',
-        supportCenter: 'सहायता केंद्र', searchTopics: 'विषय खोजें...',
+        settings: 'à¤¸à¥‡à¤Ÿà¤¿à¤‚à¤—à¥à¤¸', profile: 'à¤ªà¥à¤°à¥‹à¤«à¤¼à¤¾à¤‡à¤²', darkMode: 'à¤¡à¤¾à¤°à¥à¤• मोड',
+        language: 'भाषा', privacy: 'गोपनीयता', security: 'à¤¸à¥à¤°à¤•à¥à¤·à¤¾',
+        notifications: 'à¤¸à¥‚à¤šà¤¨à¤¾à¤à¤‚', help: 'सहायता', about: 'के बारे में',
+        logout: 'लॉग आउट', home: 'होम', search: 'खोजें', create: 'à¤¬à¤¨à¤¾à¤à¤‚',
+        reels: 'à¤°à¥€à¤²à¥à¤¸', messages: 'संदेश', followers: 'à¤«à¤¼à¥‰à¤²à¥‹à¤…à¤°à¥à¤¸',
+        following: 'फ़ॉलोइंग', posts: 'à¤ªà¥‹à¤¸à¥à¤Ÿ', editProfile: 'à¤ªà¥à¤°à¥‹à¤«à¤¼à¤¾à¤‡à¤² संपादित करें',
+        verified: 'à¤¸à¤¤à¥à¤¯à¤¾à¤ªà¤¿à¤¤', getVerified: 'à¤¸à¤¤à¥à¤¯à¤¾à¤ªà¤¿à¤¤ हों',
+        comments: 'à¤Ÿà¤¿à¤ªà¥à¤ªà¤£à¤¿à¤¯à¤¾à¤‚', likes: 'पसंद', share: 'à¤¸à¤¾à¤à¤¾ करें',
+        bookmark: 'à¤¬à¥à¤•à¤®à¤¾à¤°à¥à¤•', report: 'à¤°à¤¿à¤ªà¥‹à¤°à¥à¤Ÿ', block: 'à¤¬à¥à¤²à¥‰à¤•',
+        supportCenter: 'सहायता à¤•à¥‡à¤‚à¤¦à¥à¤°', searchTopics: 'विषय खोजें...',
     },
     zh: {
-        settings: '设置', profile: '个人资料', darkMode: '深色模式',
-        language: '语言', privacy: '隐私', security: '安全',
-        notifications: '通知', help: '帮助与支持', about: '关于',
-        logout: '退出', home: '首页', search: '搜索', create: '创建',
-        reels: '短视频', messages: '消息', followers: '粉丝',
-        following: '关注', posts: '帖子', editProfile: '编辑资料',
-        verified: '已认证', getVerified: '去认证',
+        settings: '设置', profile: '个人资料', darkMode: 'æ·±è‰²æ¨¡å¼',
+        language: '语言', privacy: 'éšç§', security: '安全',
+        notifications: '通知', help: 'å¸®åŠ©ä¸Žæ”¯æŒ', about: '关于',
+        logout: '退出', home: '首页', search: 'æœç´¢', create: '创建',
+        reels: '短视频', messages: 'æ¶ˆæ¯', followers: 'ç²‰ä¸',
+        following: '关注', posts: 'å¸–å­', editProfile: '编辑资料',
+        verified: 'å·²è®¤è¯', getVerified: 'åŽ»è®¤è¯',
         comments: '评论', likes: '赞', share: '分享',
-        bookmark: '收藏', report: '举报', block: '拉黑',
-        supportCenter: '帮助中心', searchTopics: '搜索主题...',
+        bookmark: 'æ”¶è—', report: '举报', block: '拉黑',
+        supportCenter: '帮助中心', searchTopics: 'æœç´¢ä¸»é¢˜...',
     }
 };
 
@@ -11413,7 +13412,7 @@ function changeLanguage(lang) {
 }
 
 function getLanguageName(code) {
-    const names = { en:'English', es:'Español', fr:'Français', ar:'العربية', zu:'isiZulu', pt:'Português', hi:'हिन्दी', zh:'中文' };
+    const names = { en:'English', es:'Español', fr:'Français', ar:'العربية', zu:'isiZulu', pt:'Português', hi:'à¤¹à¤¿à¤¨à¥à¤¦à¥€', zh:'中文' };
     return names[code] || code;
 }
 
@@ -11496,6 +13495,36 @@ function openContextualVideo(videoUrl, context, startIndex, clipArray) {
     addReelsStyles();
     renderReel(currentReelIndex);
     setupReelGestures();
+}
+
+// Opens profile clips in a lightweight in-profile viewer (not the global TrustClip page)
+function openProfileClipViewer(startIdx) {
+    var clips = window._profileClips || [];
+    if (!clips.length) return;
+    var idx = startIdx || 0;
+    var existing = document.getElementById('profileClipViewer');
+    if (existing) existing.remove();
+    var ov = document.createElement('div');
+    ov.id = 'profileClipViewer';
+    ov.style.cssText = 'position:absolute;inset:0;z-index:20000;background:#000;display:flex;flex-direction:column;overflow:hidden;';
+    function renderClip(i) {
+        var clip = clips[i] || {};
+        var url = clip.videoUrl || clip.media_url || '';
+        ov.innerHTML =
+            '<button onclick="document.getElementById(\'profileClipViewer\').remove()" style="position:absolute;top:max(50px,env(safe-area-inset-top,50px));left:16px;z-index:10;background:rgba(0,0,0,0.4);border:none;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(10px);">' +
+                '<svg width="20" height="20" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>' +
+            '</button>' +
+            (i > 0 ? '<button onclick="window._profileClipViewerGo(' + (i-1) + ')" style="position:absolute;left:16px;top:50%;transform:translateY(-50%);z-index:10;background:rgba(0,0,0,0.35);border:none;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;"><svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>' : '') +
+            (i < clips.length - 1 ? '<button onclick="window._profileClipViewerGo(' + (i+1) + ')" style="position:absolute;right:16px;top:50%;transform:translateY(-50%);z-index:10;background:rgba(0,0,0,0.35);border:none;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;"><svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></button>' : '') +
+            '<video src="' + escapeHtml(url) + '" autoplay playsinline controls style="width:100%;height:100%;object-fit:contain;background:#000;"></video>' +
+            '<div style="position:absolute;bottom:max(24px,env(safe-area-inset-bottom,24px));left:0;right:0;text-align:center;pointer-events:none;">' +
+                '<small style="color:rgba(255,255,255,0.5);font-size:12px;">' + (i+1) + ' / ' + clips.length + '</small>' +
+            '</div>';
+    }
+    window._profileClipViewerGo = function(i) { idx = i; renderClip(i); };
+    renderClip(idx);
+    var profileOv = document.getElementById('profile-overlay') || document.querySelector('.app') || document.body;
+    profileOv.appendChild(ov);
 }
 
 function openFullScreenMedia(url, type) {
@@ -11721,21 +13750,60 @@ function addReelsStyles() {
 async function loadReels() {
     try {
         if (!window.sb) { renderReelsFallback(); return; }
+
+        // Query trustclips table (allow rows where is_hidden is NULL or false)
         var { data, error } = await sb
             .from('trustclips')
             .select('*, users:user_id (id, full_name, username, avatar_url, badge_tier, verified)')
-            .eq('is_hidden', false)
+            .neq('is_hidden', true)
             .order('created_at', { ascending: false })
             .limit(20);
 
-        if (error || !data || data.length === 0) {
+        // If the users join fails (FK relationship not configured), retry without it
+        // so the clips still load instead of falling through to "no clips".
+        if (error) {
+            console.warn('[Reels] join query failed, retrying without users join:', error.message);
+            var retryR = await sb.from('trustclips').select('*')
+                .neq('is_hidden', true).order('created_at', { ascending: false }).limit(20);
+            data = retryR.data; error = retryR.error;
+        }
+
+        // Fallback: also look in posts table for video posts
+        if (!data || data.length === 0) {
+            var postsRes = await sb
+                .from('posts')
+                .select('id, media_url, thumbnail_url, caption, like_count, comment_count, user_id, users:user_id(id,full_name,username,avatar_url,badge_tier,verified)')
+                .or('post_type.eq.video,post_type.eq.trustclip,media_type.eq.video')
+                .order('created_at', { ascending: false })
+                .limit(20);
+            if (postsRes.data && postsRes.data.length > 0) {
+                reelsData = postsRes.data.map(function(p) {
+                    return {
+                        id: p.id,
+                        videoUrl: p.media_url || '',
+                        username: '@' + (p.users && p.users.username ? p.users.username : 'user'),
+                        caption: p.caption || '',
+                        sound: 'Original Audio',
+                        likes: p.like_count || 0,
+                        comments: p.comment_count || 0,
+                        liked: false, bookmarked: false, isOriginalSound: true
+                    };
+                });
+                var loading = document.getElementById('reelsLoading');
+                if (loading) loading.style.display = 'none';
+                renderReel(0);
+                setupReelGestures();
+                return;
+            }
             renderReelsFallback(); return;
         }
+
+        if (error) { renderReelsFallback(); return; }
 
         reelsData = data.map(function(clip) {
             return {
                 id: clip.id,
-                videoUrl: clip.video_url || '',
+                videoUrl: clip.video_url || clip.media_url || '',
                 username: '@' + (clip.users && clip.users.username ? clip.users.username : 'user'),
                 caption: clip.caption || '',
                 sound: clip.sound_name || 'Original Audio',
@@ -11743,7 +13811,11 @@ async function loadReels() {
                 comments: clip.comment_count || 0,
                 liked: false,
                 bookmarked: false,
-                isOriginalSound: !clip.sound_name
+                isOriginalSound: !clip.sound_name,
+                hide_likes: !!clip.hide_likes,
+                hide_shares: !!clip.hide_shares,
+                no_comments: !!clip.no_comments,
+                no_downloads: !!clip.no_downloads
             };
         });
 
@@ -11773,7 +13845,7 @@ function renderReel(index) {
             <!-- Video or placeholder -->
             <div style="width:100%; height:100%; background:linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
                 display:flex; align-items:center; justify-content:center;">
-                <video id="reelVideo" class="reel-video" src="${reel.videoUrl}" loop playsinline muted
+                <video id="reelVideo" class="reel-video" src="${reel.videoUrl}" loop playsinline
                     style="${reel.videoUrl ? '' : 'display:none;'}"></video>
                 ${!reel.videoUrl ? `<span style="color:rgba(255,255,255,0.3); font-size:18px;">Video Preview</span>` : ''}
             </div>
@@ -11794,14 +13866,14 @@ function renderReel(index) {
                     <svg width="28" height="28" viewBox="0 0 24 24" fill="${reel.liked ? '#FF3B30' : 'none'}" stroke="white" stroke-width="2">
                         <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
                     </svg>
-                    <span>${formatCount(reel.likes)}</span>
+                    ${reel.hide_likes ? '' : `<span>${formatCount(reel.likes)}</span>`}
                 </button>
-                <button class="reel-action-btn" onclick="openReelComments('${reel.id}')">
+                ${reel.no_comments ? '' : `<button class="reel-action-btn" onclick="openComments('${reel.id}')">
                     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                     </svg>
                     <span>${formatCount(reel.comments)}</span>
-                </button>
+                </button>`}
                 <button class="reel-action-btn" onclick="openShareMenu('${reel.id}')">
                     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
                         <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
@@ -11830,7 +13902,7 @@ function renderReel(index) {
 
             <!-- Sound bar -->
             <div class="reel-sound-bar">
-                <div class="reel-sound-pill" onclick="openSoundHub('${reel.sound}')">
+                <div class="reel-sound-pill" onclick="openSoundHub('${reel.sound}','${reel.videoUrl}')">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
                         <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
                     </svg>
@@ -11843,6 +13915,17 @@ function renderReel(index) {
             <div class="reel-progress">
                 <div class="reel-progress-fill" id="reelProgressFill"></div>
             </div>
+
+            <!-- Interested / Not interested (shown randomly ~1 in 4 clips) -->
+            ${Math.random() < 0.25 ? `
+            <div id="reelInterestBar" style="position:absolute;bottom:0;left:0;right:0;z-index:5030;display:flex;animation:modalUp 0.3s ease;">
+                <button onclick="reelFeedback('not_interested',${index})" style="flex:1;padding:16px 10px;background:rgba(0,0,0,0.72);backdrop-filter:blur(12px);border:none;border-right:0.5px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.8);font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+                    <i class="fa-solid fa-xmark" style="font-size:13px;"></i> Not interested
+                </button>
+                <button onclick="reelFeedback('interested',${index})" style="flex:1;padding:16px 10px;background:rgba(0,0,0,0.72);backdrop-filter:blur(12px);border:none;color:rgba(255,255,255,0.8);font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+                    <i class="fa-solid fa-check" style="font-size:13px;"></i> Interested
+                </button>
+            </div>` : ''}
         </div>
     `;
 
@@ -11851,9 +13934,23 @@ function renderReel(index) {
     if (video && reel.videoUrl) {
         video.play().catch(() => {});
         updateReelProgress(video);
+        // Record watch history
+        if (window.sb && currentUser && reel.id && !String(reel.id).startsWith('tmp_') && !String(reel.id).startsWith('single_')) {
+            sb.from('watch_history').insert({ user_id: currentUser.id, post_id: reel.id, watched_at: new Date().toISOString() }).then(function(){}).catch(function(){});
+        }
     }
 }
 
+function reelFeedback(type, index) {
+    var bar = document.getElementById('reelInterestBar');
+    if (bar) { bar.style.animation = 'none'; bar.style.opacity = '0'; bar.style.transition = 'opacity 0.2s'; setTimeout(function(){ bar.remove(); }, 200); }
+    if (type === 'not_interested') {
+        showToast('Got it — fewer clips like this');
+        setTimeout(function(){ renderReel(currentReelIndex + 1); }, 300);
+    } else {
+        showToast('Great — more like this coming');
+    }
+}
 function setupReelGestures() {
     const container = document.getElementById('reelsContainer');
     let startY = 0;
@@ -11977,9 +14074,10 @@ function showReelContextMenu() {
 
         /* Top card — primary actions */
         '<div style="background:rgba(255,255,255,0.14);backdrop-filter:blur(50px) saturate(180%);-webkit-backdrop-filter:blur(50px) saturate(180%);border:0.5px solid rgba(255,255,255,0.18);border-radius:22px;overflow:hidden;margin-bottom:10px;box-shadow:0 12px 40px rgba(0,0,0,0.4),0 1px 0 rgba(255,255,255,0.12) inset;">' +
+        ((reelsData[currentReelIndex] && reelsData[currentReelIndex].no_downloads) ? '' :
         '<div onclick="downloadReel();document.getElementById(\'reelLongPressMenu\').remove();" style="display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:0.5px solid rgba(255,255,255,0.08);cursor:pointer;" onmouseover="this.style.background=\'rgba(255,255,255,0.07)\'" onmouseout="this.style.background=\'\'">' +
         '<div style="width:36px;height:36px;border-radius:10px;background:rgba(0,122,255,0.2);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-arrow-down-to-line" style="color:#007AFF;font-size:16px;"></i></div>' +
-        '<span style="font-size:15px;font-weight:600;color:white;">Download</span></div>' +
+        '<span style="font-size:15px;font-weight:600;color:white;">Download</span></div>') +
         '<div onclick="document.getElementById(\'reelLongPressMenu\').remove();showToast(\'You won\\\'t see similar content\');" style="display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:0.5px solid rgba(255,255,255,0.08);cursor:pointer;" onmouseover="this.style.background=\'rgba(255,255,255,0.07)\'" onmouseout="this.style.background=\'\'">' +
         '<div style="width:36px;height:36px;border-radius:10px;background:rgba(255,149,0,0.2);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-eye-slash" style="color:#FF9500;font-size:16px;"></i></div>' +
         '<span style="font-size:15px;font-weight:600;color:white;">Not Interested</span></div>' +
@@ -12087,11 +14185,21 @@ function toggleFullscreen() {
 
 function closeReelsPage() {
     var container = document.getElementById('reelsContainer');
-    if (container) container.remove();
+    if (container) {
+        container.querySelectorAll('video').forEach(function(v){ try { v.pause(); v.src = ''; } catch(e){} });
+        container.remove();
+    }
 
     // Restore nav bar
     var navBar = document.querySelector('.nav-container');
     if (navBar) navBar.style.display = 'flex';
+
+    // Navigate back to where the user came from
+    if (_videoFeedContext === 'profile') {
+        var profileOverlay = document.getElementById('profile-overlay');
+        if (profileOverlay) profileOverlay.style.display = 'block';
+        return;
+    }
 
     // Navigate back to feed
     navHome();
@@ -12102,32 +14210,6 @@ function closeReelsPage() {
         feedPanels.style.display = '';
         feedPanels.scrollTop = 0;
     }
-}
-
-// ============================================
-// DOWNLOAD WITH PROGRESS ANIMATION
-// ============================================
-let activeDownload = null;
-
-function downloadReel() {
-    document.getElementById('reelContextMenu').style.display = 'none';
-    var reel = reelsData[currentReelIndex];
-    if (!reel || !reel.videoUrl) { showToast('Download not available for this clip'); return; }
-
-    fetch(reel.videoUrl)
-        .then(function(res) { return res.blob(); })
-        .then(function(blob) {
-            var url = URL.createObjectURL(blob);
-            var a = document.createElement('a');
-            a.href = url;
-            a.download = 'reel_' + reel.id + '.mp4';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
-            showToast('clip saved to device');
-        })
-        .catch(function() { showToast('Download failed — try again'); });
 }
 
 function showDownloadPill(reelId) {
@@ -12183,11 +14265,11 @@ async function toggleReelLike(reelId) {
     reel.liked = !reel.liked;
     reel.likes += reel.liked ? 1 : -1;
     renderReel(currentReelIndex);
-    if (window.sb && currentUser) {
+    if (window.sb && currentUser && reelId && !String(reelId).startsWith('single_') && !String(reelId).startsWith('tmp_')) {
         if (reel.liked) {
-            await sb.from('likes').insert({ user_id: currentUser.id, post_id: reelId }).catch(function(){});
+            try { await sb.from('likes').insert({ user_id: currentUser.id, post_id: reelId }); } catch(e) {}
         } else {
-            await sb.from('likes').delete().eq('user_id', currentUser.id).eq('post_id', reelId).catch(function(){});
+            try { await sb.from('likes').delete().eq('user_id', currentUser.id).eq('post_id', reelId); } catch(e) {}
         }
     }
 }
@@ -12198,7 +14280,7 @@ async function toggleReelBookmark(reelId) {
     reel.bookmarked = !reel.bookmarked;
     renderReel(currentReelIndex);
     showToast(reel.bookmarked ? 'Saved!' : 'Removed from saved');
-    if (window.sb && currentUser) {
+    if (window.sb && currentUser && reelId && !String(reelId).startsWith('single_') && !String(reelId).startsWith('tmp_')) {
         if (reel.bookmarked) {
             await sb.from('bookmarks').insert({ user_id: currentUser.id, post_id: reelId }).catch(function(){});
         } else {
@@ -12206,14 +14288,6 @@ async function toggleReelBookmark(reelId) {
         }
     }
 }
-
-function formatCount(num) {
-    if (num >= 1000000) return (num/1000000).toFixed(1) + 'M';
-    if (num >= 1000) return (num/1000).toFixed(1) + 'K';
-    return num.toString();
-}
-
-
 
 // ============================================
 // REELS TUTORIAL
@@ -13387,92 +15461,159 @@ function reportReel() {
     openReportMenu('reel_' + currentReelIndex, 'reel');
 }
 function closeSoundHub() { stopSoundPreview&&stopSoundPreview(); var p=document.getElementById('soundHubPage'); if(p)p.remove(); var _rc=document.getElementById('reelsContainer'); if(!_rc) { showNavBar&&showNavBar(); } }
-function openSoundHub(soundName) {
+async function openSoundHub(soundName, fallbackVideoUrl) {
     soundName = soundName || 'Original Audio';
-
     var navBar = document.querySelector('.nav-container');
     if (navBar) navBar.style.display = 'none';
-
     var existing = document.getElementById('soundHubPage');
     if (existing) existing.remove();
 
-var detected = JSON.parse(localStorage.getItem('tf-detected-sounds')||'[]');
-    var sampleTracks = [
-        { name: 'Afro House Beat', artist: '@dj_cpt', plays: '2.1M', id: 'snd1' },
-        { name: 'Amapiano Groove', artist: '@music_sa', plays: '3.8M', id: 'snd2' },
-        { name: 'Sunset Vibes', artist: '@creator_hub', plays: '890K', id: 'snd3' },
-        { name: soundName, artist: 'Original Audio', plays: '156K', id: 'snd4' }
-    ];
-    var track = sampleTracks.find(function(t) { return t.name === soundName; }) || sampleTracks[sampleTracks.length - 1];
-
+    // Build shell immediately so user sees the page
     var page = document.createElement('div');
     page.id = 'soundHubPage';
-    page.style.cssText = 'position:fixed;top:0;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;z-index:7000;background:var(--bg-primary,#fff);overflow-y:auto;-webkit-overflow-scrolling:touch;';
-
-    var videosGrid = '';
-    for (var v = 1; v <= 6; v++) {
-        videosGrid += '<div onclick="closeSoundHub();initReels();" style="aspect-ratio:9/16;border-radius:8px;overflow:hidden;cursor:pointer;background:#111;position:relative;">' +
-            '<div style="width:100%;height:100%;background:linear-gradient(135deg,rgba(29,185,84,0.25),rgba(0,122,255,0.15));display:flex;align-items:center;justify-content:center;"><i class=\"fa-solid fa-music\" style=\"color:rgba(255,255,255,0.4);font-size:24px;\"></i></div>' +
-            '<div style="position:absolute;bottom:6px;left:6px;"><i class="fa-solid fa-play" style="color:white;font-size:12px;text-shadow:0 1px 4px rgba(0,0,0,0.8);"></i></div>' +
-        '</div>';
-    }
-
-    var relatedHTML = '';
-    sampleTracks.filter(function(t) { return t.name !== track.name; }).forEach(function(t) {
-        relatedHTML += '<div onclick="openSoundHub(\'' + escapeHtml(t.name) + '\')" style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border-color,#f5f5f5);cursor:pointer;">' +
-            '<div style="width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,#1a1a2e,#344);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;">🎵</div>' +
-            '<div style="flex:1;"><b style="font-size:14px;color:var(--text-primary,#000);">' + escapeHtml(t.name) + '</b><br><small style="color:#888;">' + escapeHtml(t.artist) + ' · ' + t.plays + '</small></div>' +
-            '<i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>' +
-        '</div>';
-    });
-
+    page.style.cssText = 'position:fixed;top:0;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;z-index:10001;background:var(--bg-primary,#fff);overflow-y:auto;-webkit-overflow-scrolling:touch;';
     page.innerHTML =
-        /* Sticky Header */
         '<div style="position:sticky;top:0;z-index:10;background:var(--bg-primary,#fff);backdrop-filter:blur(20px);padding:50px 16px 16px;border-bottom:1px solid var(--border-color,#f0f0f0);">' +
             '<div style="display:flex;align-items:center;gap:12px;">' +
                 '<div class="liquid-glass-btn" onclick="closeSoundHub()" style="cursor:pointer;"><i class="fa-solid fa-chevron-left"></i></div>' +
                 '<h2 style="font-size:20px;font-weight:800;color:var(--text-primary,#000);flex:1;margin:0;">Sound Hub</h2>' +
             '</div>' +
         '</div>' +
-
-        '<div style="padding:20px 16px;">' +
-
-            /* Track card */
-            '<div style="background:linear-gradient(135deg,rgba(0,122,255,0.08),rgba(88,86,214,0.08));border:1px solid rgba(0,122,255,0.12);border-radius:22px;padding:22px;display:flex;align-items:center;gap:16px;margin-bottom:20px;">' +
-                /* Spinning disc */
-                '<div id="soundDisc" style="width:68px;height:68px;border-radius:50%;background:linear-gradient(135deg,#1a1a2e,#16213e);border:3px solid rgba(0,122,255,0.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:animation 0.3s;">' +
-                    '<div style="width:22px;height:22px;border-radius:50%;background:var(--bg-primary,#fff);"></div>' +
-                '</div>' +
-                '<div style="flex:1;min-width:0;">' +
-                    '<h3 style="font-size:15px;font-weight:700;color:var(--text-primary,#000);margin:0 0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(track.name) + '</h3>' +
-                    '<p style="font-size:13px;color:#888;margin:0 0 12px;">' + escapeHtml(track.artist) + ' · ' + track.plays + ' clips</p>' +
-                    '<div style="display:flex;gap:8px;align-items:center;">' +
-                        /* PLAY PREVIEW BUTTON */
-                        '<button id="soundPlayBtn" onclick="toggleSoundPreview(this)" style="width:48px;height:48px;border-radius:50%;background:rgba(0,122,255,0.12);border:1.5px solid rgba(0,122,255,0.25);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:20px;color:#007AFF;transition:all 0.25s;">' +
-                            '<i class="fa-solid fa-play" style="margin-left:3px;"></i>' +
-                        '</button>' +
-                        '<button onclick="saveSoundToFavorites(\'' + escapeHtml(track.name) + '\')" style="padding:8px 16px;border-radius:20px;border:1px solid var(--border-color,#eee);background:transparent;color:var(--text-primary,#000);font-size:13px;font-weight:600;cursor:pointer;"><i class="fa-regular fa-bookmark"></i> Save</button>' +
-                    '</div>' +
-                '</div>' +
-            '</div>' +
-
-            /* USE AUDIO BUTTON — opens camera */
-            '<button onclick="useAudioAndOpenCamera(\'' + escapeHtml(track.name) + '\')" style="width:100%;padding:16px;border-radius:18px;border:none;background:linear-gradient(135deg,#007AFF,#5856D6);color:white;font-size:16px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:24px;box-shadow:0 4px 20px rgba(0,122,255,0.35);">' +
-                '<i class="fa-solid fa-music"></i> Use This Audio' +
-            '</button>' +
-
-            /* Related */
-            '<h4 style="font-size:12px;font-weight:800;color:#888;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;">Similar Tracks</h4>' +
-            relatedHTML +
-
-            /* Videos grid */
-            '<h4 style="font-size:12px;font-weight:800;color:#888;text-transform:uppercase;letter-spacing:0.06em;margin:20px 0 12px;">Clips using this sound</h4>' +
-            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;border-radius:16px;overflow:hidden;">' + videosGrid + '</div>' +
-
+        '<div id="soundHubBody" style="padding:20px 16px;">' +
+            '<div style="text-align:center;padding:40px 0;"><i class="fa-solid fa-compact-disc fa-spin" style="font-size:32px;color:#007AFF;opacity:0.5;"></i></div>' +
         '</div>';
-
     document.body.appendChild(page);
     soundPreviewPlaying = false;
+    window._soundHubCurrentTrackVideoUrl = null;
+
+    // Fetch real data
+    var clipCount = 0;
+    var firstVideoUrl = null;
+    var firstThumb = null;
+    var uploaderName = 'Original Audio';
+    var clips = [];
+    var similarSounds = [];
+
+    if (window.sb) {
+        try {
+            // Count clips using this exact sound
+            var countRes = await sb.from('trustclips').select('id', { count: 'exact', head: true }).eq('sound_name', soundName);
+            clipCount = countRes.count || 0;
+        } catch(e) {}
+
+        try {
+            // Get up to 6 real clips using this sound (for grid + preview audio)
+            var clipsRes = await sb.from('trustclips')
+                .select('id,video_url,thumbnail_url,user_id')
+                .eq('sound_name', soundName)
+                .limit(6);
+            clips = (clipsRes.data) || [];
+            if (clips.length > 0) {
+                firstVideoUrl = clips[0].video_url || null;
+                firstThumb = clips[0].thumbnail_url || null;
+                // Get uploader name
+                if (clips[0].user_id) {
+                    try {
+                        var profRes = await sb.from('profiles').select('username').eq('id', clips[0].user_id).maybeSingle();
+                        if (profRes.data && profRes.data.username) uploaderName = '@' + profRes.data.username;
+                    } catch(e) {}
+                }
+            }
+        } catch(e) {}
+
+        try {
+            // Get distinct other sound names used by real clips (similar sounds)
+            var simRes = await sb.from('trustclips')
+                .select('sound_name, user_id')
+                .neq('sound_name', soundName)
+                .not('sound_name', 'is', null)
+                .limit(20);
+            if (simRes.data && simRes.data.length) {
+                var seen = {};
+                simRes.data.forEach(function(r) {
+                    if (r.sound_name && !seen[r.sound_name]) {
+                        seen[r.sound_name] = true;
+                        similarSounds.push({ name: r.sound_name, userId: r.user_id });
+                    }
+                });
+                similarSounds = similarSounds.slice(0, 5);
+                // Fetch usernames for similar sounds
+                var uids = similarSounds.map(function(s){ return s.userId; }).filter(Boolean);
+                if (uids.length) {
+                    try {
+                        var uRes = await sb.from('profiles').select('id,username').in('id', uids);
+                        var uMap = {};
+                        (uRes.data||[]).forEach(function(u){ uMap[u.id] = u.username; });
+                        similarSounds.forEach(function(s){ s.artist = s.userId && uMap[s.userId] ? '@'+uMap[s.userId] : 'Original Audio'; });
+                    } catch(e) {}
+                }
+            }
+        } catch(e) {}
+    }
+
+    window._soundHubCurrentTrackVideoUrl = firstVideoUrl || null;
+    window._soundHubFallbackAudioUrl = fallbackVideoUrl || null;
+
+    var countLabel = clipCount > 0 ? clipCount.toLocaleString() + ' clip' + (clipCount !== 1 ? 's' : '') : 'No clips yet';
+
+    // Build similar tracks HTML
+    var relatedHTML = '';
+    if (similarSounds.length > 0) {
+        similarSounds.forEach(function(t) {
+            relatedHTML += '<div onclick="openSoundHub(\'' + escapeHtml(t.name) + '\')" style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border-color,#f5f5f5);cursor:pointer;">' +
+                '<div style="width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,#1a1a2e,#344);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;">🎵</div>' +
+                '<div style="flex:1;min-width:0;"><b style="font-size:14px;color:var(--text-primary,#000);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;">' + escapeHtml(t.name) + '</b><small style="color:#888;">' + escapeHtml(t.artist || 'Original Audio') + '</small></div>' +
+                '<i class="fa-solid fa-chevron-right" style="color:#ccc;flex-shrink:0;"></i>' +
+            '</div>';
+        });
+    } else {
+        relatedHTML = '<div style="text-align:center;padding:20px 0;color:#aaa;font-size:13px;"><i class="fa-solid fa-music" style="display:block;font-size:24px;margin-bottom:8px;opacity:0.3;"></i>No similar sounds yet</div>';
+    }
+
+    // Build clips grid HTML
+    var videosGrid = '';
+    if (clips.length > 0) {
+        clips.forEach(function(c) {
+            videosGrid += '<div onclick="closeSoundHub();openContextualVideo(\'' + escapeHtml(c.id) + '\');" style="aspect-ratio:9/16;border-radius:8px;overflow:hidden;cursor:pointer;background:#111;position:relative;">' +
+                (c.thumbnail_url
+                    ? '<img src="' + escapeHtml(c.thumbnail_url) + '" style="width:100%;height:100%;object-fit:cover;">'
+                    : '<div style="width:100%;height:100%;background:linear-gradient(135deg,rgba(29,185,84,0.25),rgba(0,122,255,0.15));display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-music" style="color:rgba(255,255,255,0.4);font-size:24px;"></i></div>') +
+                '<div style="position:absolute;bottom:6px;left:6px;"><i class="fa-solid fa-play" style="color:white;font-size:12px;text-shadow:0 1px 4px rgba(0,0,0,0.8);"></i></div>' +
+            '</div>';
+        });
+    } else {
+        videosGrid = '<div style="grid-column:1/-1;text-align:center;padding:30px 0;color:#aaa;font-size:13px;"><i class="fa-solid fa-video" style="display:block;font-size:28px;margin-bottom:8px;opacity:0.25;"></i>No clips using this sound yet</div>';
+    }
+
+    var body = document.getElementById('soundHubBody');
+    if (!body) return;
+    body.innerHTML =
+        /* Track card */
+        '<div style="background:linear-gradient(135deg,rgba(0,122,255,0.08),rgba(88,86,214,0.08));border:1px solid rgba(0,122,255,0.12);border-radius:22px;padding:22px;display:flex;align-items:center;gap:16px;margin-bottom:20px;">' +
+            '<div id="soundDisc" style="width:68px;height:68px;border-radius:50%;background:linear-gradient(135deg,#1a1a2e,#16213e);border:3px solid rgba(0,122,255,0.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+                '<div style="width:22px;height:22px;border-radius:50%;background:var(--bg-primary,#fff);"></div>' +
+            '</div>' +
+            '<div style="flex:1;min-width:0;">' +
+                '<h3 style="font-size:15px;font-weight:700;color:var(--text-primary,#000);margin:0 0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(soundName) + '</h3>' +
+                '<p style="font-size:13px;color:#888;margin:0 0 12px;">' + escapeHtml(uploaderName) + ' · ' + countLabel + '</p>' +
+                '<div style="display:flex;gap:8px;align-items:center;">' +
+                    '<button id="soundPlayBtn" onclick="toggleSoundPreview(this)" ' + (!(firstVideoUrl || fallbackVideoUrl) ? 'disabled style="opacity:0.4;cursor:not-allowed;' : 'style="') + 'width:48px;height:48px;border-radius:50%;background:rgba(0,122,255,0.12);border:1.5px solid rgba(0,122,255,0.25);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:20px;color:#007AFF;transition:all 0.25s;">' +
+                        '<i class="fa-solid fa-play" style="margin-left:3px;"></i>' +
+                    '</button>' +
+                    '<button onclick="saveSoundToFavorites(\'' + escapeHtml(soundName) + '\')" style="padding:8px 16px;border-radius:20px;border:1px solid var(--border-color,#eee);background:transparent;color:var(--text-primary,#000);font-size:13px;font-weight:600;cursor:pointer;"><i class="fa-regular fa-bookmark"></i> Save</button>' +
+                '</div>' +
+            '</div>' +
+        '</div>' +
+
+        '<button onclick="useAudioAndOpenCamera(\'' + escapeHtml(soundName) + '\')" style="width:100%;padding:16px;border-radius:18px;border:none;background:linear-gradient(135deg,#007AFF,#5856D6);color:white;font-size:16px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:24px;box-shadow:0 4px 20px rgba(0,122,255,0.35);">' +
+            '<i class="fa-solid fa-music"></i> Use This Audio' +
+        '</button>' +
+
+        '<h4 style="font-size:12px;font-weight:800;color:#888;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;">Similar Tracks</h4>' +
+        relatedHTML +
+
+        '<h4 style="font-size:12px;font-weight:800;color:#888;text-transform:uppercase;letter-spacing:0.06em;margin:20px 0 12px;">Clips using this sound</h4>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;border-radius:16px;overflow:hidden;">' + videosGrid + '</div>';
 }
 
 function closeSoundHub() {
@@ -13500,6 +15641,30 @@ function toggleSoundPreview(btn) {
         if (disc) disc.style.animation = 'none';
         return;
     }
+    // Play actual video audio if we have a real video URL
+    var videoUrl = window._soundHubCurrentTrackVideoUrl || window._soundHubFallbackAudioUrl;
+    if (videoUrl) {
+        if (!_musicAudio) _musicAudio = new Audio();
+        _musicAudio.src = videoUrl;
+        _musicAudio.currentTime = 0;
+        _musicAudio.volume = 1;
+        _musicAudio.play().catch(function(){ showToast('Could not play preview'); return; });
+        soundPreviewPlaying = true;
+        btn.innerHTML = '<i class="fa-solid fa-stop"></i>';
+        btn.style.background = 'rgba(0,122,255,0.25)';
+        btn.style.boxShadow = '0 0 0 6px rgba(0,122,255,0.1)';
+        var disc = document.getElementById('soundDisc');
+        if (disc) disc.style.animation = 'spinRepost 3s linear infinite';
+        _musicAudio.onended = function() {
+            soundPreviewPlaying = false;
+            if (btn) { btn.innerHTML = '<i class="fa-solid fa-play" style="margin-left:3px;"></i>'; btn.style.background = 'rgba(0,122,255,0.12)'; btn.style.boxShadow = 'none'; }
+            var d = document.getElementById('soundDisc'); if (d) d.style.animation = 'none';
+        };
+        return;
+    }
+    // No real audio available — disable play silently
+    showToast('No preview available for this sound');
+    return;
     try {
         soundPreviewCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
 // Route audio through speaker, not earpiece
@@ -13547,9 +15712,11 @@ if (soundPreviewCtx.destination && navigator.mediaDevices) {
 }
 
 function stopSoundPreview() {
-    if (soundPreviewOsc) { try { soundPreviewOsc.stop(); } catch(e) { if (e) console.warn('[Suppressed error]', e); } soundPreviewOsc = null; }
-    if (soundPreviewCtx) { try { soundPreviewCtx.close(); } catch(e) { if (e) console.warn('[Suppressed error]', e); } soundPreviewCtx = null; }
+    if (_musicAudio) { try { _musicAudio.pause(); _musicAudio.onended = null; } catch(e){} }
+    if (soundPreviewOsc) { try { soundPreviewOsc.stop(); } catch(e){} soundPreviewOsc = null; }
+    if (soundPreviewCtx) { try { soundPreviewCtx.close(); } catch(e){} soundPreviewCtx = null; }
     soundPreviewPlaying = false;
+    var disc = document.getElementById('soundDisc'); if (disc) disc.style.animation = 'none';
 }
 
 async function saveSoundToFavorites(name) {
@@ -13746,7 +15913,7 @@ function showDeleteAccount() {
     var overlay = document.createElement('div');
     overlay.id = 'deleteAccountOverlay';
     overlay.style.cssText =
-        'position:fixed; top:0; left:0; right:0; bottom:0; z-index:10000;' +
+        'position:absolute; top:0; left:0; right:0; bottom:0; z-index:10000;' +
         'background:var(--bg-primary,#fff); overflow-y:auto;';
 
     overlay.innerHTML =
@@ -14076,6 +16243,14 @@ function changeProfilePicture() {
             return;
         }
 
+        // Optimistic update — reflect the picked image immediately so the avatar
+        // visibly changes right away, independent of the upload result.
+        try {
+            var _previewReader = new FileReader();
+            _previewReader.onload = function(ev){ try { updateAvatarsOnPage(ev.target.result); } catch(_e){} };
+            _previewReader.readAsDataURL(file);
+        } catch(_e){}
+
         showToast('Updating profile picture...');
 
         try {
@@ -14104,18 +16279,17 @@ function changeProfilePicture() {
                 var urlResult = sb.storage.from('avatars').getPublicUrl(fileName);
                 var publicUrl = urlResult.data.publicUrl;
 
-                // Update user profile
-                await sb.from('users').update({
-                    avatar_url: publicUrl,
-                    updated_at: new Date().toISOString()
-                }).eq('id', currentUser.id);
+                // Update both users and profiles tables
+                var ts = new Date().toISOString();
+                await Promise.all([
+                    sb.from('users').update({ avatar_url: publicUrl, updated_at: ts }).eq('id', currentUser.id),
+                    sb.from('profiles').update({ avatar_url: publicUrl, updated_at: ts }).eq('id', currentUser.id)
+                ]);
 
-                setGlobalAvatar(publicUrl);
+                if (currentUser) currentUser.avatar_url = publicUrl;
                 secureSave('current_user', currentUser);
-
-                // Update all avatar images on page
                 updateAvatarsOnPage(publicUrl);
-                showToast('Profile picture updated! ✨');
+                showToast('Profile picture updated');
 
             } else {
                 saveAvatarLocally(compressed);
@@ -14209,11 +16383,7 @@ function updateAvatarsOnPage(newUrl) {
         if (statusIcon) statusIcon.style.display = 'none';
     }
 
-    // 6. Nav profile button — swap font icon for avatar img
-    var navAccount = document.getElementById('nav-account');
-    if (navAccount) {
-        navAccount.innerHTML = '<img src="' + newUrl + '" style="width:26px;height:26px;border-radius:50%;object-fit:cover;border:2px solid #007AFF;">';
-    }
+
 
     // 7. Chat list avatars (dynamically rendered rows)
     document.querySelectorAll('.chat-item-avatar, .msg-avatar, [data-my-avatar]').forEach(function(el) {
@@ -14381,7 +16551,8 @@ async function submitReportProblem() {
     if (!window.DeviceMotionEvent) return;
     var lastShake = 0;
     var threshold = 18;
-    window.addEventListener('devicemotion', function(e) {
+    function _attachShake() {
+        window.addEventListener('devicemotion', function(e) {
         var shakeEnabled = localStorage.getItem('tf-shake-report') !== '0';
         if (!shakeEnabled) return;
         var a = e.accelerationIncludingGravity;
@@ -14397,9 +16568,19 @@ async function submitReportProblem() {
             var existing = document.getElementById('reportProblemOverlay');
             if (existing && existing.style.display !== 'none') return;
             openReportProblem();
-            rpGoToScreen(2); // go straight to logs step on shake
+            rpGoToScreen(2);
         }
     });
+    }
+    if (typeof DeviceMotionEvent.requestPermission === 'function') {
+        // iOS 13+ requires user gesture to get motion permission
+        document.addEventListener('click', function _askMotion() {
+            document.removeEventListener('click', _askMotion);
+            DeviceMotionEvent.requestPermission().then(function(s){ if(s==='granted') _attachShake(); }).catch(function(){});
+        }, { once: true });
+    } else {
+        _attachShake();
+    }
 })();
 
 // ============================================================
@@ -15240,7 +17421,7 @@ async function renderAnalyticsTab(tab) {
     if (window.sb && currentUser && currentUser.id) {
         try {
             var [lRes, cRes, fRes, pRes] = await Promise.all([
-                sb.from('likes').select('id', { count: 'exact', head: true }).eq('post_id', 'any'),
+                sb.from('posts').select('id', { count: 'exact', head: true }).eq('user_id', currentUser.id).eq('status','published'),
                 sb.from('comments').select('id', { count: 'exact', head: true }),
                 sb.from('follows').select('id', { count: 'exact', head: true }).eq('following_id', currentUser.id),
                 sb.from('posts').select('id,text_content,like_count,comment_count,created_at,media_url').eq('user_id', currentUser.id).eq('status','published').order('like_count', { ascending: false }).limit(5)
@@ -16171,7 +18352,7 @@ function linkParentAccount() {
     // Check if parent exists and is verified
     if (window.sb) {
         sb.from('users')
-            .select('id, username, name, verified, account_type')
+            .select('id, username, full_name, name, verified, account_type, badge_tier')
             .eq('username', parentId.trim().toLowerCase().replace('@',''))
             .maybeSingle()
             .then(function(result) {
@@ -16180,7 +18361,7 @@ function linkParentAccount() {
                     return;
                 }
                 if (!result.data.verified) {
-                    showToast('Parent must be verified (blue badge) first');
+                    showToast('Parent must be verified before linking a Kids account');
                     return;
                 }
                 if (result.data.account_type === 'child') {
@@ -16192,12 +18373,20 @@ function linkParentAccount() {
                 secureSave('parent_link_request', {
                     parent_id: result.data.id,
                     parent_username: result.data.username,
-                    parent_name: result.data.name,
+                    parent_name: result.data.full_name || result.data.name || result.data.username,
+                    parent_badge: result.data.badge_tier,
                     status: 'pending',
                     timestamp: Date.now()
                 });
 
-                showToast('Link request sent to ' + result.data.name + '! They must approve.');
+                showToast('Link request sent. Your parent can approve it in Family Center.');
+                sb.from('notifications').insert({
+                    user_id: result.data.id,
+                    type: 'child_link_request',
+                    message: 'A child account wants to link to you in Family Center',
+                    preview_text: 'Open Family Center to approve',
+                    read: false
+                }).then(function(){}).catch(function(){});
                 setTimeout(function() {
                     completeRegistration(false);
                 }, 2000);
@@ -16882,7 +19071,7 @@ var userId = session.user.id;
         followIds.push(userId);
 
         var { data, error } = await client.from('posts')
-            .select('*, users:user_id (id, full_name, username, avatar_url, badge_tier, verified), quoted_post:quoted_post_id (id, text_content, media_url, users:user_id (full_name, username, avatar_url))')
+            .select('*, users:user_id (id, full_name, username, avatar_url, badge_tier, verified), collab_user:collab_user_id (id, full_name, username, avatar_url, badge_tier, verified), quoted_post:quoted_post_id (id, text_content, media_url, thumbnail_url, post_type, media_type, users:user_id (full_name, username, avatar_url))')
             .in('user_id', followIds)
             .eq('is_hidden', false)
             .order('created_at', { ascending: false })
@@ -16899,11 +19088,19 @@ var userId = session.user.id;
         var bmRes = await client.from('bookmarks').select('post_id').eq('user_id', userId).in('post_id', postIds);
         var bookmarkedIds = (bmRes.data || []).map(function(b) { return b.post_id; });
 
-        return (data || []).map(function(p) {
+        var result = (data || []).map(function(p) {
             p._liked = likedIds.indexOf(p.id) > -1;
             p._bookmarked = bookmarkedIds.indexOf(p.id) > -1;
             return p;
         });
+        // Kids-feed separation: child accounts only see content from approved
+        // kids-content creators (white badge) — adult content never reaches the kids feed.
+        if (typeof isChildAccount === 'function' && isChildAccount()) {
+            result = result.filter(function(p) {
+                return p.users && p.users.badge_tier === 'verify-white';
+            });
+        }
+        return result;
     },
 
     async getDiscoverFeed(page, limit) {
@@ -17170,17 +19367,23 @@ function renderRealPostCard(post) {
         }
     }
 
+    var collabUser = post.collab_user || null;
+    var collabBadge = collabUser && collabUser.badge_tier ? collabUser.badge_tier : 'verify-blue';
+    var hasCollab = !!(collabUser && collabUser.username);
     card.innerHTML =
         '<div class="post-header">' +
             '<img src="' + escapeHtml(avatarUrl) + '" class="post-avatar" onclick="viewUserProfile(\'' + (user.id || post.user_id) + '\')" style="cursor:pointer;">' +
             '<div style="flex:1;min-width:0;">' +
-                '<div class="post-info"><b style="display:flex;align-items:center;gap:4px;">' +
+                '<div class="post-info"><b style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">' +
                     '<span class="clickable-user" onclick="viewUserProfile(\'' + (user.id || post.user_id) + '\')">' + escapeHtml(displayName) + '</span>' +
                     (user.verified ? '<i class="fa-solid fa-circle-check ' + badgeClass + '" style="font-size:12px;"></i>' : '') +
+                    (hasCollab ? '<span style="font-weight:400;color:var(--text-primary,#000);font-size:14px;">and</span>' +
+                        '<span class="clickable-user" onclick="viewUserProfile(\'' + escapeHtml(collabUser.id || '') + '\')" style="font-weight:700;">' + escapeHtml(collabUser.username || '') + '</span>' +
+                        (collabUser.verified ? '<i class="fa-solid fa-circle-check ' + collabBadge + '" style="font-size:12px;"></i>' : '') : '') +
                 '</b></div>' +
                 '<div class="post-info"><small>' + escapeHtml(handle) + ' · ' + timeAgo + '</small></div>' +
             '</div>' +
-            (!isOwnPost ? '<button class="feed-follow-btn' + (isFollowing ? ' following' : '') + '" onclick="realToggleFollow(this,\'' + (user.id || post.user_id) + '\')" style="flex-shrink:0;">' + (isFollowing ? 'Following' : 'Follow') + '</button>' : '') +
+            (!isOwnPost ? '<button class="feed-follow-btn' + (isFollowing ? ' following' : '') + '" onclick="' + (hasCollab ? 'openCollaboratorsModal(event,\'' + escapeHtml(post.id) + '\',\'' + escapeHtml(user.id || post.user_id) + '\',\'' + escapeHtml(collabUser && collabUser.id ? collabUser.id : '') + '\')' : 'realToggleFollow(this,\'' + (user.id || post.user_id) + '\')') + '" style="flex-shrink:0;">' + (isFollowing ? 'Following' : 'Follow') + '</button>' : '') +
             '<i class="fa-solid fa-ellipsis" style="margin-left:8px;padding:5px;cursor:pointer;flex-shrink:0;" onclick="openPostMenu(\'' + post.id + '\',\'' + (user.id || post.user_id) + '\')"></i>' +
         '</div>' +
         (function() {
@@ -17207,7 +19410,9 @@ function renderRealPostCard(post) {
             }
             return txt ? '<div class="post-content">' + (typeof formatPostText === 'function' ? formatPostText(txt) : escapeHtml(txt).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#007AFF;text-decoration:underline;">$1</a>')) + '</div>' : '';
         })() +
-        (post.media_url ? '<div class="post-media-box"><img src="' + escapeHtml(post.media_url) + '" class="post-img" loading="lazy" onerror="this.closest(\'.post-media-box\').style.display=\'none\'"></div>' : '') +
+        (post.media_url ? '<div class="post-media-box">' + ((post.media_type === 'video' || post.post_type === 'video') ?
+    '<video src="' + escapeHtml(post.media_url) + '" controls playsinline preload="metadata" style="width:100%;max-height:480px;border-radius:12px;object-fit:contain;background:#000;display:block;"></video>' :
+    '<img src="' + escapeHtml(post.media_url) + '" class="post-img" loading="lazy" style="object-fit:contain;max-height:480px;" onerror="this.closest(\'.post-media-box\').style.display=\'none\'">') + '</div>' : '') +
         interactiveHTML +
         '<div class="post-icons">' +
             '<div onclick="realToggleLike(this,\'' + post.id + '\')" data-liked="' + (post._liked ? 'true' : 'false') + '">' +
@@ -17250,6 +19455,70 @@ function renderRealPostCard(post) {
     return card;
 }
 
+function openCollaboratorsModal(event, postId, mainUserId, collabUserId) {
+    if (event && event.stopPropagation) event.stopPropagation();
+    var existing = document.getElementById('collaboratorsModal');
+    if (existing) { existing.remove(); return; }
+    var modal = document.createElement('div');
+    modal.id = 'collaboratorsModal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:30000;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,0.4);animation:fadeIn 0.2s ease;';
+    modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+
+    var followedUsers = JSON.parse(localStorage.getItem('tf-followed-users') || '[]');
+    var isFollowingMain = followedUsers.indexOf(mainUserId) > -1;
+    var isFollowingCollab = followedUsers.indexOf(collabUserId) > -1;
+
+    // Fetch both users' display data from current post cards
+    var mainCard = document.querySelector('[data-post-id="' + postId + '"]');
+    var mainAvatar = '', mainName = '', mainUsername = '', mainVerified = false;
+    var collabAvatar = '', collabName = '', collabUsername = '', collabVerified = false;
+    if (mainCard) {
+        var mainImg = mainCard.querySelector('.post-avatar');
+        if (mainImg) mainAvatar = mainImg.src;
+        var names = mainCard.querySelectorAll('.clickable-user');
+        if (names[0]) mainUsername = names[0].textContent.trim();
+        if (names[1]) collabUsername = names[1].textContent.trim();
+    }
+
+    function makeRow(avatar, name, username, userId, verified, isFollowing) {
+        var initials = (username || name || 'U').charAt(0).toUpperCase();
+        var avatarHtml = avatar
+            ? '<img src="' + escapeHtml(avatar) + '" style="width:52px;height:52px;border-radius:50%;object-fit:cover;flex-shrink:0;">'
+            : '<div style="width:52px;height:52px;border-radius:50%;background:#007AFF;display:flex;align-items:center;justify-content:center;color:white;font-size:20px;font-weight:700;flex-shrink:0;">' + escapeHtml(initials) + '</div>';
+        return '<div style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:0.5px solid var(--border-color,#f0f0f0);">' +
+            avatarHtml +
+            '<div style="flex:1;min-width:0;">' +
+                '<div style="display:flex;align-items:center;gap:5px;">' +
+                    '<b style="font-size:15px;color:var(--text-primary,#000);">' + escapeHtml(username || name || 'User') + '</b>' +
+                    (verified ? '<i class="fa-solid fa-circle-check verify-blue" style="font-size:13px;"></i>' : '') +
+                '</div>' +
+                (name && name !== username ? '<div style="font-size:13px;color:#888;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(name) + '</div>' : '') +
+            '</div>' +
+            '<button onclick="(function(btn,uid,wasFollowing){' +
+                'var f=JSON.parse(localStorage.getItem(\'tf-followed-users\')||\'[]\');' +
+                'if(wasFollowing){f=f.filter(function(i){return i!==uid;});btn.textContent=\'Follow\';btn.style.background=\'#007AFF\';btn.style.color=\'white\';}' +
+                'else{if(f.indexOf(uid)===-1)f.push(uid);btn.textContent=\'Following\';btn.style.background=\'rgba(0,0,0,0.06)\';btn.style.color=\'var(--text-primary,#000)\';}' +
+                'localStorage.setItem(\'tf-followed-users\',JSON.stringify(f));' +
+                'if(window.sb&&window.currentUser){sb.from(wasFollowing?\'follows\':\'follows\')[wasFollowing?\'delete\':\'insert\'](wasFollowing?undefined:{follower_id:currentUser.id,following_id:uid}).eq(wasFollowing?\'follower_id\':\'id\',wasFollowing?currentUser.id:undefined).then(function(){});}' +
+                '})(this,\'' + escapeHtml(userId) + '\',' + (isFollowing ? 'true' : 'false') + ')" ' +
+                'style="padding:8px 18px;border-radius:22px;border:none;font-size:14px;font-weight:700;cursor:pointer;flex-shrink:0;background:' + (isFollowing ? 'rgba(0,0,0,0.06);color:var(--text-primary,#000)' : '#007AFF;color:white') + ';">' +
+                (isFollowing ? 'Following' : 'Follow') +
+            '</button>' +
+        '</div>';
+    }
+
+    modal.innerHTML =
+        '<div style="background:var(--bg-primary,#fff);border-radius:24px 24px 0 0;width:100%;max-width:480px;padding:0 20px 32px;">' +
+            '<div style="display:flex;justify-content:center;padding:12px 0 8px;">' +
+                '<div style="width:36px;height:4px;background:rgba(0,0,0,0.15);border-radius:2px;"></div>' +
+            '</div>' +
+            '<h3 style="text-align:center;font-size:18px;font-weight:800;color:var(--text-primary,#000);margin:0 0 16px;">Collaborators</h3>' +
+            makeRow(mainAvatar, mainName, mainUsername, mainUserId, mainVerified, isFollowingMain) +
+            (collabUserId ? makeRow(collabAvatar, collabName, collabUsername, collabUserId, collabVerified, isFollowingCollab) : '') +
+        '</div>';
+    document.body.appendChild(modal);
+}
+
 function openPostThoughtViewer(el, postId) {
     // Parse music name from the sticker label inside the clicked element
     var nameEl = el.querySelector('b');
@@ -17267,6 +19536,8 @@ function openPostThoughtViewer(el, postId) {
 function formatPostText(text) {
     if (!text) return '';
     var safe = escapeHtml(text);
+    // Linkify URLs first (before hashtag/mention so they don't double-process)
+    safe = safe.replace(/(https?:\/\/[^\s&lt;&quot;]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#007AFF;text-decoration:underline;word-break:break-all;">$1</a>');
     safe = safe.replace(/#(\w+)/g, '<span onclick="searchHashtag(\'$1\')" style="color:#007AFF;font-weight:600;cursor:pointer;">#$1</span>');
     safe = safe.replace(/@(\w+)/g, '<span onclick="viewUserByUsername(\'$1\')" style="color:#007AFF;font-weight:600;cursor:pointer;">@$1</span>');
     return safe;
@@ -17501,9 +19772,7 @@ initFeed = async function() {
     var feed = document.getElementById('feed-panels');
     if (!feed) return;
 
-    feed.innerHTML = '<div style="text-align:center;padding:60px 20px;">' +
-        '<i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:24px;"></i>' +
-        '<p style="color:#aaa;margin-top:10px;font-size:13px;">Loading feed...</p></div>';
+    showSkeleton(feed, 'post', 4);
 
 // Show cached posts immediately while Supabase loads
 var cacheEntry = null;
@@ -17554,7 +19823,7 @@ function buildLocalChildFeed() {
     // Safe placeholder posts for offline/fallback
     return [{
         id: 'safe_1',
-        text_content: 'Welcome to TrustFirst Kids! This is a safe space. 🌟',
+        text_content: 'Welcome to TrustFirst Kids',
         post_type: 'text',
         created_at: new Date().toISOString(),
         like_count: 12, comment_count: 3, repost_count: 0,
@@ -17611,11 +19880,12 @@ if (posts.length) localStorage.setItem('tf-cached-feed', JSON.stringify({ ts: Da
     }
     if (posts.length === 0) return;
 
-    posts.forEach(function(post) {
+    posts.filter(function(post) { return !isTrustClipPost(post); }).forEach(function(post) {
         feed.appendChild(renderRealPostCard(post));
     });
 
-    fillProfileGrid();
+    var _pg3 = document.getElementById('profile-grid');
+    if (_pg3 && typeof loadProfilePosts === 'function') loadProfilePosts(_pg3);
     renderParentRequests();
     loadFeedStories();
 };
@@ -17629,29 +19899,97 @@ async function loadFeedStories() {
         ? currentUser.avatar_url
         : 'https://ui-avatars.com/api/?name=' + encodeURIComponent((currentUser && currentUser.username) || 'U') + '&background=007AFF&color=fff&size=100';
 
-    bar.innerHTML = '<div class="story-item" onclick="openStoryPicker()">' +
-        '<div style="width:68px;height:68px;border-radius:50%;padding:3px;background:rgba(0,0,0,0.08);position:relative;display:flex;align-items:center;justify-content:center;">' +
+    // Check if current user has an active story (within 24h)
+    var myStoryClick = 'openStoryPicker()';
+    var myRingStyle = 'background:rgba(0,0,0,0.08)';
+    if (window.sb && currentUser) {
+        try {
+            var since24h = new Date(Date.now() - 86400000).toISOString();
+            var { data: myStories } = await sb.from('stories')
+                .select('id').eq('user_id', currentUser.id).gte('created_at', since24h).limit(1);
+            if (myStories && myStories.length > 0) {
+                myStoryClick = 'openStoryViewer(\'' + currentUser.id + '\')';
+                myRingStyle = 'background:linear-gradient(135deg,#007AFF,#5856D6);padding:3px';
+            }
+        } catch(e) {}
+    }
+
+    bar.innerHTML = '<div class="story-item" onclick="' + myStoryClick + '">' +
+        '<div style="width:68px;height:68px;border-radius:50%;padding:3px;' + myRingStyle + ';position:relative;display:flex;align-items:center;justify-content:center;">' +
         '<img src="' + myAvatar + '" class="story-pic" style="width:62px;height:62px;">' +
-        '<div style="position:absolute;bottom:0;right:0;width:22px;height:22px;border-radius:50%;background:#007AFF;border:2px solid white;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-plus" style="color:white;font-size:10px;"></i></div>' +
+        (myStoryClick === 'openStoryPicker()' ? '<div style="position:absolute;bottom:0;right:0;width:22px;height:22px;border-radius:50%;background:#007AFF;border:2px solid white;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-plus" style="color:white;font-size:10px;"></i></div>' : '') +
         '</div><small style="font-size:11px;">Your Story</small></div>';
 
     if (!window.sb || !currentUser) return;
     try {
         var since = new Date(Date.now() - 86400000).toISOString();
-        var { data } = await sb
-            .from('stories')
-            .select('user_id, users:user_id(id, full_name, username, avatar_url)')
+
+        // 1. Get list of users who have hidden their stories FROM me
+        var hiddenFromMe = [];
+        try {
+            var { data: hideRows } = await sb.from('hide_story_from')
+                .select('owner_id').eq('hidden_user_id', currentUser.id);
+            hiddenFromMe = (hideRows || []).map(function(r){ return r.owner_id; });
+        } catch(e2) {}
+
+        // 2. Fetch all stories in last 24h (need id for viewed tracking)
+        var { data } = await sb.from('stories')
+            .select('id, user_id, users:user_id(id, full_name, username, avatar_url)')
             .gte('created_at', since)
             .neq('user_id', currentUser.id)
-            .limit(15);
+            .limit(100);
 
+        // 3. Fetch which story IDs this user has already viewed
+        var viewedSet = {};
+        if (data && data.length > 0) {
+            var allIds = data.map(function(s){ return s.id; });
+            try {
+                var { data: viewRows } = await sb.from('story_views')
+                    .select('story_id').eq('viewer_id', currentUser.id)
+                    .in('story_id', allIds);
+                (viewRows || []).forEach(function(v){ viewedSet[v.story_id] = true; });
+            } catch(e3) {}
+        }
+
+        // 4. Group stories by user, skip hidden users
+        var userMap = {}, userOrder = [];
         (data || []).forEach(function(s) {
             var u = s.users || {};
+            if (!u.id) return;
+            if (hiddenFromMe.indexOf(u.id) !== -1) return;
+            if (!userMap[u.id]) { userMap[u.id] = { user: u, stories: [] }; userOrder.push(u.id); }
+            userMap[u.id].stories.push({ id: s.id, viewed: !!viewedSet[s.id] });
+        });
+
+        // 5. Render each user with a segmented SVG ring
+        userOrder.forEach(function(uid) {
+            var entry = userMap[uid];
+            var u = entry.user;
+            var stories = entry.stories;
+            var total = stories.length;
             var name = u.full_name || u.username || 'User';
             var avatar = u.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(name.charAt(0)) + '&background=007AFF&color=fff&size=100';
-            bar.innerHTML += '<div class="story-item" onclick="openStoryViewer(\'' + escapeHtml(u.id || '') + '\')">' +
-                '<div class="ring-blue"><img src="' + escapeHtml(avatar) + '" class="story-pic" onerror="this.src=\'https://ui-avatars.com/api/?name=' + encodeURIComponent(name.charAt(0)) + '&background=007AFF&color=fff&size=100\'"></div>' +
-                '<small style="font-size:11px;">' + escapeHtml(name.split(' ')[0]) + '</small></div>';
+            var size = 68, cx = 34, cy = 34, outerR = 32, innerR = 28;
+            var gapDeg = total > 1 ? 5 : 0;
+            var svgPaths = '';
+            for (var i = 0; i < total; i++) {
+                var sDeg = (i / total) * 360 - 90 + gapDeg / 2;
+                var eDeg = ((i + 1) / total) * 360 - 90 - gapDeg / 2;
+                var sRad = sDeg * Math.PI / 180, eRad = eDeg * Math.PI / 180;
+                var x1 = cx + outerR * Math.cos(sRad), y1 = cy + outerR * Math.sin(sRad);
+                var x2 = cx + outerR * Math.cos(eRad), y2 = cy + outerR * Math.sin(eRad);
+                var x3 = cx + innerR * Math.cos(eRad), y3 = cy + innerR * Math.sin(eRad);
+                var x4 = cx + innerR * Math.cos(sRad), y4 = cy + innerR * Math.sin(sRad);
+                var lg = (eDeg - sDeg) > 180 ? 1 : 0;
+                var color = stories[i].viewed ? '#C7C7CC' : '#007AFF';
+                svgPaths += '<path d="M'+x1.toFixed(2)+' '+y1.toFixed(2)+' A'+outerR+' '+outerR+' 0 '+lg+' 1 '+x2.toFixed(2)+' '+y2.toFixed(2)+' L'+x3.toFixed(2)+' '+y3.toFixed(2)+' A'+innerR+' '+innerR+' 0 '+lg+' 0 '+x4.toFixed(2)+' '+y4.toFixed(2)+' Z" fill="'+color+'"/>';
+            }
+            var svgRing = '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'" style="position:absolute;top:0;left:0;pointer-events:none;">'+svgPaths+'</svg>';
+            bar.innerHTML += '<div class="story-item" onclick="openStoryViewer(\'' + escapeHtml(u.id) + '\')">' +
+                '<div style="position:relative;width:68px;height:68px;flex-shrink:0;">' + svgRing +
+                '<img src="' + escapeHtml(avatar) + '" class="story-pic" style="position:absolute;top:5px;left:5px;width:58px;height:58px;border-radius:50%;object-fit:cover;" ' +
+                'onerror="this.src=\'https://ui-avatars.com/api/?name='+encodeURIComponent(name.charAt(0))+'&background=007AFF&color=fff&size=100\'">' +
+                '</div><small style="font-size:11px;">' + escapeHtml(name.split(' ')[0]) + '</small></div>';
         });
     } catch(e) { console.warn('[FeedStories]', e); }
 }
@@ -18019,14 +20357,49 @@ async function realReportPost(postId) {
 // ==========================================================================
 // VIEW OTHER USER'S PROFILE
 // ==========================================================================
+window.openProfile = function(userId) { viewUserProfile(userId); };
+
+function _openOwnProfilePage() {
+    var pp = document.getElementById('profile-overlay');
+    if (pp && getComputedStyle(pp).display !== 'none') {
+        // Already viewing own profile — nudge with haptic + shake instead of reopening.
+        // Use the Web Animations API so it overrides the overlay's own entry animation.
+        try { triggerHaptic(20); } catch (e) {}
+        try {
+            pp.animate([
+                { transform: 'translateX(0)' }, { transform: 'translateX(-7px)' },
+                { transform: 'translateX(7px)' }, { transform: 'translateX(-5px)' },
+                { transform: 'translateX(5px)' }, { transform: 'translateX(-3px)' },
+                { transform: 'translateX(0)' }
+            ], { duration: 450, easing: 'cubic-bezier(.36,.07,.19,.97)' });
+        } catch (e) {
+            pp.classList.remove('tf-shake'); void pp.offsetWidth; pp.classList.add('tf-shake');
+        }
+        return;
+    }
+    // Open own profile the same way the bottom-nav account button does (loads data too)
+    if (typeof navGoTo === 'function') { navGoTo('account'); }
+    else { openPage('profile-overlay'); if (typeof loadMyProfile === 'function') loadMyProfile(); }
+}
+
 async function viewUserProfile(userId) {
-    var session = await DB.getSession();
-    if (session && session.user.id === userId) {
-        openPage('profile-page');
+    // Own profile — check both session and currentUser
+    if (currentUser && currentUser.id === userId) {
+        _openOwnProfilePage();
+        return;
+    }
+    var session = await DB.getSession().catch(function(){ return null; });
+    if (session && session.user && session.user.id === userId) {
+        _openOwnProfilePage();
+        return;
+    }
+    // Local/demo posts have no real userId — open own profile as fallback
+    if (!userId || String(userId).startsWith('local_')) {
+        _openOwnProfilePage();
         return;
     }
 
-    var profile = await DB.getUserProfile(userId);
+    var profile = await DB.getUserProfile(userId).catch(function(){ return null; });
     if (!profile) { showToast('User not found'); return; }
 
     var counts = await RealData.getCounts(userId);
@@ -18038,6 +20411,11 @@ async function viewUserProfile(userId) {
         isFollowing = !!check.data;
     }
 
+    // Private account gate: non-followers only see a "protected" notice, not the posts.
+    var isPrivate = !!(profile.privacy_settings && profile.privacy_settings.private_account);
+    var isOwnView = currentUser && currentUser.id === userId;
+    var isLockedOut = isPrivate && !isFollowing && !isOwnView;
+
     var avatarUrl = profile.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(profile.full_name || profile.username || 'U') + '&background=007AFF&color=fff&size=200';
     var coverUrl = profile.cover_url || '';
     var badgeClass = profile.badge_tier || 'verify-blue';
@@ -18048,7 +20426,13 @@ async function viewUserProfile(userId) {
     overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg-primary,#fff);z-index:9999;overflow-y:auto;-webkit-overflow-scrolling:touch;';
 
     var postsHtml = '';
-    if (posts.length === 0) {
+    if (isLockedOut) {
+        postsHtml = '<div style="padding:54px 28px;text-align:center;">' +
+            '<div style="width:66px;height:66px;border-radius:50%;background:var(--bg-secondary,#f2f2f7);display:flex;align-items:center;justify-content:center;margin:0 auto 20px;"><i class="fa-solid fa-lock" style="font-size:26px;color:#888;"></i></div>' +
+            '<h2 style="font-size:23px;font-weight:800;color:var(--text-primary,#000);margin-bottom:10px;">This account is private</h2>' +
+            '<p style="font-size:14px;color:#888;line-height:1.65;max-width:300px;margin:0 auto;">Only confirmed followers can see @' + escapeHtml(profile.username) + '’s posts and complete profile. Tap Follow to send a request.</p>' +
+        '</div>';
+    } else if (posts.length === 0) {
         postsHtml = '<div style="text-align:center;padding:40px;color:#aaa;">No posts yet</div>';
     } else {
         posts.forEach(function(p) {
@@ -18471,7 +20855,7 @@ createPostFromComposer = async function() {
     const postText = textarea?.value.trim() || '';
     const postType = currentPostType || 'text';
 
-    if (!postText && !window._composerImageData && postType === 'text') { showToast('Write something first!'); return; }
+    if (!postText && !window._composerImageData && !window._composerMediaUrl && postType === 'text') { showToast('Write something first!'); return; }
     if (postType === 'poll' && pollOptions.filter(o => o.trim()).length < 2) { showToast('Add at least 2 poll options'); return; }
     if (postType === 'quiz' && quizOptions.filter(o => o.trim()).length < 2) { showToast('Add at least 2 quiz options'); return; }
     if (containsBannedWords(postText)) { showToast('Content violates our guidelines.'); return; }
@@ -18486,8 +20870,9 @@ createPostFromComposer = async function() {
         const insertData = {
             user_id: currentUser?.id,
             text_content: postText,
-            media_url: window._composerImageData || null,
+            media_url: window._composerMediaUrl || window._composerImageData || null,
             post_type: window._composerMediaType === 'video' ? 'video' : window._composerMediaType === 'image' ? 'image' : postType,
+            media_type: window._composerMediaType || null,
             status: 'published',
             is_hidden: false,
             poll_options: (postType === 'poll') ? pollOptions.filter(o => o.trim()) :
@@ -18549,7 +20934,7 @@ updateComposerState = function() {
     const len = textarea?.value.trim().length || 0;
     const hasPoll = currentPostType === 'poll' && pollOptions.filter(o => o.trim()).length >= 2;
     const hasQuiz = currentPostType === 'quiz' && quizOptions.filter(o => o.trim()).length >= 2;
-    const hasMedia = !!window._composerImageData;
+    const hasMedia = !!window._composerImageData || !!window._composerMediaUrl;
     const hasContent = len > 0 || hasPoll || hasQuiz || currentPostType === 'question' || hasMedia;
     btn.style.opacity = hasContent ? '1' : '0.5';
     btn.style.pointerEvents = hasContent ? 'all' : 'none';
@@ -18570,6 +20955,29 @@ renderRealPostCard = function(post) {
             quoteBlock.style.cssText = 'border:0.5px solid var(--border-color,rgba(128,128,128,0.3));border-radius:16px;overflow:hidden;margin:6px 16px 10px;cursor:pointer;transition:background 0.15s;background:var(--bg-secondary,rgba(0,0,0,0.04));';
             quoteBlock.onmouseover = function(){ this.style.background = 'var(--bg-secondary,#f7f7f7)'; };
             quoteBlock.onmouseout  = function(){ this.style.background = ''; };
+            quoteBlock.onclick = function(e) {
+    e.stopPropagation();
+    if (!qp.id) return;
+    // Scroll/highlight if the post is already in the feed
+    var existing = document.querySelector('[data-post-id="' + qp.id + '"]');
+    if (existing) { existing.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    // Otherwise open a detail overlay
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:absolute;inset:0;z-index:9900;background:var(--bg-primary,#fff);overflow-y:auto;-webkit-overflow-scrolling:touch;';
+    ov.innerHTML = '<div style="display:flex;align-items:center;padding:14px 16px;border-bottom:0.5px solid var(--border-color,#eee);gap:12px;">' +
+        '<div onclick="this.closest(\'[style*=\\\"z-index:9900\\\"]\').remove()" style="width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,0.06);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;">' +
+        '<i class="fa-solid fa-arrow-left" style="font-size:15px;"></i></div>' +
+        '<b style="font-size:17px;">Original Post</b></div>' +
+        '<div id="_qpd_content" style="padding:0;"></div>';
+    (document.getElementById('app') || document.body).appendChild(ov);
+    // Load original post
+    if (window.sb) {
+        window.sb.from('posts').select('*, users:user_id(id,full_name,username,avatar_url,badge_tier,verified)').eq('id', qp.id).single().then(function(r) {
+            var c = document.getElementById('_qpd_content');
+            if (c && r.data && typeof renderRealPostCard === 'function') c.appendChild(renderRealPostCard(r.data));
+        });
+    }
+};
             quoteBlock.innerHTML = `
                 <div style="padding:12px 14px 10px;">
                     <!-- Quoted user row -->
@@ -18580,10 +20988,10 @@ renderRealPostCard = function(post) {
                         <span style="color:var(--text-tertiary,#888);font-size:13px;line-height:1;">@${escapeHtml(qUser.username||'user')}</span>
                     </div>
                     <!-- Quoted text -->
-                    ${qp.text_content ? `<p style="font-size:14px;color:var(--text-primary,#000);margin:0 0 ${qp.media_url?'10px':'0'};line-height:1.45;word-break:break-word;">${escapeHtml(qp.text_content)}</p>` : ''}
+                    ${qp.text_content ? `<p style="font-size:14px;color:var(--text-primary,#000);margin:0 0 ${(qp.thumbnail_url||qp.media_url)?'10px':'0'};line-height:1.45;word-break:break-word;">${escapeHtml(qp.text_content)}</p>` : (!qp.thumbnail_url && !qp.media_url ? '<p style="font-size:13px;color:var(--text-tertiary,#888);margin:0;font-style:italic;">View post &#8594;</p>' : '')}
                 </div>
-                <!-- Quoted image (full bleed, no padding) -->
-                ${qp.media_url ? `<img src="${qp.media_url}" style="width:100%;display:block;max-height:240px;object-fit:cover;" onerror="this.style.display='none'">` : ''}
+                <!-- Quoted media: prefer thumbnail (safe for video), add play icon if video -->
+                ${(qp.thumbnail_url || qp.media_url) ? `<div style="position:relative;">${(qp.post_type==='video'||qp.media_type==='video') ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:1;"><div style="width:32px;height:32px;background:rgba(0,0,0,0.5);border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-play" style="color:white;font-size:11px;margin-left:2px;"></i></div></div>` : ''}${((qp.post_type==='video'||qp.media_type==='video')&&!qp.thumbnail_url) ? `<video src="${escapeHtml(qp.media_url)}" style="width:100%;display:block;max-height:240px;object-fit:cover;" muted playsinline preload="metadata"></video>` : `<img src="${qp.thumbnail_url||qp.media_url}" style="width:100%;display:block;max-height:240px;object-fit:cover;" onerror="this.style.display='none'">`}</div>` : ''}
             `;
             const iconsDiv = card.querySelector('.post-icons');
             if (iconsDiv) {
@@ -18685,10 +21093,11 @@ renderRealPostCard = function(post) {
         ${post.text_content ? `<div class="post-content">${formatPostText ? formatPostText(post.text_content) : escapeHtml(post.text_content)}</div>` : ''}
         ${interactiveHTML}
         <div class="post-icons">
+            <div onclick="realToggleLike(this,'${post.id}')" data-liked="false"><i class="fa-regular fa-heart"></i> <span style="font-size:13px;color:#888;">0</span></div>
             <div onclick="realOpenComments('${post.id}')"><i class="fa-regular fa-comment"></i></div>
-            <div onclick="handleRepost()"><i class="fa-solid fa-retweet"></i></div>
+            <div onclick="handleRepost('${post.id}')"><i class="fa-solid fa-retweet"></i></div>
             <div onclick="realToggleBookmark(this,'${post.id}')" data-bookmarked="false"><i class="fa-regular fa-bookmark"></i></div>
-            <div onclick="openShare()"><i class="fa-solid fa-share-nodes"></i></div>
+            <div onclick="openShare('${post.id}')"><i class="fa-solid fa-share-nodes"></i></div>
         </div>`;
     return card;
 };
@@ -19373,6 +21782,8 @@ navGoTo = function(destination) {
     }
     if (destination === 'messages') {
         hideNavBar();
+        document.querySelectorAll('.m-tab').forEach(function(t){t.classList.remove('active');});
+        var _pTab2=document.querySelector('.m-tab'); if(_pTab2) _pTab2.classList.add('active');
         openPage('msg-overlay');
         fillMsgContent();
         navNotifications.messages = 0;
@@ -19384,7 +21795,8 @@ navGoTo = function(destination) {
         var nav2 = document.querySelector('.nav-container'); if (nav2) nav2.style.display = 'flex';
         openPage('profile-overlay');
         loadMyProfile();
-        fillProfileGrid();
+        var _pg4 = document.getElementById('profile-grid');
+        if (_pg4 && typeof loadProfilePosts === 'function') loadProfilePosts(_pg4);
         var ai = document.getElementById('nav-account'); if (ai) ai.classList.add('nav-active');
         return;
     }
@@ -19553,6 +21965,8 @@ function navOpenSearch() {
         var inp = document.getElementById('navSearchInput');
         if (inp) inp.focus();
         function outsideClick(e) {
+            // If the clicked element was removed from DOM by a dynamic update (e.g. filter pill rebuild), ignore
+            if (!document.body.contains(e.target)) return;
             var pill = document.querySelector('.liquid-pill');
             var sp = document.getElementById('searchSeparatePill');
             var sc = document.getElementById('searchCircle');
@@ -19625,6 +22039,8 @@ function navGoTo(destination) {
     var notifCheck = document.getElementById('notif-overlay');
     if (notifCheck) notifCheck.style.display = 'none';
     hideNavBar();
+    document.querySelectorAll('.m-tab').forEach(function(t){t.classList.remove('active');});
+    var _pTab=document.querySelector('.m-tab'); if(_pTab) _pTab.classList.add('active');
     openPage('msg-overlay');
     fillMsgContent();
     navNotifications.messages = 0;
@@ -19636,7 +22052,8 @@ function navGoTo(destination) {
             if (navAcc) navAcc.style.display = 'flex';
             if (typeof openPage === 'function') openPage('profile-overlay');
             loadMyProfile();
-            fillProfileGrid();
+            var _pg5 = document.getElementById('profile-grid');
+            if (_pg5 && typeof loadProfilePosts === 'function') loadProfilePosts(_pg5);
             break;
     }
 
@@ -19768,6 +22185,9 @@ function hideNavBar() {
     // ============================================================
 // CONTACT PROFILE — Fix 4
 // ============================================================
+function openCPStoryOrProfile() {
+    if (window._cpHasStory) { openStoryViewer(window._currentChatUserId); } else { openChatUserProfile(); }
+}
 function openContactProfile() {
     var chatUserName = document.getElementById('chat-user-name');
     var name = chatUserName ? chatUserName.textContent : 'User';
@@ -19775,12 +22195,23 @@ function openContactProfile() {
     document.getElementById('cp-name').textContent = name;
     document.getElementById('cp-status').textContent = 'Loading...';
     var _cpAvEl = document.getElementById('cp-avatar');
+    var _cpAvEl2 = document.getElementById('cp-avatar2');
+    var _cpRing = document.getElementById('cp-avatar-ring');
+    var _cpNoRing = document.getElementById('cp-avatar-no-ring');
+    window._cpHasStory = false;
     if (window._currentChatUserId && window.sb) {
-        window.sb.from('users').select('full_name,username,avatar_url,last_seen').eq('id', window._currentChatUserId).single()
+        var _since = new Date(Date.now()-86400000).toISOString();
+        window.sb.from('stories').select('id').eq('user_id',window._currentChatUserId).gte('created_at',_since).limit(1).then(function(sr){
+            window._cpHasStory = !!(sr.data && sr.data.length);
+            if (_cpRing) _cpRing.style.display = window._cpHasStory ? 'block' : 'none';
+            if (_cpNoRing) _cpNoRing.style.display = window._cpHasStory ? 'none' : 'block';
+        });
+        window.sb.from('users').select('full_name,username,avatar_url,last_seen').eq('id', window._currentChatUserId).maybeSingle()
             .then(function(res) {
                 var u = res.data || {};
                 if (u.full_name || u.username) document.getElementById('cp-name').textContent = u.full_name || u.username;
                 if (u.avatar_url && _cpAvEl) _cpAvEl.src = u.avatar_url;
+                if (u.avatar_url && _cpAvEl2) _cpAvEl2.src = u.avatar_url;
                 var diff = u.last_seen ? Date.now() - new Date(u.last_seen).getTime() : null;
                 var st = diff !== null && diff < 180000 ? 'Active now'
                     : (diff !== null && diff < 3600000 ? 'Active ' + Math.floor(diff/60000) + 'm ago' : 'Tap to view profile');
@@ -19809,12 +22240,29 @@ if (!window.sb) {
     if (window._currentChatUser) { openUserProfile(window._currentChatUser); return; }
     openContactProfile(); return;
 }
-    window.sb.from('users').select('*').eq('username', username).single().then(function(res) {
+    window.sb.from('users').select('*').eq('username', username).maybeSingle().then(function(res) {
         if (res.data) { openUserProfile(res.data); }
         else { openContactProfile(); }
     });
 }
 
+function _showConfirmModal(title, message, onConfirm) {
+    var old = document.getElementById('_confirmModal');
+    if (old) old.remove();
+    var m = document.createElement('div');
+    m.id = '_confirmModal';
+    m.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.5);display:flex;align-items:flex-end;justify-content:center;';
+    m.innerHTML = '<div style="width:100%;max-width:430px;background:var(--bg-primary,#fff);border-radius:22px 22px 0 0;padding:24px 20px calc(24px + env(safe-area-inset-bottom,0px));animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);">' +
+        '<h3 style="margin:0 0 10px;font-size:18px;font-weight:700;color:var(--text-primary,#000);">' + title + '</h3>' +
+        '<p style="margin:0 0 22px;font-size:15px;color:#666;">' + message + '</p>' +
+        '<div style="display:flex;gap:12px;">' +
+        '<button onclick="document.getElementById(\'_confirmModal\').remove()" style="flex:1;padding:14px;border-radius:14px;border:1px solid var(--border-color,#e5e5e5);background:transparent;font-size:16px;font-weight:600;cursor:pointer;color:var(--text-primary,#000);">Cancel</button>' +
+        '<button id="_confirmModalOk" style="flex:1;padding:14px;border-radius:14px;border:none;background:#FF3B30;font-size:16px;font-weight:700;cursor:pointer;color:#fff;">Confirm</button>' +
+        '</div></div>';
+    document.body.appendChild(m);
+    document.getElementById('_confirmModalOk').onclick = function() { m.remove(); onConfirm(); };
+    m.onclick = function(e) { if (e.target === m) m.remove(); };
+}
 function closeContactProfile() {
     var overlay = document.getElementById('contact-profile-overlay');
     if (overlay) overlay.style.display = 'none';
@@ -19919,7 +22367,7 @@ function showCoverPhotoOptions() {
         en:  { title:'Cover Photo', see:'See Cover Photo', choose:'Choose Cover Photo', del:'Delete Cover Photo', cancel:'Cancel' },
         es:  { title:'Foto de portada', see:'Ver foto de portada', choose:'Elegir foto de portada', del:'Eliminar foto de portada', cancel:'Cancelar' },
         fr:  { title:'Photo de couverture', see:'Voir la photo', choose:'Choisir une photo', del:'Supprimer la photo', cancel:'Annuler' },
-        ar:  { title:'صورة الغلاف', see:'عرض صورة الغلاف', choose:'اختيار صورة الغلاف', del:'حذف صورة الغلاف', cancel:'إلغاء' },
+        ar:  { title:'صورة Ø§Ù„ØºÙ„Ø§Ù', see:'عرض صورة Ø§Ù„ØºÙ„Ø§Ù', choose:'اختيار صورة Ø§Ù„ØºÙ„Ø§Ù', del:'Ø­Ø°Ù صورة Ø§Ù„ØºÙ„Ø§Ù', cancel:'إلغاء' },
         zu:  { title:'Isithombe Sesihloko', see:'Bona isithombe', choose:'Khetha isithombe', del:'Susa isithombe', cancel:'Khansela' },
         pt:  { title:'Foto de capa', see:'Ver foto de capa', choose:'Escolher foto de capa', del:'Remover foto de capa', cancel:'Cancelar' },
         af:  { title:'Omslagfoto', see:'Sien omslagfoto', choose:'Kies omslagfoto', del:'Verwyder omslagfoto', cancel:'Kanselleer' },
@@ -20548,10 +22996,13 @@ function closeLgCam() {
     lgAudioTrack = null;
     var page = document.getElementById('lgCameraPage');
     if (page) page.remove();
-    // Only show nav bar if we're NOT inside the reel overlay
     var reelOpen = document.getElementById('reel-overlay');
     var reelIsOpen = reelOpen && reelOpen.style.display !== 'none' && reelOpen.style.display !== '';
-    if (!reelIsOpen) {
+    var chatOpen = document.getElementById('chat-interface');
+    var chatIsOpen = chatOpen && chatOpen.style.display !== 'none' && chatOpen.style.display !== '';
+    var msgOpen = document.getElementById('msg-overlay');
+    var msgIsOpen = msgOpen && msgOpen.style.display !== 'none' && msgOpen.style.display !== '';
+    if (!reelIsOpen && !chatIsOpen && !msgIsOpen && !window._lgChatMode) {
         showNavBar();
     }
 }
@@ -20702,11 +23153,12 @@ async function startRealCall(targetUserId, targetUserName, isVideo) {
     var _callerAvatar = '';
     if (window.sb) {
         try {
-            var _pr = await window.sb.from('profiles').select('avatar_url').eq('id', targetUserId).single();
+            var _pr = await window.sb.from('profiles').select('avatar_url').eq('id', targetUserId).maybeSingle();
             if (_pr.data) _callerAvatar = _pr.data.avatar_url || '';
         } catch(e) {}
     }
-    _showCallOverlay(targetUserName, isVideo, 'outgoing', _callerAvatar, targetUserId);
+    _callTargetAvatar = _callerAvatar;
+    _showCallOverlay(targetUserName || document.getElementById('chat-user-name')?.textContent || 'User', isVideo, 'outgoing', _callerAvatar, targetUserId);
 
     rtcPeerConn = new RTCPeerConnection(RTC_CONFIG);
     rtcLocalStream.getTracks().forEach(function(t) { rtcPeerConn.addTrack(t, rtcLocalStream); });
@@ -20733,8 +23185,31 @@ async function startRealCall(targetUserId, targetUserName, isVideo) {
 
     // Store offer in the call row
     await window.sb.from('calls').update({ offer: JSON.stringify(offer) }).eq('id', rtcCallId);
+    // Switch "Calling" → "Ringing" once offer delivered (callee device now ringing)
+    setTimeout(function() {
+        var _ov = document.getElementById('call-overlay');
+        var _st = document.getElementById('call-status-text');
+        if (_ov && _ov.getAttribute('data-state') === 'calling') {
+            _ov.setAttribute('data-state', 'ringing');
+            if (_st) {
+                var _node = _st.childNodes[0];
+                if (_node && _node.nodeType === 3) _node.textContent = 'Ringing';
+                else if (_st) _st.textContent = 'Ringing';
+            }
+        }
+    }, 2500);
+    // Switch "Calling" → "Ringing" once offer is delivered (callee device will now ring)
+    setTimeout(function() {
+        var callStatusEl = document.getElementById('call-status-text');
+        var ov3 = document.getElementById('call-overlay');
+        if (ov3 && ov3.getAttribute('data-state') === 'calling') {
+            ov3.setAttribute('data-state', 'ringing');
+            if (callStatusEl) callStatusEl.childNodes[0].textContent = 'Ringing';
+        }
+    }, 2500);
 
     // Listen for answer + ICE from callee
+    if (!rtcCallId) { console.error('[Call] No rtcCallId — cannot subscribe to signal channel'); endRealCall(); return; }
     rtcSignalChannel = window.sb
         .channel('call_' + rtcCallId)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_signals', filter: 'call_id=eq.' + rtcCallId },
@@ -20743,7 +23218,7 @@ async function startRealCall(targetUserId, targetUserName, isVideo) {
                 if (sig.sender_id === currentUser.id) return;
                 if (sig.type === 'answer') {
                     await rtcPeerConn.setRemoteDescription(new RTCSessionDescription(JSON.parse(sig.payload)));
-                    showToast(targetUserName + ' answered 📞');
+                    showToast(targetUserName + ' answered');
                     triggerHaptic(30);
                     var callStatus = document.getElementById('call-status-text');
                     if (callStatus) callStatus.textContent = 'Connected';
@@ -20895,8 +23370,15 @@ function _showCallOverlay(name, isVideo, direction, avatarUrl, targetId) {
         triggerHaptic(100);
     }
 
-    // Init local video if video call
-    if (isVideo && direction === 'outgoing') _startLocalVideo();
+    // Init local video stream (don't show preview until connected)
+    if (isVideo && direction === 'outgoing') {
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(function(stream) {
+            rtcLocalStream = stream;
+            var localVid = document.getElementById('call-local-video');
+            if (localVid) localVid.srcObject = stream;
+            // self-preview stays hidden until minimized or connected
+        }).catch(function(){});
+    }
 
     // Tap to show/hide controls
     ov.onclick = function(e) {
@@ -20917,13 +23399,8 @@ function _showCallOverlay(name, isVideo, direction, avatarUrl, targetId) {
 }
 
 function _startLocalVideo() {
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(function(stream) {
-        rtcLocalStream = stream;
-        var localVid = document.getElementById('call-local-video');
-        if (localVid) { localVid.srcObject = stream; }
-        var selfPreview = document.getElementById('call-self-preview');
-        if (selfPreview) selfPreview.style.display = 'block';
-    }).catch(function() {});
+    var selfPreview = document.getElementById('call-self-preview');
+    if (selfPreview) selfPreview.style.display = 'block';
 }
 
 function _initDraggableSelfPreview() {
@@ -21015,6 +23492,25 @@ function endRealCall() {
         rtcCallId = null;
     }
     rtcCallActive = false;
+    // Insert call log into the conversation
+    (async function() {
+        try {
+            if (_callTargetId && currentUser && window.sb && currentConversationId) {
+                var dur = _callTimerSeconds || 0;
+                var durStr = dur > 0 ? ' · ' + Math.floor(dur/60) + ':' + ((dur%60)<10?'0':'') + (dur%60) : '';
+                var callLogText = (_callIsVideo ? 'Video call' : 'Voice call') + durStr;
+                await window.sb.from('messages').insert({
+                    conversation_id: currentConversationId,
+                    sender_id: currentUser.id,
+                    ciphertext: callLogText,
+                    nonce: null,
+                    message_type: 'call_log',
+                    created_at: new Date().toISOString(),
+                    inserted_at: new Date().toISOString()
+                });
+            }
+        } catch(e) {}
+    })();
     var ov = document.getElementById('call-overlay');
     if (ov) { ov.style.display = 'none'; ov.removeAttribute('data-state'); }
     var remoteAudio = document.getElementById('call-remote-audio');
@@ -21056,7 +23552,7 @@ function retryCall() {
     if (avatarState) avatarState.style.display = 'flex';
     if (topBar) { topBar.style.display = 'flex'; topBar.style.opacity = '1'; }
     if (_callTargetId) {
-        startRealCall(_callTargetId, _callTargetName, _callIsVideo);
+        initiateCall(_callTargetId, _callIsVideo ? 'video' : 'voice');
     }
 }
 
@@ -21064,11 +23560,41 @@ function closeCallNoAnswer() {
     endRealCall();
 }
 
+function _syncCallMiniBubble() {
+    var nameEl = document.getElementById('call-mini-name');
+    var statusEl = document.getElementById('call-mini-status');
+    var avatarWrap = document.getElementById('call-mini-avatar-wrap');
+    if (nameEl) nameEl.textContent = _callTargetName || 'Unknown';
+    if (statusEl) {
+        var ov2 = document.getElementById('call-overlay');
+        var st = ov2 ? ov2.getAttribute('data-state') : '';
+        statusEl.textContent = st === 'connected' ? (_callTimerSeconds > 0 ? (Math.floor(_callTimerSeconds/60)+':'+((_callTimerSeconds%60)<10?'0':'')+(_callTimerSeconds%60)) : 'Connected') : (st === 'ringing' ? 'Ringing…' : (_callIsVideo ? 'TrustVideo' : 'TrustCall'));
+    }
+    if (avatarWrap && _callTargetAvatar) {
+        avatarWrap.innerHTML = '<img src="' + _callTargetAvatar + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\'">';
+    }
+}
 function minimizeCall() {
     var ov = document.getElementById('call-overlay');
     var mini = document.getElementById('call-mini-bubble');
+    // Picture-in-Picture for active video calls
+    if (_callIsVideo) {
+        var remVid = document.getElementById('call-remote-video');
+        if (remVid && remVid.srcObject && document.pictureInPictureEnabled && typeof remVid.requestPictureInPicture === 'function') {
+            remVid.requestPictureInPicture().then(function() {
+                if (ov) ov.style.display = 'none';
+            }).catch(function() {
+                if (ov) ov.style.display = 'none';
+                if (mini) mini.style.display = 'block';
+                _syncCallMiniBubble();
+            });
+            _callMinimized = true;
+            return;
+        }
+    }
     if (ov) ov.style.display = 'none';
     if (mini) mini.style.display = 'block';
+    _syncCallMiniBubble();
     _callMinimized = true;
 }
 
@@ -21208,8 +23734,9 @@ function startVmRecording() {
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
         _vmRecorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg' });
         _vmRecorder.ondataavailable = function(e) { if (e.data.size > 0) _vmChunks.push(e.data); };
+        var _vmMimeCapture = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
         _vmRecorder.onstop = function() {
-            _vmBlob = new Blob(_vmChunks, { type: _vmRecorder.mimeType });
+            _vmBlob = new Blob(_vmChunks, { type: _vmMimeCapture });
             stream.getTracks().forEach(function(t) { t.stop(); });
             var sendBtn = document.getElementById('vm-send-btn');
             var recBtn  = document.getElementById('vm-record-btn');
@@ -21306,7 +23833,7 @@ function _initIncomingCallListener() {
                 // Fetch caller name + avatar
                 var profile = { full_name: 'Unknown', avatar_url: '' };
                 try {
-                    var r = await window.sb.from('profiles').select('full_name,avatar_url').eq('id', call.caller_id).single();
+                    var r = await window.sb.from('profiles').select('avatar_url').eq('id', call.caller_id).maybeSingle();
                     if (r.data) profile = r.data;
                 } catch(e) {}
                 _showCallOverlay(profile.full_name, call.type === 'video', 'incoming', profile.avatar_url, call.caller_id);
@@ -21463,7 +23990,7 @@ function showCPMoreMenu() {
     var userName = getCurrentChatUserKey();
     var menu = document.createElement('div');
     menu.id = 'cpMoreMenu';
-    menu.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:15000;';
+    menu.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:15000;';
 
     menu.innerHTML =
         '<div style="position:absolute;top:220px;right:24px;width:200px;background:rgba(255,255,255,0.75);backdrop-filter:blur(50px) saturate(200%);-webkit-backdrop-filter:blur(50px) saturate(200%);border:0.5px solid rgba(255,255,255,0.8);border-radius:18px;box-shadow:0 10px 40px rgba(0,0,0,0.18),0 1.5px 0 rgba(255,255,255,0.9) inset;overflow:hidden;animation:jellyPop 0.25s cubic-bezier(0.68,-0.55,0.27,1.55);">' +
@@ -21481,7 +24008,7 @@ function showCPMoreMenu() {
     menu.addEventListener('click', function(e) {
         if (e.target === menu) menu.remove();
     });
-    document.body.appendChild(menu);
+    (document.getElementById('app') || document.body).appendChild(menu);
 }
 
 // --- NICKNAMES ---
@@ -22070,11 +24597,12 @@ async function submitQuoteRetweet(quotedPostId) {
 
     var modal = document.getElementById('quoteRetweetModal');
     if (modal) modal.remove();
-    showToast('Quoted! 🔁');
+    showToast('Quoted!');
     triggerHaptic(40);
-    var cached = JSON.parse(localStorage.getItem('tf-cached-feed') || '[]');
+    var _cqEntry = null; try { _cqEntry = JSON.parse(localStorage.getItem('tf-cached-feed') || 'null'); } catch(e) {}
+    var cached = (_cqEntry && Array.isArray(_cqEntry.posts)) ? _cqEntry.posts : (Array.isArray(_cqEntry) ? _cqEntry : []);
     if (result && result.data) cached.unshift(result.data);
-    localStorage.setItem('tf-cached-feed', JSON.stringify(cached.slice(0,50)));
+    localStorage.setItem('tf-cached-feed', JSON.stringify({ ts: Date.now(), posts: cached.slice(0,50) }));
 }
 
 // ============================================================
@@ -22088,7 +24616,7 @@ createPostFromComposer = async function() {
     var postText = textarea?.value.trim() || '';
     var postType = currentPostType || 'text';
 
-    if (!postText && postType === 'text') { showToast('Write something first!'); return; }
+    if (!postText && !window._composerMediaUrl && !window._composerImageData && postType === 'text') { showToast('Write something first!'); return; }
     if (postType === 'poll' && pollOptions.filter(function(o){ return o.trim(); }).length < 2) { showToast('Add at least 2 poll options'); return; }
     if (postType === 'quiz' && quizOptions.filter(function(o){ return o.trim(); }).length < 2) { showToast('Add at least 2 quiz options'); return; }
     if (containsBannedWords(postText)) { showToast('Content violates our guidelines.'); return; }
@@ -22200,8 +24728,6 @@ if (profileGrid && profileGrid.offsetParent !== null) {
     if (btn) { btn.textContent = 'Post'; btn.disabled = false; }
 };
 
-function handleComposerPost() { createPostFromComposer(); }
-
     function openNotificationsSettings() { showToast('Notifications settings coming soon'); }
 function openCreatorAnalytics() { openTrustAnalytics(); }
 
@@ -22306,44 +24832,8 @@ function openAboutYourAccount() {
     })();
 }
 
-// Privacy Policy content
-var _tfPrivacyHTML = `<h2 style="font-size:20px;font-weight:900;margin:0 0 4px;">TrustFirst Privacy Policy</h2><p style="font-size:12px;color:#888;margin-bottom:24px;">Effective Date: 20 April 2026</p><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:18px;">TrustFirst ("we", "our", "us") is committed to protecting your privacy and ensuring transparency about how your information is collected, used, and shared.</p><h3 style="font-size:16px;font-weight:800;margin:22px 0 8px;">1. What We Collect</h3><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:12px;"><b>You provide:</b> Name, username, email, date of birth, profile picture, content you post, and parent/guardian info for Kid Accounts.</p><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:12px;"><b>Verification:</b> Government ID (via Stripe KYC) or facial verification — used strictly for safety.</p><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:12px;"><b>Automatically:</b> Device info, IP address, app usage, interactions, crash logs.</p><h3 style="font-size:16px;font-weight:800;margin:22px 0 8px;">2. How We Use It</h3><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:12px;">To provide and improve the Service, detect fraud, enforce safety rules, and personalise your experience. We do not sell your data or show ads.</p><h3 style="font-size:16px;font-weight:800;margin:22px 0 8px;">3. Sharing</h3><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:12px;">Only with trusted providers (Stripe, hosting), and when required by South African law. Never sold to third parties.</p><h3 style="font-size:16px;font-weight:800;margin:22px 0 8px;">4. Your Rights</h3><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:12px;">Access, edit, or delete your data at any time. Account deletion removes all data immediately.</p><h3 style="font-size:16px;font-weight:800;margin:22px 0 8px;">5. Kids &amp; Family</h3><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:12px;">Users under 18 require a linked parent account. Parents may receive activity reports. Certain features are restricted.</p><h3 style="font-size:16px;font-weight:800;margin:22px 0 8px;">6. Contact</h3><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;">TrustFirst Support Team · Cape Town, South Africa</p>`;
+// Legal content moved to feed-legal.js (feed-legal.js loaded after feed.js in HTML)
 
-var _tfTermsHTML = `<h2 style="font-size:20px;font-weight:900;margin:0 0 4px;">TrustFirst Terms of Use</h2><p style="font-size:12px;color:#888;margin-bottom:24px;">Effective Date: 20 April 2026</p><h3 style="font-size:16px;font-weight:800;margin:22px 0 8px;">1. The Service</h3><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:12px;">TrustFirst is a global social platform for creating content, following people, messaging, and livestreaming — built on safety and authenticity.</p><h3 style="font-size:16px;font-weight:800;margin:22px 0 8px;">2. Eligibility</h3><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:12px;">You must be at least 13. Users under 18 must have a linked parent account. Bots and fake accounts are prohibited.</p><h3 style="font-size:16px;font-weight:800;margin:22px 0 8px;">3. Verification</h3><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:12px;">Verified users get full platform access (posting, commenting, messaging). Non-verified users can view, bookmark, and share only.</p><h3 style="font-size:16px;font-weight:800;margin:22px 0 8px;">4. Kid Accounts</h3><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:12px;">Under-18 accounts must be approved by a parent. Activity may be visible to the linked guardian. Certain features are restricted.</p><h3 style="font-size:16px;font-weight:800;margin:22px 0 8px;">5. Prohibited Content</h3><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:12px;">No nudity, scams, hate speech, illegal content, spam, or impersonation. Violations may result in suspension or permanent ban.</p><h3 style="font-size:16px;font-weight:800;margin:22px 0 8px;">6. No Ads · No Data Selling</h3><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:12px;">TrustFirst does not display advertisements and does not sell user data.</p><h3 style="font-size:16px;font-weight:800;margin:22px 0 8px;">7. Governing Law</h3><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;">These Terms are governed by the laws of South Africa. Disputes are resolved in Cape Town, Western Cape.</p>`;
-
-var _tfInfoHTML = `<h2 style="font-size:20px;font-weight:900;margin:0 0 16px;">Why this information is important</h2><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:20px;">TrustFirst shows certain account information to help people understand who they are interacting with. This transparency builds trust and helps keep the platform safe.</p><div style="background:var(--card-bg,#fff);border-radius:16px;padding:18px 20px;margin-bottom:14px;border:0.5px solid var(--border-color,rgba(0,0,0,0.06));"><div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:14px;"><div style="width:32px;height:32px;border-radius:9px;background:rgba(0,122,255,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-regular fa-calendar" style="color:#007AFF;font-size:14px;"></i></div><div><b style="font-size:15px;color:var(--text-primary,#000);display:block;margin-bottom:4px;">Date Joined</b><p style="font-size:13px;color:var(--text-secondary,#555);line-height:1.6;margin:0;">Knowing when an account was created helps people identify recently-created accounts, which may indicate inauthentic activity.</p></div></div><div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:14px;"><div style="width:32px;height:32px;border-radius:9px;background:rgba(52,199,89,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-earth-africa" style="color:#34C759;font-size:14px;"></i></div><div><b style="font-size:15px;color:var(--text-primary,#000);display:block;margin-bottom:4px;">Account Based In</b><p style="font-size:13px;color:var(--text-secondary,#555);line-height:1.6;margin:0;">This refers to the country associated with your account at registration. It helps users make informed decisions about who they interact with.</p></div></div><div style="display:flex;gap:12px;align-items:flex-start;"><div style="width:32px;height:32px;border-radius:9px;background:rgba(255,149,0,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-clock-rotate-left" style="color:#FF9500;font-size:14px;"></i></div><div><b style="font-size:15px;color:var(--text-primary,#000);display:block;margin-bottom:4px;">Former Usernames</b><p style="font-size:13px;color:var(--text-secondary,#555);line-height:1.6;margin:0;">This helps prevent impersonation and keeps a transparent history of identity changes on the platform.</p></div></div></div>`;
-
-function openInAppBrowser(title, type) {
-    var existing = document.getElementById('inAppBrowserOverlay');
-    if (existing) existing.remove();
-    var overlay = document.createElement('div');
-    overlay.id = 'inAppBrowserOverlay';
-    overlay.style.cssText = 'position:absolute;inset:0;z-index:7400;display:flex;flex-direction:column;background:var(--bg-primary,#fff);animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
-    var contentMap = { privacy: _tfPrivacyHTML, terms: _tfTermsHTML, info: _tfInfoHTML };
-    var html = contentMap[type] || '<p style="padding:20px;color:#888;">Content not found.</p>';
-    overlay.innerHTML =
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:var(--bg-primary,#fff);border-bottom:0.5px solid var(--border-color,#e0e0e0);flex-shrink:0;">' +
-            '<div class="liquid-glass-btn" onclick="document.getElementById(\'inAppBrowserOverlay\').remove()" style="cursor:pointer;"><i class="fa-solid fa-chevron-left"></i></div>' +
-            '<b style="font-size:16px;color:var(--text-primary,#000);text-overflow:ellipsis;overflow:hidden;white-space:nowrap;max-width:200px;">' + escapeHtml(title) + '</b>' +
-            '<div style="width:42px;display:flex;justify-content:flex-end;">' +
-                '<button onclick="shareInAppPage(\'' + type + '\')" style="background:none;border:none;color:#007AFF;font-size:16px;cursor:pointer;padding:4px;"><i class="fa-solid fa-share-nodes"></i></button>' +
-            '</div>' +
-        '</div>' +
-        '<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:24px 20px 60px;background:var(--bg-primary,#fff);">' +
-            html +
-        '</div>';
-    document.getElementById('app').appendChild(overlay);
-}
-
-function shareInAppPage(type) {
-    var urls = { privacy: 'https://trustfirst.app/privacy', terms: 'https://trustfirst.app/terms', info: 'https://trustfirst.app/about/info' };
-    if (navigator.share) {
-        navigator.share({ title: 'TrustFirst', url: urls[type] || 'https://trustfirst.app' }).catch(function(){});
-    } else {
-        try { navigator.clipboard.writeText(urls[type] || 'https://trustfirst.app'); showToast('Link copied'); } catch(e) {}
-    }
-}
-// openTimeManagement, openTrustCircle, openBlockedList — real implementations defined below
 function openLocationSettings() {
     var existing = document.getElementById('locationPrivacySheet');
     if (existing) { existing.remove(); return; }
@@ -22551,7 +25041,15 @@ function openTimeManagement() {
     } catch(e) {}
 })();
 
-function openTrustCircle() { openSub('trustCircleOverlay'); loadTrustCircleData(); }
+function openTrustCircle() {
+    var tc = document.getElementById('trustCircleOverlay');
+    if (tc && document.getElementById('story-viewer') && document.getElementById('story-viewer').style.display !== 'none') {
+        tc.style.zIndex = '9800';
+        tc.style.position = 'fixed';
+    }
+    openSub('trustCircleOverlay');
+    loadTrustCircleData();
+}
 function openBlockedList() { openSub('blockedAccountsOverlay'); loadBlockedAccountsData(); }
 function openStoryRepliesSettings() { openSub('msgStoryRepliesOverlay'); }
 function openCommentsSettings() { openSub('commentsSettingsOverlay'); }
@@ -23070,11 +25568,7 @@ openSub = function(id) {
         setTimeout(refresh, 250);
 
         new MutationObserver(function(){
-            var dark = document.documentElement.getAttribute('data-theme')==='dark';
-            droplet.style.background  = dark ? '#0A84FF' : '#007AFF';
-            droplet.style.boxShadow   = dark
-                ? '0 0 0 3px rgba(10,132,255,0.14),0 2px 8px rgba(10,132,255,0.5)'
-                : '0 0 0 3px rgba(0,122,255,0.12),0 2px 8px rgba(0,122,255,0.45)';
+            // colors now handled entirely by CSS — no inline override needed
         }).observe(document.documentElement, { attributes: true, attributeFilter:['data-theme'] });
     }
 
@@ -23504,9 +25998,14 @@ function showMessageContextMenu(bubbleEl) {
                 '<span style="font-size:15px;font-weight:600;color:white;">Pin</span>' +
                 '<i class="fa-solid fa-thumbtack" style="color:rgba(255,255,255,0.4);font-size:15px;"></i>' +
             '</div>' +
-            '<div class="msg-ctx-row" onclick="deleteMessage(\'' + escapeHtml(msgId) + '\');document.getElementById(\'msgContextOverlay\').remove();">' +
+'<div class="msg-ctx-row" onclick="deleteMessage(\'' + escapeHtml(msgId) + '\');document.getElementById(\'msgContextOverlay\').remove();">' +
                 '<span style="font-size:15px;font-weight:600;color:#FF3B30;">Delete</span>' +
                 '<i class="fa-solid fa-trash" style="color:#FF3B30;font-size:15px;"></i>' +
+            '</div>' +
+            '<div class="msg-ctx-row" onclick="selectMessage(\'' + escapeHtml(msgId) + '\');document.getElementById(\'msgContextOverlay\').remove();">' +
+                '<span style="font-size:15px;font-weight:600;color:white;">Select</span>' +
+                '<div style="width:22px;height:22px;border-radius:50%;border:1.5px solid rgba(255,255,255,0.4);display:flex;align-items:center;justify-content:center;">' +
+                    '<i class="fa-solid fa-check" style="color:white;font-size:10px;"></i></div>' +
             '</div>';
     }
 
@@ -23551,34 +26050,202 @@ function pinMessage() {
     showToast('Message pinned 📌');
     triggerHaptic(15);
 }
-function deleteMessage() {
+function deleteMessage(msgId) {
     document.getElementById('msgContextOverlay')?.remove();
-
-    // Find the long-pressed bubble
+    var chatName = document.getElementById('chat-user-name') ? document.getElementById('chat-user-name').textContent.trim() : 'them';
+    var sheet = document.createElement('div');
+    sheet.id = 'deleteMsgSheet';
+    sheet.style.cssText = 'position:absolute;inset:0;z-index:20000;background:rgba(0,0,0,0.45);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);display:flex;align-items:flex-end;';
+    sheet.innerHTML =
+        '<div style="width:100%;background:var(--bg-primary,#fff);border-radius:24px 24px 0 0;padding:12px 16px max(32px,env(safe-area-inset-bottom,32px));box-shadow:0 -8px 40px rgba(0,0,0,0.18);">' +
+            '<div style="width:36px;height:4px;background:#ccc;border-radius:2px;margin:0 auto 18px;"></div>' +
+            '<div onclick="document.getElementById(\'deleteMsgSheet\').remove();_doDeleteMsgLocal(\'' + (msgId||'') + '\')" style="padding:16px;border-radius:14px;border:none;background:transparent;color:#FF3B30;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:12px;border-bottom:0.5px solid rgba(0,0,0,0.07);">' +
+                '<i class="fa-solid fa-trash"></i>Delete for me and ' + escapeHtml(chatName) +
+            '</div>' +
+            '<div onclick="document.getElementById(\'deleteMsgSheet\').remove();_doDeleteMsgLocal(\'' + (msgId||'') + '\')" style="padding:16px;border-radius:14px;border:none;background:transparent;color:#FF3B30;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:12px;">' +
+                '<i class="fa-solid fa-user-minus"></i>Delete for me' +
+            '</div>' +
+            '<div onclick="document.getElementById(\'deleteMsgSheet\').remove()" style="padding:16px;border-radius:14px;border:none;background:rgba(0,0,0,0.05);color:var(--text-primary,#000);font-size:16px;font-weight:600;cursor:pointer;text-align:center;margin-top:8px;">Cancel</div>' +
+        '</div>';
+    sheet.addEventListener('click', function(e){ if(e.target===sheet) sheet.remove(); });
+    (document.getElementById('chat-interface') || document.getElementById('app') || document.body).appendChild(sheet);
+}
+function _doDeleteMsgLocal(msgId) {
     var chatBody = document.getElementById('chat-body');
-    if (!chatBody) { showToast('Message deleted'); return; }
-
-    // We tag the last interacted bubble
-    var target = chatBody.querySelector('[data-msg-bubble][data-lp-active]');
+    if (!chatBody) { showToast('Deleted'); return; }
+    var target = msgId ? chatBody.querySelector('[data-msg-id="' + msgId + '"]') : chatBody.querySelector('[data-msg-bubble][data-lp-active]');
     if (!target) {
-        // fallback: delete the last own message
         var own = chatBody.querySelectorAll('div[style*="background:#007AFF"]');
         target = own[own.length - 1] || null;
     }
     if (target) {
-        target.classList.add('vaporizing');
-        setTimeout(function(){ if(target.parentNode) target.remove(); }, 650);
-        triggerHaptic(30);
+        var wrap = target.closest('[style*="flex-direction:column"]') || target.parentElement;
+        var el = wrap || target;
+        el.style.transition = 'opacity 0.3s, transform 0.3s';
+        el.style.opacity = '0';
+        el.style.transform = 'scale(0.85)';
+        setTimeout(function(){ if(el.parentNode) el.remove(); }, 320);
+        triggerHaptic(25);
     }
     showToast('Message deleted');
 }
-function selectMessage() {
-    document.getElementById('msgContextOverlay').remove();
-    showToast('Select mode — tap messages to select');
+function selectMessage(msgId) {
+    var overlay = document.getElementById('msgContextOverlay');
+    if (overlay) overlay.remove();
+    var chatInterface = document.getElementById('chat-interface');
+    if (!chatInterface) return;
+    // Mark selection mode
+    chatInterface.setAttribute('data-select-mode', '1');
+    var selectedIds = [];
+
+    // Swap header
+    var header = chatInterface.querySelector('.chat-header') || chatInterface.querySelector('[style*="chat-header"]');
+    var origHeader = chatInterface.querySelector('#chat-top-bar') || chatInterface.querySelector('[id*="chat-header"]');
+    var selHeader = document.createElement('div');
+    selHeader.id = 'chatSelectHeader';
+    selHeader.style.cssText = 'position:absolute;top:0;left:0;right:0;z-index:200;display:flex;align-items:center;justify-content:space-between;padding:max(48px,env(safe-area-inset-top,48px)) 16px 12px;background:var(--bg-primary,#fff);border-bottom:0.5px solid var(--border-color,#eee);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);';
+    selHeader.innerHTML =
+        '<button onclick="clearChatConfirm()" style="padding:8px 14px;border-radius:20px;border:none;background:rgba(255,59,48,0.1);color:#FF3B30;font-size:14px;font-weight:700;cursor:pointer;">Clear Chat</button>' +
+        '<span id="chatSelCount" style="font-size:15px;font-weight:700;color:var(--text-primary,#000);">0 Selected</span>' +
+        '<button onclick="exitSelectMode()" style="width:34px;height:34px;border-radius:50%;border:none;background:rgba(0,122,255,0.1);display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-check" style="color:#007AFF;font-size:15px;"></i></button>';
+    chatInterface.appendChild(selHeader);
+
+    // Bottom action bar
+    var actionBar = document.createElement('div');
+    actionBar.id = 'chatSelectBar';
+    actionBar.style.cssText = 'position:absolute;bottom:0;left:0;right:0;z-index:200;display:flex;align-items:center;justify-content:space-around;padding:12px 20px max(28px,env(safe-area-inset-bottom,28px));background:var(--bg-primary,#fff);border-top:0.5px solid var(--border-color,#eee);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);';
+    actionBar.innerHTML =
+        '<button id="selDelBtn" onclick="deleteSelectedMessages()" style="display:flex;flex-direction:column;align-items:center;gap:4px;border:none;background:none;cursor:pointer;opacity:0.35;pointer-events:none;"><i class="fa-solid fa-trash" style="font-size:22px;color:#FF3B30;"></i><span style="font-size:10px;color:#FF3B30;font-weight:700;">Delete</span></button>' +
+        '<button id="selFwdBtn" onclick="showToast(\'Forward coming soon\')" style="display:flex;flex-direction:column;align-items:center;gap:4px;border:none;background:none;cursor:pointer;opacity:0.35;pointer-events:none;"><i class="fa-solid fa-share" style="font-size:22px;color:#007AFF;"></i><span style="font-size:10px;color:#007AFF;font-weight:700;">Forward</span></button>' +
+        '<button id="selShareBtn" style="display:none;flex-direction:column;align-items:center;gap:4px;border:none;background:none;cursor:pointer;opacity:0.35;pointer-events:none;"><i class="fa-solid fa-arrow-up-from-bracket" style="font-size:22px;color:#34C759;"></i><span style="font-size:10px;color:#34C759;font-weight:700;">Share</span></button>';
+    chatInterface.appendChild(actionBar);
+
+    // Add circles to all bubbles
+    var chatBody = document.getElementById('chat-body');
+    if (chatBody) {
+        chatBody.querySelectorAll('[data-msg-bubble]').forEach(function(bubble) {
+            var circle = document.createElement('div');
+            circle.className = 'sel-circle';
+            circle.style.cssText = 'width:22px;height:22px;border-radius:50%;border:2px solid #007AFF;background:transparent;flex-shrink:0;margin-right:8px;transition:background 0.2s;cursor:pointer;display:flex;align-items:center;justify-content:center;';
+            var wrap = bubble.parentElement;
+            if (wrap) {
+                wrap.style.display = 'flex';
+                wrap.style.alignItems = 'center';
+                wrap.insertBefore(circle, wrap.firstChild);
+            }
+            bubble.style.cursor = 'pointer';
+            function toggleSel() {
+                var id = bubble.getAttribute('data-msg-id') || ('m' + Date.now());
+                var idx = selectedIds.indexOf(id);
+                if (idx > -1) {
+                    selectedIds.splice(idx, 1);
+                    circle.style.background = 'transparent';
+                    circle.innerHTML = '';
+                    bubble.style.outline = '';
+                } else {
+                    selectedIds.push(id);
+                    circle.style.background = '#007AFF';
+                    circle.innerHTML = '<i class="fa-solid fa-check" style="color:white;font-size:10px;"></i>';
+                    bubble.style.outline = '2px solid #007AFF';
+                }
+                var cnt = selectedIds.length;
+                var countEl = document.getElementById('chatSelCount');
+                if (countEl) countEl.textContent = cnt + ' Selected';
+                var delBtn = document.getElementById('selDelBtn');
+                var fwdBtn = document.getElementById('selFwdBtn');
+                var shareBtn = document.getElementById('selShareBtn');
+                var hasAny = cnt > 0;
+                if (delBtn) { delBtn.style.opacity = hasAny ? '1' : '0.35'; delBtn.style.pointerEvents = hasAny ? 'auto' : 'none'; }
+                if (fwdBtn) { fwdBtn.style.opacity = hasAny ? '1' : '0.35'; fwdBtn.style.pointerEvents = hasAny ? 'auto' : 'none'; }
+                // Share only if all selected are media
+                var allMedia = selectedIds.length > 0 && selectedIds.every(function(sid) {
+                    var b = chatBody.querySelector('[data-msg-id="' + sid + '"]');
+                    var t = b ? b.getAttribute('data-msg-type') : 'text';
+                    return t === 'image' || t === 'video' || t === 'audio';
+                });
+                if (shareBtn) {
+                    shareBtn.style.display = allMedia ? 'flex' : 'none';
+                    shareBtn.style.opacity = allMedia ? '1' : '0.35';
+                    shareBtn.style.pointerEvents = allMedia ? 'auto' : 'none';
+                }
+                triggerHaptic(8);
+            }
+            circle.addEventListener('click', toggleSel);
+            bubble.addEventListener('click', function() { if (chatInterface.getAttribute('data-select-mode') === '1') toggleSel(); });
+        });
+    }
+    // Pre-select the long-pressed message if given
+    if (msgId && chatBody) {
+        var preB = chatBody.querySelector('[data-msg-id="' + msgId + '"]');
+        if (preB) { var c = preB.parentElement && preB.parentElement.querySelector('.sel-circle'); if (c) c.click(); }
+    }
+}
+
+window._chatSelectedIds = [];
+function deleteSelectedMessages() {
+    var chatBody = document.getElementById('chat-body');
+    var chatName = document.getElementById('chat-user-name') ? document.getElementById('chat-user-name').textContent.trim() : 'them';
+    var selected = chatBody ? chatBody.querySelectorAll('[style*="outline: 2px solid rgb(0, 122, 255)"]') : [];
+    if (!selected.length) { showToast('No messages selected'); return; }
+    var sheet = document.createElement('div');
+    sheet.style.cssText = 'position:absolute;inset:0;z-index:25000;background:rgba(0,0,0,0.45);backdrop-filter:blur(16px);display:flex;align-items:flex-end;';
+    sheet.innerHTML =
+        '<div style="width:100%;background:var(--bg-primary,#fff);border-radius:24px 24px 0 0;padding:12px 16px max(32px,env(safe-area-inset-bottom,32px));">' +
+            '<div style="width:36px;height:4px;background:#ccc;border-radius:2px;margin:0 auto 18px;"></div>' +
+            '<p style="text-align:center;font-size:15px;font-weight:700;color:var(--text-primary,#000);margin-bottom:16px;">Delete ' + selected.length + ' message' + (selected.length > 1 ? 's' : '') + '?</p>' +
+            '<div onclick="this.closest(\'[style*=inset]\').remove();exitSelectMode();Array.from(document.querySelectorAll(\'[style*=\\\"outline: 2px solid\\\"]\')).forEach(function(b){var w=b.closest(\'[style*=flex-direction]\') || b.parentElement;if(w){w.style.opacity=\'0\';w.style.transition=\'opacity 0.3s\';setTimeout(function(){if(w.parentNode)w.remove();},320);}});triggerHaptic(30);showToast(\'Deleted\');" style="padding:16px;color:#FF3B30;font-size:16px;font-weight:700;cursor:pointer;border-bottom:0.5px solid rgba(0,0,0,0.07);display:flex;align-items:center;gap:10px;"><i class=\'fa-solid fa-trash\'></i>Delete for me and ' + escapeHtml(chatName) + '</div>' +
+            '<div onclick="this.closest(\'[style*=inset]\').remove();exitSelectMode();Array.from(document.querySelectorAll(\'[style*=\\\"outline: 2px solid\\\"]\')).forEach(function(b){var w=b.closest(\'[style*=flex-direction]\') || b.parentElement;if(w){w.style.opacity=\'0\';w.style.transition=\'opacity 0.3s\';setTimeout(function(){if(w.parentNode)w.remove();},320);}});triggerHaptic(30);showToast(\'Deleted\');" style="padding:16px;color:#FF3B30;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:10px;"><i class=\'fa-solid fa-user-minus\'></i>Delete for me</div>' +
+            '<div onclick="this.closest(\'[style*=inset]\').remove()" style="padding:16px;background:rgba(0,0,0,0.05);border-radius:14px;text-align:center;font-size:16px;font-weight:600;cursor:pointer;margin-top:8px;">Cancel</div>' +
+        '</div>';
+    sheet.addEventListener('click', function(e){ if(e.target===sheet) sheet.remove(); });
+    (document.getElementById('chat-interface') || document.body).appendChild(sheet);
+}
+
+function exitSelectMode() {
+    var chatInterface = document.getElementById('chat-interface');
+    if (chatInterface) chatInterface.removeAttribute('data-select-mode');
+    var selHeader = document.getElementById('chatSelectHeader');
+    var selBar = document.getElementById('chatSelectBar');
+    if (selHeader) selHeader.remove();
+    if (selBar) selBar.remove();
+    var chatBody = document.getElementById('chat-body');
+    if (chatBody) {
+        chatBody.querySelectorAll('.sel-circle').forEach(function(c){ c.remove(); });
+        chatBody.querySelectorAll('[data-msg-bubble]').forEach(function(b){ b.style.outline = ''; b.style.cursor = ''; });
+        chatBody.querySelectorAll('[data-msg-bubble]').forEach(function(b){
+            var wrap = b.parentElement;
+            if (wrap) { wrap.style.display = ''; wrap.style.alignItems = ''; }
+        });
+    }
 }
 function openMoreReactions() {
-    document.getElementById('msgContextOverlay').remove();
-    showToast('More reactions coming soon');
+    var overlay = document.getElementById('msgContextOverlay');
+    if (overlay) overlay.remove();
+    var allEmoji = ['😀','😂','😍','🥰','😎','🤩','😭','😱','🤔','🙄','😏','🥺','😡','🤯','🥳','😴','🤗','😇','🤣','😅','😬','😤','🫡','🫶','👍','👎','❤️','🔥','💯','✅','🎉','🙏','👏','💪','🤝','🫠','😈','👀','💀','🤌','😋','🤤','😝','🤪','🥴','🫣','🤫','😶','🫥','🤭','🫢','😑','😒','🙃','😌','😔','😪','🤒','🤕','🤑','🤠','🥸','🧐','🤓','😳','🥵','🥶','😨','😰','😥','😓','🫤','😟','🙁','☹️','😮','😯','😲','😦','😧','😢','😩','😫','😞','😣'];
+    var sheet = document.createElement('div');
+    sheet.id = 'moreReactSheet';
+    sheet.style.cssText = 'position:absolute;inset:0;z-index:20000;background:rgba(0,0,0,0.45);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);display:flex;align-items:flex-end;';
+    var grid = allEmoji.map(function(e){
+        return '<div onclick="sendMsgReaction(\''+e+'\');document.getElementById(\'moreReactSheet\').remove();" style="font-size:26px;width:42px;height:42px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:10px;transition:background 0.15s;" onpointerdown="this.style.background=\'rgba(0,0,0,0.1)\'" onpointerup="this.style.background=\'\'">' + e + '</div>';
+    }).join('');
+    sheet.innerHTML =
+        '<div style="width:100%;background:var(--bg-primary,#fff);border-radius:24px 24px 0 0;padding:12px 16px max(32px,env(safe-area-inset-bottom,32px));max-height:60vh;display:flex;flex-direction:column;">' +
+            '<div style="width:36px;height:4px;background:#ccc;border-radius:2px;margin:0 auto 14px;flex-shrink:0;"></div>' +
+            '<div style="display:flex;align-items:center;gap:10px;background:rgba(0,0,0,0.06);border-radius:25px;padding:10px 14px;margin-bottom:12px;flex-shrink:0;">' +
+                '<i class="fa-solid fa-magnifying-glass" style="color:#aaa;font-size:13px;"></i>' +
+                '<input id="emojiSearch" type="text" placeholder="Search emoji…" oninput="_filterEmoji(this.value)" style="flex:1;border:none;background:transparent;outline:none;font-size:15px;color:var(--text-primary,#000);">' +
+            '</div>' +
+            '<div id="emojiGrid" style="display:flex;flex-wrap:wrap;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;">' + grid + '</div>' +
+        '</div>';
+    sheet.addEventListener('click', function(e){ if(e.target===sheet) sheet.remove(); });
+    (document.getElementById('chat-interface') || document.getElementById('app') || document.body).appendChild(sheet);
+    setTimeout(function(){ var inp = document.getElementById('emojiSearch'); if(inp) inp.focus(); }, 200);
+}
+function _filterEmoji(q) {
+    var grid = document.getElementById('emojiGrid');
+    if (!grid) return;
+    if (!q) { grid.querySelectorAll('div').forEach(function(d){ d.style.display='flex'; }); return; }
+    grid.querySelectorAll('div').forEach(function(d){ d.style.display = d.textContent.includes(q) ? 'flex' : 'none'; });
 }
 
 // ── Inject long-press support whenever a chat opens ──
@@ -23718,7 +26385,7 @@ function renderGroupChatHeader(group) {
                 L.marker([lat, lng], { icon: userIcon }).addTo(tfMap);
 
                 if (sharingOn && window.sb && currentUser) {
-                    sb.from('user_locations').upsert({ user_id: currentUser.id, lat: lat, lng: lng, updated_at: new Date().toISOString() }).catch(function(){});
+                    sb.from('user_locations').upsert({ user_id: currentUser.id, lat: lat, lng: lng, updated_at: new Date().toISOString() }, { onConflict: 'user_id' }).catch(function(){});
                     localStorage.setItem('tf-last-lat', lat);
                     localStorage.setItem('tf-last-lng', lng);
                 }
@@ -23732,7 +26399,7 @@ function renderGroupChatHeader(group) {
 
             // 1. Real-time shared locations
             sb.from('user_locations')
-                .select('lat,lng,updated_at,profiles:user_id(display_name,username,avatar_url)')
+                .select('lat,lng,updated_at,user_id')
                 .then(function(r) {
                     (r.data || []).forEach(function(row) {
                         if (!row.lat || !row.lng || !row.profiles) return;
@@ -23948,21 +26615,46 @@ function discardCVR() { clearInterval(_cvrInterval); closeCVR(); }
 function sendCVR() {
     stopCVR();
     closeCVR();
-    // Insert circle video bubble
     var chatBody = document.getElementById('chat-body');
     if (!chatBody) return;
     var blob = new Blob(_cvrChunks, { type: 'video/webm' });
-    var url  = URL.createObjectURL(blob);
+    var localUrl = URL.createObjectURL(blob);
+    var msgId = 'cvr_' + Date.now();
     var bubble = document.createElement('div');
-    bubble.style.cssText = 'margin-left:auto;margin-bottom:10px;animation:popIn 0.3s ease;cursor:pointer;';
+    bubble.setAttribute('data-msg-id', msgId);
+    bubble.setAttribute('data-msg-bubble', 'true');
+    bubble.style.cssText = 'display:flex;flex-direction:column;align-items:flex-end;margin-bottom:10px;animation:popIn 0.3s ease;';
     bubble.innerHTML =
-        '<video src="' + url + '" autoplay loop muted playsinline ' +
+        '<video src="' + localUrl + '" autoplay loop muted playsinline ' +
             'style="width:120px;height:120px;border-radius:50%;object-fit:cover;display:block;' +
-                   'border:3px solid #007AFF;box-shadow:0 4px 16px rgba(0,122,255,0.35);"></video>';
+                   'border:3px solid #007AFF;box-shadow:0 4px 16px rgba(0,122,255,0.35);"></video>' +
+        '<small style="color:#aaa;font-size:10px;margin-top:3px;">' +
+            new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) + '</small>';
     chatBody.appendChild(bubble);
     chatBody.scrollTop = chatBody.scrollHeight;
-    showToast('Video note sent 🎥');
+    showToast('Video note sent');
     triggerHaptic(25);
+    // Upload and save to DB
+    if (window.sb && currentUser && currentConversationId) {
+        var path = currentUser.id + '/vn_' + Date.now() + '.webm';
+        window.sb.storage.from('chat_media').upload(path, blob, { contentType: 'video/webm' })
+            .then(function(r) {
+                if (!r.error) {
+                    var urlResult = window.sb.storage.from('chat_media').getPublicUrl(r.data.path);
+                    var publicUrl = urlResult.data && urlResult.data.publicUrl;
+                    if (publicUrl) {
+                        window.sb.from('messages').insert({
+                            conversation_id: currentConversationId,
+                            sender_id: currentUser.id,
+                            message_type: 'video',
+                            media_url: publicUrl,
+                            created_at: new Date().toISOString(),
+                            inserted_at: new Date().toISOString()
+                        }).catch(function(){});
+                    }
+                }
+            }).catch(function(){});
+    }
 }
 
 function closeCVR() {
@@ -24128,18 +26820,12 @@ async function createRealChannel() {
     showToast('Channel "' + name + '" created! 📢');
     triggerHaptic(50);
 
-    // Navigate to channels tab
     var channelsTab = Array.from(document.querySelectorAll('.m-tab')).find(function(t){ return t.textContent.trim().toLowerCase().includes('channel'); });
-    if (channelsTab) {
-        setMsgTab('channels', channelsTab);
-    } else {
-        // Open msg hub if not open, then switch
-        launchMessageHub();
-        setTimeout(function(){
-            var tab = Array.from(document.querySelectorAll('.m-tab')).find(function(t){ return t.textContent.trim().toLowerCase().includes('channel'); });
-            if (tab) setMsgTab('channels', tab);
-        }, 400);
-    }
+    if (!channelsTab) { launchMessageHub(); }
+    setTimeout(function(){
+        var tab = Array.from(document.querySelectorAll('.m-tab')).find(function(t){ return t.textContent.trim().toLowerCase().includes('channel'); });
+        if (tab) { setMsgTab('channels', tab); }
+    }, 450);
 }
 
     function autoArchiveExpiredStories() {
@@ -24245,31 +26931,18 @@ function acknowledgeViolation(id) {
 }
 
 async function startStripeVerification(userId) {
-    // 1. Ask our backend to create the session (secret key stays server-side)
-    const res = await fetch('/api/stripe/create-verification/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId })
-    });
-    const { client_secret, error } = await res.json();
-    if (error) { showToast('Verification failed: ' + error); return; }
-
-    // 2. Use the client_secret with Stripe.js (publishable key only)
-    const stripe = Stripe(STRIPE_PUBLISHABLE_KEY);
-    const { error: stripeError } = await stripe.verifyIdentity(client_secret);
-    if (stripeError) {
-        showToast(stripeError.message);
-    } else {
-        showToast('Identity verified! ✅');
-    }
+    // Stripe Identity retired — ID verification now goes through Didit.
+    // Delegates to startIdVerification() (defined in verify.js), which opens a
+    // hosted Didit session and records a pending blue-badge application.
+    if (typeof startIdVerification === 'function') return startIdVerification();
+    showToast('Verification is temporarily unavailable. Please try again later.');
 }
 
-    function openDropYoursHub() {
+    async function openDropYoursHub() {
     var existing = document.getElementById('dropYoursHub');
     if (existing) existing.remove();
     var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     var bg = isDark ? 'rgba(10,10,14,0.98)' : 'rgba(245,245,250,1)';
-    var card = isDark ? 'rgba(28,28,32,0.85)' : 'rgba(255,255,255,0.7)';
     var tc = isDark ? '#fff' : '#000';
     var sc = isDark ? 'rgba(255,255,255,0.45)' : '#888';
     var templates = [
@@ -24311,6 +26984,63 @@ async function startStripeVerification(userId) {
     (document.getElementById('app') || document.body).appendChild(hub);
 }
 
+function _renderContactList(contacts, tc, sc, bg2) {
+    var html = '<div style="padding:0 0 12px;">';
+    html += '<div style="padding:10px 16px 8px;"><div style="display:flex;align-items:center;gap:10px;background:rgba(0,0,0,0.06);border-radius:12px;padding:10px 14px;">' +
+        '<i class="fa-solid fa-magnifying-glass" style="color:'+sc+';font-size:14px;"></i>' +
+        '<input id="contactSearchInput" placeholder="Search contacts" oninput="_filterAttachContacts(this.value)" style="border:none;background:transparent;outline:none;font-size:15px;color:'+tc+';flex:1;"></div></div>';
+    if (!contacts || contacts.length === 0) {
+        // Fallback: ask for name manually
+        html += '<div style="padding:20px 16px;">' +
+            '<p style="font-size:14px;color:'+sc+';margin-bottom:14px;">Enter contact details to share:</p>' +
+            '<input id="manualContactName" placeholder="Name" style="width:100%;padding:13px;border-radius:12px;border:0.5px solid rgba(128,128,128,0.2);background:rgba(0,0,0,0.04);font-size:15px;color:'+tc+';outline:none;box-sizing:border-box;margin-bottom:10px;">' +
+            '<input id="manualContactPhone" placeholder="Phone number" type="tel" style="width:100%;padding:13px;border-radius:12px;border:0.5px solid rgba(128,128,128,0.2);background:rgba(0,0,0,0.04);font-size:15px;color:'+tc+';outline:none;box-sizing:border-box;margin-bottom:14px;">' +
+            '<button onclick="_sendManualContact()" style="width:100%;padding:14px;border-radius:14px;border:none;background:#007AFF;color:white;font-size:15px;font-weight:700;cursor:pointer;">Share Contact</button>' +
+            '</div>';
+    } else {
+        var groups = {};
+        contacts.forEach(function(c) {
+            var name = (c.name && c.name[0]) || 'Unknown';
+            var letter = name[0].toUpperCase();
+            if (!groups[letter]) groups[letter] = [];
+            groups[letter].push({ name: name, phone: (c.tel && c.tel[0]) || '' });
+        });
+        Object.keys(groups).sort().forEach(function(letter) {
+            html += '<div style="padding:6px 16px 2px;"><span style="font-size:12px;font-weight:700;color:'+sc+';">'+letter+'</span></div>';
+            html += '<div style="background:'+bg2+';border-radius:16px;margin:0 12px 8px;overflow:hidden;">';
+            groups[letter].forEach(function(c, i) {
+                html += '<div onclick="_sendContactMessage(\''+escapeHtml(c.name)+'\',\''+escapeHtml(c.phone)+'\')" style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;'+(i>0?'border-top:0.5px solid rgba(128,128,128,0.12);':'')+'">' +
+                    '<div style="width:40px;height:40px;border-radius:50%;background:#007AFF;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:16px;flex-shrink:0;">'+c.name[0].toUpperCase()+'</div>' +
+                    '<div><b style="font-size:15px;color:'+tc+';">'+escapeHtml(c.name)+'</b><br><small style="color:'+sc+';">'+escapeHtml(c.phone)+'</small></div></div>';
+            });
+            html += '</div>';
+        });
+    }
+    html += '</div>';
+    return html;
+}
+
+function _sendManualContact() {
+    var name = (document.getElementById('manualContactName')||{}).value || '';
+    var phone = (document.getElementById('manualContactPhone')||{}).value || '';
+    if (!name) { showToast('Enter a name'); return; }
+    _sendContactMessage(name, phone);
+}
+
+function _sendContactMessage(name, phone) {
+    closeAttachModal();
+    var input = document.getElementById('chat-msg-input');
+    if (input) {
+        input.value = '📇 ' + name + (phone ? ' · ' + phone : '');
+        input.dispatchEvent(new Event('input'));
+        sendMessageNew();
+    }
+}
+
+function _filterAttachContacts(q) {
+    // No-op for manual entry fallback; for real contacts it would re-render
+}
+
     function openAttachmentModal() {
     var existing = document.getElementById('attachModal');
     if (existing) { existing.remove(); return; }
@@ -24323,13 +27053,13 @@ async function startStripeVerification(userId) {
     // Dim overlay
     var dim = document.createElement('div');
     dim.id = 'attachDim';
-    dim.style.cssText = 'position:fixed;inset:0;z-index:20000;background:rgba(0,0,0,0.38);';
+    dim.style.cssText = 'position:absolute;inset:0;z-index:20000;background:rgba(0,0,0,0.38);';
     dim.addEventListener('click', closeAttachModal);
 
     var modal = document.createElement('div');
     modal.id = 'attachModal';
     modal.style.cssText = [
-        'position:fixed;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:430px;',
+        'position:absolute;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:430px;',
         'z-index:20001;',
         'border-radius:28px 28px 0 0;',
         'background:'+bg+';',
@@ -24355,7 +27085,7 @@ async function startStripeVerification(userId) {
             '<p style="font-size:16px;font-weight:700;color:' + tc + ';margin:0;">Choose from Library</p>' +
             '<p style="font-size:13px;color:' + sc + ';text-align:center;margin:0;">Select a photo or video from your device</p>' +
             '<div style="display:flex;gap:12px;margin-top:4px;">' +
-                '<button onclick="closeAttachModal();document.getElementById(\'file-input\').accept=\'image/*,video/*\';document.getElementById(\'file-input\').click();" style="flex:1;padding:14px;border-radius:14px;background:#007AFF;border:none;color:white;font-size:15px;font-weight:700;cursor:pointer;">Photo / Video</button>' +
+                '<button onclick="document.getElementById(\'file-input\').accept=\'image/*,video/*\';document.getElementById(\'file-input\').click();closeAttachModal();" style="flex:1;padding:14px;border-radius:14px;background:#007AFF;border:none;color:white;font-size:15px;font-weight:700;cursor:pointer;">Photo / Video</button>' +
                 '<button onclick="closeAttachModal();startCamera();" style="flex:1;padding:14px;border-radius:14px;background:rgba(0,122,255,0.1);border:1px solid rgba(0,122,255,0.2);color:#007AFF;font-size:15px;font-weight:700;cursor:pointer;"><i class="fa-solid fa-camera"></i> Camera</button>' +
             '</div>' +
         '</div>';
@@ -24400,7 +27130,7 @@ async function startStripeVerification(userId) {
                 '<input id="ckNewItem" placeholder="Add item…" onkeydown="if(event.key===\'Enter\'){addChecklistItem();event.preventDefault();}" style="flex:1;border:none;background:transparent;outline:none;font-size:15px;color:'+tc+';caret-color:#007AFF;">' +
                 '<button onclick="addChecklistItem()" style="background:none;border:none;color:#007AFF;font-size:20px;cursor:pointer;padding:0 4px;">+</button>' +
             '</div>' +
-            '<button onclick="closeAttachModal();showToast(\'Checklist sent! ✅\');" style="width:100%;padding:15px;border-radius:16px;border:none;background:#007AFF;color:white;font-size:16px;font-weight:700;cursor:pointer;margin-top:10px;">Send Checklist</button>' +
+            '<button onclick="_sendChecklistMessage();closeAttachModal();" style="width:100%;padding:15px;border-radius:16px;border:none;background:#007AFF;color:white;font-size:16px;font-weight:700;cursor:pointer;margin-top:10px;">Send Checklist</button>' +
             '<button onclick="closeAttachModal()" style="width:100%;padding:12px;border-radius:16px;border:none;background:transparent;color:'+sc+';font-size:14px;cursor:pointer;margin-top:6px;">Cancel</button>' +
         '</div>';
     }
@@ -24457,8 +27187,9 @@ async function startStripeVerification(userId) {
         if (dy > 100) { closeAttachModal(); } else { modal.style.transform = 'translateY(0)'; modal.style.transition = 'transform 0.3s cubic-bezier(0.32,0.72,0,1)'; }
     }, {passive:true});
 
-    document.body.appendChild(dim);
-    document.body.appendChild(modal);
+    var appEl = document.getElementById('app') || document.body;
+    appEl.appendChild(dim);
+    appEl.appendChild(modal);
 }
 
 window._attachTabFns = {
@@ -24473,9 +27204,71 @@ window._attachTabFns = {
             '</div>';
     }
 },
-    file: function(){ document.getElementById('file-input').click(); closeAttachModal(); },
-    audio: function(){ showToast('Record or pick an audio file'); closeAttachModal(); },
-    contact: function(){ showToast('Select a contact to share'); closeAttachModal(); }
+    file: function(){
+        var area = document.getElementById('attachContentArea');
+        document.getElementById('attachModalTitle').textContent = 'File';
+        var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        var tc = isDark ? '#fff' : '#000'; var sc = isDark ? 'rgba(255,255,255,0.4)' : '#888';
+        var bg2 = isDark ? '#1c1c1e' : '#fff';
+        area.innerHTML =
+            '<div style="padding:12px 16px;">' +
+            '<div style="background:'+bg2+';border-radius:16px;overflow:hidden;">' +
+                '<div onclick="closeAttachModal();setTimeout(function(){ var fi=document.getElementById(\'file-input\'); fi.accept=\'image/*\'; fi.click(); },100);" style="display:flex;align-items:center;gap:14px;padding:16px;cursor:pointer;border-bottom:0.5px solid rgba(128,128,128,0.12);">' +
+                    '<div style="width:40px;height:40px;border-radius:50%;background:rgba(0,122,255,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-regular fa-image" style="color:#007AFF;font-size:17px;"></i></div>' +
+                    '<b style="font-size:15px;color:'+tc+';">Select from Gallery</b>' +
+                '</div>' +
+                '<div onclick="closeAttachModal();setTimeout(function(){ var fi=document.getElementById(\'file-input\'); fi.accept=\'*/*\'; fi.click(); },100);" style="display:flex;align-items:center;gap:14px;padding:16px;cursor:pointer;border-bottom:0.5px solid rgba(128,128,128,0.12);">' +
+                    '<div style="width:40px;height:40px;border-radius:50%;background:rgba(255,149,0,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-cloud-arrow-up" style="color:#FF9500;font-size:17px;"></i></div>' +
+                    '<b style="font-size:15px;color:'+tc+';">Select from Files</b>' +
+                '</div>' +
+                '<div onclick="closeAttachModal();setTimeout(openDocumentScanner,100);" style="display:flex;align-items:center;gap:14px;padding:16px;cursor:pointer;">' +
+                    '<div style="width:40px;height:40px;border-radius:50%;background:rgba(52,199,89,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-scan" style="color:#34C759;font-size:17px;"></i></div>' +
+                    '<b style="font-size:15px;color:'+tc+';">Scan Document</b>' +
+                '</div>' +
+            '</div></div>';
+    },
+    audio: function(){
+        var area = document.getElementById('attachContentArea');
+        document.getElementById('attachModalTitle').textContent = 'Audio';
+        var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        var tc = isDark ? '#fff' : '#000'; var sc = isDark ? 'rgba(255,255,255,0.4)' : '#888';
+        var bg2 = isDark ? '#1c1c1e' : '#fff';
+        // Create hidden audio input
+        var inp = document.getElementById('_attachAudioInput');
+        if (!inp) { inp = document.createElement('input'); inp.type='file'; inp.id='_attachAudioInput'; inp.accept='audio/*'; inp.style.display='none'; document.body.appendChild(inp); }
+        inp.onchange = function() {
+            if (!inp.files || !inp.files.length) return;
+            var file = inp.files[0];
+            closeAttachModal();
+            // Send as audio message
+            var url = URL.createObjectURL(file);
+            _sendMediaMessage(url, 'audio', file.name);
+        };
+        area.innerHTML =
+            '<div style="padding:16px;">' +
+            '<div onclick="document.getElementById(\'_attachAudioInput\').click()" style="display:flex;align-items:center;gap:14px;padding:16px;background:'+bg2+';border-radius:16px;cursor:pointer;margin-bottom:10px;">' +
+                '<div style="width:44px;height:44px;border-radius:50%;background:rgba(255,59,48,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+                    '<i class="fa-solid fa-cloud-arrow-up" style="color:#FF3B30;font-size:18px;"></i>' +
+                '</div>' +
+                '<div><b style="font-size:15px;color:'+tc+';">Select from Files</b><br><small style="color:'+sc+';">Pick an audio file from your device</small></div>' +
+            '</div>' +
+            '</div>';
+    },
+    contact: function(){
+        var area = document.getElementById('attachContentArea');
+        document.getElementById('attachModalTitle').textContent = 'Contact';
+        var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        var tc = isDark ? '#fff' : '#000'; var sc = isDark ? 'rgba(255,255,255,0.4)' : '#888';
+        var bg2 = isDark ? '#1c1c1e' : '#fff';
+        // Try Web Contacts API first
+        if ('contacts' in navigator && 'ContactsManager' in window) {
+            navigator.contacts.select(['name','tel','email'],{multiple:true}).then(function(contacts){
+                area.innerHTML = _renderContactList(contacts, tc, sc, bg2);
+            }).catch(function(){ area.innerHTML = _renderContactList([], tc, sc, bg2); });
+        } else {
+            area.innerHTML = _renderContactList([], tc, sc, bg2);
+        }
+    }
 };
 
 function switchAttachTab(tabId, el) {
@@ -24542,7 +27335,7 @@ function switchAttachTab(tabId, el) {
         document.getElementById('attachModalTitle').textContent = 'Checklist';
         var isDark2 = document.documentElement.getAttribute('data-theme') === 'dark';
         var tc2 = isDark2?'#fff':'#000'; var sc2 = isDark2?'rgba(255,255,255,0.4)':'#888';
-        area.innerHTML = '<div style="padding:16px;"><input id="ckTitle" placeholder="Checklist title" style="width:100%;padding:14px;border-radius:14px;border:0.5px solid rgba(128,128,128,0.18);background:rgba(0,0,0,0.04);font-size:16px;font-weight:700;outline:none;margin-bottom:10px;color:'+tc2+';box-sizing:border-box;"><div id="ckItems" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;"></div><div style="display:flex;gap:8px;align-items:center;padding:10px 0;border-top:0.5px solid rgba(128,128,128,0.12);"><div style="width:20px;height:20px;border-radius:6px;border:1.5px solid rgba(0,122,255,0.4);flex-shrink:0;"></div><input id="ckNewItem" placeholder="Add item…" onkeydown="if(event.key===\'Enter\'){addChecklistItem();event.preventDefault();}" style="flex:1;border:none;background:transparent;outline:none;font-size:15px;color:'+tc2+';caret-color:#007AFF;"><button onclick="addChecklistItem()" style="background:none;border:none;color:#007AFF;font-size:20px;cursor:pointer;padding:0 4px;">+</button></div><button onclick="closeAttachModal();showToast(\'Checklist sent! ✅\');" style="width:100%;padding:15px;border-radius:16px;border:none;background:#007AFF;color:white;font-size:16px;font-weight:700;cursor:pointer;margin-top:10px;">Send Checklist</button><button onclick="closeAttachModal()" style="width:100%;padding:12px;border-radius:16px;border:none;background:transparent;color:'+sc2+';font-size:14px;cursor:pointer;margin-top:6px;">Cancel</button></div>';
+        area.innerHTML = '<div style="padding:16px;"><input id="ckTitle" placeholder="Checklist title" style="width:100%;padding:14px;border-radius:14px;border:0.5px solid rgba(128,128,128,0.18);background:rgba(0,0,0,0.04);font-size:16px;font-weight:700;outline:none;margin-bottom:10px;color:'+tc2+';box-sizing:border-box;"><div id="ckItems" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;"></div><div style="display:flex;gap:8px;align-items:center;padding:10px 0;border-top:0.5px solid rgba(128,128,128,0.12);"><div style="width:20px;height:20px;border-radius:6px;border:1.5px solid rgba(0,122,255,0.4);flex-shrink:0;"></div><input id="ckNewItem" placeholder="Add item…" onkeydown="if(event.key===\'Enter\'){addChecklistItem();event.preventDefault();}" style="flex:1;border:none;background:transparent;outline:none;font-size:15px;color:'+tc2+';caret-color:#007AFF;"><button onclick="addChecklistItem()" style="background:none;border:none;color:#007AFF;font-size:20px;cursor:pointer;padding:0 4px;">+</button></div><button onclick="_sendChecklistMessage();closeAttachModal();" style="width:100%;padding:15px;border-radius:16px;border:none;background:#007AFF;color:white;font-size:16px;font-weight:700;cursor:pointer;margin-top:10px;">Send Checklist</button><button onclick="closeAttachModal()" style="width:100%;padding:12px;border-radius:16px;border:none;background:transparent;color:'+sc2+';font-size:14px;cursor:pointer;margin-top:6px;">Cancel</button></div>';
     } else if (window._attachTabFns[tabId]) {
         window._attachTabFns[tabId]();
     }
@@ -24660,16 +27453,65 @@ function openClipSelectorGallery() {
     openPage('clip-selector-overlay');
     var grid = document.getElementById('clip-gallery-grid');
     if (!grid) return;
-
-    // Show add button pinned at top, grid fills below
-    grid.innerHTML =
-        '<div class="clip-thumb-item" id="clip-add-btn" style="aspect-ratio:9/16;border-radius:6px;background:rgba(0,122,255,0.1);border:2px dashed rgba(0,122,255,0.4);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;gap:8px;" onclick="document.getElementById(\'video-clip-input\').click()">' +
-            '<i class="fa-solid fa-plus" style="color:#007AFF;font-size:24px;"></i>' +
-            '<span style="color:#007AFF;font-size:11px;font-weight:700;">Add</span>' +
-        '</div>';
-
     var nextBtn = document.getElementById('clipNextBtn');
     if (nextBtn) { nextBtn.style.opacity = '0.4'; nextBtn.style.pointerEvents = 'none'; }
+
+    // Hidden real file input — browser-native gallery picker
+    var inp = document.getElementById('_clipGalleryInput');
+    if (!inp) {
+        inp = document.createElement('input');
+        inp.type = 'file';
+        inp.id = '_clipGalleryInput';
+        inp.accept = 'image/*,video/*';
+        inp.multiple = true;
+        inp.style.display = 'none';
+        inp.addEventListener('change', function() {
+            if (!inp.files || !inp.files.length) return;
+            _clipFileObjects = Array.from(inp.files);
+            selectedClipFiles = [];
+            _renderClipGallery(_clipFileObjects);
+        });
+        document.body.appendChild(inp);
+    }
+
+    // Show gallery grid with a "Browse" button and instructions
+    grid.innerHTML =
+        '<div style="grid-column:1/-1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;gap:16px;">' +
+            '<div onclick="document.getElementById(\'_clipGalleryInput\').click()" style="width:80px;height:80px;border-radius:50%;background:rgba(0,122,255,0.1);border:2.5px dashed rgba(0,122,255,0.4);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+                '<i class="fa-solid fa-images" style="color:#007AFF;font-size:28px;"></i>' +
+            '</div>' +
+            '<p style="font-size:15px;font-weight:700;color:var(--text-primary,#000);text-align:center;">Select from your gallery</p>' +
+            '<p style="font-size:13px;color:#888;text-align:center;max-width:240px;">Tap to open your camera roll and pick photos or videos</p>' +
+            '<button onclick="document.getElementById(\'_clipGalleryInput\').click()" style="padding:13px 32px;border-radius:50px;background:#007AFF;border:none;color:white;font-size:15px;font-weight:700;cursor:pointer;">Open Gallery</button>' +
+        '</div>';
+}
+
+function _renderClipGallery(files) {
+    var grid = document.getElementById('clip-gallery-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    files.forEach(function(file, idx) {
+        var isVid = file.type.startsWith('video/');
+        var url = URL.createObjectURL(file);
+        var item = document.createElement('div');
+        item.className = 'clip-thumb-item';
+        item.style.cssText = 'aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;position:relative;background:#111;border:3px solid transparent;transition:border-color 0.15s;';
+        item.setAttribute('data-idx', idx);
+        item.innerHTML =
+            (isVid
+                ? '<video src="'+url+'" style="width:100%;height:100%;object-fit:cover;" muted playsinline preload="metadata"></video>' +
+                  '<div style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.55);border-radius:6px;padding:2px 5px;"><i class="fa-solid fa-play" style="color:white;font-size:9px;"></i></div>'
+                : '<img src="'+url+'" style="width:100%;height:100%;object-fit:cover;" loading="lazy">') +
+            '<div class="clip-check" style="position:absolute;top:5px;right:5px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,0.3);border:2px solid white;display:flex;align-items:center;justify-content:center;"></div>';
+        item.addEventListener('click', function(){ toggleClipSelection(idx, item); });
+        grid.appendChild(item);
+    });
+    // Add more button at end
+    var addMore = document.createElement('div');
+    addMore.style.cssText = 'aspect-ratio:1;border-radius:6px;background:rgba(0,122,255,0.08);border:2px dashed rgba(0,122,255,0.3);display:flex;align-items:center;justify-content:center;cursor:pointer;';
+    addMore.innerHTML = '<i class="fa-solid fa-plus" style="color:#007AFF;font-size:22px;"></i>';
+    addMore.onclick = function(){ document.getElementById('_clipGalleryInput').click(); };
+    grid.appendChild(addMore);
 }
 
 function toggleClipSelection(idx, el) {
@@ -24775,10 +27617,31 @@ function openPreviewEditScreen() {
         counter.textContent = '1 / ' + selectedClipFiles.length;
     }
 
-    edRenderTimeline();
+     edRenderTimeline();
     edStartAutoSave();
+    var _firstVidClip = edState.clips.find(function(c){ return c.objectUrl; });
+    if (_firstVidClip) {
+        var _edVidEl = document.getElementById('edVideo');
+if (_edVidEl) {
+            _edVidEl.src = _firstVidClip.objectUrl;
+            _edVidEl.muted = false;
+            _edVidEl.loop = true;
+            _edVidEl.load();
+            _edVidEl.play().catch(function(){});
+            _edVidEl.onloadedmetadata = function() {
+                var realDurMs = Math.round(_edVidEl.duration * 1000);
+                if (_firstVidClip && realDurMs > 0) {
+                    _firstVidClip.durationMs = realDurMs;
+                    _firstVidClip.endMs = realDurMs;
+                }
+                edUpdateTimestamp();
+                edRenderTimeline();
+            };
+        }
+    }
     triggerHaptic(10);
 }
+
 
 function edRenderTimeline() {
     var vTrack = document.getElementById('edVideoTrack');
@@ -24795,7 +27658,7 @@ function edRenderTimeline() {
             'style="width:' + w + 'px;background:' + c.color + ';" ' +
             'onclick="edSelectClip(\'' + c.id + '\')">' +
             '<div class="ed-trim ed-trim-l" ontouchstart="edTrimStart(event,\'' + c.id + '\',\'l\')" onmousedown="edTrimStart(event,\'' + c.id + '\',\'l\')">⠿</div>' +
-            '<img src="https://picsum.photos/seed/' + c.seed + '/80/40" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.45;pointer-events:none;">' +
+            (c.thumbnail ? '<img src="' + c.thumbnail + '" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.6;pointer-events:none;">' : '') +
             '<span style="position:relative;z-index:1;pointer-events:none;">Clip ' + (edState.clips.indexOf(c)+1) + '</span>' +
             '<div class="ed-trim ed-trim-r" ontouchstart="edTrimStart(event,\'' + c.id + '\',\'r\')" onmousedown="edTrimStart(event,\'' + c.id + '\',\'r\')">⠿</div>' +
             '</div>';
@@ -24805,7 +27668,8 @@ function edRenderTimeline() {
     if (aTrack) {
         aTrack.innerHTML = edState.audioTracks.map(function(a) {
             var w = Math.max(60, (a.durationMs / 1000) * ED_CLIP_PX_PER_SEC * edZoom);
-            return '<div class="ed-clip" style="width:' + w + 'px;background:rgba(52,199,89,0.8);">' +
+            return '<div class="ed-clip" style="width:' + w + 'px;background:rgba(52,199,89,0.8);cursor:pointer;" ' +
+                'onclick="edSelectAudioTrack(\'' + a.id + '\')">' +
                 '<div class="ed-trim ed-trim-l">⠿</div>' +
                 '<i class="fa-solid fa-music" style="margin-right:6px;font-size:11px;"></i>' + a.label +
                 '<div class="ed-trim ed-trim-r">⠿</div></div>';
@@ -24876,6 +27740,90 @@ function edSelectClip(id) {
     triggerHaptic(8);
 }
 
+function edSelectAudioTrack(id) {
+    var a = edState.audioTracks.find(function(t){return t.id === id;});
+    if (!a) return;
+    var existing = document.getElementById('edAudioActionSheet');
+    if (existing) { existing.remove(); return; }
+    var sheet = document.createElement('div');
+    sheet.id = 'edAudioActionSheet';
+    sheet.style.cssText = 'position:absolute;bottom:0;left:0;right:0;z-index:9999;background:rgba(30,30,35,0.97);backdrop-filter:blur(30px);border-radius:22px 22px 0 0;padding:20px;';
+    sheet.innerHTML = '<b style="color:white;font-size:15px;display:block;margin-bottom:16px;text-align:center;">' + escapeHtml(a.label) + '</b>' +
+        '<div style="display:flex;gap:8px;margin-bottom:12px;">' +
+            '<button onclick="document.getElementById(\'edAudioActionSheet\').remove();edOpenVolumeMusicPanel(\'' + id + '\');" style="flex:1;padding:12px 8px;border-radius:14px;border:none;background:rgba(255,255,255,0.1);color:white;font-size:13px;font-weight:700;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;"><i class="fa-solid fa-volume-high" style="font-size:18px;"></i>Volume</button>' +
+            '<button onclick="document.getElementById(\'edAudioActionSheet\').remove();edOpenFadeMusicPanel(\'' + id + '\');" style="flex:1;padding:12px 8px;border-radius:14px;border:none;background:rgba(255,255,255,0.1);color:white;font-size:13px;font-weight:700;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;"><i class="fa-solid fa-wave-square" style="font-size:18px;"></i>Fade</button>' +
+            '<button onclick="document.getElementById(\'edAudioActionSheet\').remove();edOpenAdjustMusicPanel(\'' + id + '\');" style="flex:1;padding:12px 8px;border-radius:14px;border:none;background:rgba(255,255,255,0.1);color:white;font-size:13px;font-weight:700;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;"><i class="fa-solid fa-sliders" style="font-size:18px;"></i>Adjust</button>' +
+        '</div>' +
+        '<button onclick="edOpenMusicModal();document.getElementById(\'edAudioActionSheet\').remove();" style="width:100%;padding:14px;border-radius:14px;border:none;background:rgba(255,255,255,0.1);color:white;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:8px;"><i class="fa-solid fa-arrow-right-arrow-left" style="margin-right:8px;"></i>Replace</button>' +
+        '<button onclick="edState.audioTracks=edState.audioTracks.filter(function(t){return t.id!==\'' + id + '\';});edRenderTimeline();edSaveHistory();document.getElementById(\'edAudioActionSheet\').remove();" style="width:100%;padding:14px;border-radius:14px;border:none;background:rgba(255,59,48,0.2);color:#FF3B30;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:8px;"><i class="fa-solid fa-trash" style="margin-right:8px;"></i>Remove</button>' +
+        '<button onclick="document.getElementById(\'edAudioActionSheet\').remove();" style="width:100%;padding:14px;border-radius:14px;border:none;background:transparent;color:rgba(255,255,255,0.4);font-size:15px;cursor:pointer;">Cancel</button>';
+    (document.getElementById('preview-edit-overlay') || document.body).appendChild(sheet);
+    triggerHaptic(10);
+}
+
+function edOpenVolumeMusicPanel(trackId) {
+    var a = edState.audioTracks.find(function(t){return t.id===trackId;});
+    if (!a) return;
+    var overlay = document.getElementById('preview-edit-overlay'); if (!overlay) return;
+    var p = document.createElement('div'); p.id='edMusicVolPanel';
+    p.style.cssText='position:absolute;left:0;right:0;bottom:0;z-index:510;background:rgba(10,10,10,0.97);backdrop-filter:blur(30px);border-radius:24px 24px 0 0;padding:20px 16px max(32px,env(safe-area-inset-bottom,32px));animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
+    var vol = a.volume !== undefined ? a.volume : 100;
+    p.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;"><span style="color:white;font-size:17px;font-weight:700;">Music Volume</span><button onclick="document.getElementById(\'edMusicVolPanel\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button></div>'+
+        '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;"><i class="fa-solid fa-volume-'+(vol===0?'xmark':vol<50?'low':'high')+'" id="mvIcon" style="color:rgba(255,255,255,0.6);font-size:18px;width:22px;text-align:center;"></i><input type="range" id="mvSlider" min="0" max="200" value="'+vol+'" oninput="var v=parseInt(this.value);document.getElementById(\'mvVal\').textContent=v+\'%\';document.getElementById(\'mvIcon\').className=\'fa-solid fa-volume-\'+(v===0?\'xmark\':v<50?\'low\':\'high\')+\' \';this.style.background=\'linear-gradient(to right,#007AFF \'+(v/2)+\'%,rgba(255,255,255,0.2) \'+(v/2)+\'%)\';var at=edState.audioTracks.find(function(t){return t.id===\''+trackId+'\';});if(at)at.volume=v;" style="flex:1;height:4px;-webkit-appearance:none;appearance:none;background:linear-gradient(to right,#007AFF '+(vol/2)+'%,rgba(255,255,255,0.2) '+(vol/2)+'%);border-radius:2px;outline:none;cursor:pointer;"><span id="mvVal" style="color:white;font-size:14px;font-weight:700;min-width:38px;text-align:right;">'+vol+'%</span></div>'+
+        '<button onclick="document.getElementById(\'edMusicVolPanel\').remove();showToast(\'Volume applied ✅\');triggerHaptic(15);" style="width:100%;padding:14px;border-radius:14px;border:none;background:#007AFF;color:white;font-size:15px;font-weight:700;cursor:pointer;">Done</button>';
+    overlay.appendChild(p);
+}
+function edOpenFadeMusicPanel(trackId) {
+    var a = edState.audioTracks.find(function(t){return t.id===trackId;});
+    if (!a) return;
+    var overlay = document.getElementById('preview-edit-overlay'); if (!overlay) return;
+    var p = document.createElement('div'); p.id='edMusicFadePanel';
+    p.style.cssText='position:absolute;left:0;right:0;bottom:0;z-index:510;background:rgba(10,10,10,0.97);backdrop-filter:blur(30px);border-radius:24px 24px 0 0;padding:20px 16px max(32px,env(safe-area-inset-bottom,32px));animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
+    var fadeIn = a.fadeIn||0; var fadeOut = a.fadeOut||0;
+    p.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;"><span style="color:white;font-size:17px;font-weight:700;">Fade</span><button onclick="document.getElementById(\'edMusicFadePanel\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button></div>'+
+        '<p style="color:rgba(255,255,255,0.4);font-size:12px;margin:0 0 16px;">Fade In starts from the beginning. Fade Out from the end. Increase to fade more of the song.</p>'+
+        '<div style="margin-bottom:16px;"><div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="color:white;font-size:14px;font-weight:600;">Fade In</span><span id="fiVal" style="color:#007AFF;font-size:14px;font-weight:700;">'+fadeIn+'s</span></div>'+
+        '<input type="range" id="fiSlider" min="0" max="10" step="0.5" value="'+fadeIn+'" oninput="var v=parseFloat(this.value);document.getElementById(\'fiVal\').textContent=v+\'s\';var at=edState.audioTracks.find(function(t){return t.id===\''+trackId+'\';});if(at)at.fadeIn=v;edUpdateFadeViz(\''+trackId+'\');" style="width:100%;height:4px;-webkit-appearance:none;appearance:none;background:linear-gradient(to right,#007AFF '+(fadeIn*10)+'%,rgba(255,255,255,0.2) '+(fadeIn*10)+'%);border-radius:2px;outline:none;cursor:pointer;"></div>'+
+        '<div style="margin-bottom:20px;"><div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="color:white;font-size:14px;font-weight:600;">Fade Out</span><span id="foVal" style="color:#007AFF;font-size:14px;font-weight:700;">'+fadeOut+'s</span></div>'+
+        '<input type="range" id="foSlider" min="0" max="10" step="0.5" value="'+fadeOut+'" oninput="var v=parseFloat(this.value);document.getElementById(\'foVal\').textContent=v+\'s\';var at=edState.audioTracks.find(function(t){return t.id===\''+trackId+'\';});if(at)at.fadeOut=v;edUpdateFadeViz(\''+trackId+'\');" style="width:100%;height:4px;-webkit-appearance:none;appearance:none;background:linear-gradient(to right,#007AFF '+(fadeOut*10)+'%,rgba(255,255,255,0.2) '+(fadeOut*10)+'%);border-radius:2px;outline:none;cursor:pointer;"></div>'+
+        // Music bar visualization with fade shadows
+        '<div id="fadeVizBar" style="height:32px;border-radius:10px;background:rgba(52,199,89,0.3);position:relative;overflow:hidden;margin-bottom:20px;">'+
+            '<div id="fadeInShadow" style="position:absolute;left:0;top:0;bottom:0;background:linear-gradient(to right,rgba(0,0,0,0.6),transparent);border-radius:10px 0 0 10px;width:'+(fadeIn*10)+'%;"></div>'+
+            '<div id="fadeOutShadow" style="position:absolute;right:0;top:0;bottom:0;background:linear-gradient(to left,rgba(0,0,0,0.6),transparent);border-radius:0 10px 10px 0;width:'+(fadeOut*10)+'%;"></div>'+
+            '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:1px;">'+
+                Array.from({length:30},function(){return '<div style="width:3px;height:'+(Math.random()*20+8)+'px;background:rgba(52,199,89,0.8);border-radius:2px;"></div>';}).join('')+
+            '</div>'+
+        '</div>'+
+        '<button onclick="document.getElementById(\'edMusicFadePanel\').remove();edSaveHistory();showToast(\'Fade applied ✅\');triggerHaptic(15);" style="width:100%;padding:14px;border-radius:14px;border:none;background:#007AFF;color:white;font-size:15px;font-weight:700;cursor:pointer;">Done</button>';
+    overlay.appendChild(p);
+}
+function edUpdateFadeViz(trackId) {
+    var a = edState.audioTracks.find(function(t){return t.id===trackId;}); if(!a) return;
+    var fi = document.getElementById('fadeInShadow'); var fo = document.getElementById('fadeOutShadow');
+    if(fi) fi.style.width = (a.fadeIn||0)*10+'%';
+    if(fo) fo.style.width = (a.fadeOut||0)*10+'%';
+}
+function edOpenAdjustMusicPanel(trackId) {
+    var a = edState.audioTracks.find(function(t){return t.id===trackId;});
+    if (!a) return;
+    var overlay = document.getElementById('preview-edit-overlay'); if (!overlay) return;
+    var p = document.createElement('div'); p.id='edMusicAdjPanel';
+    p.style.cssText='position:absolute;left:0;right:0;bottom:0;z-index:510;background:rgba(10,10,10,0.97);backdrop-filter:blur(30px);border-radius:24px 24px 0 0;padding:20px 16px max(32px,env(safe-area-inset-bottom,32px));animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
+    var startPct = a.startPct||0;
+    p.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;"><span style="color:white;font-size:17px;font-weight:700;">Adjust — Pick Part of Song</span><button onclick="document.getElementById(\'edMusicAdjPanel\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button></div>'+
+        '<p style="color:rgba(255,255,255,0.4);font-size:12px;margin:0 0 16px;">Drag the scrubber to choose which part of the song plays with your video.</p>'+
+        '<div style="height:48px;border-radius:12px;background:rgba(52,199,89,0.25);position:relative;overflow:hidden;margin-bottom:16px;">'+
+            '<div style="position:absolute;inset:0;display:flex;align-items:center;gap:1px;padding:0 4px;">'+
+                Array.from({length:60},function(){return '<div style="flex:1;height:'+(Math.random()*32+8)+'px;background:rgba(52,199,89,0.7);border-radius:1px;"></div>';}).join('')+
+            '</div>'+
+            '<div id="adjScrubHandle" style="position:absolute;top:0;bottom:0;left:'+startPct+'%;width:60px;background:rgba(255,255,255,0.2);border:2px solid white;border-radius:8px;cursor:grab;"></div>'+
+        '</div>'+
+        '<input type="range" id="adjScrubber" min="0" max="90" step="1" value="'+startPct+'" oninput="var v=parseInt(this.value);document.getElementById(\'adjScrubHandle\').style.left=v+\'%\';document.getElementById(\'adjPct\').textContent=Math.round(v)+'%';var at=edState.audioTracks.find(function(t){return t.id===\''+trackId+'\';});if(at)at.startPct=v;" style="width:100%;height:4px;-webkit-appearance:none;appearance:none;background:linear-gradient(to right,#34C759 '+startPct+'%,rgba(255,255,255,0.2) '+startPct+'%);border-radius:2px;outline:none;cursor:pointer;margin-bottom:8px;">'+
+        '<div style="text-align:center;margin-bottom:16px;"><span id="adjPct" style="color:#34C759;font-size:14px;font-weight:700;">'+startPct+'%</span><span style="color:rgba(255,255,255,0.4);font-size:13px;"> into the song</span></div>'+
+        '<button onclick="document.getElementById(\'edMusicAdjPanel\').remove();edSaveHistory();showToast(\'Start point saved ✅\');triggerHaptic(15);" style="width:100%;padding:14px;border-radius:14px;border:none;background:#007AFF;color:white;font-size:15px;font-weight:700;cursor:pointer;">Done</button>';
+    overlay.appendChild(p);
+}
+
 var _edTrimData = null;
 function edTrimStart(e, clipId, side) {
     e.stopPropagation();
@@ -24920,8 +27868,10 @@ function editorSplitClip() {
     var idx = edState.clips.findIndex(function(c){return c.id === edState.selectedClipId;});
     if (idx < 0) return;
     var c = edState.clips[idx];
+    var _sv = document.getElementById('edVideo');
+    if (_sv && isFinite(_sv.duration) && _sv.duration > 0) edState.playheadMs = Math.round(_sv.currentTime * 1000);
     var splitAt = edState.playheadMs;
-    if (splitAt <= c.startMs || splitAt >= c.endMs) { showToast('Playhead must be inside the clip'); return; }
+    if (splitAt <= c.startMs || splitAt >= c.endMs) splitAt = c.startMs + Math.floor(c.durationMs / 2);
     var newClip = { id: 'clip_' + Date.now(), seed: c.seed + 1, startMs: splitAt, endMs: c.endMs, durationMs: c.endMs - splitAt, color: c.color };
     c.endMs = splitAt; c.durationMs = splitAt - c.startMs;
     edState.clips.splice(idx + 1, 0, newClip);
@@ -24956,11 +27906,92 @@ function editorDeleteClip() {
     if (!edState.selectedClipId) return;
     edState.clips = edState.clips.filter(function(c){return c.id !== edState.selectedClipId;});
     edState.selectedClipId = null;
-    document.getElementById('edClipActions').style.display = 'none';
+    var bar = document.getElementById('edClipActions');
+    if (bar) bar.style.display = 'none';
     edState.isDirty = true;
+    // Update preview to show first remaining clip or clear
+    var vid = document.getElementById('edVideo');
+    if (vid) {
+        var first = edState.clips.find(function(c){ return c.objectUrl; });
+        if (first) { vid.src = first.objectUrl; vid.load(); if (edState.isPlaying) vid.play().catch(function(){}); }
+        else { vid.src = ''; edState.isPlaying = false; var pb = document.getElementById('edPlayBtn'); if(pb) pb.innerHTML = '<i class="fa-solid fa-play"></i>'; }
+    }
     edRenderTimeline(); edSaveHistory(); editorSaveDraft(false); triggerHaptic(20);
 }
 
+function edOpenSpeedPanel() {
+    var existing = document.getElementById('edSpeedPanel'); if (existing) { existing.remove(); return; }
+    var overlay = document.getElementById('preview-edit-overlay'); if (!overlay) return;
+    var clip = edState.clips.find(function(c){return c.id===edState.selectedClipId;}) || edState.clips[0];
+    var curSpeed = clip ? (clip.speed||1) : 1;
+    var p = document.createElement('div'); p.id='edSpeedPanel';
+    p.style.cssText='position:absolute;left:0;right:0;bottom:0;z-index:500;background:rgba(10,10,10,0.97);backdrop-filter:blur(30px);border-radius:24px 24px 0 0;padding:20px 16px max(32px,env(safe-area-inset-bottom,32px));animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
+    var speeds=[0.3,0.5,1,1.5,2,3];
+    p.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;"><span style="color:white;font-size:17px;font-weight:700;">Speed</span><button onclick="document.getElementById(\'edSpeedPanel\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button></div>'+
+        '<p style="color:rgba(255,255,255,0.4);font-size:12px;margin:0 0 16px;">Adjusts the video playback speed only, not the audio.</p>'+
+        '<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:20px;">'+
+        speeds.map(function(s){ var isCur=curSpeed===s; return '<button onclick="edApplySpeed('+s+')" style="flex:1;padding:12px 4px;border-radius:14px;border:2px solid '+(isCur?'#007AFF':'rgba(255,255,255,0.15)')+';background:'+(isCur?'rgba(0,122,255,0.2)':'rgba(255,255,255,0.06)')+';color:'+(isCur?'#007AFF':'white')+';font-size:14px;font-weight:700;cursor:pointer;" id="spdBtn_'+s+'">'+s+'x</button>'; }).join('')+
+        '</div>'+
+        '<button onclick="document.getElementById(\'edSpeedPanel\').remove();showToast(\'Speed applied ✅\');triggerHaptic(15);" style="width:100%;padding:14px;border-radius:14px;border:none;background:#007AFF;color:white;font-size:15px;font-weight:700;cursor:pointer;">Done</button>';
+    overlay.appendChild(p);
+}
+function edApplySpeed(speed) {
+    var clip = edState.clips.find(function(c){return c.id===edState.selectedClipId;}) || edState.clips[0];
+    if (clip) { clip.speed = speed; edState.isDirty = true; }
+    var vid = document.getElementById('edVideo');
+    if (vid) vid.playbackRate = speed;
+    document.querySelectorAll('[id^="spdBtn_"]').forEach(function(b){ b.style.border='2px solid rgba(255,255,255,0.15)'; b.style.background='rgba(255,255,255,0.06)'; b.style.color='white'; });
+    var active = document.getElementById('spdBtn_'+speed);
+    if (active) { active.style.border='2px solid #007AFF'; active.style.background='rgba(0,122,255,0.2)'; active.style.color='#007AFF'; }
+    triggerHaptic(8);
+}
+function edReverseClip() {
+    if (!edState.selectedClipId) { showToast('Select a clip first'); return; }
+    var clip = edState.clips.find(function(c){return c.id===edState.selectedClipId;});
+    if (!clip) return;
+    clip.reversed = !clip.reversed;
+    edState.isDirty = true;
+    edRenderTimeline(); edSaveHistory();
+    showToast(clip.reversed ? 'Clip reversed ↩' : 'Reverse removed');
+    triggerHaptic(10);
+    // Visual indicator on video
+    var vid = document.getElementById('edVideo');
+    if (vid && clip.reversed) { vid.style.transform='scaleX(-1)'; } else if (vid) { vid.style.transform=''; }
+}
+function edOpenVoiceEffectsPanel() {
+    var existing = document.getElementById('edVoiceEffectsPanel'); if (existing) { existing.remove(); return; }
+    var overlay = document.getElementById('preview-edit-overlay'); if (!overlay) return;
+    var EFFECTS = [
+        {id:'none',   label:'Original',  icon:'fa-microphone',        color:'#888'},
+        {id:'deep',   label:'Deep',      icon:'fa-arrow-down',        color:'#5AC8FA'},
+        {id:'high',   label:'Chipmunk',  icon:'fa-arrow-up',          color:'#FF9500'},
+        {id:'robot',  label:'Robot',     icon:'fa-robot',             color:'#30D158'},
+        {id:'echo',   label:'Echo',      icon:'fa-wave-square',       color:'#BF5AF2'},
+        {id:'alien',  label:'Alien',     icon:'fa-satellite',         color:'#FF2D55'}
+    ];
+    var p = document.createElement('div'); p.id='edVoiceEffectsPanel';
+    p.style.cssText='position:absolute;left:0;right:0;bottom:0;z-index:500;background:rgba(10,10,10,0.97);backdrop-filter:blur(30px);border-radius:24px 24px 0 0;padding:20px 16px max(32px,env(safe-area-inset-bottom,32px));animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
+    p.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;"><span style="color:white;font-size:17px;font-weight:700;">Voice Effects</span><button onclick="document.getElementById(\'edVoiceEffectsPanel\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button></div>'+
+        '<p style="color:rgba(255,255,255,0.4);font-size:12px;margin:0 0 16px;">Changes the voice of anyone talking in your video.</p>'+
+        '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px;">'+
+        EFFECTS.map(function(ef){
+            return '<button onclick="edApplyVoiceEffect(\''+ef.id+'\')" id="vefx_'+ef.id+'" style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 8px;border-radius:16px;border:2px solid '+(ef.id==='none'?'#007AFF':'rgba(255,255,255,0.12)')+';background:'+(ef.id==='none'?'rgba(0,122,255,0.15)':'rgba(255,255,255,0.07)')+';color:white;cursor:pointer;">'+
+                '<div style="width:44px;height:44px;border-radius:50%;background:rgba(128,128,128,0.2);display:flex;align-items:center;justify-content:center;"><i class="fa-solid '+ef.icon+'" style="color:'+ef.color+';font-size:18px;"></i></div>'+
+                '<span style="font-size:12px;font-weight:600;">'+ef.label+'</span>'+
+            '</button>';
+        }).join('')+
+        '</div>'+
+        '<button onclick="document.getElementById(\'edVoiceEffectsPanel\').remove();showToast(\'Voice effect applied ✅\');triggerHaptic(15);" style="width:100%;padding:14px;border-radius:14px;border:none;background:#007AFF;color:white;font-size:15px;font-weight:700;cursor:pointer;">Done</button>';
+    overlay.appendChild(p);
+}
+function edApplyVoiceEffect(effectId) {
+    var clip = edState.clips.find(function(c){return c.id===edState.selectedClipId;}) || edState.clips[0];
+    if (clip) { clip.voiceEffect = effectId; edState.isDirty = true; }
+    document.querySelectorAll('[id^="vefx_"]').forEach(function(b){ b.style.border='2px solid rgba(255,255,255,0.12)'; b.style.background='rgba(255,255,255,0.07)'; });
+    var active = document.getElementById('vefx_'+effectId);
+    if (active) { active.style.border='2px solid #007AFF'; active.style.background='rgba(0,122,255,0.15)'; }
+    triggerHaptic(8);
+}
 function editorTogglePlay() {
     edState.isPlaying = !edState.isPlaying;
     var btn = document.getElementById('edPlayBtn');
@@ -24980,6 +28011,13 @@ function edTickPlayhead() {
     } else {
         edState.playheadMs += 33;
         edUpdateTimestamp();
+    }
+    // Scroll timeline to follow playhead
+    var totalMs = edState.clips.reduce(function(s,c){return s+c.durationMs;},0) || 1;
+    var scroller = document.querySelector('#preview-edit-overlay .ed-timeline-scroll');
+    if (scroller) {
+        var maxScroll = scroller.scrollWidth - scroller.clientWidth;
+        if (maxScroll > 0) scroller.scrollLeft = (edState.playheadMs / totalMs) * maxScroll;
     }
     _edTickRAF = requestAnimationFrame(edTickPlayhead);
 }
@@ -25108,7 +28146,6 @@ function edApplyEffect(id) {
         if (id === 'mirror') vid.style.transform = 'scaleX(-1)'; else vid.style.transform = '';
     }
     edState.isDirty = true;
-    showToast(id === 'none' ? 'Effect removed' : 'Effect applied');
     triggerHaptic(10);
 }
 function edFilterEffects(q) {
@@ -25132,6 +28169,18 @@ function edEffectsTab(tab) {
     });
 }
 
+function edToggleEffectFav(id) {
+    window._edEffectFavs = window._edEffectFavs || [];
+    var idx = window._edEffectFavs.indexOf(id);
+    if (idx === -1) { window._edEffectFavs.push(id); } else { window._edEffectFavs.splice(idx, 1); }
+    var icon = document.getElementById('efFavIcon_' + id);
+    if (icon) {
+        var isFav = window._edEffectFavs.indexOf(id) !== -1;
+        icon.className = isFav ? 'fa-solid fa-bookmark' : 'fa-regular fa-bookmark';
+        icon.style.color = isFav ? '#FFD60A' : 'rgba(255,255,255,0.3)';
+    }
+    triggerHaptic(8);
+}
 /* ---- VOICE PANEL ---- */
 function edOpenVoicePanel() {
     var existing = document.getElementById('edVoicePanel');
@@ -25170,7 +28219,7 @@ function edToggleVoiceRecord() {
             window._edVoiceRecording = true;
             window._edVoiceStartTime = Date.now();
             var vid = document.getElementById('edVideo');
-            if (vid) { vid.muted = true; vid.currentTime = 0; vid.play().catch(function(){}); }
+            if (vid) { vid.muted = false; vid.currentTime = 0; vid.play().catch(function(){}); }
             var recBtn = document.getElementById('edVoiceRecBtn');
             var recIcon = document.getElementById('edVoiceRecIcon');
             var circle = document.getElementById('edVoiceCircle');
@@ -25356,16 +28405,50 @@ function edRenderCaptionLines(text) {
 
 /* ---- OVERLAY PICKER ---- */
 function edOpenOverlayPicker() {
-    var inp = document.createElement('input');
-    inp.type = 'file'; inp.accept = 'image/*,video/*';
-    inp.onchange = function() {
-        if (!inp.files || !inp.files.length) return;
-        var file = inp.files[0];
-        var url = URL.createObjectURL(file);
-        var isVideo = file.type.startsWith('video');
-        edAddOverlayItem(url, isVideo, file.name);
-    };
-    inp.click();
+    var existing = document.getElementById('edGalleryPicker');
+    if (existing) { existing.remove(); return; }
+    var picker = document.createElement('div');
+    picker.id = 'edGalleryPicker';
+    picker.style.cssText = 'position:absolute;inset:0;z-index:600;background:rgba(0,0,0,0.85);display:flex;flex-direction:column;animation:slideUpOverlay 0.3s ease;';
+    picker.innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:52px 20px 16px;flex-shrink:0;">' +
+            '<button onclick="document.getElementById(\'edGalleryPicker\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:15px;">✕</button>' +
+            '<b style="color:white;font-size:16px;">Add as overlay</b>' +
+            '<button onclick="document.getElementById(\'edOverlayFileInput\').click()" style="background:#007AFF;border:none;color:white;font-size:13px;font-weight:700;padding:8px 16px;border-radius:20px;cursor:pointer;">Browse Files</button>' +
+        '</div>' +
+        '<input id="edOverlayFileInput" type="file" accept="image/*,video/*,.mov" style="display:none" onchange="edPickerFileChosen(this)">' +
+        '<div id="edPickerGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:2px;overflow-y:auto;flex:1;padding:2px;"></div>';
+    var overlay = document.getElementById('preview-edit-overlay');
+    if (overlay) overlay.appendChild(picker);
+    // Load recent images/videos from _edState or show browse prompt
+    var grid = document.getElementById('edPickerGrid');
+    if (grid) {
+        if (edState.clips && edState.clips.length) {
+            edState.clips.forEach(function(c) {
+                if (!c.objectUrl && !c.url) return;
+                var src = c.objectUrl || c.url;
+                var div = document.createElement('div');
+                div.style.cssText = 'aspect-ratio:1;background:#222;overflow:hidden;cursor:pointer;position:relative;';
+                div.innerHTML = '<video src="'+src+'" style="width:100%;height:100%;object-fit:cover;" muted preload="metadata"></video>' +
+                    '<div style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.6);border-radius:4px;padding:2px 6px;font-size:10px;color:white;font-weight:700;">Clip '+(edState.clips.indexOf(c)+1)+'</div>';
+                div.onclick = function() {
+                    document.getElementById('edGalleryPicker').remove();
+                    edAddOverlayItem(src, true, 'Clip '+(edState.clips.indexOf(c)+1));
+                };
+                grid.appendChild(div);
+            });
+        } else {
+            grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:rgba(255,255,255,0.4);font-size:14px;">Tap "Browse Files" to choose a photo or video</div>';
+        }
+    }
+}
+function edPickerFileChosen(inp) {
+    if (!inp.files || !inp.files.length) return;
+    var file = inp.files[0];
+    var url = URL.createObjectURL(file);
+    var isVideo = file.type.startsWith('video');
+    document.getElementById('edGalleryPicker')?.remove();
+    edAddOverlayItem(url, isVideo, file.name);
 }
 function edAddOverlayItem(url, isVideo, name) {
     var previewArea = document.getElementById('edPreviewArea');
@@ -25463,7 +28546,16 @@ function edAddClipFromGallery() {
         vid.onloadedmetadata = function() {
             var dur = Math.round((vid.duration || 5) * 1000);
             var startMs = edState.clips.reduce(function(acc,c){return acc+c.durationMs;}, 0);
-            edState.clips.push({id:'clip_'+Date.now(), label:file.name.split('.')[0].substring(0,10), url:url, startMs:startMs, durationMs:dur, color:'rgba(52,199,89,0.5)'});
+            var clipId = 'clip_'+Date.now();
+            var canvas = document.createElement('canvas'); canvas.width=80; canvas.height=40;
+            vid.currentTime = 0.1;
+            vid.onseeked = function() {
+                try { canvas.getContext('2d').drawImage(vid,0,0,80,40); } catch(e){}
+                var thumb = canvas.toDataURL('image/jpeg',0.5);
+                var clip = edState.clips.find(function(c){return c.id===clipId;});
+                if (clip) { clip.thumbnail = thumb; edRenderTimeline(); }
+            };
+            edState.clips.push({id:clipId, label:file.name.split('.')[0].substring(0,10), url:url, startMs:startMs, durationMs:dur, color:'rgba(52,199,89,0.5)'});
             edMarkDirtyAndUnlockNext();
             edRenderTimeline(); edSaveHistory();
             showToast('Clip added'); triggerHaptic(15);
@@ -25496,8 +28588,9 @@ function edOpenMusicModal() {
         '</div>';
     var overlay = document.getElementById('preview-edit-overlay');
     if (overlay) overlay.appendChild(m);
-    // Pre-populate with suggestions
-    edSearchMusicReal('trending');
+    // Show empty state — user must search
+    var list = document.getElementById('edMusicList');
+    if (list) list.innerHTML = '<div style="text-align:center;padding:40px 20px;"><i class="fa-solid fa-magnifying-glass" style="color:rgba(255,255,255,0.2);font-size:32px;margin-bottom:12px;display:block;"></i><p style="color:rgba(255,255,255,0.4);font-size:14px;margin:0 0 16px;">Search for any song above</p><div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;">' + ['Amapiano','Afrobeats','Hip Hop','R&B','Pop','Gospel'].map(function(g){ return '<button onclick="document.getElementById(\'edMusicSearch\').value=\''+g+'\';edSearchMusic(\''+g+'\')" style="padding:7px 14px;border-radius:20px;border:0.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.7);font-size:13px;cursor:pointer;">'+g+'</button>'; }).join('') + '</div></div>';
 }
 function edSearchMusic(q) {
     edSearchMusicReal(q || 'trending');
@@ -25524,6 +28617,15 @@ async function edSearchMusicReal(query) {
     }
 }
 function edAddMusicTrackReal(title, artist, previewUrl, artUrl) {
+    // If called from story post context, play audio instead of adding to editor
+    if (window._spMusicModalActive) {
+        window._spMusicModalActive = false;
+        window._spMusicOnly = false; // image/video + music -> no spinning disc
+        var m = document.getElementById('edMusicModal'); if (m) m.remove();
+        triggerHaptic && triggerHaptic(15);
+        spApplyMusic({ name: title, artist: artist, previewUrl: previewUrl, artUrl: artUrl });
+        return;
+    }
     edState.audioTracks.push({id:'music_'+Date.now(), label:title+' — '+artist, url:previewUrl, artUrl:artUrl, startMs:0, durationMs:180000});
     edState.isDirty = true; edRenderTimeline(); edSaveHistory(); editorSaveDraft(false);
     var m = document.getElementById('edMusicModal');
@@ -25766,7 +28868,20 @@ function edOpenCropPanel() {
         h.style.cssText = 'position:absolute;width:20px;height:20px;border:3px solid white;pointer-events:all;cursor:pointer;' + pos;
         cropGrid.appendChild(h);
     });
-    if (previewArea) previewArea.appendChild(cropGrid);
+    if (previewArea) {
+        previewArea.appendChild(cropGrid);
+        // Size crop grid to match the actual video element, not full preview area
+        var edVidEl = document.getElementById('edVideo');
+        if (edVidEl && cropGrid) {
+            var vr = edVidEl.getBoundingClientRect();
+            var pr = previewArea.getBoundingClientRect();
+            cropGrid.style.inset = 'auto';
+            cropGrid.style.width = Math.round(vr.width) + 'px';
+            cropGrid.style.height = Math.round(vr.height) + 'px';
+            cropGrid.style.left = Math.round(vr.left - pr.left) + 'px';
+            cropGrid.style.top = Math.round(vr.top - pr.top) + 'px';
+        }
+    }
 
     var p = document.createElement('div');
     p.id = 'edCropPanel';
@@ -25980,7 +29095,7 @@ function edOpenCutoutPanel() {
 
     p.innerHTML =
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">' +
-            '<button onclick="document.getElementById(\'edCutoutPanel\').remove()" style="background:rgba(255,255,255,0.1);border:none;color:white;width:32px;height:32px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button>' +
+            '<button onclick="document.getElementById(\'edCutoutPanel\').remove();var _cp=document.getElementById(\'edChromaPicker\');if(_cp)_cp.remove();" style="background:rgba(255,255,255,0.1);border:none;color:white;width:32px;height:32px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button>' +
             '<span style="color:white;font-size:17px;font-weight:700;">Cutout</span>' +
             '<button onclick="edCutoutApply()" style="background:none;border:none;color:#007AFF;font-size:14px;font-weight:700;cursor:pointer;">✔</button>' +
         '</div>' +
@@ -26218,8 +29333,8 @@ function edApplyFilter(id) {
         if (thumb) thumb.querySelector('div').style.border = x.id===id ? '2px solid #007AFF' : '2px solid rgba(255,255,255,0.15)';
         if (lbl) lbl.style.color = x.id===id ? '#007AFF' : 'rgba(255,255,255,0.6)';
     });
-    edState.isDirty = true;
-    showToast(f.label + ' filter applied'); triggerHaptic(8);
+      edState.isDirty = true;
+    triggerHaptic(8);
 }
 
 /* ---- STICKER TRAY ---- */
@@ -26405,6 +29520,7 @@ function editorRealExit() {
     if (_edTickRAF) cancelAnimationFrame(_edTickRAF);
     edState.isPlaying = false;
     if (edState.autoSaveTimer) clearInterval(edState.autoSaveTimer);
+    localStorage.removeItem('tf_editor_draft');
     var overlay = document.getElementById('preview-edit-overlay');
     if (overlay) overlay.style.display = 'none';
     openPage('clip-selector-overlay');
@@ -26439,8 +29555,18 @@ function checkDraftRecovery() {
         if (!raw) return;
         var draft = JSON.parse(raw);
         if (!draft || !draft.isDraftIncomplete) return;
+        if (!draft.clips || !draft.clips.length) {
+            localStorage.removeItem('tf_editor_draft');
+            return;
+        }
         var modal = document.getElementById('draftRecoveryModal');
-        if (modal) modal.classList.add('active');
+        if (modal) {
+            modal.classList.add('active');
+            var thumb = document.getElementById('draftThumb');
+            if (thumb && draft.clips && draft.clips[0] && draft.clips[0].thumbnailUrl) {
+                thumb.innerHTML = '<img src="'+draft.clips[0].thumbnailUrl+'" style="width:100%;height:100%;object-fit:cover;border-radius:16px;">';
+            }
+        }
     } catch(e) { if (e) console.warn('[Suppressed error]', e); }
 }
 function draftContinue() {
@@ -26606,26 +29732,128 @@ function openMoreOptionsScreen() {
     openPage('more-options-overlay');
 }
 
-function submitTrustClip() {
+async function submitTrustClip() {
     var caption = document.getElementById('tcCaption');
     var text = caption ? caption.value.trim() : '';
-    var clipEntry = { id: 'clip_' + Date.now(), caption: text, ts: Date.now() };
-    try {
-        var clips = JSON.parse(localStorage.getItem('tf-trust-clips') || '[]');
-        clips.unshift(clipEntry);
-        if (clips.length > 50) clips = clips.slice(0, 50);
-        localStorage.setItem('tf-trust-clips', JSON.stringify(clips));
-    } catch(e) { if (e) console.warn('[Suppressed error]', e); }
+    var clipId = 'clip_' + Date.now();
+
+    // Close screens immediately — post in background
     closePage('new-trust-clip-overlay');
     closePage('preview-edit-overlay');
     closePage('clip-selector-overlay');
+    showNavBar();
+    triggerHaptic(30);
+    showToast('Posting clip...');
+
+    var videoUrl = '';
+    var thumbnailUrl = '';
+
+    try {
+        // Upload video blob to Supabase Storage
+        var blob = window._lastRecordedBlob || null;
+        var blobUrl = window._lastPickedVideoSrc || '';
+
+        // If we have a blob URL from file picker, fetch it back to a blob
+        if (!blob && blobUrl && blobUrl.startsWith('blob:')) {
+            try {
+                var resp = await fetch(blobUrl);
+                blob = await resp.blob();
+            } catch(e) { blob = null; }
+        }
+
+        if (!blob) {
+            console.warn('[TrustClip] No video blob captured — _lastRecordedBlob/_lastPickedVideoSrc empty');
+        }
+
+        if (blob && window.sb && currentUser) {
+            // Isolate the storage upload so a failure here does NOT skip the DB insert below.
+            try {
+                var ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
+                var path = currentUser.id + '/' + clipId + '.' + ext;
+                var upRes = await sb.storage
+                    .from('trustclips')
+                    .upload(path, blob, { contentType: blob.type, upsert: true });
+                if (upRes.error) {
+                    console.warn('[TrustClip] Storage upload failed:', upRes.error.message);
+                    showToast('Upload failed: ' + upRes.error.message);
+                } else if (upRes.data) {
+                    videoUrl = sb.storage.from('trustclips').getPublicUrl(upRes.data.path).data.publicUrl;
+                }
+            } catch (upEx) {
+                console.warn('[TrustClip] Storage upload threw:', upEx && upEx.message);
+                showToast('Upload error: ' + (upEx && upEx.message || 'unknown'));
+            }
+        }
+
+        // Fallback to blob URL if upload failed (temporary, session-only)
+        if (!videoUrl) videoUrl = blobUrl;
+
+        // Insert row into trustclips table
+        if (window.sb && currentUser && videoUrl) {
+            var insertRow = {
+                id: clipId,
+                user_id: currentUser.id,
+                video_url: videoUrl,
+                thumbnail_url: thumbnailUrl || null,
+                caption: text,
+                audience: window._tcAudience || 'everyone',
+                sound_name: window._tcAudioName || 'Original Audio',
+                is_hidden: false,
+is_demo: window._tcIsDemoClip || false,
+                demo_expiry: window._tcIsDemoClip ? new Date(Date.now() + 7*24*60*60*1000).toISOString() : null,
+                hide_likes: document.getElementById('moHideLikes') && document.getElementById('moHideLikes').classList.contains('active'),
+                hide_shares: document.getElementById('moHideShares') && document.getElementById('moHideShares').classList.contains('active'),
+                no_comments: document.getElementById('moNoComments') && document.getElementById('moNoComments').classList.contains('active'),
+                no_downloads: document.getElementById('moAllowDownloads') && !document.getElementById('moAllowDownloads').classList.contains('active'),
+                allow_template: !(document.getElementById('moNoTemplate') && document.getElementById('moNoTemplate').classList.contains('active')),
+                scheduled_at: window._tcScheduledAt || null
+            };
+            var { error: insertErr } = await sb.from('trustclips').insert(insertRow);
+            if (insertErr) {
+                console.warn('[TrustClip] DB insert failed, retrying with core columns:', insertErr.message);
+                // Some optional columns (hide_likes, no_comments, scheduled_at, ...) may not exist
+                // in the trustclips schema — retry with only the essential columns so the clip still posts.
+                var retryRes = await sb.from('trustclips').insert({
+                    id: clipId, user_id: currentUser.id, video_url: videoUrl,
+                    thumbnail_url: thumbnailUrl || null, caption: text, is_hidden: false
+                });
+                if (retryRes.error) {
+                    console.error('[TrustClip] Core insert also failed:', retryRes.error.message);
+                    showToast('Could not save clip: ' + retryRes.error.message);
+                }
+            }
+        }
+
+        // Also save to localStorage for instant profile tab display
+        try {
+            var clips = JSON.parse(localStorage.getItem('tf-trust-clips') || '[]');
+            clips.unshift({
+                id: clipId,
+                caption: text,
+                ts: Date.now(),
+                videoSrc: videoUrl,
+                audience: window._tcAudience || 'everyone'
+            });
+            if (clips.length > 50) clips = clips.slice(0, 50);
+            localStorage.setItem('tf-trust-clips', JSON.stringify(clips));
+        } catch(e) {}
+
+        showToast('Clip posted ✓');
+        loadFeedStories();
+
+    } catch(e) {
+        console.error('[TrustClip] Upload error:', e);
+        showToast('Posted locally — will sync when online');
+    }
+
+    // Cleanup
+    window._tcIsDemoClip = false;
+    window._tcAudioName = null;
+    window._tcScheduledAt = null;
+    window._tcAudience = null;
     window._lastRecordedBlob = null;
     window._lastPickedVideoSrc = null;
-    triggerHaptic(30);
-    showReelUploadProgress(10);
-    setTimeout(function(){ showReelUploadProgress(55); }, 800);
-    setTimeout(function(){ showReelUploadProgress(100); }, 2000);
-    showToast('TrustClip posted! 🎬'); showNavBar();
+    localStorage.removeItem('tf_editor_draft');
 }
 
 function saveTrustclipAsDraft() {
@@ -26635,7 +29863,11 @@ function saveTrustclipAsDraft() {
     var draft = {
         id: 'tcdraft_' + Date.now(),
         caption: text,
-        videoThumbnail: 'https://picsum.photos/seed/' + thumbSeed + '/200/320',
+        videoThumbnail: (function() {
+            if (window._lastPickedVideoSrc) return window._lastPickedVideoSrc;
+            if (window._lastRecordedBlob) return URL.createObjectURL(window._lastRecordedBlob);
+            return 'https://picsum.photos/seed/' + thumbSeed + '/200/320';
+        })(),
         fileSize: (Math.random() * 400 + 50).toFixed(1) + 'MB',
         dateCreated: new Date().toISOString()
     };
@@ -26668,7 +29900,7 @@ function openTrustclipDraftsScreen() {
         : '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:2px;padding:2px;">' +
             drafts.map(function(d) {
                 var dateLabel = new Date(d.dateCreated).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
-                return '<div style="aspect-ratio:9/16;position:relative;background:#111;overflow:hidden;cursor:pointer;" onclick="openTrustclipDraftPreview(\'' + d.id + '\')">' +
+                return '<div style="aspect-ratio:9/16;position:relative;background:#111;overflow:hidden;cursor:pointer;" data-draft-id="' + d.id + '" onclick="openTrustclipDraftPreview(\'' + d.id + '\')">' +
                     '<img src="' + d.videoThumbnail + '" style="width:100%;height:100%;object-fit:cover;opacity:0.85;">' +
                     '<div style="position:absolute;top:6px;left:6px;background:rgba(255,255,255,0.92);border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;color:#000;">' + dateLabel + '</div>' +
                 '</div>';
@@ -26744,7 +29976,38 @@ function continueTrustclipDraft(draftId) {
     }, 200);
 }
 
-function openTrustclipDraftSelect() { showToast('Select mode coming soon'); }
+function openTrustclipDraftSelect() {
+    var screen = document.getElementById('tcDraftsScreen');
+    if (!screen) return;
+    var drafts = [];
+    try { drafts = JSON.parse(localStorage.getItem('tf_tc_drafts') || '[]'); } catch(e) {}
+    var selected = [];
+    screen.querySelectorAll('[data-draft-id]').forEach(function(el) {
+        el.style.position = 'relative';
+        if (!el.querySelector('.tc-sel-circle')) {
+            var circle = document.createElement('div');
+            circle.className = 'tc-sel-circle';
+            circle.style.cssText = 'position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;border:2px solid white;background:rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;z-index:10;';
+            el.appendChild(circle);
+            var origClick = el.getAttribute('onclick');
+            el.removeAttribute('onclick');
+            el.onclick = function() {
+                var id = el.getAttribute('data-draft-id');
+                var idx = selected.indexOf(id);
+                if (idx === -1) { selected.push(id); circle.style.background='#007AFF'; circle.innerHTML='<i class="fa-solid fa-check" style="color:white;font-size:11px;"></i>'; }
+                else { selected.splice(idx,1); circle.style.background='rgba(0,0,0,0.3)'; circle.innerHTML=''; }
+                actionBar.querySelector('button:last-child').textContent = 'Delete (' + selected.length + ')';
+                actionBar.querySelector('button:last-child').style.opacity = selected.length ? '1' : '0.4';
+            };
+        }
+    });
+    var actionBar = document.createElement('div');
+    actionBar.style.cssText = 'position:absolute;bottom:0;left:0;right:0;padding:16px 20px max(32px,env(safe-area-inset-bottom,32px));background:var(--bg-primary,#fff);display:flex;gap:10px;border-top:0.5px solid var(--border-color,#eee);z-index:100;';
+    actionBar.innerHTML = '<button onclick="document.getElementById(\'tcDraftsScreen\').remove();openTrustclipDraftsScreen();" style="flex:1;padding:14px;border-radius:14px;border:none;background:rgba(0,0,0,0.06);color:var(--text-primary,#000);font-size:15px;font-weight:600;cursor:pointer;">Cancel</button>' +
+        '<button style="flex:1;padding:14px;border-radius:14px;border:none;background:#FF3B30;color:white;font-size:15px;font-weight:700;cursor:pointer;opacity:0.4;" onclick="if(!selected.length)return;if(confirm(\'Delete \'+selected.length+\' draft\'+(selected.length>1?\'s?\':\' ?\'))) { var drafts=JSON.parse(localStorage.getItem(\'tf_tc_drafts\')||\'[]\'); localStorage.setItem(\'tf_tc_drafts\',JSON.stringify(drafts.filter(function(d){return selected.indexOf(d.id)===-1;}))); document.getElementById(\'tcDraftsScreen\').remove(); openTrustclipDraftsScreen(); showToast(\'Deleted\'); }">Delete (0)</button>';
+    screen.appendChild(actionBar);
+    screen.style.paddingBottom = '80px';
+}
 
 window._tcAudience = 'everyone';
 window._tcProfileDisplay = 'trustclip_grid';
@@ -26848,7 +30111,7 @@ function _setTcProfileDisplay(val) {
 }
 
 function _saveTcAudience() {
-    var labels = { everyone:'Everyone', friends:'Close Friends' };
+    var labels = { everyone:'Everyone', friends:'TrustCircle', trustcircle:'TrustCircle' };
     var lbl = document.getElementById('tcAudienceLabel');
     if (lbl) lbl.innerHTML = (labels[window._tcAudience]||'Everyone') + ' <i class="fa-solid fa-chevron-right" style="color:#ccc;font-size:12px;"></i>';
     document.getElementById('tcAudienceScreen')?.remove();
@@ -26866,7 +30129,9 @@ function openTrustclipLocationPicker() {
 }
 
 function _showLocationDisclaimer(onContinue) {
+    window._tcLocContinueFn = onContinue;
     var overlay = document.createElement('div');
+    overlay.id = 'tcLocDisclaimer';
     overlay.style.cssText = 'position:absolute;inset:0;z-index:9500;display:flex;align-items:flex-end;background:rgba(0,0,0,0.55);backdrop-filter:blur(12px);';
     overlay.innerHTML =
         '<div style="width:100%;background:var(--bg-primary,#fff);border-radius:22px 22px 0 0;overflow:hidden;animation:modalUp 0.35s cubic-bezier(0.32,0.72,0,1);">' +
@@ -26881,7 +30146,7 @@ function _showLocationDisclaimer(onContinue) {
             '<div style="padding:20px 24px;">' +
                 '<b style="font-size:19px;color:var(--text-primary,#000);display:block;margin-bottom:8px;">Clip tagged content is public</b>' +
                 '<p style="font-size:14px;color:#888;line-height:1.65;margin-bottom:24px;">When you add a location, your trustclip will appear on a public map visible to the audience you selected. You can remove it at any time.</p>' +
-                '<button onclick="(function(el){el.closest(\'[style*=\"z-index:9500\"]\').remove();})(this);(' + onContinue.toString() + ')()" style="width:100%;padding:16px;border-radius:14px;background:#007AFF;color:white;border:none;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:10px;">Add location</button>' +
+                '<button onclick="document.getElementById(\'tcLocDisclaimer\').remove();if(window._tcLocContinueFn)window._tcLocContinueFn();" style="width:100%;padding:16px;border-radius:14px;background:#007AFF;color:white;border:none;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:10px;">Add location</button>' +
                 '<button onclick="this.closest(\'[style*=\"z-index:9500\"]\').remove()" style="width:100%;padding:14px;border-radius:14px;background:transparent;color:#888;border:none;font-size:15px;cursor:pointer;">Cancel</button>' +
             '</div>' +
         '</div>';
@@ -26977,6 +30242,7 @@ function addChecklistItem() {
     var label = document.createElement('span');
     label.style.cssText = 'flex:1;font-size:15px;color:' + tc + ';';
     label.textContent = inp.value.trim();
+    label.setAttribute('data-ck-label', inp.value.trim());
 
     var delBtn = document.createElement('button');
     delBtn.style.cssText = 'background:none;border:none;color:#FF3B30;font-size:15px;cursor:pointer;padding:0 2px;';
@@ -26996,8 +30262,8 @@ function addChecklistItem() {
 // APP INIT — DRAFT RECOVERY CHECK
 // ============================================================
 (function initDraftCheck() {
-    // Run after DOM ready with a short delay so the app renders first
-    setTimeout(checkDraftRecovery, 800);
+    // Run after DOM ready with a longer delay so auth finishes first
+    setTimeout(checkDraftRecovery, 2500);
 })();
 
 function closeAttachModal() {
@@ -27012,6 +30278,198 @@ function closeAttachModal() {
         dim.style.transition = 'opacity 0.3s';
         dim.style.opacity = '0';
         setTimeout(function(){ if(dim) dim.remove(); }, 320);
+    }
+}
+
+function openDocumentScanner() {
+    var existing = document.getElementById('docScannerOverlay');
+    if (existing) existing.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'docScannerOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:29000;background:#000;display:flex;flex-direction:column;overflow:hidden;';
+
+    var scanState = { flash: 'auto', filter: 'color', shutterSound: true, stream: null, capturedBlob: null, scanning: false };
+
+    overlay.innerHTML =
+        // Top controls
+        '<div id="dsc-top" style="position:absolute;top:0;left:0;right:0;z-index:10;display:flex;align-items:center;justify-content:space-between;padding:max(52px,env(safe-area-inset-top,52px)) 16px 16px;background:linear-gradient(to bottom,rgba(0,0,0,0.7),transparent);">' +
+            '<button onclick="closeScannerOverlay()" style="background:rgba(255,255,255,0.15);border:none;border-radius:50%;width:40px;height:40px;color:white;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button>' +
+            '<div style="display:flex;gap:8px;">' +
+                // Flash
+                '<button id="dsc-flash-btn" onclick="dscCycleFlash()" style="background:rgba(255,255,255,0.15);border:none;border-radius:20px;padding:8px 14px;color:white;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;"><i id="dsc-flash-icon" class="fa-solid fa-bolt-lightning"></i><span id="dsc-flash-label">Auto</span></button>' +
+                // Filter
+                '<button id="dsc-filter-btn" onclick="dscCycleFilter()" style="background:rgba(255,255,255,0.15);border:none;border-radius:20px;padding:8px 14px;color:white;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;"><i class="fa-solid fa-circle-half-stroke"></i><span id="dsc-filter-label">Colour</span></button>' +
+                // Sound
+                '<button id="dsc-sound-btn" onclick="dscToggleSound()" style="background:rgba(255,255,255,0.15);border:none;border-radius:20px;padding:8px 14px;color:white;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;"><i id="dsc-sound-icon" class="fa-solid fa-volume-high"></i></button>' +
+            '</div>' +
+        '</div>' +
+        // Viewfinder
+        '<div id="dsc-viewfinder" style="flex:1;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden;">' +
+            '<video id="dsc-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;"></video>' +
+            '<canvas id="dsc-canvas" style="display:none;"></canvas>' +
+            // Edge detection overlay
+            '<div id="dsc-edge-overlay" style="position:absolute;inset:20px;border:2px solid rgba(255,255,255,0.5);border-radius:8px;pointer-events:none;">' +
+                '<div style="position:absolute;top:-3px;left:-3px;width:20px;height:20px;border-top:3px solid #fff;border-left:3px solid #fff;border-radius:2px 0 0 0;"></div>' +
+                '<div style="position:absolute;top:-3px;right:-3px;width:20px;height:20px;border-top:3px solid #fff;border-right:3px solid #fff;border-radius:0 2px 0 0;"></div>' +
+                '<div style="position:absolute;bottom:-3px;left:-3px;width:20px;height:20px;border-bottom:3px solid #fff;border-left:3px solid #fff;border-radius:0 0 0 2px;"></div>' +
+                '<div style="position:absolute;bottom:-3px;right:-3px;width:20px;height:20px;border-bottom:3px solid #fff;border-right:3px solid #fff;border-radius:0 0 2px 0;"></div>' +
+            '</div>' +
+        '</div>' +
+        // Shutter area
+        '<div id="dsc-shutter-area" style="display:flex;align-items:center;justify-content:center;padding:30px 0 max(40px,env(safe-area-inset-bottom,40px));background:linear-gradient(to top,rgba(0,0,0,0.7),transparent);">' +
+            '<button id="dsc-shutter-btn" onclick="dscCapture()" style="width:72px;height:72px;border-radius:50%;background:white;border:4px solid rgba(255,255,255,0.5);cursor:pointer;box-shadow:0 0 0 4px rgba(255,255,255,0.2);transition:transform 0.1s;"></button>' +
+        '</div>' +
+        // Preview mode (hidden initially)
+        '<div id="dsc-preview-area" style="display:none;position:absolute;inset:0;background:#000;flex-direction:column;">' +
+            '<img id="dsc-preview-img" style="flex:1;width:100%;height:100%;object-fit:contain;">' +
+            '<div style="display:flex;gap:16px;padding:24px 30px max(40px,env(safe-area-inset-bottom,40px));background:rgba(0,0,0,0.8);justify-content:center;">' +
+                '<button onclick="dscRetake()" style="flex:1;max-width:160px;padding:16px;border-radius:16px;border:1.5px solid rgba(255,255,255,0.4);background:transparent;color:white;font-size:16px;font-weight:700;cursor:pointer;">Retake</button>' +
+                '<button onclick="dscKeep()" style="flex:1;max-width:160px;padding:16px;border-radius:16px;border:none;background:white;color:#000;font-size:16px;font-weight:700;cursor:pointer;">Keep</button>' +
+            '</div>' +
+        '</div>';
+
+    document.body.appendChild(overlay);
+
+    // Start camera
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+        .then(function(stream) {
+            scanState.stream = stream;
+            var vid = document.getElementById('dsc-video');
+            if (vid) {
+                vid.srcObject = stream;
+                vid.play().catch(function() {});
+            }
+        })
+        .catch(function(err) {
+            // Fallback to any camera if environment-facing unavailable
+            navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+                .then(function(stream) {
+                    scanState.stream = stream;
+                    var vid = document.getElementById('dsc-video');
+                    if (vid) { vid.srcObject = stream; vid.play().catch(function(){}); }
+                })
+                .catch(function() { showToast('Camera access denied'); closeScannerOverlay(); });
+        });
+
+    window._docScanState = scanState;
+}
+
+function closeScannerOverlay() {
+    var s = window._docScanState;
+    if (s && s.stream) { s.stream.getTracks().forEach(function(t){ t.stop(); }); }
+    var el = document.getElementById('docScannerOverlay');
+    if (el) el.remove();
+    window._docScanState = null;
+}
+
+function dscCycleFlash() {
+    var s = window._docScanState; if (!s) return;
+    var modes = ['auto','on','off']; var labels = ['Auto','On','Off']; var icons = ['fa-bolt-lightning','fa-bolt','fa-bolt-slash'];
+    var idx = (modes.indexOf(s.flash) + 1) % 3;
+    s.flash = modes[idx];
+    document.getElementById('dsc-flash-label').textContent = labels[idx];
+    document.getElementById('dsc-flash-icon').className = 'fa-solid ' + icons[idx];
+    // Apply torch if supported
+    if (s.stream) {
+        var track = s.stream.getVideoTracks()[0];
+        if (track && track.getCapabilities && track.getCapabilities().torch) {
+            track.applyConstraints({ advanced: [{ torch: s.flash === 'on' }] }).catch(function(){});
+        }
+    }
+}
+
+function dscCycleFilter() {
+    var s = window._docScanState; if (!s) return;
+    var modes = ['color','greyscale','bw','photo']; var labels = ['Colour','Greyscale','B&W','Photo'];
+    var idx = (modes.indexOf(s.filter) + 1) % 4;
+    s.filter = modes[idx];
+    document.getElementById('dsc-filter-label').textContent = labels[idx];
+    // Apply filter to video preview
+    var filters = { color:'none', greyscale:'grayscale(100%)', bw:'grayscale(100%) contrast(200%)', photo:'saturate(130%) contrast(105%)' };
+    var vid = document.getElementById('dsc-video');
+    if (vid) vid.style.filter = filters[s.filter] || 'none';
+}
+
+function dscToggleSound() {
+    var s = window._docScanState; if (!s) return;
+    s.shutterSound = !s.shutterSound;
+    document.getElementById('dsc-sound-icon').className = s.shutterSound ? 'fa-solid fa-volume-high' : 'fa-solid fa-volume-xmark';
+}
+
+function dscCapture() {
+    var s = window._docScanState; if (!s) return;
+    var vid = document.getElementById('dsc-video');
+    var canvas = document.getElementById('dsc-canvas');
+    if (!vid || !canvas) return;
+
+    // Shutter animation
+    var btn = document.getElementById('dsc-shutter-btn');
+    if (btn) { btn.style.transform = 'scale(0.85)'; setTimeout(function(){ btn.style.transform = ''; }, 150); }
+
+    // Shutter sound
+    if (s.shutterSound) {
+        try {
+            var ctx = new (window.AudioContext || window.webkitAudioContext)();
+            var osc = ctx.createOscillator(); var gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.frequency.value = 800; gain.gain.setValueAtTime(0.3, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+            osc.start(); osc.stop(ctx.currentTime + 0.1);
+        } catch(e) {}
+    }
+
+    canvas.width = vid.videoWidth || 1280;
+    canvas.height = vid.videoHeight || 720;
+    var ctx2d = canvas.getContext('2d');
+
+    // Apply filter
+    var filters = { color:'none', greyscale:'grayscale(100%)', bw:'grayscale(100%) contrast(200%)', photo:'saturate(130%) contrast(105%)' };
+    ctx2d.filter = filters[s.filter] || 'none';
+    ctx2d.drawImage(vid, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob(function(blob) {
+        s.capturedBlob = blob;
+        var url = URL.createObjectURL(blob);
+        var previewImg = document.getElementById('dsc-preview-img');
+        var previewArea = document.getElementById('dsc-preview-area');
+        var viewfinder = document.getElementById('dsc-viewfinder');
+        var shutterArea = document.getElementById('dsc-shutter-area');
+        var topCtrl = document.getElementById('dsc-top');
+        if (previewImg) previewImg.src = url;
+        if (previewArea) previewArea.style.display = 'flex';
+        if (viewfinder) viewfinder.style.display = 'none';
+        if (shutterArea) shutterArea.style.display = 'none';
+        if (topCtrl) topCtrl.style.display = 'none';
+    }, 'image/jpeg', 0.92);
+}
+
+function dscRetake() {
+    var previewArea = document.getElementById('dsc-preview-area');
+    var viewfinder = document.getElementById('dsc-viewfinder');
+    var shutterArea = document.getElementById('dsc-shutter-area');
+    var topCtrl = document.getElementById('dsc-top');
+    if (previewArea) previewArea.style.display = 'none';
+    if (viewfinder) viewfinder.style.display = 'flex';
+    if (shutterArea) shutterArea.style.display = 'flex';
+    if (topCtrl) topCtrl.style.display = 'flex';
+    var s = window._docScanState;
+    if (s) { s.capturedBlob = null; }
+}
+
+function dscKeep() {
+    var s = window._docScanState;
+    if (!s || !s.capturedBlob) return;
+    var blob = s.capturedBlob;
+    var fileName = 'scan_' + Date.now() + '.jpg';
+    closeScannerOverlay();
+    // Send as document message
+    var url = URL.createObjectURL(blob);
+    if (typeof _sendMediaMessage === 'function') {
+        _sendMediaMessage(url, 'document', fileName, blob);
+    } else {
+        // Fallback: trigger file send
+        showToast('Document scanned ✅');
     }
 }
 
@@ -27174,6 +30632,62 @@ function logWalletTransaction(type, amount, status) {
     } catch(e) {}
 }
 
+function openWalletHistory() {
+    var existing = document.getElementById('wallet-history-sheet');
+    if (existing) existing.remove();
+
+    var txns = [];
+    try { txns = JSON.parse(localStorage.getItem('tf-wallet-txns') || '[]'); } catch (e) {}
+
+    function iconFor(t) {
+        t = String(t || '');
+        if (/withdraw/i.test(t))  return ['fa-arrow-up-from-bracket', '#FF3B30'];
+        if (/coin/i.test(t))      return ['fa-coins', '#FFB800'];
+        if (/topup|add/i.test(t)) return ['fa-arrow-down-to-bracket', '#34C759'];
+        if (/gift/i.test(t))      return ['fa-gift', '#FF2D92'];
+        return ['fa-receipt', '#007AFF'];
+    }
+
+    var rowsHtml;
+    if (!txns.length) {
+        rowsHtml = '<div style="text-align:center;padding:60px 20px;color:#aaa;">' +
+            '<i class="fa-solid fa-receipt" style="font-size:36px;display:block;margin-bottom:14px;opacity:0.4;"></i>' +
+            'No transactions yet.</div>';
+    } else {
+        rowsHtml = txns.map(function(tx) {
+            var ic = iconFor(tx.type);
+            var label = String(tx.type || 'Transaction').replace(/_/g, ' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+            var d = tx.date ? new Date(tx.date) : null;
+            var when = d ? (d.toLocaleDateString() + ' · ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : '';
+            var status = String(tx.status || '');
+            var statusColor = /complet|success|done/i.test(status) ? '#34C759' : (/pend/i.test(status) ? '#FF9500' : '#888');
+            var amt = (tx.amount != null && tx.amount !== '') ? tx.amount : '';
+            return '<div style="display:flex;align-items:center;gap:14px;padding:14px 4px;border-bottom:0.5px solid var(--border-color,rgba(0,0,0,0.06));">' +
+                '<div style="width:40px;height:40px;border-radius:12px;background:' + ic[1] + '22;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+                    '<i class="fa-solid ' + ic[0] + '" style="color:' + ic[1] + ';font-size:16px;"></i></div>' +
+                '<div style="flex:1;min-width:0;">' +
+                    '<div style="font-size:15px;font-weight:700;color:var(--text-primary,#000);">' + escapeHtml(label) + '</div>' +
+                    '<div style="font-size:12px;color:#888;margin-top:2px;">' + escapeHtml(when) + (status ? ' · <span style="color:' + statusColor + ';font-weight:600;">' + escapeHtml(status) + '</span>' : '') + '</div>' +
+                '</div>' +
+                '<div style="font-size:15px;font-weight:800;color:var(--text-primary,#000);white-space:nowrap;">' + escapeHtml(String(amt)) + '</div>' +
+            '</div>';
+        }).join('');
+    }
+
+    var sheet = document.createElement('div');
+    sheet.id = 'wallet-history-sheet';
+    sheet.className = 'white-overlay';
+    sheet.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:6900;display:flex;flex-direction:column;background:var(--bg-primary,#fff);animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
+    sheet.innerHTML =
+        '<div class="header-container" style="flex-shrink:0;">' +
+            '<div class="liquid-glass-btn" onclick="document.getElementById(\'wallet-history-sheet\').remove()" style="cursor:pointer;"><i class="fa-solid fa-chevron-left"></i></div>' +
+            '<b>Transaction History</b>' +
+        '</div>' +
+        '<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:8px 18px 120px;box-sizing:border-box;">' + rowsHtml + '</div>';
+    (document.getElementById('app') || document.body).appendChild(sheet);
+    if (typeof triggerHaptic === 'function') triggerHaptic(10);
+}
+
 function confirmWithdraw() {
     var inp = document.getElementById('withdraw-amount');
     var amount = parseFloat(inp ? inp.value : 0);
@@ -27300,11 +30814,14 @@ function vibePlayShuffle() {
                     var word = tag.getAttribute('data-word');
                     var bg = getComputedStyle(tag).background;
                     var col = getComputedStyle(tag).color;
-                    dropzone.innerHTML = '<span style="padding:8px 20px;border-radius:20px;font-size:14px;font-weight:700;background:'+bg+';color:'+col+';">'+word+'</span>';
+                    dropzone.innerHTML = '<span style=\"padding:8px 20px;border-radius:20px;font-size:14px;font-weight:700;background:'+bg+';color:'+col+';\">'+word+'</span>';
                     dropzone.classList.add('filled');
                     dropzone.classList.remove('dragover');
                     vibePlaySnap();
                     if (typeof triggerHaptic === 'function') triggerHaptic(12);
+                    window._vibeDropWord = word;
+                    var celSec = document.getElementById('vibe-celebrate-section');
+                    if (celSec) { celSec.style.display = 'block'; celSec.style.animation = 'popIn 0.35s ease'; }
                 } else {
                     dropzone.classList.remove('dragover');
                     tag.style.opacity = '1';
@@ -28017,7 +31534,7 @@ function clearSelectedChatDates() {
     if (existing) { existing.remove(); return; }
     var el = document.createElement('div');
     el.id = 'breatheRelaxOverlay';
-    el.style.cssText = 'position:absolute;inset:0;z-index:9000;background:linear-gradient(180deg,#0048A8 0%,#0070E0 100%);display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:60px 32px 40px;overflow:hidden;';
+    el.style.cssText = 'position:absolute;inset:0;z-index:9400;background:linear-gradient(180deg,#0048A8 0%,#0070E0 100%);display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:60px 32px 40px;overflow:hidden;';
     el.innerHTML =
         '<div id="breatheCloudLayer" style="position:absolute;inset:0;overflow:hidden;pointer-events:none;"></div>'+
         '<h1 style="color:white;font-size:26px;font-weight:900;text-align:center;z-index:1;letter-spacing:-0.5px;">Relax Your Mind</h1>'+
@@ -28340,7 +31857,7 @@ function edMarkDirtyAndUnlockNext() {
     var sel = localStorage.getItem('tf-location-vis') || 'none';
     var opts = [
         { val:'friends', bg:'#000', icon:'fa-users', title:'Friends', sub:'Followers you follow back' },
-        { val:'trustcircle', bg:'#007AFF', icon:'fa-star', title:'trustcircle', sub:'Choose people >' },
+        { val:'trustcircle', bg:'#007AFF', icon:'fa-star', title:'TrustCircle', sub:'Choose people >' },
         { val:'only', bg:'#3A3A3C', icon:'fa-user', title:'Only these friends', sub:'Choose people >' },
         { val:'none', bg:'#C7C7CC', icon:'fa-location-dot-slash', title:'No one', sub:"Don't share location" }
     ];
@@ -28442,7 +31959,7 @@ function openEditCoverSuite() {
     suite.id = 'editCoverSuite';
     suite.style.cssText = 'position:absolute;inset:0;z-index:9600;display:flex;flex-direction:column;background:#000;animation:edIn 0.25s ease;';
     var frames = Array.from({length:18},function(_,i){
-        return '<div onclick="scrubTo('+i+')" style="width:36px;height:46px;flex-shrink:0;border-radius:4px;background:#2a2a2a;border:1px solid #333;cursor:pointer;position:relative;overflow:hidden;"><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;"><span style="color:#444;font-size:8px;">'+(i+1)+'</span></div></div>';
+        return '<div id="ecFrame'+i+'" onclick="scrubTo('+i+')" style="width:36px;height:46px;flex-shrink:0;border-radius:4px;background:#2a2a2a center/cover;border:1px solid #333;cursor:pointer;position:relative;overflow:hidden;"></div>';
     }).join('');
     suite.innerHTML =
         '<div style="background:#fff;display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:0.5px solid #e0e0e0;">' +
@@ -28465,46 +31982,129 @@ function openEditCoverSuite() {
             '<button onclick="showToast(\'Opening camera roll…\')" style="width:100%;padding:16px;border-radius:14px;background:#007AFF;color:#fff;font-size:16px;font-weight:700;border:none;cursor:pointer;">Add from camera roll</button>' +
         '</div>';
     var src = document.getElementById('tcThumbVid');
-    if (src && src.src) { var vid = suite.querySelector('#ecPreviewVid'); if(vid){vid.src=src.src;vid.play().catch(function(){});} }
+    var _ecSrc = (src && src.src) ? src.src : (window._lastPickedVideoSrc || '');
+    if (_ecSrc) { var vid = suite.querySelector('#ecPreviewVid'); if(vid){vid.src=_ecSrc;vid.play().catch(function(){});} }
     (document.getElementById('app')||document.body).appendChild(suite);
+
+    // Capture REAL frames from the video for the cover filmstrip (was fake numbered cells)
+    window._ecTimes = [];
+    if (_ecSrc) {
+        (async function() {
+            var result = await _ecCaptureCoverFrames(_ecSrc, 18);
+            window._ecTimes = result.times;
+            result.frames.forEach(function(f, i) {
+                var cell = document.getElementById('ecFrame' + i);
+                if (cell && f) cell.style.backgroundImage = 'url(' + f + ')';
+            });
+        })();
+    }
+}
+
+function _ecCaptureCoverFrames(videoSrc, n) {
+    return new Promise(function(resolve) {
+        var v = document.createElement('video');
+        v.muted = true; v.playsInline = true; v.preload = 'auto';
+        try { v.crossOrigin = 'anonymous'; } catch(e) {}
+        var times = [], frames = [], done = false;
+        var finish = function(){ if(!done){ done = true; resolve({ times: times, frames: frames }); } };
+        v.addEventListener('error', finish);
+        setTimeout(finish, 8000); // safety timeout
+        v.addEventListener('loadedmetadata', function() {
+            var dur = (v.duration && isFinite(v.duration)) ? v.duration : 0;
+            for (var i = 0; i < n; i++) times.push(dur > 0 ? Math.min(dur - 0.05, dur * i / n) : 0);
+            var idx = 0;
+            var grab = function() {
+                if (idx >= n) { finish(); return; }
+                var onSeek = function() {
+                    v.removeEventListener('seeked', onSeek);
+                    try {
+                        var c = document.createElement('canvas');
+                        c.width = 72; c.height = 92;
+                        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+                        frames.push(c.toDataURL('image/jpeg', 0.6));
+                    } catch(e) { frames.push(null); }
+                    idx++; grab();
+                };
+                v.addEventListener('seeked', onSeek);
+                try { v.currentTime = times[idx]; } catch(e) { v.removeEventListener('seeked', onSeek); frames.push(null); idx++; grab(); }
+            };
+            grab();
+        });
+        v.src = videoSrc;
+    });
 }
 window.switchCoverTab = function(tab) {
     var cc = document.getElementById('ecTabCover'), cg = document.getElementById('ecTabGrid');
     if(cc){cc.style.borderBottomColor=tab==='cover'?'#007AFF':'transparent';cc.style.color=tab==='cover'?'#fff':'#888';}
     if(cg){cg.style.borderBottomColor=tab==='grid'?'#007AFF':'transparent';cg.style.color=tab==='grid'?'#fff':'#888';}
 };
-window.scrubTo = function(frame) { triggerHaptic(6); };
+window.scrubTo = function(frame) {
+    triggerHaptic(6);
+    var v = document.getElementById('ecPreviewVid');
+    if (v && window._ecTimes && window._ecTimes[frame] != null) {
+        try { v.pause(); v.currentTime = window._ecTimes[frame]; } catch(e) {}
+    }
+    for (var i = 0; i < 18; i++) { var c = document.getElementById('ecFrame'+i); if (c) c.style.borderColor = (i === frame) ? '#007AFF' : '#333'; }
+};
 
 /* --- LINK CLIP GALLERY --- */
 function openLinkClipGallery() {
     var existing = document.getElementById('linkClipGallery');
     if (existing) existing.remove();
-    var seeds = ['bike','car','drive','race','auto','speed','road','drift','night','city','track','motor'];
     var gallery = document.createElement('div');
     gallery.id = 'linkClipGallery';
     gallery.style.cssText = 'position:absolute;inset:0;z-index:9600;display:flex;flex-direction:column;background:var(--bg-primary,#fff);animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
-    var cells = Array.from({length:12},function(_,i){
-        var views = (Math.floor(Math.random()*99)+1)+'.'+(Math.floor(Math.random()*9))+'K';
-        return '<div onclick="selectLinkedClip(this,'+i+')" id="lcCell'+i+'" style="position:relative;aspect-ratio:9/16;background:#111;border-radius:6px;overflow:hidden;cursor:pointer;">' +
-            '<div style="width:100%;height:100%;background:linear-gradient(135deg,rgba(0,0,0,0.3),rgba(0,0,0,0.6));"></div>' +
-            '<div style="position:absolute;bottom:6px;left:6px;display:flex;align-items:center;gap:3px;background:rgba(0,0,0,0.55);border-radius:20px;padding:2px 7px 2px 4px;">' +
-                '<i class="fa-solid fa-eye" style="color:#fff;font-size:9px;"></i>' +
-                '<span style="color:#fff;font-size:9px;font-weight:700;">'+views+'</span>' +
-            '</div>' +
-            '<div id="lcRadio'+i+'" style="position:absolute;bottom:6px;right:6px;width:22px;height:22px;border-radius:50%;border:1.5px solid rgba(255,255,255,0.7);background:rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;transition:all 0.2s;"></div>' +
-        '</div>';
-    }).join('');
     gallery.innerHTML =
         '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:0.5px solid var(--border-color,#f0f0f0);">' +
             '<button onclick="document.getElementById(\'linkClipGallery\').remove()" style="background:none;border:none;color:#007AFF;font-size:16px;cursor:pointer;font-weight:500;">Cancel</button>' +
             '<b style="font-size:17px;color:var(--text-primary,#000);">Select a trustclip</b>' +
             '<button id="lcDoneBtn" onclick="confirmLinkedClip()" style="background:none;border:none;color:#ccc;font-size:16px;font-weight:700;cursor:pointer;">Done</button>' +
         '</div>' +
-        '<div style="flex:1;overflow-y:auto;padding:12px 12px 40px;">' +
-            '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:3px;">'+cells+'</div>' +
+        '<div id="lcGrid" style="flex:1;overflow-y:auto;padding:12px 12px 40px;">' +
+            '<div style="text-align:center;padding:50px;color:#aaa;"><i class="fa-solid fa-spinner fa-spin" style="font-size:24px;"></i></div>' +
         '</div>';
     (document.getElementById('app')||document.body).appendChild(gallery);
     window._linkedClipSel = -1;
+    window._linkedClips = [];
+
+    // Load the user's REAL trustclips with their REAL view counts (no fake data)
+    (async function() {
+        var clips = [];
+        try {
+            if (window.sb && currentUser) {
+                var res = await sb.from('trustclips')
+                    .select('id, media_url, video_url, thumbnail_url, caption, view_count')
+                    .eq('user_id', currentUser.id)
+                    .neq('is_hidden', true)
+                    .order('created_at', { ascending: false })
+                    .limit(30);
+                clips = res.data || [];
+            }
+        } catch (e) { console.warn('[LinkClip]', e); }
+        window._linkedClips = clips;
+        var grid = document.getElementById('lcGrid');
+        if (!grid) return;
+        if (!clips.length) {
+            grid.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#aaa;">' +
+                '<i class="fa-solid fa-clapperboard" style="font-size:34px;display:block;margin-bottom:14px;opacity:0.5;"></i>' +
+                'You have no TrustClips to link yet.</div>';
+            return;
+        }
+        var cells = clips.map(function(c, i) {
+            var thumb = c.thumbnail_url || '';
+            var vc = c.view_count || 0;
+            var views = vc >= 1000 ? (vc / 1000).toFixed(1).replace(/\.0$/, '') + 'K' : String(vc);
+            var bg = thumb ? 'background:#111 url(' + encodeURI(thumb) + ') center/cover;' : 'background:linear-gradient(135deg,#1a1a1a,#333);';
+            return '<div onclick="selectLinkedClip(this,' + i + ')" id="lcCell' + i + '" style="position:relative;aspect-ratio:9/16;' + bg + 'border-radius:6px;overflow:hidden;cursor:pointer;">' +
+                '<div style="position:absolute;bottom:6px;left:6px;display:flex;align-items:center;gap:3px;background:rgba(0,0,0,0.55);border-radius:20px;padding:2px 7px 2px 4px;">' +
+                    '<i class="fa-solid fa-eye" style="color:#fff;font-size:9px;"></i>' +
+                    '<span style="color:#fff;font-size:9px;font-weight:700;">' + views + '</span>' +
+                '</div>' +
+                '<div id="lcRadio' + i + '" style="position:absolute;bottom:6px;right:6px;width:22px;height:22px;border-radius:50%;border:1.5px solid rgba(255,255,255,0.7);background:rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;transition:all 0.2s;"></div>' +
+            '</div>';
+        }).join('');
+        grid.innerHTML = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:3px;">' + cells + '</div>';
+    })();
 }
 window.selectLinkedClip = function(el, idx) {
     triggerHaptic(8);
@@ -28601,7 +32201,7 @@ function openTagPeopleWorkspace() {
                 '<div id="tpTagLayer" style="position:absolute;inset:0;"></div>' +
                 '<div style="position:absolute;bottom:0;left:0;right:0;padding:12px 16px;display:flex;gap:10px;background:linear-gradient(transparent,rgba(0,0,0,0.6));">' +
                     '<button onclick="showToast(\'Tap the video to place a tag\')" style="flex:1;padding:10px;border-radius:10px;background:rgba(200,200,200,0.2);border:none;color:#fff;font-size:14px;font-weight:600;cursor:pointer;backdrop-filter:blur(12px);">Add Tag</button>' +
-                    '<button onclick="showToast(\'Invite collaborators coming soon\')" style="flex:1;padding:10px;border-radius:10px;background:rgba(200,200,200,0.2);border:none;color:#fff;font-size:14px;font-weight:600;cursor:pointer;backdrop-filter:blur(12px);">Invite Collaborators</button>' +
+                    '<button onclick="openInviteCollabSearch()" style="flex:1;padding:10px;border-radius:10px;background:rgba(200,200,200,0.2);border:none;color:#fff;font-size:14px;font-weight:600;cursor:pointer;backdrop-filter:blur(12px);">Invite Collaborators</button>' +
                 '</div>' +
             '</div>' +
             '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;">' +
@@ -28654,6 +32254,51 @@ window.tagUser = function(name) {
     var inp = document.getElementById('tagPeopleSearch');
     if (inp) inp.remove();
     triggerHaptic(12);
+};
+
+/* --- INVITE COLLABORATORS --- */
+function openInviteCollabSearch() {
+    var existing = document.getElementById('inviteCollabPage');
+    if (existing) { existing.remove(); return; }
+    var page = document.createElement('div');
+    page.id = 'inviteCollabPage';
+    page.style.cssText = 'position:absolute;inset:0;z-index:9700;display:flex;flex-direction:column;background:var(--bg-primary,#fff);animation:edIn 0.25s ease;';
+    page.innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:0.5px solid var(--border-color,#f0f0f0);">' +
+            '<button onclick="document.getElementById(\'inviteCollabPage\').remove()" style="background:none;border:none;color:#007AFF;font-size:16px;cursor:pointer;font-weight:500;">Cancel</button>' +
+            '<b style="font-size:17px;color:var(--text-primary,#000);">Invite Collaborators</b>' +
+            '<div style="width:50px;"></div>' +
+        '</div>' +
+        '<div style="padding:12px 16px;border-bottom:0.5px solid var(--border-color,#f0f0f0);">' +
+            '<div style="display:flex;align-items:center;background:var(--card-bg,#f2f2f7);border-radius:12px;padding:10px 14px;gap:10px;">' +
+                '<i class="fa-solid fa-magnifying-glass" style="color:#888;font-size:15px;"></i>' +
+                '<input autofocus id="collabSearchInput" placeholder="Search for a person" style="flex:1;background:none;border:none;outline:none;font-size:15px;color:var(--text-primary,#000);font-family:inherit;" oninput="renderCollabSearchResults(this.value)">' +
+            '</div>' +
+        '</div>' +
+        '<div style="padding:12px 16px 4px;"><p style="font-size:12px;color:#888;line-height:1.5;">When they accept, this video will post on both accounts simultaneously.</p></div>' +
+        '<div id="collabSearchResults" style="flex:1;overflow-y:auto;padding:0 16px;"></div>';
+    (document.getElementById('tagPeoplePage') || document.getElementById('app') || document.body).appendChild(page);
+    setTimeout(function(){ var i=page.querySelector('#collabSearchInput');if(i)i.focus(); },100);
+}
+window.renderCollabSearchResults = function(q) {
+    var container = document.getElementById('collabSearchResults');
+    if (!container) return;
+    if (!q.trim()) { container.innerHTML = ''; return; }
+    var names = ['Alex M.','Jordan K.','Priya S.','Tyler B.','Nomsa D.','Kai L.','Sofia R.','Marcus T.'];
+    var results = names.filter(function(n){ return n.toLowerCase().includes(q.toLowerCase()); });
+    container.innerHTML = results.map(function(n){
+        var handle = '@'+n.toLowerCase().replace(/[. ]/g,'_');
+        return '<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:0.5px solid var(--border-color,#f0f0f0);">' +
+            '<div style="width:40px;height:40px;border-radius:50%;background:#5856D6;display:flex;align-items:center;justify-content:center;color:white;font-size:16px;font-weight:700;">'+escapeHtml((n||'U').charAt(0).toUpperCase())+'</div>' +
+            '<div style="flex:1;"><div style="font-size:15px;font-weight:600;color:var(--text-primary,#000);">'+escapeHtml(n)+'</div><div style="font-size:13px;color:#888;">'+escapeHtml(handle)+'</div></div>' +
+            '<button onclick="sendCollabInvite(\''+escapeHtml(n)+'\')" style="padding:8px 16px;border-radius:20px;background:#007AFF;border:none;color:white;font-size:13px;font-weight:700;cursor:pointer;">Invite</button>' +
+        '</div>';
+    }).join('') || '<div style="padding:30px;text-align:center;color:#888;font-size:14px;">No users found</div>';
+};
+window.sendCollabInvite = function(name) {
+    showToast('@'+name.toLowerCase().replace(/[. ]/g,'_')+' invited — they will accept or decline');
+    triggerHaptic(15);
+    document.getElementById('inviteCollabPage').remove();
 };
 
 /* --- LOCATION PICKER --- */
@@ -28798,6 +32443,10 @@ window.confirmSchedule = function() {
     var hs=['00','01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16','17','18','19','20','21','22','23'];
     var ms=['00','05','10','15','20','25','30','35','40','45','50','55'];
     var label=(di===0?'Today':di===1?'Tomorrow':'Day '+(di+1))+' at '+(hs[hi]||'00')+':'+(ms[mi]||'00');
+    var schedDate = new Date(); schedDate.setDate(schedDate.getDate()+di); schedDate.setHours(parseInt(hs[hi]||'0'),parseInt(ms[mi]||'0'),0,0);
+    window._tcScheduledAt = schedDate.getTime();
+    var schedLbl = document.getElementById('moScheduleLbl');
+    if(schedLbl) schedLbl.textContent = label;
     document.getElementById('scheduleSheet').remove();
     showToast('Scheduled: '+label+' ✅');
     triggerHaptic(20);
@@ -28836,6 +32485,10 @@ window.saveAudioName = function() {
 
 /* --- VOICE TRANSLATION MODAL (ElevenLabs) --- */
 function openVoiceTranslationModal(toggleEl) {
+    if (localStorage.getItem('tf_voice_translation_seen')) {
+        if (toggleEl) toggleEl.classList.toggle('active');
+        return;
+    }
     var existing = document.getElementById('voiceTranslationModal');
     if (existing) existing.remove();
     var modal = document.createElement('div');
@@ -28860,8 +32513,8 @@ function openVoiceTranslationModal(toggleEl) {
     modal.addEventListener('click',function(e){ if(e.target===modal){modal.remove();if(window._vtToggle)window._vtToggle.classList.remove('active');} });
     (document.getElementById('app')||document.body).appendChild(modal);
 }
-window.allowVoiceTranslation = function() { if(window._vtToggle)window._vtToggle.classList.add('active'); document.getElementById('voiceTranslationModal').remove(); showToast('Voice translation enabled 🌐'); triggerHaptic(20); };
-window.denyVoiceTranslation = function() { if(window._vtToggle)window._vtToggle.classList.remove('active'); document.getElementById('voiceTranslationModal').remove(); triggerHaptic(10); };
+window.allowVoiceTranslation = function() { localStorage.setItem('tf_voice_translation_seen','1'); if(window._vtToggle)window._vtToggle.classList.add('active'); document.getElementById('voiceTranslationModal').remove(); showToast('Voice translation enabled 🌐'); triggerHaptic(20); };
+window.denyVoiceTranslation = function() { localStorage.setItem('tf_voice_translation_seen','1'); if(window._vtToggle)window._vtToggle.classList.remove('active'); document.getElementById('voiceTranslationModal').remove(); triggerHaptic(10); };
 
 /* --- PRODUCT DETAILS SCREEN --- */
 function openProductDetailsScreen() {
@@ -29286,25 +32939,7 @@ function toggleDataSaver(toggleEl) {
         '</div>' +
 
         // Helper text
-        '<p style="font-size:12px;color:#8E8E8E;padding:12px 20px;line-height:1.55;">This doesn\'t affect your account privacy settings. Reels you share are available to people across TrustFirst.</p>' +
-
-        // Divider
-        '<div style="height:0.5px;background:var(--border-color,#e0e0e0);margin:4px 0;"></div>' +
-
-        // Section 2
-        '<div style="padding:20px 20px 8px;">' +
-            '<p style="font-size:12px;font-weight:800;color:#8E8E8E;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px;">Where your reel can be seen</p>' +
-        '</div>' +
-        '<div style="background:var(--bg-primary,#fff);border-radius:18px;margin:0 16px;overflow:hidden;">' +
-            '<div onclick="openProfileDisplaySettings()" style="display:flex;align-items:center;gap:14px;padding:16px 18px;cursor:pointer;">' +
-                '<i class="fa-solid fa-grid" style="font-size:20px;color:var(--text-primary,#000);width:24px;text-align:center;"></i>' +
-                '<div style="flex:1;">' +
-                    '<span style="font-size:15px;font-weight:500;color:var(--text-primary,#000);display:block;">Profile display</span>' +
-                '</div>' +
-                '<span style="font-size:13px;color:#C7C7CC;margin-right:6px;">Main grid and Reels grid</span>' +
-                '<i class="fa-solid fa-chevron-right" style="color:#C7C7CC;font-size:13px;"></i>' +
-            '</div>' +
-        '</div>';
+        '';
 
     var app = document.getElementById('app') || document.body;
     app.appendChild(screen);
@@ -29743,9 +33378,11 @@ async function initiateCall(userId, type) {
     if (previewEl) {
         previewEl.style.display = 'block';
         previewEl.innerHTML = isVideo
-            ? '<div style="position:relative;"><video src="' + localPreview + '" controls playsinline style="width:100%;max-height:280px;border-radius:12px;object-fit:cover;display:block;"></video><div onclick="clearComposerMedia()" style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2;"><i class="fa-solid fa-xmark" style="color:white;font-size:13px;"></i></div></div>'
-            : '<div style="position:relative;display:inline-block;"><img src="' + localPreview + '" style="width:100%;max-height:280px;border-radius:12px;object-fit:cover;display:block;"><div onclick="clearComposerMedia()" style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-xmark" style="color:white;font-size:13px;"></i></div></div>';
+            ? '<div style="position:relative;"><video src="' + localPreview + '" controls playsinline style="width:100%;max-height:480px;border-radius:12px;object-fit:contain;display:block;background:#000;" onloadedmetadata="(function(v){v.style.maxHeight=(v.videoHeight>v.videoWidth)?\'480px\':\'240px\';})(this)"></video><div onclick="clearComposerMedia()" style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2;"><i class="fa-solid fa-xmark" style="color:white;font-size:13px;"></i></div></div>'
+            : '<div style="position:relative;display:inline-block;"><img src="' + localPreview + '" style="width:100%;max-height:480px;border-radius:12px;object-fit:contain;display:block;" onload="(function(img){img.style.maxHeight=(img.naturalHeight>img.naturalWidth)?\'480px\':\'260px\';})(this)"><div onclick="clearComposerMedia()" style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-xmark" style="color:white;font-size:13px;"></i></div></div>';
         updateComposerState();
+        var _ct = document.getElementById('composer-text');
+        if (_ct) _ct.value = '';
     }
 
     // Upload to Supabase storage
@@ -29873,7 +33510,7 @@ async function savePronoun(val, modal) {
         if (memberIds.length === 0) {
             membersEl.innerHTML = '<p style="text-align:center;color:#aaa;padding:24px 0;font-size:14px;">No members yet.</p>';
         } else {
-            var profiles = await sb.from('profiles').select('id,full_name,username,avatar_url').in('id', memberIds);
+            var profiles = await sb.from('users').select('id,full_name,username,avatar_url').in('id', memberIds);
             membersEl.innerHTML = '<p style="font-size:12px;font-weight:800;color:#888;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">' + memberIds.length + ' ' + (memberIds.length === 1 ? 'person' : 'people') + '</p><div class="settings-card" style="margin-bottom:20px;">' +
                 (profiles.data || []).map(function(u) {
                     var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff&size=80');
@@ -29884,7 +33521,7 @@ async function savePronoun(val, modal) {
         var following = await sb.from('follows').select('following_id').eq('follower_id', currentUser.id).limit(10);
         var followIds = (following.data || []).map(function(f){ return f.following_id; }).filter(function(id){ return !memberIds.includes(id); });
         if (!followIds.length) { if (suggestedEl) suggestedEl.innerHTML = '<p style="text-align:center;color:#aaa;padding:16px 0;font-size:14px;">No suggestions yet.</p>'; return; }
-        var sug = await sb.from('profiles').select('id,full_name,username,avatar_url').in('id', followIds).limit(5);
+        var sug = await sb.from('users').select('id,full_name,username,avatar_url').in('id', followIds).limit(5);
         if (suggestedEl && sug.data && sug.data.length) {
             suggestedEl.innerHTML = sug.data.map(function(u) {
                 var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff&size=80');
@@ -30359,4 +33996,941 @@ async function joinRealChannel(btn, channelId) {
         btn.disabled = false;
         showToast('Could not join. Try again.');
     }
+}
+
+function clearChatConfirm() {
+    var chatName = document.getElementById('chat-user-name') ? document.getElementById('chat-user-name').textContent.trim() : 'this person';
+    var avatarEl = document.getElementById('chat-avatar') || document.querySelector('#chat-interface img');
+    var avatarSrc = avatarEl ? avatarEl.src : '';
+    var sheet = document.createElement('div');
+    sheet.id = 'clearChatSheet';
+    sheet.style.cssText = 'position:absolute;inset:0;z-index:25000;background:rgba(0,0,0,0.45);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);display:flex;align-items:flex-end;';
+    sheet.innerHTML =
+        '<div style="width:100%;background:var(--bg-primary,#fff);border-radius:24px 24px 0 0;padding:12px 20px max(36px,env(safe-area-inset-bottom,36px));">' +
+            '<div style="width:36px;height:4px;background:#ccc;border-radius:2px;margin:0 auto 20px;"></div>' +
+            '<div style="display:flex;justify-content:center;margin-bottom:14px;">' +
+                '<div style="width:64px;height:64px;border-radius:50%;overflow:hidden;border:2.5px solid rgba(0,0,0,0.1);">' +
+                    (avatarSrc ? '<img src="' + escapeHtml(avatarSrc) + '" style="width:100%;height:100%;object-fit:cover;">' : '<div style="width:100%;height:100%;background:#007AFF;display:flex;align-items:center;justify-content:center;color:white;font-size:24px;font-weight:800;">' + escapeHtml(chatName.charAt(0)) + '</div>') +
+                '</div>' +
+            '</div>' +
+            '<p style="text-align:center;font-size:15px;font-weight:600;color:var(--text-primary,#000);margin-bottom:20px;line-height:1.4;">Are you sure you want to delete all messages in the chat with <b>' + escapeHtml(chatName) + '</b>?</p>' +
+            '<div onclick="document.getElementById(\'clearChatSheet\').remove();exitSelectMode();var cb=document.getElementById(\'chat-body\');if(cb)cb.innerHTML=\'\';showToast(\'Chat cleared for both\');triggerHaptic(30);" style="padding:16px;border-radius:14px;color:#FF3B30;font-size:16px;font-weight:700;cursor:pointer;border-bottom:0.5px solid rgba(0,0,0,0.07);display:flex;align-items:center;gap:10px;"><i class=\'fa-solid fa-trash\'></i>Delete for me and ' + escapeHtml(chatName) + '</div>' +
+            '<div onclick="document.getElementById(\'clearChatSheet\').remove();exitSelectMode();var cb=document.getElementById(\'chat-body\');if(cb)cb.innerHTML=\'\';showToast(\'Chat cleared\');triggerHaptic(30);" style="padding:16px;border-radius:14px;color:#FF3B30;font-size:16px;font-weight:700;cursor:pointer;border-bottom:0.5px solid rgba(0,0,0,0.07);display:flex;align-items:center;gap:10px;"><i class=\'fa-solid fa-user-minus\'></i>Delete just for me</div>' +
+            '<div onclick="document.getElementById(\'clearChatSheet\').remove();openAutoDeleteSheet();" style="padding:16px;border-radius:14px;color:#007AFF;font-size:16px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:10px;"><i class=\'fa-solid fa-clock-rotate-left\'></i>Enable Auto-Delete</div>' +
+            '<div onclick="document.getElementById(\'clearChatSheet\').remove()" style="padding:16px;border-radius:14px;background:rgba(0,0,0,0.05);text-align:center;font-size:16px;font-weight:600;cursor:pointer;margin-top:10px;color:var(--text-primary,#000);">Cancel</div>' +
+        '</div>';
+    sheet.addEventListener('click', function(e){ if(e.target===sheet) sheet.remove(); });
+    (document.getElementById('chat-interface') || document.body).appendChild(sheet);
+}
+
+function openAutoDeleteSheet() {
+    var sheet = document.createElement('div');
+    sheet.id = 'autoDeleteSheet';
+    sheet.style.cssText = 'position:absolute;inset:0;z-index:26000;background:rgba(0,0,0,0.45);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);display:flex;align-items:flex-end;';
+    var days = [1,2,3,4,5,6,7,14,30,90];
+    var opts = days.map(function(d){ return '<option value="'+d+'">'+(d===1?'1 day':d+' days')+'</option>'; }).join('');
+    sheet.innerHTML =
+        '<div style="width:100%;background:var(--bg-primary,#fff);border-radius:24px 24px 0 0;padding:12px 20px max(36px,env(safe-area-inset-bottom,36px));">' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">' +
+                '<button onclick="document.getElementById(\'autoDeleteSheet\').remove()" style="width:32px;height:32px;border-radius:50%;border:none;background:rgba(0,0,0,0.08);display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-xmark" style="font-size:14px;"></i></button>' +
+                '<span style="font-size:16px;font-weight:800;color:var(--text-primary,#000);">Auto-Delete After…</span>' +
+                '<div style="width:32px;"></div>' +
+            '</div>' +
+            '<div style="display:flex;justify-content:center;margin:20px 0;">' +
+                '<select id="autoDeletePicker" style="font-size:22px;font-weight:700;color:var(--text-primary,#000);border:none;background:transparent;outline:none;text-align:center;cursor:pointer;padding:12px 20px;border-radius:16px;background:var(--bg-secondary,#f5f5f5);">' + opts + '</select>' +
+            '</div>' +
+            '<button onclick="var v=document.getElementById(\'autoDeletePicker\').value;document.getElementById(\'autoDeleteSheet\').remove();showToast(\'Auto-delete set: \'+v+\' day\'+(v==1?\'\':\'s\'));triggerHaptic(20);" style="width:100%;padding:16px;border-radius:50px;background:#007AFF;border:none;color:white;font-size:16px;font-weight:800;cursor:pointer;margin-top:8px;">Set Auto-Delete</button>' +
+        '</div>';
+    sheet.addEventListener('click', function(e){ if(e.target===sheet) sheet.remove(); });
+    (document.getElementById('chat-interface') || document.body).appendChild(sheet);
+}
+
+function vibeSelectCelebration(el) {
+    document.querySelectorAll('.vibe-cel-tag').forEach(function(t){ t.classList.remove('selected'); });
+    el.classList.add('selected');
+    triggerHaptic(10);
+    var cel = el.getAttribute('data-cel');
+    window._vibeCelebration = cel;
+    setTimeout(function(){ showVibeAffirmationCard(window._vibeDropWord, cel); }, 350);
+}
+
+function showVibeAffirmationCard(mood, celebration) {
+    var affirmations = {
+        Courage: 'You chose courage today. That alone changes everything.',
+        Boldness: 'Being bold is your superpower. Own it fully.',
+        Consistency: 'Small steps daily build extraordinary lives.',
+        Growth: 'Every challenge is growth in disguise.',
+        Resilience: 'You bend but never break. That is strength.',
+        Joy: 'Joy is resistance. Keep choosing it.',
+        Progress: 'Progress over perfection, always.',
+        Peace: 'Your peace is your power. Protect it.',
+        Discipline: 'Discipline is love you give your future self.',
+        Gratitude: 'What you appreciate appreciates.'
+    };
+    var text = affirmations[celebration] || 'You are exactly where you need to be.';
+    var today = new Date().toLocaleDateString('en-ZA', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+    var card = document.createElement('div');
+    card.id = 'vibeAffirmationCard';
+    card.style.cssText = 'position:absolute;inset:0;z-index:9500;background:linear-gradient(135deg,#3b1f6e,#7c3aed);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 32px;animation:slideUpOverlay 0.4s ease;';
+    card.innerHTML =
+        '<button onclick="document.getElementById(\'vibeAffirmationCard\').remove()" style="position:absolute;top:52px;left:20px;width:36px;height:36px;border-radius:50%;border:none;background:rgba(255,255,255,0.15);color:white;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button>' +
+        '<small style="color:rgba(255,255,255,0.55);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:24px;">' + today + '</small>' +
+        '<div style="background:rgba(255,255,255,0.12);border-radius:28px;padding:32px 28px;border:1px solid rgba(255,255,255,0.2);text-align:center;backdrop-filter:blur(20px);margin-bottom:28px;">' +
+            '<p style="color:rgba(255,255,255,0.6);font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Your Affirmation</p>' +
+            '<p style="color:white;font-size:22px;font-weight:800;line-height:1.4;">' + escapeHtml(text) + '</p>' +
+        '</div>' +
+        '<button onclick="document.getElementById(\'vibeAffirmationCard\').remove();openLiquidGlassCamera();" style="width:100%;padding:15px;border-radius:50px;background:white;border:none;color:#7c3aed;font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,0.25);">Add to Story</button>';
+    (document.getElementById('wellbeing-modules-overlay') || document.getElementById('app') || document.body).appendChild(card);
+    triggerHaptic(20);
+}
+
+function openLiquidGlassCameraWithFile(file, url) {
+    var overlay = document.getElementById('lg-camera-overlay');
+    if (!overlay) { if (typeof openLiquidGlassCamera === 'function') { openLiquidGlassCamera(); } return; }
+    overlay.style.display = 'flex';
+    hideNavBar && hideNavBar();
+    var lgVid = document.getElementById('lgVid');
+    if (lgVid) {
+        lgVid.src = url;
+        lgVid.muted = true; lgVid.loop = true;
+        lgVid.play().catch(function(){});
+        lgVid.style.display = 'block';
+    }
+    // Hide the capture button, show the "Use" button
+    var captureBtn = document.getElementById('lgCaptureBtn') || document.querySelector('#lg-camera-overlay [onclick*="capture"]');
+    if (captureBtn) captureBtn.style.display = 'none';
+    var useBtn = document.getElementById('lgUseFileBtn');
+    if (!useBtn) {
+        useBtn = document.createElement('button');
+        useBtn.id = 'lgUseFileBtn';
+        useBtn.textContent = 'Use';
+        useBtn.style.cssText = 'position:absolute;bottom:100px;left:50%;transform:translateX(-50%);background:#007AFF;color:white;border:none;border-radius:50px;padding:14px 48px;font-size:16px;font-weight:700;cursor:pointer;z-index:500;';
+        useBtn.onclick = function() {
+            window._lastPickedVideoSrc = url;
+            window._lastRecordedBlob = file;
+            useBtn.remove();
+            if (captureBtn) captureBtn.style.display = '';
+            openNewTrustClipPost && openNewTrustClipPost();
+        };
+        overlay.appendChild(useBtn);
+    }
+}
+
+function openReelLikesModal(postId, likes, views) {
+    var existing = document.getElementById('reelLikesModal');
+    if (existing) existing.remove();
+    var modal = document.createElement('div');
+    modal.id = 'reelLikesModal';
+    modal.style.cssText = 'position:absolute;inset:0;z-index:19000;display:flex;align-items:flex-end;background:rgba(0,0,0,0.5);';
+    modal.innerHTML =
+        '<div style="width:100%;background:var(--bg-primary,#1c1c1e);border-radius:22px 22px 0 0;padding:12px 0 max(40px,env(safe-area-inset-bottom,40px));max-height:80%;display:flex;flex-direction:column;">' +
+            '<div style="width:36px;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;margin:0 auto 16px;"></div>' +
+            '<div style="text-align:center;padding:0 0 16px;border-bottom:0.5px solid rgba(255,255,255,0.1);flex-shrink:0;">' +
+                '<b style="color:white;font-size:16px;">Likes and views</b>' +
+            '</div>' +
+            '<div style="display:flex;justify-content:center;gap:40px;padding:20px 0;border-bottom:0.5px solid rgba(255,255,255,0.1);flex-shrink:0;">' +
+                '<div style="text-align:center;"><i class="fa-regular fa-heart" style="color:white;font-size:18px;"></i><div style="color:white;font-size:18px;font-weight:800;margin-top:4px;">' + likes + '</div></div>' +
+                '<div style="text-align:center;"><i class="fa-regular fa-eye" style="color:white;font-size:18px;"></i><div style="color:white;font-size:18px;font-weight:800;margin-top:4px;">' + (parseInt(views)>999?(parseInt(views)/1000).toFixed(1)+'K':views||0) + '</div></div>' +
+            '</div>' +
+            '<div style="padding:16px 20px 8px;flex-shrink:0;"><b style="color:white;font-size:15px;">Liked by</b></div>' +
+            '<div style="overflow-y:auto;flex:1;padding:0 16px;" id="reelLikersList"><div style="text-align:center;padding:30px;color:rgba(255,255,255,0.4);font-size:14px;">Loading…</div></div>' +
+        '</div>';
+    modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
+    (document.getElementById('reel-overlay') || document.getElementById('app') || document.body).appendChild(modal);
+    triggerHaptic(10);
+    // Load likers from Supabase
+    if (window.sb) {
+        window.sb.from('likes').select('user_id,profiles(username,avatar_url)').eq('post_id',postId).limit(20).then(function(r){
+            var list = document.getElementById('reelLikersList');
+            if (!list) return;
+            if (!r.data || !r.data.length) { list.innerHTML = '<div style="text-align:center;padding:30px;color:rgba(255,255,255,0.4);font-size:14px;">No likes yet</div>'; return; }
+            list.innerHTML = r.data.map(function(row){
+                var p = row.profiles || {}; var av = p.avatar_url || ('https://ui-avatars.com/api/?name='+(p.username||'U')+'&background=007AFF&color=fff&size=60');
+                return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:0.5px solid rgba(255,255,255,0.07);" onclick="modal.remove();viewUserProfile(\''+escapeHtml(row.user_id||'')+'\')">' +
+                    '<img src="'+escapeHtml(av)+'" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">' +
+                    '<div><div style="color:white;font-size:14px;font-weight:700;">'+escapeHtml(p.display_name||p.username||'User')+'</div>' +
+                    '<div style="color:rgba(255,255,255,0.5);font-size:13px;">@'+escapeHtml(p.username||'')+'</div></div>' +
+                    '<button style="margin-left:auto;padding:7px 16px;border-radius:20px;border:1.5px solid rgba(255,255,255,0.3);background:transparent;color:white;font-size:13px;font-weight:600;cursor:pointer;">Follow</button>' +
+                '</div>';
+            }).join('');
+        });
+    }
+}
+
+function openStoryPostArea(file, url) {
+    var existing = document.getElementById('storyPostScreen');
+    if (existing) existing.remove();
+    var isVideo = file && file.type && file.type.startsWith('video/');
+    window._spStoryFile = file; window._spStoryUrl = url; window._spStoryIsVideo = isVideo;
+    window._spStoryMusicAudio = null;
+    window._spStoryMusicInfo = window._spPendingMusicInfo || null;
+    window._spPendingMusicInfo = null;
+    var screen = document.createElement('div');
+    screen.id = 'storyPostScreen';
+    screen.style.cssText = 'position:absolute;inset:0;z-index:9800;display:flex;flex-direction:column;background:#000;';
+    screen.innerHTML =
+        '<div style="position:absolute;top:0;left:0;right:0;z-index:20;padding:max(52px,env(safe-area-inset-top,52px)) 16px 0;display:flex;align-items:flex-start;justify-content:space-between;">' +
+            '<button id="spCloseBtn" style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.55);border:none;color:white;font-size:17px;display:flex;align-items:center;justify-content:center;cursor:pointer;margin-top:4px;"><i class="fa-solid fa-xmark"></i></button>' +
+            '<div style="display:flex;flex-direction:column;gap:10px;align-items:center;">' +
+                '<button id="spBtnAa" style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.55);border:none;color:white;font-size:16px;display:flex;align-items:center;justify-content:center;cursor:pointer;"><b style="font-size:15px;">Aa</b></button>' +
+                '<button id="spBtnSticker" style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.55);border:none;color:white;font-size:16px;display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-face-smile"></i></button>' +
+                '<button id="spBtnMusic" style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.55);border:none;color:white;font-size:16px;display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-music"></i></button>' +
+                '<button id="spBtnDownload" style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.55);border:none;color:white;font-size:16px;display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-download"></i></button>' +
+                '<button id="spBtnVolume" style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.55);border:none;color:white;font-size:16px;display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-volume-high"></i></button>' +
+            '</div>' +
+        '</div>' +
+        '<div style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;">' +
+            (isVideo ? '<video id="storyPostVid" src="'+url+'" style="width:100%;height:100%;object-fit:cover;will-change:transform;" loop playsinline muted preload="auto"></video>'
+                     : '<img src="'+url+'" style="width:100%;height:100%;object-fit:cover;">') +
+        '</div>' +
+
+
+        // Waveform audio scrubber bar — hidden until music is chosen
+        '<div id="spWaveformBar" style="position:absolute;bottom:100px;left:0;right:0;padding:0 10px;display:none;">' +
+            '<div style="position:relative;height:48px;overflow:hidden;">' +
+                '<div id="spWaveformTrack" style="display:flex;align-items:center;gap:1.5px;height:48px;overflow:hidden;cursor:pointer;">' +
+                    (function(){ var b=''; for(var i=0;i<60;i++){ var h=Math.floor(Math.random()*30)+8; b+='<div class="spwb" style="flex-shrink:0;width:3px;height:'+h+'px;background:rgba(255,255,255,0.35);border-radius:2px;transition:height 0.3s;"></div>'; } return b; })() +
+                '</div>' +
+                '<div id="spWaveformSelector" style="position:absolute;top:0;bottom:0;left:0%;width:28%;background:linear-gradient(90deg,rgba(255,120,0,0.55),rgba(255,40,180,0.55));border-radius:4px;border:2px solid rgba(255,160,50,0.9);cursor:grab;"></div>' +
+            '</div>' +
+        '</div>' +
+        '<div style="position:absolute;bottom:0;left:0;right:0;padding:0 16px max(36px,env(safe-area-inset-bottom,36px));display:flex;gap:10px;align-items:center;">' +
+            '<button id="spBtnYourStory" style="flex:1;display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.15);backdrop-filter:blur(12px);border:none;border-radius:50px;padding:14px 20px;cursor:pointer;">' +
+                '<div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#5856d6,#007AFF);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-user" style="color:white;font-size:12px;"></i></div>' +
+                '<span style="color:white;font-size:15px;font-weight:700;">Your story</span>' +
+            '</button>' +
+            '<button id="spBtnTrustCircle" style="flex:1;display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.15);backdrop-filter:blur(12px);border:none;border-radius:50px;padding:14px 20px;cursor:pointer;">' +
+                '<div style="width:30px;height:30px;border-radius:50%;background:#007AFF;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-star" style="color:white;font-size:12px;"></i></div>' +
+                '<span style="color:white;font-size:15px;font-weight:700;">TrustCircle</span>' +
+            '</button>' +
+            '<button id="spBtnShare" style="width:50px;height:50px;border-radius:50%;background:#007AFF;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"><i class="fa-solid fa-arrow-up-from-bracket" style="color:white;font-size:17px;"></i></button>' +
+        '</div>';
+    (document.getElementById('app') || document.body).appendChild(screen);
+
+    // X — back to picker
+    document.getElementById('spCloseBtn').onclick = function() {
+        spRemoveMusic();
+        screen.remove();
+        openStoryPicker();
+    };
+    // Aa — reuse existing editor text sheet, reparent to storyPostScreen
+    document.getElementById('spBtnAa').onclick = function() {
+        var old = document.getElementById('edTextSheet'); if (old) { old.remove(); return; }
+        edOpenTextSheet();
+        var sheet = document.getElementById('edTextSheet');
+        if (sheet) screen.appendChild(sheet);
+    };
+    // Sticker — reuse existing editor sticker tray, reparent
+    document.getElementById('spBtnSticker').onclick = function() {
+        var old = document.getElementById('edStickerTray'); if (old) { old.remove(); return; }
+        edOpenStickerTray();
+        var tray = document.getElementById('edStickerTray');
+        if (tray) screen.appendChild(tray);
+    };
+    // Music — open thought music hub (same as thoughts), intercept pick for story
+    document.getElementById('spBtnMusic').onclick = function() {
+        window._spMusicModalActive = true;
+        openThoughtMusicPicker();
+    };
+    // Download
+    document.getElementById('spBtnDownload').onclick = function() {
+        var a = document.createElement('a'); a.href = url;
+        a.download = isVideo ? 'story.mp4' : 'story.jpg'; a.click();
+    };
+    // Volume — mute video only, music unaffected
+    document.getElementById('spBtnVolume').onclick = function() { storyToggleVolume(this); };
+    // Your story / TrustCircle / Share
+    document.getElementById('spBtnYourStory').onclick = function() { submitStoryPost(url, isVideo, 'everyone'); };
+    document.getElementById('spBtnTrustCircle').onclick = function() { submitStoryPost(url, isVideo, 'trustcircle'); };
+    document.getElementById('spBtnShare').onclick = function() { openStoryShareModal(url, isVideo); };
+
+    // Waveform lives only inside Music Editor
+
+    // Smooth video playback
+    if (isVideo) {
+        var vid = document.getElementById('storyPostVid');
+        if (vid) { vid.load(); vid.addEventListener('canplaythrough', function(){ vid.play().catch(function(){}); }, {once:true}); }
+    }
+    triggerHaptic && triggerHaptic(10);
+
+    // If music was pre-attached (music-only story from picker), show the album
+    // cover on the music button so tapping it opens the editor.
+    if (window._spStoryMusicInfo) {
+        if (typeof setStoryMusicButtonToAlbum === 'function') {
+            setStoryMusicButtonToAlbum();
+        } else {
+            spApplyMusic(window._spStoryMusicInfo, screen);
+        }
+    }
+}
+
+function openStoryMusicEditor(screen) {
+    var old = document.getElementById('spMusicEditor'); if (old) { old.remove(); return; }
+    // Tell thought music picker that the pick goes to story
+    window._spMusicModalActive = true;
+    openThoughtMusicPicker();
+    // After pick, selectRealMusicTrack calls spApplyMusic if _spMusicModalActive
+}
+
+function spApplyMusic(track, screen) {
+    if (!screen) screen = document.getElementById('storyPostScreen');
+    if (!screen) return;
+    window._spStoryMusicInfo = track;
+
+    // Highlight music button
+    var btn = document.getElementById('spBtnMusic');
+    if (btn) btn.style.background = 'rgba(0,122,255,0.7)';
+
+    // Play preview
+    if (window._spStoryMusicAudio) { window._spStoryMusicAudio.pause(); }
+    if (track.previewUrl) {
+        var a = new Audio(track.previewUrl);
+        a.loop = true; a.volume = 0.8;
+        a.currentTime = 0;
+        a.play().catch(function(){});
+        window._spStoryMusicAudio = a;
+    }
+
+    // Show waveform scrubber bar
+    var wfBar = document.getElementById('spWaveformBar');
+    if (wfBar) wfBar.style.display = 'block';
+
+    // Wire waveform selector drag to scrub song position
+    var wfTrack = document.getElementById('spWaveformTrack');
+    var wfSel   = document.getElementById('spWaveformSelector');
+    if (wfTrack && wfSel) {
+        var _dragging = false, _dragStartX = 0, _selStartLeft = 0;
+        wfSel.addEventListener('pointerdown', function(e) {
+            _dragging = true; _dragStartX = e.clientX;
+            _selStartLeft = parseFloat(wfSel.style.left) || 30;
+            wfSel.style.cursor = 'grabbing';
+            wfSel.setPointerCapture(e.pointerId);
+        });
+        wfSel.addEventListener('pointermove', function(e) {
+            if (!_dragging) return;
+            var trackW = wfTrack.getBoundingClientRect().width;
+            if (!trackW) return;
+            var dx = ((e.clientX - _dragStartX) / trackW) * 100;
+            var selW = parseFloat(wfSel.style.width) || 28;
+            var newLeft = Math.max(0, Math.min(100 - selW, _selStartLeft + dx));
+            wfSel.style.left = newLeft + '%';
+            if (window._spStoryMusicAudio && window._spStoryMusicAudio.duration) {
+                window._spStoryMusicAudio.currentTime = (newLeft / 100) * window._spStoryMusicAudio.duration;
+            }
+        });
+        wfSel.addEventListener('pointerup', function(e) { _dragging = false; wfSel.style.cursor = 'grab'; });
+    }
+
+    // Remove any old sticker
+    var oldSticker = document.getElementById('spMusicSticker');
+    if (oldSticker) oldSticker.remove();
+
+    // Create draggable music sticker on canvas
+    var sticker = document.createElement('div');
+    sticker.id = 'spMusicSticker';
+    sticker.style.cssText = 'position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);z-index:9820;display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.55);backdrop-filter:blur(12px);border:0.5px solid rgba(255,255,255,0.25);border-radius:20px;padding:8px 14px;cursor:grab;touch-action:none;user-select:none;';
+    var artUrl = track.artUrl || '';
+    sticker.innerHTML =
+        (artUrl ? '<img src="'+escapeHtml(artUrl)+'" style="width:28px;height:28px;border-radius:6px;object-fit:cover;flex-shrink:0;">' : '<i class="fa-solid fa-music" style="color:white;font-size:14px;flex-shrink:0;"></i>') +
+        '<div style="display:flex;flex-direction:column;max-width:120px;">' +
+            '<span style="color:white;font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escapeHtml(track.name||'Music')+'</span>' +
+            '<span style="color:rgba(255,255,255,0.6);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escapeHtml(track.artist||'')+'</span>' +
+        '</div>';
+    screen.appendChild(sticker);
+
+    // Drag sticker
+    var _sx=0,_sy=0,_ox=0,_oy=0,_draggingSticker=false,_didDrag=false;
+    sticker.addEventListener('pointerdown', function(e) {
+        _draggingSticker=true; _didDrag=false;
+        var r=sticker.getBoundingClientRect(), sr=screen.getBoundingClientRect();
+        _ox=r.left-sr.left+r.width/2; _oy=r.top-sr.top+r.height/2;
+        _sx=e.clientX; _sy=e.clientY;
+        sticker.style.cursor='grabbing';
+        sticker.setPointerCapture(e.pointerId);
+    });
+    sticker.addEventListener('pointermove', function(e) {
+        if (!_draggingSticker) return;
+        var dx=e.clientX-_sx, dy=e.clientY-_sy;
+        if (Math.abs(dx)>3||Math.abs(dy)>3) _didDrag=true;
+        var sr=screen.getBoundingClientRect();
+        sticker.style.left=Math.max(0,Math.min(sr.width,_ox+dx))+'px';
+        sticker.style.top=Math.max(0,Math.min(sr.height,_oy+dy))+'px';
+        sticker.style.transform='translate(-50%,-50%)';
+    });
+    sticker.addEventListener('pointerup', function(e) {
+        _draggingSticker=false; sticker.style.cursor='grab';
+        if (!_didDrag) spToggleMusicStickerEditor(track, screen, sticker);
+    });
+}
+
+function spToggleMusicStickerEditor(track, screen, sticker) {
+    var old = document.getElementById('spStickerEditorBar');
+    if (old) { old.remove(); return; }
+
+    var bar = document.createElement('div');
+    bar.id = 'spStickerEditorBar';
+    bar.style.cssText = 'position:absolute;bottom:155px;left:0;right:0;z-index:9830;display:flex;align-items:center;justify-content:center;gap:20px;';
+    bar.innerHTML =
+        // X — remove sticker, keep music
+        '<button id="spStickerRemoveBtn" style="width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,0.6);border:1.5px solid rgba(255,255,255,0.3);color:white;font-size:18px;display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>' +
+        // Style toggle
+        '<button id="spStickerStyleBtn" style="height:44px;border-radius:22px;background:rgba(0,0,0,0.6);border:1.5px solid rgba(255,255,255,0.3);color:white;font-size:13px;font-weight:700;padding:0 18px;cursor:pointer;display:flex;align-items:center;gap:6px;"><i class="fa-solid fa-palette" style="font-size:14px;"></i> Style</button>' +
+        // Done
+        '<button id="spStickerDoneBtn" style="height:44px;border-radius:22px;background:#007AFF;border:none;color:white;font-size:14px;font-weight:700;padding:0 22px;cursor:pointer;">Done</button>';
+    screen.appendChild(bar);
+
+    document.getElementById('spStickerRemoveBtn').onclick = function() {
+        if (sticker) sticker.remove();
+        bar.remove();
+    };
+    document.getElementById('spStickerDoneBtn').onclick = function() {
+        bar.remove();
+        var wfBar = document.getElementById('spWaveformBar');
+        if (wfBar) wfBar.style.display = 'none';
+        if (window._spStoryMusicAudio) {
+            window._spMusicStartSec = window._spStoryMusicAudio.currentTime;
+        }
+    };
+    var _styleIdx = 0;
+    var _styles = [
+        'background:rgba(0,0,0,0.55);backdrop-filter:blur(12px);border:0.5px solid rgba(255,255,255,0.25);border-radius:20px;',
+        'background:rgba(255,255,255,0.9);border-radius:20px;',
+        'background:linear-gradient(135deg,#5856d6,#007AFF);border-radius:20px;border:none;',
+        'background:rgba(0,0,0,0.85);border-radius:4px;border:0.5px solid rgba(255,255,255,0.15);'
+    ];
+    document.getElementById('spStickerStyleBtn').onclick = function() {
+        _styleIdx = (_styleIdx + 1) % _styles.length;
+        if (sticker) {
+    var _css = sticker.style.cssText;
+    _css = _css.replace(/background:[^;]+;backdrop-filter:[^;]+;border:[^;]+;border-radius:[^;]+;/, '');
+    _css = _css.replace(/background:[^;]+;border-radius:[^;]+;border:[^;]+;/, '');
+    _css = _css.replace(/background:[^;]+;border-radius:[^;]+;/, '');
+    sticker.style.cssText = _css + _styles[_styleIdx];
+}
+    };
+}
+
+function openSpMusicEditorSheet(track, screen) {
+    var old = document.getElementById('spMusicEditorSheet'); if (old) { old.remove(); return; }
+    if (!screen) screen = document.getElementById('storyPostScreen');
+    if (!screen) return;
+
+    var sheet = document.createElement('div');
+    sheet.id = 'spMusicEditorSheet';
+    sheet.style.cssText = 'position:absolute;bottom:0;left:0;right:0;z-index:9850;display:flex;flex-direction:column;overflow:hidden;border-radius:24px 24px 0 0;max-height:72%;';
+
+    // Blurred album art background
+    var bgUrl = track.artUrl || 'https://picsum.photos/seed/music/400/400';
+    sheet.innerHTML =
+        // Blurred background
+        '<div style="position:absolute;inset:0;z-index:0;">' +
+            '<img src="'+escapeHtml(bgUrl)+'" style="width:100%;height:100%;object-fit:cover;filter:blur(28px) brightness(0.45);transform:scale(1.1);">' +
+        '</div>' +
+
+        // Top bar
+        '<div style="position:relative;z-index:2;display:flex;align-items:center;justify-content:space-between;padding:max(52px,env(safe-area-inset-top,52px)) 20px 16px;">' +
+            '<button id="spMeCancel" style="background:rgba(255,255,255,0.15);backdrop-filter:blur(20px);border:none;border-radius:50px;padding:8px 18px;color:white;font-size:15px;font-weight:600;cursor:pointer;">Cancel</button>' +
+            '<button id="spMeDone" style="background:#007AFF;border:none;border-radius:50px;padding:8px 22px;color:white;font-size:15px;font-weight:700;cursor:pointer;">Done</button>' +
+        '</div>' +
+
+        // Spinning disc + track info
+        '<div style="position:relative;z-index:2;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;">' +
+            '<div id="spDiscOuter" style="width:160px;height:160px;position:relative;">' +
+                // Vinyl record
+                '<div id="spDiscVinyl" style="width:160px;height:160px;border-radius:50%;background:radial-gradient(circle,#333 18%,#111 20%,#222 22%,#111 40%,#1a1a1a 100%);animation:spDiscSpin 3s linear infinite;box-shadow:0 8px 32px rgba(0,0,0,0.8);">' +
+                    // Album art in centre
+                    '<img src="'+escapeHtml(bgUrl)+'" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:58px;height:58px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.15);">' +
+                    // Centre dot
+                    '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,0.7);z-index:2;"></div>' +
+                '</div>' +
+            '</div>' +
+            '<b style="color:white;font-size:18px;font-weight:800;text-align:center;text-shadow:0 2px 8px rgba(0,0,0,0.6);">'+escapeHtml(track.name||'')+'</b>' +
+            '<span style="color:rgba(255,255,255,0.6);font-size:14px;">'+escapeHtml(track.artist||'')+'</span>' +
+
+            // Animated bars
+            '<div id="spMeBars" style="display:flex;align-items:flex-end;gap:3px;height:28px;">' +
+                ['10','18','8','22','12','18','8','14','20','10'].map(function(h){
+                    return '<div class="sp-mebar" style="width:3px;height:'+h+'px;background:rgba(255,255,255,0.8);border-radius:2px;transition:height 0.2s ease;"></div>';
+                }).join('') +
+            '</div>' +
+        '</div>' +
+
+        // Bottom controls
+        '<div style="position:relative;z-index:2;background:rgba(0,0,0,0.5);backdrop-filter:blur(20px);padding:16px 20px max(32px,env(safe-area-inset-bottom,32px));border-top:0.5px solid rgba(255,255,255,0.1);">' +
+
+            // Duration picker row
+            '<div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">' +
+                '<button id="spMeDurBtn" onclick="openSpClipDurationPicker(this)" style="min-width:54px;height:36px;border-radius:18px;background:rgba(255,255,255,0.15);border:0.5px solid rgba(255,255,255,0.2);color:white;font-size:12px;font-weight:800;cursor:pointer;">30s</button>' +
+                '<div style="flex:1;height:3px;background:rgba(255,255,255,0.2);border-radius:2px;position:relative;cursor:pointer;" id="spMeProgressBar">' +
+                    '<div id="spMeProgressFill" style="width:0%;height:100%;background:#007AFF;border-radius:2px;transition:width 0.15s;"></div>' +
+                    '<div id="spMeProgressThumb" style="position:absolute;top:50%;left:0%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:white;box-shadow:0 2px 8px rgba(0,0,0,0.5);cursor:grab;"></div>' +
+                '</div>' +
+                '<button id="spMePlayBtn" onclick="toggleSpMusicPreview(this,\''+escapeHtml(track.previewUrl||'')+'\')" style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.15);border:0.5px solid rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+                    '<i class="fa-solid fa-play" style="color:white;font-size:13px;margin-left:2px;"></i>' +
+                '</button>' +
+            '</div>' +
+
+            // Music only toggle
+            '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:rgba(255,255,255,0.08);border-radius:14px;">' +
+                '<div>' +
+                    '<b style="color:white;font-size:14px;display:block;">Music only</b>' +
+                    '<span style="color:rgba(255,255,255,0.5);font-size:12px;">Album art fills the story</span>' +
+                '</div>' +
+                '<div id="spMeOnlyToggle" onclick="toggleSpMusicOnly(this)" style="width:50px;height:28px;border-radius:14px;background:rgba(255,255,255,0.2);position:relative;cursor:pointer;transition:background 0.2s;">' +
+                    '<div id="spMeOnlyThumb" style="position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:white;transition:transform 0.2s;box-shadow:0 2px 6px rgba(0,0,0,0.3);"></div>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+
+    // Inject spin keyframe once
+    if (!document.getElementById('spDiscStyle')) {
+        var st = document.createElement('style');
+        st.id = 'spDiscStyle';
+        st.textContent = '@keyframes spDiscSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}} @keyframes spBarPulse{0%,100%{opacity:0.6}50%{opacity:1}}';
+        document.head.appendChild(st);
+    }
+
+    screen.appendChild(sheet);
+
+    // Wire cancel
+    document.getElementById('spMeCancel').onclick = function() {
+        sheet.remove();
+    };
+
+    // Wire done
+    document.getElementById('spMeDone').onclick = function() {
+        sheet.remove();
+        showToast('🎵 Music added');
+    };
+
+    // Wire progress bar scrub
+    var pb = document.getElementById('spMeProgressBar');
+    if (pb && window._spStoryMusicAudio) {
+        pb.addEventListener('click', function(e) {
+            var rect = pb.getBoundingClientRect();
+            var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            var aud = window._spStoryMusicAudio;
+            if (aud && aud.duration) aud.currentTime = pct * aud.duration;
+        });
+        window._spStoryMusicAudio.addEventListener('timeupdate', function() {
+            var aud = window._spStoryMusicAudio;
+            if (!aud || !aud.duration) return;
+            var pct = (aud.currentTime / aud.duration) * 100;
+            var fill = document.getElementById('spMeProgressFill');
+            var thumb = document.getElementById('spMeProgressThumb');
+            if (fill) fill.style.width = pct + '%';
+            if (thumb) thumb.style.left = pct + '%';
+        });
+    }
+
+    // Animate bars
+    window._spMeBarInterval = setInterval(function() {
+        var bars = document.querySelectorAll('#spMeSheet .sp-mebar, #spMusicEditorSheet .sp-mebar');
+        if (!bars.length) { clearInterval(window._spMeBarInterval); return; }
+        var heights = [6,20,8,24,12,20,8,16,22,10];
+        bars.forEach(function(b, i) {
+            b.style.height = (heights[(i + Math.floor(Math.random()*3)) % heights.length]) + 'px';
+        });
+    }, 250);
+}
+
+function toggleSpMusicOnly(toggle) {
+    var on = toggle.dataset.on === '1';
+    toggle.dataset.on = on ? '0' : '1';
+    toggle.style.background = on ? 'rgba(255,255,255,0.2)' : '#007AFF';
+    var thumb = document.getElementById('spMeOnlyThumb');
+    if (thumb) thumb.style.transform = on ? 'translateX(0)' : 'translateX(22px)';
+    window._spMusicOnly = !on;
+    if (!on) {
+        showToast('Music only — album art as background');
+        // Replace story bg with album art
+        var storyScreen = document.getElementById('storyPostScreen');
+        if (storyScreen && window._spStoryMusicInfo) {
+            var vid = document.getElementById('storyPostVid');
+            var img = storyScreen.querySelector('.sp-bg-media');
+            var artUrl = window._spStoryMusicInfo.artUrl || '';
+            if (!img) {
+                img = document.createElement('img');
+                img.className = 'sp-bg-media';
+                img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;filter:blur(8px) brightness(0.6);transform:scale(1.05);';
+                storyScreen.insertBefore(img, storyScreen.firstChild);
+            }
+            img.src = artUrl;
+            if (vid) vid.style.display = 'none';
+        }
+    } else {
+        window._spMusicOnly = false;
+        var vid2 = document.getElementById('storyPostVid');
+        var bgImg = document.querySelector('#storyPostScreen .sp-bg-media');
+        if (vid2) vid2.style.display = '';
+        if (bgImg) bgImg.remove();
+    }
+}
+
+function openSpClipDurationPicker(btn) {
+    var old = document.getElementById('spClipDurPicker'); if (old) { old.remove(); return; }
+    var currentLen = window._spClipLen || 30;
+    var overlay = document.createElement('div');
+    overlay.id = 'spClipDurPicker';
+    overlay.style.cssText = 'position:absolute;inset:0;z-index:10000;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-end;background:rgba(0,0,0,0.6);';
+    var sheet = document.createElement('div');
+    sheet.style.cssText = 'background:rgba(18,18,24,0.97);backdrop-filter:blur(30px);border-radius:20px 20px 0 0;padding:0 0 max(24px,env(safe-area-inset-bottom,24px));';
+    sheet.innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:center;padding:12px 0 8px;">' +
+            '<div style="width:36px;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;"></div>' +
+        '</div>' +
+        '<p style="color:white;font-size:17px;font-weight:700;text-align:center;margin:0 0 12px;">Choose clip duration</p>' +
+        '<div id="spDurScroller" style="height:220px;overflow-y:auto;scroll-snap-type:y mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;">' +
+            '<div style="height:90px;flex-shrink:0;"></div>' +
+            (function(){
+                var html = ''; for(var s=5;s<=60;s++){
+                    html += '<div class="spdur-item" data-sec="'+s+'" onclick="spDurSelect('+s+')" style="height:44px;display:flex;align-items:center;justify-content:center;scroll-snap-align:center;cursor:pointer;transition:all 0.15s;font-size:'+(s===currentLen?'22':'16')+'px;font-weight:'+(s===currentLen?'800':'500')+';color:'+(s===currentLen?'white':'rgba(255,255,255,0.35)')+';'+(s===currentLen?'background:rgba(255,255,255,0.08);border-radius:12px;':'')+'">' + s + ' seconds</div>';
+                } return html;
+            })() +
+            '<div style="height:90px;flex-shrink:0;"></div>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;justify-content:center;padding:16px 20px 0;">' +
+            '<button onclick="document.getElementById(\'spClipDurPicker\').remove()" style="width:100%;padding:16px;border-radius:16px;border:none;background:#007AFF;color:white;font-size:16px;font-weight:700;cursor:pointer;">Done</button>' +
+        '</div>';
+    overlay.appendChild(sheet);
+    overlay.addEventListener('click', function(e){ if(e.target===overlay) overlay.remove(); });
+    var screen = document.getElementById('storyPostScreen') || document.getElementById('spMusicEditorSheet') || document.body;
+    screen.appendChild(overlay);
+    // Scroll to current selection
+    setTimeout(function(){
+        var scroller = document.getElementById('spDurScroller');
+        var target = scroller && scroller.querySelector('[data-sec="'+currentLen+'"]');
+        if (target) target.scrollIntoView({block:'center'});
+    }, 50);
+}
+function spDurSelect(len) {
+    window._spClipLen = len;
+    var durBtn = document.getElementById('spMeDurBtn');
+    if (durBtn) durBtn.textContent = len + 's';
+    document.querySelectorAll('.spdur-item').forEach(function(el){
+        var isSelected = parseInt(el.dataset.sec) === len;
+        el.style.fontSize = isSelected ? '22px' : '16px';
+        el.style.fontWeight = isSelected ? '800' : '500';
+        el.style.color = isSelected ? 'white' : 'rgba(255,255,255,0.35)';
+        el.style.background = isSelected ? 'rgba(255,255,255,0.08)' : '';
+        el.style.borderRadius = isSelected ? '12px' : '';
+    });
+    var waveWin = document.getElementById('spMeWaveWindow');
+    var durLabel = document.getElementById('spMeWaveDurLabel');
+    var aud = window._spStoryMusicAudio;
+    if (waveWin) {
+        var totalDur = (aud && aud.duration) ? aud.duration : 30;
+        var winPct = Math.min(90, (len / totalDur) * 100);
+        waveWin.style.width = winPct + '%';
+        var curLeft = parseFloat(waveWin.style.left) || 25;
+        if (curLeft + winPct > 100) waveWin.style.left = (100 - winPct) + '%';
+    }
+    if (durLabel) durLabel.textContent = 'Clip: ' + len + 's';
+    if (aud) {
+        clearTimeout(window._spClipTimer);
+        window._spClipTimer = setTimeout(function(){ if (window._spStoryMusicAudio) window._spStoryMusicAudio.pause(); }, len * 1000);
+    }
+}
+
+function toggleSpMusicPreview(btn, previewUrl) {
+    var icon = btn.querySelector('i');
+    var aud = window._spStoryMusicAudio;
+    if (!aud) {
+        if (!previewUrl) { showToast('No preview'); return; }
+        aud = new Audio(previewUrl);
+        aud.loop = true; aud.volume = 0.8;
+        window._spStoryMusicAudio = aud;
+    }
+    if (aud.paused) {
+        aud.play().catch(function(){});
+        if (icon) { icon.className = 'fa-solid fa-pause'; icon.style.marginLeft = '0'; }
+    } else {
+        aud.pause();
+        if (icon) { icon.className = 'fa-solid fa-play'; icon.style.marginLeft = '2px'; }
+    }
+}
+
+function spRemoveMusic() {
+    if (window._spStoryMusicAudio) { try { window._spStoryMusicAudio.pause(); window._spStoryMusicAudio.src = ''; } catch(e){} window._spStoryMusicAudio = null; }
+    window._spStoryMusicInfo = null;
+    var sticker = document.getElementById('spMusicSticker'); if (sticker) sticker.remove();
+    var trash = document.getElementById('spMusicTrashZone'); if (trash) trash.remove();
+    var btn = document.getElementById('spBtnMusic'); if (btn) btn.style.background = 'rgba(0,0,0,0.55)';
+    window._spMusicModalActive = false;
+}
+
+async function submitStoryPost(url, isVideo, audience) {
+    var caption = (document.getElementById('storyPostCaption') || {}).value || '';
+    var storyId = 'story_' + Date.now();
+    var finalUrl = url;
+
+    // Close screen immediately — upload in background
+    var _savedMusicInfo = window._spStoryMusicInfo ? Object.assign({}, window._spStoryMusicInfo) : null;
+    spRemoveMusic();
+    document.getElementById('storyPostScreen')?.remove();
+    var _msgOvIsOpen = (function(){ var m=document.getElementById('msg-overlay'); return m && m.style.display !== 'none'; })();
+    if (!_msgOvIsOpen) { showNavBar && showNavBar(); }
+    triggerHaptic && triggerHaptic(30);
+
+    // Mark story as "uploading" in localStorage so ring shows spinner
+    try {
+        var stories = JSON.parse(localStorage.getItem('tf_my_stories') || '[]');
+        stories.unshift({ id: storyId, url: url, isVideo: isVideo, caption: caption, audience: audience||'everyone', ts: Date.now(), expiry: Date.now()+86400000, uploading: true });
+        localStorage.setItem('tf_my_stories', JSON.stringify(stories));
+    } catch(e) {}
+    if (typeof loadFeedStories === 'function') loadFeedStories();
+
+    // Upload in background
+    try {
+        if (url && window.sb && currentUser) {
+            var _sMusic = _savedMusicInfo;
+            if (url.startsWith('blob:')) {
+                var resp = await fetch(url);
+                var blob = await resp.blob();
+                var ext = isVideo ? 'mp4' : 'jpg';
+                var path = currentUser.id + '/' + storyId + '.' + ext;
+                var { data: upData, error: upErr } = await sb.storage
+                    .from('stories')
+                    .upload(path, blob, { contentType: blob.type, upsert: false });
+                if (upErr) {
+                    console.error('[Story] Storage upload FAILED:', upErr);
+                } else if (upData) {
+                    var { data: urlData } = sb.storage.from('stories').getPublicUrl(upData.path);
+                    finalUrl = urlData.publicUrl;
+                }
+            } else {
+                // Non-blob URL (e.g. album art from music hub) — use directly
+                finalUrl = url;
+            }
+            var { error: storyDbErr } = await sb.from('stories').insert({
+                user_id: currentUser.id,
+                media_url: finalUrl,
+                media_type: isVideo ? 'video' : 'image',
+                caption: caption || null,
+                audience: audience || 'everyone',
+                created_at: new Date().toISOString(),
+                expires_at: new Date(Date.now() + 86400000).toISOString(),
+                sound_name: _sMusic ? (_sMusic.name || null) : null,
+                sound_url: _sMusic ? (_sMusic.previewUrl || null) : null,
+                sound_start: _sMusic && typeof _sMusic.start === 'number' ? _sMusic.start : null,
+                sound_duration: _sMusic && typeof _sMusic.duration === 'number' ? _sMusic.duration : null,
+                music_style: _sMusic ? (window._spMusicOnly ? 'disc' : 'box') : null
+            });
+            if (storyDbErr) console.error('[Story] DB insert FAILED:', storyDbErr);
+        }
+        // Update stored entry with final URL and remove uploading flag
+        try {
+            var stories2 = JSON.parse(localStorage.getItem('tf_my_stories') || '[]');
+            var idx = stories2.findIndex(function(s){ return s.id === storyId; });
+            if (idx !== -1) { stories2[idx].url = finalUrl; delete stories2[idx].uploading; }
+            localStorage.setItem('tf_my_stories', JSON.stringify(stories2));
+        } catch(e) {}
+        if (typeof loadFeedStories === 'function') loadFeedStories();
+    } catch(e) {
+        // Keep the blob URL version — works for session at least
+        try {
+            var stories3 = JSON.parse(localStorage.getItem('tf_my_stories') || '[]');
+            var idx2 = stories3.findIndex(function(s){ return s.id === storyId; });
+            if (idx2 !== -1) { delete stories3[idx2].uploading; }
+            localStorage.setItem('tf_my_stories', JSON.stringify(stories3));
+        } catch(e2) {}
+        if (typeof loadFeedStories === 'function') loadFeedStories();
+    }
+}
+
+function storyUploadDotsMenu(btn) {
+    var old = document.getElementById('storyUploadDotsSheet'); if (old) { old.remove(); return; }
+    var sheet = document.createElement('div');
+    sheet.id = 'storyUploadDotsSheet';
+    sheet.style.cssText = 'position:absolute;bottom:80px;right:16px;z-index:9800;background:rgba(44,44,46,0.98);backdrop-filter:blur(20px);border-radius:16px;overflow:hidden;min-width:200px;box-shadow:0 8px 32px rgba(0,0,0,0.6);';
+    sheet.innerHTML =
+        '<div onclick="document.getElementById(\'storyUploadingOverlay\').remove();document.getElementById(\'storyUploadDotsSheet\')?.remove();showNavBar&&showNavBar();" style="display:flex;align-items:center;gap:12px;padding:16px 18px;cursor:pointer;border-bottom:0.5px solid rgba(255,255,255,0.1);">' +
+            '<i class="fa-regular fa-circle-xmark" style="color:#FF3B30;font-size:20px;"></i>' +
+            '<span style="color:#FF3B30;font-size:15px;font-weight:500;">Cancel upload</span>' +
+        '</div>' +
+        '<div onclick="openCameraSettings&&openCameraSettings();document.getElementById(\'storyUploadDotsSheet\')?.remove();" style="display:flex;align-items:center;gap:12px;padding:16px 18px;cursor:pointer;">' +
+            '<i class="fa-solid fa-gear" style="color:white;font-size:20px;"></i>' +
+            '<span style="color:white;font-size:15px;font-weight:500;">Story settings</span>' +
+        '</div>';
+    var overlay = document.getElementById('storyUploadingOverlay');
+    if (overlay) overlay.appendChild(sheet);
+    else document.body.appendChild(sheet);
+}
+
+function storyToggleVolume(btn) {
+    var vid = document.getElementById('storyPostVid');
+    if (vid) {
+        vid.muted = !vid.muted;
+        btn.innerHTML = vid.muted ? '<i class="fa-solid fa-volume-xmark"></i>' : '<i class="fa-solid fa-volume-high"></i>';
+        btn.style.color = vid.muted ? 'rgba(255,255,255,0.5)' : 'white';
+        // Music audio (_spStoryMusicAudio) is intentionally NOT touched
+    }
+}
+
+function openStoryShareModal(url, isVideo) {
+    var old = document.getElementById('storyShareModal'); if (old) { old.remove(); return; }
+    var modal = document.createElement('div');
+    modal.id = 'storyShareModal';
+    modal.style.cssText = 'position:absolute;inset:0;z-index:9900;display:flex;flex-direction:column;background:rgba(0,0,0,0.5);';
+    modal.innerHTML =
+        '<div style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;" onclick="document.getElementById(\'storyShareModal\').remove();">' +
+            (isVideo ? '<video src="'+url+'" style="width:75%;max-height:50vh;border-radius:16px;object-fit:cover;" autoplay loop playsinline muted></video>'
+                     : '<img src="'+url+'" style="width:75%;max-height:50vh;border-radius:16px;object-fit:cover;">') +
+        '</div>' +
+        '<div style="background:#1c1c1e;border-radius:22px 22px 0 0;padding:8px 0 max(32px,env(safe-area-inset-bottom,32px));">' +
+            '<div style="width:36px;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;margin:8px auto 16px;"></div>' +
+            '<b style="color:white;font-size:17px;font-weight:700;display:block;text-align:center;padding-bottom:16px;">Share</b>' +
+            // Your story row
+            '<div onclick="document.getElementById(\'storyShareModal\').remove();submitStoryPost(\''+url+'\','+isVideo+',\'everyone\');" style="display:flex;align-items:center;padding:14px 20px;cursor:pointer;border-top:0.5px solid rgba(255,255,255,0.1);">' +
+                '<div style="width:44px;height:44px;border-radius:50%;border:2px solid rgba(255,255,255,0.3);display:flex;align-items:center;justify-content:center;margin-right:14px;overflow:hidden;">' +
+                    '<img src="'+(window.currentUserAvatar||'')+'" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\'">' +
+                '</div>' +
+                '<div style="flex:1;">' +
+                    '<b style="color:white;font-size:15px;display:block;">Your story</b>' +
+                    '<span style="color:rgba(255,255,255,0.5);font-size:13px;">Sharing options ›</span>' +
+                '</div>' +
+                '<div id="spShareCheckYours" style="width:24px;height:24px;border-radius:50%;border:2px solid white;background:white;display:flex;align-items:center;justify-content:center;"><div style="width:10px;height:10px;border-radius:50%;background:#007AFF;"></div></div>' +
+            '</div>' +
+            // TrustCircle row
+            '<div onclick="document.getElementById(\'storyShareModal\').remove();submitStoryPost(\''+url+'\','+isVideo+',\'trustcircle\');" style="display:flex;align-items:center;padding:14px 20px;cursor:pointer;border-top:0.5px solid rgba(255,255,255,0.1);">' +
+                '<div style="width:44px;height:44px;border-radius:50%;background:#007AFF;display:flex;align-items:center;justify-content:center;margin-right:14px;">' +
+                    '<i class="fa-solid fa-star" style="color:white;font-size:18px;"></i>' +
+                '</div>' +
+                '<div style="flex:1;">' +
+                    '<b style="color:white;font-size:15px;display:block;">TrustCircle</b>' +
+                '</div>' +
+                '<div style="width:24px;height:24px;border-radius:50%;border:2px solid rgba(255,255,255,0.4);"></div>' +
+            '</div>' +
+            // Share button
+            '<div style="padding:16px 16px 0;">' +
+                '<button onclick="document.getElementById(\'storyShareModal\').remove();submitStoryPost(\''+url+'\','+isVideo+',\'everyone\');" style="width:100%;background:#007AFF;border:none;border-radius:14px;padding:16px;color:white;font-size:16px;font-weight:700;cursor:pointer;">Share</button>' +
+            '</div>' +
+        '</div>';
+    (document.getElementById('app') || document.body).appendChild(modal);
+}
+
+function _sendChecklistMessage() {
+    var titleEl = document.getElementById('ckTitle');
+    var title = titleEl ? titleEl.value.trim() : 'Checklist';
+    var itemEls = document.querySelectorAll('#ckItems [data-ck-label]');
+    var items = Array.from(itemEls).map(function(el){ return el.getAttribute('data-ck-label'); }).filter(Boolean);
+    if (!items.length) { showToast('Add at least one item'); return; }
+    var chatBody = document.getElementById('chat-body');
+    if (!chatBody) { showToast('Open a chat first'); return; }
+    var msgId = 'ck_' + Date.now();
+    var rows = items.map(function(label, i){
+        return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:0.5px solid rgba(0,0,0,0.06);" onclick="_ckToggle(this)">' +
+            '<div style="width:22px;height:22px;border-radius:50%;border:2px solid #007AFF;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s;" data-ck-check>' +
+                '<i class="fa-solid fa-check" style="color:white;font-size:11px;display:none;"></i></div>' +
+            '<span style="font-size:14px;color:var(--text-primary,#000);">' + escapeHtml(label) + '</span>' +
+        '</div>';
+    }).join('');
+    var bubble = document.createElement('div');
+    bubble.style.cssText = 'display:flex;flex-direction:column;align-items:flex-end;margin-bottom:6px;padding:0 2px;margin-left:auto;';
+    bubble.setAttribute('data-msg-bubble','true');
+    bubble.innerHTML =
+        '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:16px;max-width:280px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">' +
+            '<div style="background:linear-gradient(135deg,rgba(88,86,214,0.08),rgba(0,122,255,0.06));padding:14px 16px 4px;">' +
+                '<b style="font-size:15px;font-weight:700;color:var(--text-primary,#000);">' + escapeHtml(title || 'Checklist') + '</b>' +
+                '<p style="font-size:11px;color:#888;margin:2px 0 8px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Group Checklist</p>' +
+            '</div>' +
+            '<div style="padding:0 16px 4px;" id="ckBubbleItems_' + msgId + '">' + rows + '</div>' +
+            '<div style="padding:8px 16px 10px;text-align:center;">' +
+                '<small style="color:#888;font-size:12px;" id="ckCount_' + msgId + '">0 of ' + items.length + ' completed</small>' +
+            '</div>' +
+        '</div>';
+    chatBody.appendChild(bubble);
+    chatBody.scrollTop = chatBody.scrollHeight;
+}
+function _ckToggle(row) {
+    var check = row.querySelector('[data-ck-check]');
+    var label = row.querySelector('span');
+    var icon = check ? check.querySelector('i') : null;
+    if (!check) return;
+    var done = check.style.background === 'rgb(0, 122, 255)';
+    check.style.background = done ? '' : '#007AFF';
+    if (icon) icon.style.display = done ? 'none' : 'block';
+    if (label) label.style.textDecoration = done ? '' : 'line-through';
+    if (label) label.style.color = done ? '' : '#aaa';
+    var bubble = row.closest('[data-msg-bubble]');
+    if (!bubble) return;
+    var allRows = bubble.querySelectorAll('[data-ck-check]');
+    var completed = Array.from(allRows).filter(function(c){ return c.style.background === 'rgb(0, 122, 255)'; }).length;
+    var countEl = bubble.querySelector('[id^="ckCount_"]');
+    if (countEl) countEl.textContent = completed + ' of ' + allRows.length + ' completed';
+}
+
+function _sendMediaMessage(url, type, fileName, blob) {
+    var chatBody = document.getElementById('chat-body');
+    if (!chatBody) { showToast('Open a chat first'); return; }
+    var icons = { audio: 'fa-music', document: 'fa-file-pdf', image: 'fa-image' };
+    var colors = { audio: '#FF3B30', document: '#FF9500', image: '#007AFF' };
+    var icon = icons[type] || 'fa-file';
+    var color = colors[type] || '#888';
+    var bubble = document.createElement('div');
+    bubble.className = 'msg-bubble sent';
+    bubble.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(0,122,255,0.12);border-radius:14px;min-width:180px;cursor:pointer;" onclick="window.open(\''+url+'\',\'_blank\')">' +
+        '<div style="width:40px;height:40px;border-radius:12px;background:'+color+';display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid '+icon+'" style="color:white;font-size:18px;"></i></div>' +
+        '<div><b style="font-size:14px;color:var(--text-primary,#000);">'+escapeHtml(fileName||type)+'</b><br><small style="color:#888;">'+type+'</small></div>' +
+        '</div>';
+    chatBody.appendChild(bubble);
+    chatBody.scrollTop = chatBody.scrollHeight;
+    // Upload to Supabase if available
+    if (window.sb && currentUser && currentConversationId && blob) {
+        var path = currentUser.id + '/' + Date.now() + '_' + (fileName||'file');
+        sb.storage.from('chat_media').upload(path, blob, { contentType: blob.type }).then(function(r) {
+            if (!r.error) {
+                var { data: u } = sb.storage.from('chat_media').getPublicUrl(r.data.path);
+                sb.from('messages').insert({ conversation_id: currentConversationId, sender_id: currentUser.id, ciphertext: u.publicUrl, message_type: type, created_at: new Date().toISOString(), inserted_at: new Date().toISOString() }).catch(function(){});
+            }
+        }).catch(function(){});
+    }
+}
+
+function openLiquidGlassCameraFromChat(userId, userName) {
+    window._lgChatSendTarget = { userId: userId, userName: userName };
+    openLiquidGlassCamera();
+    setTimeout(function() {
+        var _lgPage = document.getElementById('lgCameraPage');
+        if (!_lgPage) return;
+        var _origLgCapture = window.lgCapture;
+        window.lgCapture = function() {
+            if (_origLgCapture) _origLgCapture();
+            setTimeout(function() {
+                if (!window._lgChatSendTarget) return;
+                var _previewImg = _lgPage.querySelector('canvas, img[id*="preview"], video');
+                var _existing = _lgPage.querySelector('#lgChatSendPill');
+                if (_existing) _existing.remove();
+                var _pill = document.createElement('div');
+                _pill.id = 'lgChatSendPill';
+                _pill.style.cssText = 'position:absolute;bottom:max(40px,env(safe-area-inset-bottom,40px));left:50%;transform:translateX(-50%);z-index:999;';
+                _pill.innerHTML = '<button onclick="sendLgChatPhoto()" style="background:#007AFF;color:#fff;border:none;border-radius:50px;padding:15px 38px;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:10px;box-shadow:0 8px 28px rgba(0,122,255,0.45);white-space:nowrap;"><i class=\"fa-solid fa-paper-plane\"></i> Send to ' + escapeHtml(userName || 'User') + '</button>';
+                _lgPage.appendChild(_pill);
+            }, 400);
+        };
+    }, 500);
+}
+function sendLgChatPhoto() {
+    var _target = window._lgChatSendTarget;
+    if (!_target) return;
+    window._lgChatSendTarget = null;
+    var _lgPage = document.getElementById('lgCameraPage');
+    var _canvas = _lgPage && _lgPage.querySelector('canvas');
+    var _photoUrl = _canvas ? _canvas.toDataURL('image/jpeg', 0.9) : null;
+    if (_lgPage) _lgPage.remove();
+    var _row = document.querySelector('.msg-row[data-uid="' + _target.userId + '"]');
+    if (_row) _openMsgRow(_row);
+    setTimeout(function() {
+        if (_photoUrl && currentConversationId && window.sb && currentUser) {
+            window.sb.from('messages').insert({
+                conversation_id: currentConversationId,
+                sender_id: currentUser.id,
+                ciphertext: _photoUrl,
+                nonce: null,
+                message_type: 'image',
+                created_at: new Date().toISOString(),
+                inserted_at: new Date().toISOString()
+            }).then(function() { showToast('Photo sent!'); }).catch(function() {});
+        }
+    }, 900);
 }

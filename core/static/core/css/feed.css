@@ -347,6 +347,7 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     z-index: 6000;
     gap: 10px;
     pointer-events: none;
+    height: 54px;
 }
 
 .app.is-others .nav-container,
@@ -575,18 +576,16 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     color: rgba(255, 255, 255, 0.4);
 }
 [data-theme="dark"] .nav-icon.nav-active {
-    color: #0A84FF !important;
-    background: rgba(10, 132, 255, 0.15);
+    background: #0A84FF !important;
+    color: #ffffff !important;
+    border-radius: 20px !important;
 }
 
 /* --- iOS 26 Droplet Selector --- */
 .nav-icon.nav-active {
     color: #007AFF;
 }
-.nav-icon.nav-active::before,
-.nav-icon.nav-active::after {
-    display: none !important;
-}
+
 
 @keyframes iconSpring26 {
     0%   { transform: scale(1); }
@@ -597,23 +596,79 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     100% { transform: scale(1); }
 }
 .nav-icon.nav-active {
-    animation: iconSpring26 0.52s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-    color: #007AFF !important;
-    filter: drop-shadow(0 0 4px rgba(0,122,255,0.45));
+    background: #007AFF !important;
+    color: #ffffff !important;
+    border-radius: 20px !important;
+    padding: 8px 18px !important;
+    filter: none !important;
+    animation: none !important;
+}
+
+@property --droplet-angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+}
+
+@keyframes droplet-spin {
+    to { --droplet-angle: 360deg; }
+}
+
+@keyframes droplet-shimmer {
+    0%   { filter: brightness(1) saturate(1.2); }
+    50%  { filter: brightness(1.35) saturate(1.8); }
+    100% { filter: brightness(1) saturate(1.2); }
 }
 
 #navDroplet {
+    display: none !important;
     position: absolute;
     top: 3px;
     width: 5px;
     height: 5px;
     border-radius: 50%;
-    background: #007AFF;
     pointer-events: none;
     z-index: 20;
     will-change: left, width, height, border-radius;
-    box-shadow: 0 0 0 3px rgba(0,122,255,0.12), 0 2px 8px rgba(0,122,255,0.45);
     opacity: 0;
+    background: conic-gradient(
+        from var(--droplet-angle),
+        #007AFF 0%,
+        #5AC8FA 18%,
+        #34C759 32%,
+        #FFD60A 46%,
+        #FF6B6B 58%,
+        #FF375F 68%,
+        #BF5AF2 78%,
+        #5E5CE6 88%,
+        #007AFF 100%
+    );
+    box-shadow:
+        0 0 0 1.5px rgba(255,255,255,0.35),
+        0 0 6px 1px rgba(0,122,255,0.5),
+        0 0 14px 2px rgba(88,86,214,0.3),
+        inset 0 0.5px 0 rgba(255,255,255,0.55);
+    animation: droplet-spin 2.5s linear infinite, droplet-shimmer 2s ease-in-out infinite;
+}
+
+[data-theme="dark"] #navDroplet {
+    background: conic-gradient(
+        from var(--droplet-angle),
+        #0A84FF 0%,
+        #64D2FF 18%,
+        #30D158 32%,
+        #FFD60A 46%,
+        #FF6961 58%,
+        #FF375F 68%,
+        #BF5AF2 78%,
+        #6E6CF0 88%,
+        #0A84FF 100%
+    );
+    box-shadow:
+        0 0 0 1.5px rgba(255,255,255,0.2),
+        0 0 8px 2px rgba(10,132,255,0.6),
+        0 0 18px 3px rgba(191,90,242,0.35),
+        inset 0 0.5px 0 rgba(255,255,255,0.3);
 }
 
 .nav-icon .nav-halo {
@@ -642,9 +697,7 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     background: #0A84FF;
     box-shadow: 0 0 0 3px rgba(10,132,255,0.14), 0 2px 8px rgba(10,132,255,0.5);
 }
-[data-theme="dark"] .nav-icon.nav-active {
-    color: #0A84FF !important;
-}
+
 [data-theme="dark"] .nav-icon .nav-halo {
     background: rgba(10,132,255,0.13);
 }
@@ -2250,10 +2303,9 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
 /* Screen-safe sub-overlays */
 .settings-sub-overlay {
     position: absolute;
-    top: 0; left: 0;
+    inset: 0;
     width: 100%;
     height: 100%;
-    max-height: 100%;
     background: var(--bg-secondary, #f2f2f7);
     z-index: 8500;
     display: none;
@@ -2263,6 +2315,7 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
 }
 .settings-sub-overlay .sub-scroll {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     padding-bottom: 100px;
@@ -2624,10 +2677,9 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     /* ── Screen-safe sub-overlays ── */
 .settings-sub-overlay {
     position: absolute;
-    top: 0; left: 0;
+    inset: 0;
     width: 100%;
     height: 100%;
-    max-height: 100%;
     background: var(--bg-secondary, #f2f2f7);
     z-index: 8500;
     display: none;
@@ -2719,6 +2771,28 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     overflow-x: hidden !important;
     -webkit-overflow-scrolling: touch !important;
     box-sizing: border-box !important;
+    pointer-events: none;
+}
+.white-overlay[style*="display: flex"],
+.white-overlay[style*="display:flex"],
+.white-overlay[style*="display: block"],
+.white-overlay[style*="display:block"] {
+    pointer-events: auto;
+}
+
+/* ── Keep body-level full-screen overlays inside the centered phone frame on
+   wider screens. Mobile (<=430px) is unaffected — they are full-width there by
+   design. Centering uses calc(left) instead of transform so the slideUpOverlay
+   open animation (which animates transform) is not broken. ── */
+@media (min-width: 431px) {
+    #saved-overlay, #archive-overlay, #live-overlay, #wallet-overlay,
+    #channels-overlay, #drafts-overlay, #scheduled-overlay, #groups-overlay,
+    #group-page-overlay, #notif-overlay, #contact-profile-overlay,
+    #share-sheet, #repost-sheet {
+        max-width: 430px !important;
+        left: calc(50% - 215px) !important;
+        right: auto !important;
+    }
 }
 
 /* ── Fix delete account overlay ── */
@@ -2880,7 +2954,7 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
 @keyframes hundredSpin { 0%{transform:rotate(-360deg) scale(0);opacity:0} 70%{transform:rotate(10deg) scale(1.2)} 100%{transform:rotate(0deg) scale(1);opacity:1} }
 
     #circularVideoRecorder {
-    position:fixed;top:0;left:0;right:0;bottom:0;z-index:10000;
+    position:absolute;top:0;left:0;right:0;bottom:0;z-index:10000;
     background:#000;display:none;flex-direction:column;align-items:center;justify-content:center;
 }
 #circularVideoRecorder video {
@@ -3093,7 +3167,7 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
 .fs-follows-badge { background:#222;color:#ccc;font-size:10px;font-weight:600;padding:2px 7px;border-radius:8px; }
 [data-theme="dark"] .fs-follows-badge { background:#333; }
 .fs-bio { font-size:13px;color:var(--text-secondary,#555);margin-top:3px;line-height:1.4;word-break:break-word; }
-.fs-follow-btn { padding:7px 16px;border-radius:20px;border:1.5px solid var(--border-color,#ddd
+.fs-follow-btn { padding:7px 16px;border-radius:20px;border:1.5px solid var(--border-color,#ddd);background:transparent;color:var(--text-primary,#000);cursor:pointer;font-size:14px;font-weight:600; }
 
     #chat-body.bubble-focused .chat-bubble:not(.focused) {
     filter: blur(3px);
@@ -3242,3 +3316,59 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
 [data-theme="dark"] .ch-members-pill {
     background: rgba(255,255,255,0.1) !important;
 }
+
+.vibe-cel-tag {
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  background: rgba(124,58,237,0.1);
+  color: #7c3aed;
+  border: 1.5px solid rgba(124,58,237,0.2);
+  transition: all 0.2s;
+  user-select: none;
+}
+.vibe-cel-tag.selected {
+  background: #7c3aed;
+  color: white;
+  border-color: #7c3aed;
+}
+
+/* Story sound waveform animation */
+.sv-wave-bar {
+  width: 2.5px; background: #fff; border-radius: 2px; height: 8px;
+  animation: svWave 0.7s ease-in-out infinite alternate;
+}
+.sv-wave-bar:nth-child(1){animation-delay:0s;height:5px}
+.sv-wave-bar:nth-child(2){animation-delay:0.1s;height:10px}
+.sv-wave-bar:nth-child(3){animation-delay:0.2s;height:14px}
+.sv-wave-bar:nth-child(4){animation-delay:0.15s;height:9px}
+.sv-wave-bar:nth-child(5){animation-delay:0.05s;height:6px}
+@keyframes svWave {
+  from { transform: scaleY(0.4); }
+  to   { transform: scaleY(1.2); }
+}
+/* Story disc spin */
+@keyframes discSpin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+@keyframes discSpinHaptic { 0%{transform:rotate(0deg)} 100%{transform:rotate(-60deg)} }
+
+@keyframes skeletonPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+:root { --skeleton-bg: #e8e8e8; }
+[data-theme="dark"] { --skeleton-bg: #2a2a2a; }
+
+/* Profile "you're already here" nudge — used when tapping your own username
+   while the profile page is already open (paired with haptic feedback). */
+@keyframes tfShake {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-7px); }
+  30% { transform: translateX(7px); }
+  45% { transform: translateX(-5px); }
+  60% { transform: translateX(5px); }
+  75% { transform: translateX(-3px); }
+  90% { transform: translateX(3px); }
+}
+.tf-shake { animation: tfShake 0.45s cubic-bezier(.36,.07,.19,.97); }
