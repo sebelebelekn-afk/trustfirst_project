@@ -1,7 +1,7 @@
 // ==========================================================================
 // TRUSTFIRST SERVICE WORKER — PWA + OFFLINE + CACHING
 // ==========================================================================
-const CACHE_VERSION = 'trustfirst-v2.3';
+const CACHE_VERSION = 'trustfirst-v3.0';
 const STATIC_CACHE = CACHE_VERSION + '-static';
 const DYNAMIC_CACHE = CACHE_VERSION + '-dynamic';
 const IMAGE_CACHE = CACHE_VERSION + '-images';
@@ -41,6 +41,12 @@ self.addEventListener('fetch', (event) => {
 
   // Skip non-GET requests
   if (event.request.method !== 'GET') return;
+
+  // ONLY ever handle our own same-origin requests. Third-party calls
+  // (Supabase auth / REST / realtime / storage, CDNs, etc.) must go straight to
+  // the network — never route them through the cache or the offline fallback,
+  // or failures surface as confusing CORS errors and break login/data loading.
+  if (url.origin !== self.location.origin) return;
 
   // API calls — Network First
   if (url.pathname.startsWith('/api/')) {
@@ -171,8 +177,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
-      icon: '/static/core/logo.png',
-      badge: '/static/core/logo.png',
+      icon: '/static/core/icon-dark-192.png',
+      badge: '/static/core/icon-dark-192.png',
       vibrate: [100, 50, 100],
       data: data.url || '/',
       actions: [

@@ -161,6 +161,62 @@ async function adminLoadFeedback(body) {
     } catch (e) { body.innerHTML = _adminEmpty('Could not load'); }
 }
 
+// ============================================================
+// BANNED USERS LIST (admin tool) — list & unban locked accounts
+// ============================================================
+async function openBannedUsersList() {
+    if (!currentUser || !currentUser.is_admin) { showToast('Admins only'); return; }
+    var existing = document.getElementById('bannedUsersOverlay'); if (existing) existing.remove();
+    var ov = document.createElement('div');
+    ov.id = 'bannedUsersOverlay';
+    ov.className = 'white-overlay';
+    ov.style.cssText = 'position:absolute;inset:0;z-index:9810;display:flex;flex-direction:column;background:var(--bg-primary,#fff);animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
+    ov.innerHTML =
+        '<div class="header-container" style="flex-shrink:0;">' +
+            '<div class="liquid-glass-btn" onclick="document.getElementById(\'bannedUsersOverlay\').remove()" style="cursor:pointer;"><i class="fa-solid fa-chevron-left"></i></div>' +
+            '<b>Banned Users</b>' +
+        '</div>' +
+        '<div id="bannedUsersList" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 16px 80px;"><div style="text-align:center;padding:40px;color:#aaa;"><i class="fa-solid fa-spinner fa-spin"></i></div></div>';
+    (document.getElementById('app') || document.body).appendChild(ov);
+    loadBannedUsers();
+}
+
+async function loadBannedUsers() {
+    var el = document.getElementById('bannedUsersList');
+    if (!el) return;
+    try {
+        var res = await sb.from('users').select('id,username,full_name,avatar_url,lock_reason,locked_at')
+            .eq('is_locked', true).order('locked_at', { ascending: false }).limit(100);
+        var rows = res.data || [];
+        if (!rows.length) {
+            el.innerHTML = '<div style="text-align:center;padding:50px 20px;color:#aaa;"><i class="fa-solid fa-user-check" style="font-size:30px;display:block;margin-bottom:12px;opacity:0.5;"></i>No banned users</div>';
+            return;
+        }
+        el.innerHTML = rows.map(function(u) {
+            var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || u.username || 'U') + '&background=FF3B30&color=fff&size=80');
+            return '<div data-uid="' + u.id + '" style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:0.5px solid var(--border-color,#eee);">' +
+                '<img src="' + escapeHtml(av) + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
+                '<div style="flex:1;min-width:0;"><b style="font-size:15px;color:var(--text-primary,#000);">' + escapeHtml(u.full_name || u.username || 'User') + '</b><br><small style="color:#888;">@' + escapeHtml(u.username || '') + (u.lock_reason ? ' · ' + escapeHtml(u.lock_reason) : '') + '</small></div>' +
+                '<button onclick="unbanUserRow(\'' + u.id + '\',this)" style="padding:8px 16px;border-radius:18px;border:1px solid #34C759;background:transparent;color:#34C759;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;">Unban</button>' +
+            '</div>';
+        }).join('');
+    } catch(e) { el.innerHTML = '<div style="text-align:center;padding:40px;color:#aaa;">Could not load banned users</div>'; }
+}
+
+async function unbanUserRow(userId, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    try {
+        var res = await sb.from('users').update({ is_locked: false, lock_reason: null, locked_at: null }).eq('id', userId);
+        if (res && res.error) { showToast('Could not unban'); if (btn) { btn.disabled = false; btn.textContent = 'Unban'; } return; }
+        var row = document.querySelector('#bannedUsersList [data-uid="' + userId + '"]');
+        if (row) row.remove();
+        var listEl = document.getElementById('bannedUsersList');
+        if (listEl && !listEl.querySelector('[data-uid]')) loadBannedUsers();
+        showToast('User unbanned');
+        if (typeof triggerHaptic === 'function') triggerHaptic(20);
+    } catch(e) { showToast('Could not unban'); if (btn) { btn.disabled = false; btn.textContent = 'Unban'; } }
+}
+
 // Reveal the Admin entry in settings only for admins (hooks openSettings).
 (function() {
     var _origOpenSettings = window.openSettings;

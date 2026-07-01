@@ -25,17 +25,55 @@ def _is_valid_uuid(value):
         return False
 
 
+# Cache one JWKS client per project URL so we don't refetch keys every call.
+_JWKS_CLIENTS = {}
+
+
+def _get_jwks_client(supabase_url):
+    import jwt as pyjwt
+    client = _JWKS_CLIENTS.get(supabase_url)
+    if client is None:
+        jwks_url = supabase_url.rstrip('/') + '/auth/v1/.well-known/jwks.json'
+        client = pyjwt.PyJWKClient(jwks_url)
+        _JWKS_CLIENTS[supabase_url] = client
+    return client
+
+
 def _verify_supabase_jwt(request):
-    """Return decoded payload or raise ValueError."""
+    """Return decoded payload or raise ValueError.
+
+    Handles both legacy HS256 tokens (shared JWT secret) and current Supabase
+    asymmetric tokens (ES256/RS256) verified against the project's JWKS.
+    """
     import jwt as pyjwt
     auth_header = request.META.get('HTTP_AUTHORIZATION', '')
     if not auth_header.startswith('Bearer '):
         raise ValueError('missing')
     token = auth_header[7:]
-    jwt_secret = os.environ.get('SUPABASE_JWT_SECRET', '')
-    if not jwt_secret:
+
+    try:
+        alg = pyjwt.get_unverified_header(token).get('alg', 'HS256')
+    except Exception:
+        raise ValueError('invalid')
+
+    if alg == 'HS256':
+        jwt_secret = os.environ.get('SUPABASE_JWT_SECRET', '')
+        if not jwt_secret:
+            raise ValueError('misconfigured')
+        try:
+            return pyjwt.decode(token, jwt_secret, algorithms=['HS256'], audience='authenticated')
+        except Exception:
+            raise ValueError('invalid')
+
+    # Asymmetric token — verify against the project's published public keys.
+    supabase_url = getattr(settings, 'SUPABASE_URL', '') or os.environ.get('SUPABASE_URL', '')
+    if not supabase_url:
         raise ValueError('misconfigured')
-    return pyjwt.decode(token, jwt_secret, algorithms=['HS256'], audience='authenticated')
+    try:
+        signing_key = _get_jwks_client(supabase_url).get_signing_key_from_jwt(token)
+        return pyjwt.decode(token, signing_key.key, algorithms=[alg], audience='authenticated')
+    except Exception:
+        raise ValueError('invalid')
 
 
 # ---------------------------------------------------------------------------
@@ -168,22 +206,14 @@ def send_email(request):
         if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', to):
             return JsonResponse({'error': 'Invalid email address'}, status=400)
 
-        import jwt as pyjwt
-        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
-        if not auth_header.startswith('Bearer '):
-            return JsonResponse({'error': 'Unauthorized'}, status=401)
-
-        token = auth_header[7:]
-        jwt_secret = os.environ.get('SUPABASE_JWT_SECRET', '')
-        if not jwt_secret:
-            return JsonResponse({'error': 'Server misconfigured'}, status=500)
-
         try:
-            pyjwt.decode(token, jwt_secret, algorithms=['HS256'], audience='authenticated')
-        except pyjwt.ExpiredSignatureError:
-            return JsonResponse({'error': 'Token expired'}, status=401)
-        except pyjwt.PyJWTError:
-            return JsonResponse({'error': 'Invalid token'}, status=401)
+            _verify_supabase_jwt(request)
+        except ValueError as e:
+            if str(e) == 'misconfigured':
+                return JsonResponse({'error': 'Server misconfigured'}, status=500)
+            return JsonResponse({'error': 'Unauthorized'}, status=401)
+        except Exception:
+            return JsonResponse({'error': 'Unauthorized'}, status=401)
 
         resp = requests.post(
             'https://api.resend.com/emails',
@@ -216,46 +246,95 @@ def send_email(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def submit_liveness(request):
-    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
-    if not auth_header.startswith('Bearer '):
+    # Must be a signed-in user, and the token must match the claimed user_id.
+    try:
+        payload = _verify_supabase_jwt(request)
+    except ValueError as e:
+        if str(e) == 'misconfigured':
+            return JsonResponse({'error': 'Server misconfigured'}, status=500)
         return JsonResponse({'error': 'Unauthorized'}, status=401)
+    except Exception:
+        # Expired/invalid/malformed token — never leak a 500 HTML page.
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+
+    LIVENESS_DIRECTIONS = ('center', 'left', 'right', 'smile', 'blink')
 
     try:
         body = json.loads(request.body or '{}')
         user_id = body.get('user_id', '')
         image_b64 = body.get('image_b64', '')
+        direction = (body.get('direction') or '').lower()
 
         if not image_b64 or not user_id:
             return JsonResponse({'error': 'Missing image_b64 or user_id'}, status=400)
         if not _is_valid_uuid(user_id):
             return JsonResponse({'error': 'Invalid user_id'}, status=400)
-
-        # Server tracks step count — never trust the client
-        from django.core.cache import cache
-        cache_key = f'liveness_steps:{user_id}'
-        steps_done = cache.get(cache_key, 0) + 1
-        cache.set(cache_key, steps_done, timeout=600)  # 10-minute session
+        if payload.get('sub') != user_id:
+            return JsonResponse({'error': 'Token/user mismatch'}, status=403)
+        if direction not in LIVENESS_DIRECTIONS:
+            return JsonResponse({'error': 'Invalid direction'}, status=400)
 
         vision_key = settings.GOOGLE_CLOUD_VISION_API_KEY
-        vision_url = f'https://vision.googleapis.com/v1/images:annotate?key={vision_key}'
+        if not vision_key:
+            # No real verifier available — never auto-pass. Caller should fall
+            # back to the Didit biometric KYC flow instead.
+            return JsonResponse({'ok': False, 'step_ok': False, 'verified': False, 'reason': 'vision_unavailable'}, status=200)
 
+        vision_url = f'https://vision.googleapis.com/v1/images:annotate?key={vision_key}'
         vision_payload = {
             "requests": [{
                 "image": {"content": image_b64},
-                "features": [{"type": "SAFE_SEARCH_DETECTION"}]
+                "features": [
+                    {"type": "FACE_DETECTION", "maxResults": 1},
+                    {"type": "SAFE_SEARCH_DETECTION"},
+                ],
             }]
         }
-
         vision_resp = requests.post(vision_url, json=vision_payload, timeout=10)
-        vision_data = vision_resp.json()
+        resp0 = (vision_resp.json().get('responses') or [{}])[0]
 
-        safe_search = vision_data.get('responses', [{}])[0].get('safeSearchAnnotation', {})
-        spoof_signal = safe_search.get('spoof', 'UNKNOWN')
+        faces = resp0.get('faceAnnotations') or []
+        safe = resp0.get('safeSearchAnnotation') or {}
         SPOOF_FAIL = {'LIKELY', 'VERY_LIKELY'}
-        is_live = spoof_signal not in SPOOF_FAIL and steps_done >= 5
 
-        if is_live:
-            cache.delete(f'liveness_steps:{user_id}')  # Reset on success
+        # Anti-spoof: reject photos-of-photos / printouts.
+        if safe.get('spoof', 'UNKNOWN') in SPOOF_FAIL:
+            return JsonResponse({'ok': True, 'step_ok': False, 'verified': False, 'reason': 'spoof'})
+        if not faces:
+            return JsonResponse({'ok': True, 'step_ok': False, 'verified': False, 'reason': 'no_face'})
+
+        face = faces[0]
+        if face.get('detectionConfidence', 0) < 0.5:
+            return JsonResponse({'ok': True, 'step_ok': False, 'verified': False, 'reason': 'low_confidence'})
+
+        pan = face.get('panAngle', 0) or 0      # yaw: head turned left/right
+        tilt = face.get('tiltAngle', 0) or 0    # pitch
+        joy = face.get('joyLikelihood', 'UNKNOWN')
+        JOY_OK = {'LIKELY', 'VERY_LIKELY'}
+
+        # Per-step check against the real face geometry/expression.
+        if direction == 'center':
+            step_ok = abs(pan) <= 14 and abs(tilt) <= 18
+        elif direction in ('left', 'right'):
+            step_ok = abs(pan) >= 16            # a genuine head turn
+        elif direction == 'smile':
+            step_ok = joy in JOY_OK
+        else:  # blink — Vision can't read eye-open state; require a real, non-spoof face
+            step_ok = True
+
+        if not step_ok:
+            return JsonResponse({'ok': True, 'step_ok': False, 'verified': False, 'reason': 'pose_' + direction})
+
+        # Track which steps this user has genuinely passed (server-side only).
+        from django.core.cache import cache
+        ck = f'liveness_dirs:{user_id}'
+        done = set(cache.get(ck, []))
+        done.add(direction)
+        cache.set(ck, list(done), timeout=600)  # 10-minute session
+
+        verified = set(LIVENESS_DIRECTIONS).issubset(done)
+        if verified:
+            cache.delete(ck)
             patch_resp = httpx.patch(
                 f"{settings.SUPABASE_URL}/rest/v1/users?id=eq.{user_id}",
                 headers={
@@ -264,13 +343,13 @@ def submit_liveness(request):
                     "Content-Type": "application/json",
                     "Prefer": "return=minimal",
                 },
-                json={"liveness_verified": True, "liveness_steps": steps_done},
+                json={"liveness_verified": True, "liveness_steps": len(done)},
                 timeout=10,
             )
             if patch_resp.status_code not in (200, 204):
                 return JsonResponse({'error': 'Supabase update failed'}, status=502)
 
-        return JsonResponse({'ok': True, 'verified': is_live})
+        return JsonResponse({'ok': True, 'step_ok': True, 'verified': verified, 'completed': len(done)})
 
     except requests.exceptions.Timeout:
         return JsonResponse({'error': 'Vision API timeout'}, status=504)
@@ -407,15 +486,18 @@ def didit_create_verification(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def didit_webhook(request):
-    # Verify the webhook signature if a secret is configured (HMAC-SHA256 over the raw body)
+    # Verify the webhook signature (HMAC-SHA256 over the raw body). Without a
+    # configured secret we REFUSE to process — otherwise anyone could POST a
+    # forged "approved" event and verify any account (badge fraud / takeover).
     secret = os.environ.get('DIDIT_WEBHOOK_SECRET', '')
-    if secret:
-        import hmac as _hmac
-        import hashlib as _hashlib
-        sig = request.META.get('HTTP_X_SIGNATURE', '') or request.META.get('HTTP_X_DIDIT_SIGNATURE', '')
-        expected = _hmac.new(secret.encode(), request.body, _hashlib.sha256).hexdigest()
-        if not (sig and _hmac.compare_digest(sig, expected)):
-            return JsonResponse({'error': 'Invalid signature'}, status=401)
+    if not secret:
+        return JsonResponse({'error': 'Webhook not configured'}, status=503)
+    import hmac as _hmac
+    import hashlib as _hashlib
+    sig = request.META.get('HTTP_X_SIGNATURE', '') or request.META.get('HTTP_X_DIDIT_SIGNATURE', '')
+    expected = _hmac.new(secret.encode(), request.body, _hashlib.sha256).hexdigest()
+    if not (sig and _hmac.compare_digest(sig, expected)):
+        return JsonResponse({'error': 'Invalid signature'}, status=401)
 
     try:
         body = json.loads(request.body or '{}')

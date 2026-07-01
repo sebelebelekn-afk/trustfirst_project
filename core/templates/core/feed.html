@@ -6,11 +6,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="TrustFirst">
-<link rel="apple-touch-icon" href="/static/core/logo.png">
+<!-- Adaptive browser favicon: light icon in light mode, dark icon in dark mode -->
+<link rel="icon" type="image/svg+xml" href="/static/core/icon-light.svg?v=34" media="(prefers-color-scheme: light)">
+<link rel="icon" type="image/svg+xml" href="/static/core/icon-dark.svg?v=34" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/core/icon-dark-192.png?v=34">
+<!-- Home-screen (installed) icon. iOS uses one; light variant offered as a hint. -->
+<link rel="apple-touch-icon" href="/static/core/icon-dark-180.png?v=34">
+<link rel="apple-touch-icon" media="(prefers-color-scheme: light)" href="/static/core/icon-light-180.png?v=34">
 <title>TrustFirst Beta</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -1454,7 +1461,7 @@ function authenticateUser() {
 
         <div id="admin-tools-section" class="settings-section-title" style="display:none;">ADMIN TOOLS</div>
 <div id="admin-tools-card" class="settings-card" style="display:none;">
-    <div class="settings-row" style="color:#FF3B30;">
+    <div class="settings-row" style="color:#FF3B30;cursor:pointer;" onclick="openBannedUsersList()">
         <div style="display:flex; gap:10px; align-items:center;"><i class="fa-solid fa-ban"></i> Banned Users List</div>
         <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
     </div>
@@ -3953,11 +3960,11 @@ function authenticateUser() {
 
 </div>
 
-<script src="{% static 'core/js/feed.js' %}"></script>
-<script src="{% static 'core/js/feed-legal.js' %}"></script>
-<script src="{% static 'core/js/verify.js' %}"></script>
-<script src="{% static 'core/js/story-music.js' %}"></script>
-<script src="{% static 'core/js/admin.js' %}"></script>
+<script src="{% static 'core/js/feed.js' %}?v=34"></script>
+<script src="{% static 'core/js/feed-legal.js' %}?v=34"></script>
+<script src="{% static 'core/js/verify.js' %}?v=34"></script>
+<script src="{% static 'core/js/story-music.js' %}?v=34"></script>
+<script src="{% static 'core/js/admin.js' %}?v=34"></script>
 <!-- ===== LIVE MINI-PLAYER ===== -->
 <div id="liveMiniPlayer" style="display:none;position:absolute;bottom:max(96px,calc(env(safe-area-inset-bottom)+96px));left:12px;right:12px;z-index:9500;border-radius:20px;overflow:hidden;cursor:pointer;" onclick="maximizeLive()">
     <div style="background:rgba(18,18,18,0.88);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);border:0.5px solid rgba(255,255,255,0.14);border-radius:20px;padding:10px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,0.45);">

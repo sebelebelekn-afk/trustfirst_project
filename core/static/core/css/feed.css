@@ -2344,7 +2344,9 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     overflow: hidden !important;
     flex-shrink: 0 !important;
 }
-#reel-scroller .reel-page img {
+/* Only the full-bleed media image (direct child) fills the page — NOT nested
+   UI images like the author avatar, which keep their own sizing. */
+#reel-scroller .reel-page > img {
     width: 100% !important;
     height: 100% !important;
     object-fit: cover !important;

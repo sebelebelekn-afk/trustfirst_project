@@ -152,6 +152,9 @@ SECURE_CONTENT_TYPE_NOSNIFF     = True
 X_FRAME_OPTIONS                 = 'DENY'
 SESSION_COOKIE_HTTPONLY         = True
 CSRF_COOKIE_HTTPONLY            = True
+# Behind Render/any reverse proxy, trust the forwarded-proto header so HTTPS
+# detection (secure cookies, SSL redirect, HSTS) works correctly.
+SECURE_PROXY_SSL_HEADER         = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_SSL_REDIRECT             = os.environ.get('SECURE_SSL_REDIRECT', 'False') == 'True'
 SESSION_COOKIE_SECURE           = not DEBUG
 SESSION_COOKIE_SAMESITE         = 'Lax'
