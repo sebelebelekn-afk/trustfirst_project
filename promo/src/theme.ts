@@ -1,8 +1,14 @@
-// System font stack — zero network requests during render (fast + reliable on
-// a slow/flaky connection). Segoe UI on the Windows render host closely matches
-// the app's SF-style UI. Avoids @remotion/google-fonts making 100+ requests.
-export const FONT =
-  '"Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Roboto, Arial, sans-serif';
+import { loadFont } from "@remotion/google-fonts/Inter";
+
+// Inter — clean, modern, close to the app's SF-style UI. Load only the Latin
+// subset and the weights we actually use (keeps it to a handful of requests
+// instead of 100+, and renders consistently on the Linux CI runner where
+// system fonts like Segoe UI don't exist).
+const { fontFamily } = loadFont("normal", {
+  weights: ["400", "500", "600", "700", "800", "900"],
+  subsets: ["latin"],
+});
+export const FONT = fontFamily;
 
 export const COLORS = {
   blue: "#007AFF",
