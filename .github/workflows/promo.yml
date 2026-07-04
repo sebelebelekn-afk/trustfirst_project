@@ -1,0 +1,48 @@
+name: Render TrustFirst Promo
+
+# Auto-runs when the promo-video branch is pushed (works on non-default branches,
+# unlike workflow_dispatch which only shows on the default branch).
+on:
+  push:
+    branches: [promo-video]
+  workflow_dispatch:
+
+jobs:
+  render:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Chrome system libraries (for Remotion headless render)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libnss3 libdbus-1-3 libatk1.0-0 libgbm1 libasound2 \
+            libxrandr2 libxkbcommon0 libxfixes3 libxcomposite1 libxdamage1 \
+            libatk-bridge2.0-0 libpango-1.0-0 libcairo2 libcups2
+
+      - name: Install promo dependencies
+        working-directory: promo
+        run: npm install
+
+      - name: Ensure Remotion browser
+        working-directory: promo
+        run: npx remotion browser ensure
+
+      - name: Render 1080x1920 MP4
+        working-directory: promo
+        run: npx remotion render src/index.ts TrustFirstPromo out/trustfirst-promo.mp4 --codec=h264 --crf=18
+
+      - name: Upload MP4 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trustfirst-promo-mp4
+          path: promo/out/trustfirst-promo.mp4
+          if-no-files-found: error
+          retention-days: 30
