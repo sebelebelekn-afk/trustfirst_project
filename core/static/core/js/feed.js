@@ -7879,7 +7879,7 @@ function togglePrivateAccount() {
                 if (r.error) console.warn('[togglePrivateAccount]', r.error);
             });
     }
-    showToast(isPrivate ? 'Account set to private 🔒' : 'Account set to public 🌍');
+    showToast(isPrivate ? 'Account set to private' : 'Account set to public');
 }
 
 function syncPrivacyToggles() {
