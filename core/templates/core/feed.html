@@ -12,17 +12,17 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="TrustFirst">
 <!-- Adaptive browser favicon: light icon in light mode, dark icon in dark mode -->
-<link rel="icon" type="image/svg+xml" href="/static/core/icon-light.svg?v=34" media="(prefers-color-scheme: light)">
-<link rel="icon" type="image/svg+xml" href="/static/core/icon-dark.svg?v=34" media="(prefers-color-scheme: dark)">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/core/icon-dark-192.png?v=34">
+<link rel="icon" type="image/svg+xml" href="/static/core/icon-light.svg?v=39" media="(prefers-color-scheme: light)">
+<link rel="icon" type="image/svg+xml" href="/static/core/icon-dark.svg?v=39" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/core/icon-dark-192.png?v=39">
 <!-- Home-screen (installed) icon. iOS uses one; light variant offered as a hint. -->
-<link rel="apple-touch-icon" href="/static/core/icon-dark-180.png?v=34">
-<link rel="apple-touch-icon" media="(prefers-color-scheme: light)" href="/static/core/icon-light-180.png?v=34">
+<link rel="apple-touch-icon" href="/static/core/icon-dark-180.png?v=39">
+<link rel="apple-touch-icon" media="(prefers-color-scheme: light)" href="/static/core/icon-light-180.png?v=39">
 <title>TrustFirst Beta</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=58">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -109,43 +109,103 @@ function authenticateUser() {
 <body>
 <div class="splash-screen" id="splash">
 
-    <div class="auth-step active" id="step-splash" style="text-align: center;">
-        <h1 style="font-size: 50px; margin-bottom: 20px; font-weight: 900;">TrustFirst</h1>
-        <p style="color:#aaa; letter-spacing: 2px; font-size: 12px; margin-bottom: 40px;">CONNECT WITH PEOPLE YOU CAN TRUST</p>
-       <button class="auth-btn" onclick="nextAuthStep('step-login')">Log in</button>
-        <button class="auth-btn" style="background:#333;" onclick="nextAuthStep('step-register')">Create Account</button>
+    <div class="auth-step active" id="step-splash" style="text-align:center;">
+        <div class="auth-brand" style="font-size:46px; margin-bottom:8px;">TrustFirst</div>
+        <p class="auth-sub">Connect with people you can trust</p>
+        <div class="auth-cta-stack">
+            <button class="auth-btn" onclick="nextAuthStep('step-register')">Create account</button>
+            <button class="auth-btn auth-btn-outline" onclick="nextAuthStep('step-login')">Log in</button>
+        </div>
     </div>
 
     <div class="auth-step" id="step-login">
-        <h2 style="margin-bottom: 20px;">Welcome Back</h2>
-        <input type="text" class="auth-input" placeholder="Trust-ID" id="login-user" autocomplete="username">
-<input type="password" class="auth-input" placeholder="Password" id="login-pass" autocomplete="current-password">
-        <button class="auth-btn" onclick="authenticateUser()">Sign In</button>
-         <p style="text-align:center; margin-top:12px;">
-    <span onclick="showForgotPassword()" style="color:#007AFF; font-size:14px; cursor:pointer; font-weight:600;">
-        Forgot Password?
-    </span>
-</p>
-               <div style="display:flex; align-items:center; gap:15px; margin:20px 0 15px;">
-            <div style="flex:1; height:1px; background:#333;"></div>
-            <span style="color:#666; font-size:12px;">or continue with</span>
-            <div style="flex:1; height:1px; background:#333;"></div>
+        <div class="auth-topbar end"><div class="auth-back" onclick="nextAuthStep('step-splash')"><i class="fa-solid fa-xmark"></i></div></div>
+        <div style="margin-bottom:6px;">
+            <div style="font-size:20px; font-weight:600; margin-bottom:1px;">Log in to</div>
+            <div class="auth-x-title" style="margin:0;">TrustFirst</div>
         </div>
-        <div style="display:flex; gap:12px;">
-            <button onclick="signInWithGoogle()" style="flex:1; padding:14px; background:#1a1a1a; border:1px solid #333; border-radius:14px; color:white; font-size:14px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
-                <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                Google
-            </button>
-            <button onclick="signInWithApple()" style="flex:1; padding:14px; background:#1a1a1a; border:1px solid #333; border-radius:14px; color:white; font-size:14px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
-                <i class="fa-brands fa-apple" style="font-size:18px;"></i>
-                Apple
-            </button>
+        <p class="auth-sub-left" id="login-switch-sub">Continue with your existing accounts</p>
+        <div id="saved-accounts-list"></div>
+        <div class="saved-add-row" onclick="openLoginMethods()">
+            <div class="saved-add-plus">+</div>
+            <span class="saved-add-label" id="add-account-label">Add an account</span>
         </div>
-        <p style="text-align:center; margin-top:15px; font-size:13px; color:#888; cursor:pointer;" onclick="nextAuthStep('step-splash')">Back</p>
+        <div class="auth-divider"><span>OR</span></div>
+        <button class="auth-btn auth-btn-outline" onclick="nextAuthStep('step-register')">Create a new account</button>
+    </div>
+
+    <!-- Identifier carried into the password step (email or username) -->
+    <input type="hidden" id="login-user">
+
+    <div class="auth-step" id="step-login-email">
+        <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-login')"><i class="fa-solid fa-arrow-left"></i></div></div>
+        <h2 class="auth-x-title">Enter your email</h2>
+        <div class="auth-x-field-row">
+            <input class="auth-x-field" id="login-email-in" type="email" inputmode="email" autocomplete="email" placeholder="you@email.com" oninput="_xToggle(this,'login-email-continue')">
+        </div>
+        <div class="auth-x-spacer"></div>
+        <button class="auth-x-continue" id="login-email-continue" disabled onclick="_loginIdentifierNext('login-email-in')">Continue</button>
+    </div>
+
+    <div class="auth-step" id="step-login-username">
+        <div class="auth-topbar" style="justify-content:space-between; align-items:center;">
+            <div class="auth-back" onclick="nextAuthStep('step-login')"><i class="fa-solid fa-arrow-left"></i></div>
+            <span class="auth-x-forgot" onclick="openLoginMethods()">Forgot username</span>
+        </div>
+        <h2 class="auth-x-title">Enter your username</h2>
+        <div class="auth-x-field-row">
+            <span class="auth-x-prefix">@</span>
+            <input class="auth-x-field" id="login-username-in" type="text" autocomplete="username" placeholder="username" oninput="_xToggle(this,'login-username-continue')">
+        </div>
+        <div class="auth-x-spacer"></div>
+        <button class="auth-x-continue" id="login-username-continue" disabled onclick="_loginIdentifierNext('login-username-in')">Continue</button>
+    </div>
+
+    <div class="auth-step" id="step-login-phone">
+        <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-login')"><i class="fa-solid fa-arrow-left"></i></div></div>
+        <h2 class="auth-x-title">Enter your phone number</h2>
+        <div class="auth-x-field-row">
+            <button class="auth-x-flag" id="phone-flag" onclick="openCountryPicker()" style="border:none;cursor:pointer;">&#127487;&#127462;</button>
+            <span class="auth-x-prefix" id="phone-dial">+27</span>
+            <input class="auth-x-field" id="login-phone-in" type="tel" inputmode="tel" placeholder="82 345 6789" oninput="_xToggle(this,'login-phone-continue')">
+        </div>
+        <div class="auth-x-spacer"></div>
+        <button class="auth-x-continue" id="login-phone-continue" disabled onclick="loginWithPhone()">Continue</button>
+    </div>
+
+    <div class="auth-step" id="step-login-password">
+        <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-login')"><i class="fa-solid fa-arrow-left"></i></div></div>
+        <h2 class="auth-x-title">Enter your password</h2>
+        <div class="auth-x-field-row">
+            <input class="auth-x-field" id="login-pass" type="password" autocomplete="current-password" placeholder="Password" oninput="_xToggle(this,'login-pass-continue')">
+        </div>
+        <p style="margin-top:16px;"><span class="auth-x-forgot" style="color:#007AFF;" onclick="showForgotPassword()">Forgot password?</span></p>
+        <div class="auth-x-spacer"></div>
+        <button class="auth-x-continue" id="login-pass-continue" disabled onclick="authenticateUser('step-login-password')">Continue</button>
     </div>
 
     <div class="auth-step" id="step-register">
-        <h2 style="margin-bottom: 10px;">Create Your Account</h2>
+        <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-splash')"><i class="fa-solid fa-arrow-left"></i></div></div>
+        <div class="auth-create-mid">
+            <div class="auth-brand">TrustFirst</div>
+            <h2 class="auth-create-title">Create an account</h2>
+        </div>
+        <div class="auth-create-bottom">
+            <div class="auth-circle-row">
+                <button class="auth-circle" onclick="signInWithGoogle()" title="Sign up with Google">
+                    <svg width="24" height="24" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                </button>
+                <button class="auth-circle" onclick="nextAuthStep('step-signup-email')" title="Sign up with email"><i class="fa-regular fa-envelope"></i></button>
+            </div>
+            <div class="auth-divider"><span>or</span></div>
+            <button class="auth-btn auth-btn-dark" onclick="nextAuthStep('step-signup-phone-num')"><i class="fa-solid fa-phone" style="font-size:13px;"></i> Create an account with phone</button>
+            <p class="auth-terms">By continuing, you agree to our <span class="lnk" onclick="openAuthLegal('terms','Terms of Service')">Terms</span>, <span class="lnk" onclick="openAuthLegal('privacy','Privacy Policy')">Privacy Policy</span> and <span class="lnk" onclick="openAuthLegal('privacy','Cookie Use')">Cookie Use</span>.</p>
+        </div>
+    </div>
+
+    <div class="auth-step" id="step-register-form">
+        <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-register')"><i class="fa-solid fa-arrow-left"></i></div></div>
+        <h2 class="auth-title" style="text-align:left; margin-bottom:16px;">Create your account</h2>
         <div style="display:flex; gap:10px; margin-bottom:15px;">
             <input type="text" class="auth-input" placeholder="First Name" id="reg-firstname" style="flex:1; margin-bottom:0;">
             <input type="text" class="auth-input" placeholder="Last Name" id="reg-lastname" style="flex:1; margin-bottom:0;">
@@ -158,7 +218,7 @@ function authenticateUser() {
                <input type="text" class="auth-input" placeholder="Choose a unique @username" id="reg-username" oninput="checkUsernameAvailability(this.value)">
         <div id="username-status" style="margin:-10px 0 15px; padding:0 5px; font-size:12px; min-height:18px;"></div>
         <div style="background:rgba(0,122,255,0.08);border:1px solid rgba(0,122,255,0.15);border-radius:12px;padding:10px 14px;margin:-5px 0 15px;font-size:12px;color:#007AFF;">
-            <i class="fa-solid fa-shield-halved"></i> <b>Your account, your identity.</b> TrustFirst is a real-people platform — every account is verified to keep your community safe and authentic.
+            <i class="fa-solid fa-shield-halved"></i> <b>Your account, your identity.</b> TrustFirst is a real-people platform, every account is verified to keep your community safe and authentic.
         </div>
                 <input type="password" class="auth-input" placeholder="Create Password" id="reg-pass" autocomplete="new-password" oninput="checkPasswordStrength(this.value)">
         <input type="password" class="auth-input" placeholder="Confirm Password" id="reg-confirm-pass">
@@ -168,70 +228,138 @@ function authenticateUser() {
             </div>
             <small id="pw-strength-text" style="font-size:11px; margin-top:4px; display:block;"></small>
         </div>
-               <button class="auth-btn" onclick="proceedFromRegistrationDetails()">Next: Account Type</button>
-        <div style="display:flex; align-items:center; gap:15px; margin:20px 0 15px;">
-            <div style="flex:1; height:1px; background:#333;"></div>
-            <span style="color:#666; font-size:12px;">or sign up with</span>
-            <div style="flex:1; height:1px; background:#333;"></div>
-        </div>
-        <div style="display:flex; gap:12px;">
-            <button onclick="signInWithGoogle()" style="flex:1; padding:14px; background:#1a1a1a; border:1px solid #333; border-radius:14px; color:white; font-size:14px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
-                <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                Google
-            </button>
-            <button onclick="signInWithApple()" style="flex:1; padding:14px; background:#1a1a1a; border:1px solid #333; border-radius:14px; color:white; font-size:14px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
-                <i class="fa-brands fa-apple" style="font-size:18px;"></i>
-                Apple
-            </button>
-        </div>
-        <p style="text-align:center; margin-top:15px; font-size:13px; color:#888; cursor:pointer;" onclick="nextAuthStep('step-splash')">Back</p>
+        <button class="auth-btn" onclick="proceedFromRegistrationDetails()">Next: Account Type</button>
     </div>
 
-    <div class="auth-step" id="step-account-type" style="text-align:center;">
-        <h2 style="margin-bottom:5px;">Choose Account Type</h2>
-        <p style="color:#888; font-size:13px; margin-bottom:25px;">This determines your badge and experience</p>
-
-        <div id="account-type-grid" style="display:flex; flex-direction:column; gap:12px;">
-            <div class="acct-type-card" onclick="selectAccountType('personal')" style="background:#1a1a1a; padding:18px; border-radius:18px; border:2px solid transparent; cursor:pointer; text-align:left; transition:0.3s;" data-type="personal">
-                <div style="display:flex; align-items:center; gap:12px;">
-                    <i class="fa-solid fa-circle-check" style="color:#007AFF; font-size:22px;"></i>
-                    <div>
-                        <b style="font-size:16px;">Personal</b>
-                        <p style="color:#888; font-size:12px; margin-top:2px;">For individuals. Blue badge.</p>
-                    </div>
-                </div>
-            </div>
-            <div class="acct-type-card" onclick="selectAccountType('business')" style="background:#1a1a1a; padding:18px; border-radius:18px; border:2px solid transparent; cursor:pointer; text-align:left; transition:0.3s;" data-type="business">
-                <div style="display:flex; align-items:center; gap:12px;">
-                    <i class="fa-solid fa-circle-check" style="color:#C0C0C0; font-size:22px;"></i>
-                    <div>
-                        <b style="font-size:16px;">Business</b>
-                        <p style="color:#888; font-size:12px; margin-top:2px;">For brands & companies. Silver badge.</p>
-                    </div>
-                </div>
-            </div>
-            <div class="acct-type-card" onclick="selectAccountType('government')" style="background:#1a1a1a; padding:18px; border-radius:18px; border:2px solid transparent; cursor:pointer; text-align:left; transition:0.3s;" data-type="government">
-                <div style="display:flex; align-items:center; gap:12px;">
-                    <i class="fa-solid fa-circle-check" style="color:#FF3B30; font-size:22px;"></i>
-                    <div>
-                        <b style="font-size:16px;">Government</b>
-                        <p style="color:#888; font-size:12px; margin-top:2px;">For officials & agencies. Red badge.</p>
-                    </div>
-                </div>
-            </div>
-            <div class="acct-type-card" onclick="selectAccountType('child')" style="background:#1a1a1a; padding:18px; border-radius:18px; border:2px solid transparent; cursor:pointer; text-align:left; transition:0.3s;" data-type="child">
-                <div style="display:flex; align-items:center; gap:12px;">
-                    <i class="fa-solid fa-circle-check" style="color:#34C759; font-size:22px;"></i>
-                    <div>
-                        <b style="font-size:16px;">Child (Under 18)</b>
-                        <p style="color:#888; font-size:12px; margin-top:2px;">Safe, protected experience. Linked to a parent account.</p>
-                    </div>
-                </div>
-            </div>
+    <!-- ===== NEW SIGN-UP FLOW: email → code → password → name → username → profile ===== -->
+    <div class="auth-step" id="step-signup-email">
+        <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-register')"><i class="fa-solid fa-arrow-left"></i></div></div>
+        <h2 class="auth-x-title">Enter your email</h2>
+        <div class="auth-x-field-row">
+            <input class="auth-x-field" id="signup-email-in" type="email" inputmode="email" autocomplete="email" placeholder="you@email.com" oninput="_xToggle(this,'signup-email-continue')">
         </div>
-
-        <button class="auth-btn" id="acct-type-next" style="opacity:0.5; pointer-events:none; margin-top:20px;" onclick="proceedAfterAccountType()">Continue</button>
+        <div class="auth-x-spacer"></div>
+        <button class="auth-x-continue" id="signup-email-continue" disabled onclick="_signupSendCode(false)">Continue</button>
     </div>
+
+    <div class="auth-step" id="step-signup-code">
+        <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-signup-email')"><i class="fa-solid fa-arrow-left"></i></div></div>
+        <h2 class="auth-x-title">We sent you a code</h2>
+        <p class="auth-sub-left">Enter the code sent to <b id="signup-code-email">your email</b>.</p>
+        <div class="auth-x-field-row">
+            <input class="auth-x-field" id="signup-code-in" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" style="letter-spacing:6px;" oninput="_xToggle(this,'signup-code-continue')">
+        </div>
+        <p style="margin-top:16px;"><span class="auth-x-forgot" style="color:#007AFF;" onclick="_signupSendCode(true)">Didn't get it? Resend code</span></p>
+        <div class="auth-x-spacer"></div>
+        <button class="auth-x-continue" id="signup-code-continue" disabled onclick="_signupVerifyCode()">Continue</button>
+    </div>
+
+    <div class="auth-step" id="step-signup-password">
+        <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-signup-code')"><i class="fa-solid fa-arrow-left"></i></div></div>
+        <h2 class="auth-x-title">Create a password</h2>
+        <p class="auth-sub-left">Use at least 8 characters.</p>
+        <div class="auth-x-field-row">
+            <input class="auth-x-field" id="signup-pass-in" type="password" autocomplete="new-password" placeholder="Password" oninput="_xToggle(this,'signup-pass-continue')">
+        </div>
+        <div class="auth-x-spacer"></div>
+        <button class="auth-x-continue" id="signup-pass-continue" disabled onclick="_signupSetPassword()">Continue</button>
+    </div>
+
+    <div class="auth-step" id="step-signup-name">
+        <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-signup-password')"><i class="fa-solid fa-arrow-left"></i></div></div>
+        <h2 class="auth-x-title">What's your name?</h2>
+        <div class="auth-x-field-row"><input class="auth-x-field" id="signup-first-in" type="text" autocomplete="given-name" placeholder="First name" oninput="_signupNameToggle()"></div>
+        <div class="auth-x-field-row" style="margin-top:14px;border-top:0.5px solid var(--border-color,#eee);padding-top:8px;"><input class="auth-x-field" id="signup-last-in" type="text" autocomplete="family-name" placeholder="Last name" oninput="_signupNameToggle()"></div>
+        <div class="auth-x-spacer"></div>
+        <button class="auth-x-continue" id="signup-name-continue" disabled onclick="_signupName()">Continue</button>
+    </div>
+
+    <div class="auth-step" id="step-signup-username">
+        <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-signup-name')"><i class="fa-solid fa-arrow-left"></i></div></div>
+        <h2 class="auth-x-title">Choose a username</h2>
+        <div class="auth-x-field-row">
+            <span class="auth-x-prefix">@</span>
+            <input class="auth-x-field" id="signup-username-in" type="text" autocomplete="off" autocapitalize="none" placeholder="username" oninput="_signupUsernameInput(this)">
+        </div>
+        <div id="signup-username-status" style="font-size:13px;margin-top:8px;min-height:18px;"></div>
+        <div style="margin-top:18px;">
+            <div style="font-size:12px;color:#8e8e93;font-weight:700;letter-spacing:0.04em;margin-bottom:9px;">SUGGESTIONS</div>
+            <div id="signup-username-recs" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+        </div>
+        <div class="auth-x-spacer"></div>
+        <button class="auth-x-continue" id="signup-username-continue" disabled onclick="_signupUsername()">Continue</button>
+    </div>
+
+    <div class="auth-step" id="step-signup-profile">
+        <div class="auth-topbar" style="justify-content:space-between;align-items:center;">
+            <div class="auth-back" onclick="nextAuthStep('step-signup-username')"><i class="fa-solid fa-arrow-left"></i></div>
+            <span class="auth-x-forgot" onclick="_signupFinish(true)">Skip for now</span>
+        </div>
+        <h2 class="auth-x-title">Add a profile picture</h2>
+        <div style="display:flex;justify-content:center;margin:8px 0 26px;">
+            <label for="signup-avatar-file" style="cursor:pointer;position:relative;">
+                <div id="signup-avatar-preview" style="width:120px;height:120px;border-radius:50%;background:var(--bg-secondary,#f2f2f2);display:flex;align-items:center;justify-content:center;overflow:hidden;">
+                    <i class="fa-solid fa-camera" style="font-size:34px;color:#aaa;"></i>
+                </div>
+                <div style="position:absolute;bottom:2px;right:2px;width:36px;height:36px;border-radius:50%;background:#007AFF;border:3px solid var(--bg-primary,#fff);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-plus" style="color:#fff;font-size:14px;"></i></div>
+            </label>
+            <input type="file" id="signup-avatar-file" accept="image/*" style="display:none;" onchange="_signupAvatarChosen(this)">
+        </div>
+        <p style="font-size:12px;color:#8e8e93;font-weight:700;letter-spacing:0.04em;margin-bottom:9px;">BIO (OPTIONAL)</p>
+        <textarea id="signup-bio-in" placeholder="Tell people a bit about you…" maxlength="160" style="width:100%;min-height:82px;border:1px solid var(--border-color,#e5e5ea);border-radius:14px;padding:12px;font-size:15px;font-family:inherit;background:var(--bg-secondary,#f7f7f9);color:var(--text-primary,#000);outline:none;resize:none;box-sizing:border-box;"></textarea>
+        <div class="auth-x-spacer"></div>
+        <button class="auth-x-continue" id="signup-profile-continue" onclick="_signupFinish(false)">Complete sign up</button>
+    </div>
+
+    <div class="auth-step" id="step-signup-dob">
+        <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-signup-name')"><i class="fa-solid fa-arrow-left"></i></div></div>
+        <h2 class="auth-x-title">Your date of birth</h2>
+        <p class="auth-sub-left">Not shown publicly. Under-18s get a protected Kids account.</p>
+        <div class="auth-x-field-row">
+            <input class="auth-x-field" id="signup-dob-in" type="date" oninput="_signupDobToggle()">
+        </div>
+        <div id="signup-dob-status" style="font-size:13px;margin-top:8px;min-height:18px;color:#888;"></div>
+        <div class="auth-x-spacer"></div>
+        <button class="auth-x-continue" id="signup-dob-continue" disabled onclick="_signupDob()">Continue</button>
+    </div>
+
+    <div class="auth-step" id="step-signup-parent">
+        <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-signup-dob')"><i class="fa-solid fa-arrow-left"></i></div></div>
+        <h2 class="auth-x-title">Link a parent</h2>
+        <p class="auth-sub-left">Kids accounts need a parent or guardian to approve. Enter their Trust-ID (username).</p>
+        <div class="auth-x-field-row">
+            <span class="auth-x-prefix">@</span>
+            <input class="auth-x-field" id="signup-parent-in" type="text" autocapitalize="none" placeholder="parent's username" oninput="_signupParentSearch(this)">
+        </div>
+        <div id="signup-parent-results" style="margin-top:12px;"></div>
+        <div class="auth-x-spacer"></div>
+        <button class="auth-x-continue" id="signup-parent-continue" disabled onclick="_signupParentNext()">Continue</button>
+    </div>
+
+    <div class="auth-step" id="step-signup-phone-num">
+        <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-register')"><i class="fa-solid fa-arrow-left"></i></div></div>
+        <h2 class="auth-x-title">Enter your phone number</h2>
+        <div class="auth-x-field-row">
+            <button class="auth-x-flag" id="signup-phone-flag" onclick="openCountryPicker()" style="border:none;cursor:pointer;">&#127487;&#127462;</button>
+            <span class="auth-x-prefix" id="signup-phone-dial">+27</span>
+            <input class="auth-x-field" id="signup-phone-in" type="tel" inputmode="tel" placeholder="82 345 6789" oninput="_xToggle(this,'signup-phone-continue')">
+        </div>
+        <div class="auth-x-spacer"></div>
+        <button class="auth-x-continue" id="signup-phone-continue" disabled onclick="_signupSendPhoneCode()">Continue</button>
+    </div>
+
+    <div class="auth-step" id="step-signup-waiting" style="text-align:center;">
+        <div class="auth-create-mid">
+            <i class="fa-solid fa-hourglass-half" style="font-size:48px;color:#007AFF;margin-bottom:22px;"></i>
+            <h2 class="auth-create-title" style="margin-bottom:12px;">Waiting for approval</h2>
+            <p class="auth-sub" style="max-width:300px;">We sent a request to <b id="signup-wait-parent">your parent</b>. Your account opens once they approve it in Family Center.</p>
+        </div>
+        <div class="auth-create-bottom">
+            <button class="auth-x-continue" onclick="_signupCheckApproval()">I've been approved</button>
+            <p class="auth-switch" style="margin-top:16px;"><span onclick="nextAuthStep('step-splash')">Back to start</span></p>
+        </div>
+    </div>
+
 
     <div class="auth-step" id="step-parent-link" style="text-align:center;">
         <i class="fa-solid fa-shield-halved" style="font-size:50px; color:#34C759; margin-bottom:20px;"></i>
@@ -246,7 +374,7 @@ function authenticateUser() {
         <i class="fa-solid fa-user-shield" style="font-size: 50px; color: #007AFF; margin-bottom: 20px;"></i>
         <h3>Verify Your Identity</h3>
         <p style="color: #888; font-size: 13px; margin-bottom: 10px;">Choose a verification method to prove you're a real person.</p>
-        <p style="color: #34C759; font-size: 12px; margin-bottom: 25px;"><i class="fa-solid fa-circle-check"></i> Verified members get full access — posting, commenting, and messaging.</p>
+        <p style="color: #34C759; font-size: 12px; margin-bottom: 25px;"><i class="fa-solid fa-circle-check"></i> Verified members get full access, posting, commenting, and messaging.</p>
 
         <div onclick="startFaceVerification()" style="background:#1a1a1a; padding:20px; border-radius:18px; border:2px solid #333; cursor:pointer; margin-bottom:12px; text-align:left; transition:0.3s;" onmouseover="this.style.borderColor='#007AFF'" onmouseout="this.style.borderColor='#333'">
             <div style="display:flex; align-items:center; gap:14px;">
@@ -255,22 +383,22 @@ function authenticateUser() {
                 </div>
                 <div>
                     <b style="font-size:15px; display:block;">Face Verification</b>
-                    <small style="color:#888; font-size:12px;">Use your camera — look left, right, smile</small>
+                    <small style="color:#888; font-size:12px;">Use your camera, look left, right, smile</small>
                 </div>
             </div>
             <div style="margin-top:10px; padding:6px 12px; background:rgba(0,122,255,0.08); border-radius:8px; display:inline-block;">
-                <small style="color:#007AFF; font-weight:700; font-size:11px;"><i class="fa-solid fa-bolt"></i> Recommended — No ID needed</small>
+                <small style="color:#007AFF; font-weight:700; font-size:11px;"><i class="fa-solid fa-bolt"></i> Recommended, No ID needed</small>
             </div>
         </div>
 
-        <div style="background:#1a1a1a; padding:20px; border-radius:18px; border:2px solid #333; cursor:pointer; margin-bottom:12px; text-align:left; transition:0.3s;" onmouseover="this.style.borderColor='#635bff'" onmouseout="this.style.borderColor='#333'">
+        <div style="background:#1a1a1a; padding:20px; border-radius:18px; border:2px solid #333; cursor:pointer; margin-bottom:12px; text-align:left; transition:0.3s;" onmouseover="this.style.borderColor='#007AFF'" onmouseout="this.style.borderColor='#333'">
             <div style="display:flex; align-items:center; gap:14px;">
-                <div style="width:50px; height:50px; border-radius:50%; background:rgba(99,91,255,0.15); display:flex; align-items:center; justify-content:center;">
-                    <i class="fa-brands fa-stripe" style="color:#635bff; font-size:24px;"></i>
+                <div style="width:50px; height:50px; border-radius:50%; background:rgba(0,122,255,0.15); display:flex; align-items:center; justify-content:center;">
+                    <i class="fa-solid fa-id-card" style="color:#007AFF; font-size:24px;"></i>
                 </div>
                 <div>
                     <b style="font-size:15px; display:block;">ID Document Scan</b>
-                    <small style="color:#888; font-size:12px;">Scan your ID via Stripe Identity</small>
+                    <small style="color:#888; font-size:12px;">Scan your ID via Didit</small>
                 </div>
             </div>
             <div class="stripe-scan-box" id="scan-box" onclick="event.stopPropagation(); startScan();" style="margin-top:12px; height:120px;">
@@ -288,11 +416,27 @@ function authenticateUser() {
         <div class="ios-blade"></div><div class="ios-blade"></div><div class="ios-blade"></div><div class="ios-blade"></div>
         <div class="ios-blade"></div><div class="ios-blade"></div><div class="ios-blade"></div><div class="ios-blade"></div>
     </div>
+
+    <!-- Log-in method bottom sheet (opened from the login switcher) -->
+    <div class="login-methods-sheet" id="login-methods-sheet" onclick="if(event.target===this)closeLoginMethods()">
+        <div class="login-methods-inner">
+            <div class="lm-handle"></div>
+            <b class="lm-title">Log in to your account</b>
+            <button class="login-method-btn" onclick="closeLoginMethods();signInWithGoogle()">
+                <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                Continue with Google
+            </button>
+            <button class="login-method-btn" onclick="closeLoginMethods();startPasskey()"><i class="fa-solid fa-fingerprint"></i> Continue with Passkey</button>
+            <button class="login-method-btn" onclick="closeLoginMethods();nextAuthStep('step-login-phone')"><i class="fa-solid fa-phone"></i> Continue with Phone</button>
+            <button class="login-method-btn" onclick="closeLoginMethods();nextAuthStep('step-login-username')"><i class="fa-solid fa-at"></i> Continue with Username</button>
+            <button class="login-method-btn" onclick="closeLoginMethods();nextAuthStep('step-login-email')"><i class="fa-regular fa-envelope"></i> Continue with Email</button>
+        </div>
+    </div>
 </div>
 
 <div class="app not-authenticated" id="app">
 
-    <input type="file" id="file-input" hidden accept="image/*,video/*" onchange="handleChatMediaPick(this)">
+    <input type="file" id="file-input" hidden accept="image/*,video/*" multiple onchange="handleChatMediaPick(this)">
     <input type="file" id="video-clip-input" hidden accept="video/*" multiple onchange="handleClipFileSelect(this)">
 
     <div id="offline-banner" class="offline-banner" style="display:none;"><i class="fa-solid fa-wifi-slash"></i> No Internet Connection</div>
@@ -488,6 +632,14 @@ function authenticateUser() {
         <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.5);padding:5px;text-align:center;font-size:10px;color:white;font-weight:700;">Edit cover</div>
       </div>
       <div style="flex:1;">
+        <div id="tcReplyBanner" style="display:none;align-items:flex-start;gap:8px;background:rgba(255,149,0,0.10);border:1px solid rgba(255,149,0,0.28);border-radius:12px;padding:8px 10px;margin-bottom:8px;">
+          <i class="fa-solid fa-reply" style="color:#FF9500;font-size:12px;margin-top:2px;flex-shrink:0;"></i>
+          <div style="flex:1;min-width:0;">
+            <div id="tcReplyBannerName" style="font-size:12px;font-weight:700;color:#FF9500;">Replying to</div>
+            <div id="tcReplyBannerText" style="font-size:12px;color:var(--text-secondary,#888);line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"></div>
+          </div>
+          <i class="fa-solid fa-xmark" onclick="clearClipReplyContext()" style="color:#888;font-size:14px;padding:2px 4px;cursor:pointer;flex-shrink:0;"></i>
+        </div>
         <textarea id="tcCaption" placeholder="Add a caption..." style="width:100%;min-height:80px;border:none;outline:none;font-size:15px;background:transparent;resize:none;color:var(--text-primary,#000);font-family:inherit;"></textarea>
         <div style="display:flex;gap:8px;overflow-x:auto;padding:8px 0;scrollbar-width:none;">
           <div onclick="document.getElementById('tcCaption').value+=' #';document.getElementById('tcCaption').focus();" style="flex-shrink:0;padding:6px 14px;border-radius:20px;background:rgba(0,122,255,0.1);color:#007AFF;font-size:13px;font-weight:700;cursor:pointer;"># Hashtag</div>
@@ -661,7 +813,7 @@ function authenticateUser() {
       <div class="breathe-bg-blob" style="width:80px;height:80px;background:rgba(100,200,255,0.2);bottom:-10px;left:10px;animation:blobShift 8s ease-in-out infinite reverse;"></div>
       <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:rgba(255,255,255,0.6);margin-bottom:6px;">✦ Focus</p>
       <h3 style="font-size:20px;font-weight:800;color:white;margin-bottom:4px;">Breathe evenly</h3>
-      <p style="font-size:13px;color:rgba(255,255,255,0.7);margin-bottom:12px;">Box breathing — 4 counts each. A 2-minute reset.</p>
+      <p style="font-size:13px;color:rgba(255,255,255,0.7);margin-bottom:12px;">Box breathing, 4 counts each. A 2-minute reset.</p>
       <div style="display:flex;gap:8px;margin-bottom:16px;">
         <span style="padding:5px 12px;border-radius:20px;background:rgba(255,255,255,0.18);color:white;font-size:12px;font-weight:600;">Focus</span>
         <span style="padding:5px 12px;border-radius:20px;background:rgba(255,255,255,0.18);color:white;font-size:12px;font-weight:600;">2 min</span>
@@ -1207,6 +1359,17 @@ function authenticateUser() {
     </div>
 
     <div id="profile-overlay" class="white-overlay" style="z-index:6100;">
+        <div style="position:sticky;top:0;height:0;z-index:60;overflow:visible;">
+            <div id="profile-sticky-header" style="position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:11px;padding:calc(env(safe-area-inset-top,0px) + 9px) 14px 9px;opacity:0;pointer-events:none;transform:translateY(-6px);transition:opacity .22s ease,transform .22s ease;-webkit-backdrop-filter:blur(24px) saturate(1.7);backdrop-filter:blur(24px) saturate(1.7);background:rgba(255,255,255,0.72);border-bottom:0.5px solid var(--border-color,rgba(0,0,0,0.08));">
+                <div onclick="closePage('profile-overlay')" style="width:34px;height:34px;border-radius:50%;background:rgba(120,120,128,0.18);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"><i class="fa-solid fa-chevron-left" style="font-size:15px;color:var(--sticky-fg,#000);"></i></div>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;line-height:1.15;">
+                    <b id="profile-sticky-name" style="font-size:16px;color:var(--sticky-fg,#000);display:flex;align-items:center;gap:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Profile</b>
+                    <small id="profile-sticky-sub" style="font-size:12px;color:var(--sticky-fg,#000);opacity:0.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></small>
+                </div>
+                <div onclick="editProfile()" style="width:34px;height:34px;border-radius:50%;background:rgba(120,120,128,0.18);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"><i class="fa-solid fa-pen" style="font-size:13px;color:var(--sticky-fg,#000);"></i></div>
+                <div onclick="openProfileShare()" style="width:34px;height:34px;border-radius:50%;background:rgba(120,120,128,0.18);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"><i class="fa-solid fa-arrow-up-from-bracket" style="font-size:13px;color:var(--sticky-fg,#000);"></i></div>
+            </div>
+        </div>
         <div class="profile-hero">
            <div class="cover-img" id="profile-cover-img" onclick="showCoverPhotoOptions()" style="cursor:pointer; position:relative;">
     <div style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,0.45);backdrop-filter:blur(10px);border-radius:20px;padding:5px 12px;display:flex;align-items:center;gap:6px;pointer-events:none;">
@@ -1220,12 +1383,12 @@ function authenticateUser() {
             <div class="thought-cloud" id="profileThoughtCloud" onclick="handleThoughtCloudTap(this)">Thinking...</div>
         </div>
                <div class="profile-btn-row" id="profile-btn-row">
-            <button class="action-btn" onclick="openPage('share-sheet')">Share Profile</button>
+            <button class="action-btn" onclick="openProfileShare()">Share Profile</button>
             <button class="action-btn" id="profile-action-btn" style="background:#000; color:#fff;" onclick="editProfile()">Edit</button>
             <button class="action-btn" id="profile-follow-btn" style="background:#007AFF; color:#fff; display:none;" onclick="toggleFollowFromProfile()">Follow</button>
         </div>
                 <div style="padding:55px 20px 10px;">
-            <h2 style="font-weight:900;cursor:pointer;" id="profile-display-name" onclick="_openOwnProfilePage()">Loading...</h2>
+            <h2 style="font-weight:900;cursor:pointer;display:flex;align-items:center;gap:6px;" id="profile-display-name" onclick="_openOwnProfilePage()"><span id="profile-display-name-text">Loading...</span><i id="profile-verified-badge" class="fa-solid fa-circle-check verify-blue" style="display:none;font-size:17px;"></i></h2>
             <p style="color:#888;cursor:pointer;" id="profile-username" onclick="_openOwnProfilePage()">@...</p>
             <p style="margin-top:10px; line-height:1.4;" id="profile-bio"></p>
             <div id="profile-links-row" style="display:none;margin-top:10px;"></div>
@@ -1234,7 +1397,7 @@ function authenticateUser() {
                 <span onclick="openFollowersScreen();switchFsTab('following')" style="cursor:pointer;"><b id="profile-following-count">0</b> Following</span>
             </div>
         </div>
-        <div class="profile-tabs"><div class="p-tab active" onclick="switchProfileTab('posts', this)">Posts</div><div class="p-tab"onclick="switchProfileTab('reels',this)">trustclips</div><div class="p-tab"onclick="switchProfileTab('reposts',this)">reposts</div><div class="p-tab"onclick="switchProfileTab('pictures',this)">pictures</div><div class="p-tab"onclick="switchProfileTab('tabs',this)">tags</div></div>
+        <div class="profile-tabs" id="profile-tabs-bar"><div class="p-tab active" data-tab="posts" onclick="switchProfileTab('posts', this)">Posts</div><div class="p-tab" data-tab="reels" onclick="switchProfileTab('reels',this)">trustclips</div><div class="p-tab" data-tab="reposts" onclick="switchProfileTab('reposts',this)">reposts</div><div class="p-tab" data-tab="pictures" onclick="switchProfileTab('pictures',this)">pictures</div><div class="p-tab" data-tab="tabs" onclick="switchProfileTab('tabs',this)">tags</div></div>
         <div id="profile-grid" style="display:block;"></div>
     </div>
 
@@ -1252,6 +1415,15 @@ function authenticateUser() {
   </div>
 </div>
     <div style="padding:20px; padding-bottom:100px;">
+        <div class="settings-card" style="margin-bottom:22px;cursor:pointer;" onclick="openAccountInformation()">
+            <div class="settings-row" style="cursor:pointer;padding:8px 4px;">
+                <div style="display:flex;align-items:center;gap:14px;min-width:0;">
+                    <div id="settings-acct-avatar" style="width:56px;height:56px;border-radius:50%;background:#007AFF;display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;font-weight:700;flex-shrink:0;overflow:hidden;">U</div>
+                    <div style="min-width:0;"><b id="settings-acct-name" style="font-size:18px;color:var(--text-primary,#000);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Your Name</b><span style="color:#888;font-size:14px;">Account information</span></div>
+                </div>
+                <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
+            </div>
+        </div>
         <div class="settings-card">
             <div class="settings-row" onclick="openPage('qr-overlay')">
                 <div style="display:flex; gap:10px; align-items:center;"><i class="fa-solid fa-qrcode"></i> My QR Code</div>
@@ -1264,14 +1436,6 @@ function authenticateUser() {
     </div>
     <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
 </div>
-                       <div class="settings-row" onclick="openPage('trust-score-overlay'); renderTrustScore();">
-                <div style="display:flex; gap:10px; align-items:center;"><i class="fa-solid fa-star" style="color:#FFD700;"></i> Trust Score</div>
-                <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
-            </div>
-            <div class="settings-row" id="settingsGoldVerifyRow" style="display:none;" onclick="openGetVerified();">
-                <div style="display:flex; gap:10px; align-items:center;"><i class="fa-solid fa-star" style="color:#FFB800;"></i> Gold Verification</div>
-                <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
-            </div>
             <div class="settings-row" id="settingsAdminRow" style="display:none;" onclick="openAdminDashboard();">
                 <div style="display:flex; gap:10px; align-items:center;"><i class="fa-solid fa-shield-halved" style="color:#FF3B30;"></i> Admin Dashboard</div>
                 <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
@@ -1470,10 +1634,6 @@ function authenticateUser() {
             </div>
         </div>
 
-               <div style="margin-top:30px;">
-    <button onclick="logOut()" style="width:100%; padding:15px; background:#FF3B30; color:white; border:none; border-radius:15px; font-weight:bold; font-size:16px; cursor:pointer;">Log Out</button>
-</div>
-
         <p style="text-align:center; margin-top:20px; color:#ccc; font-size:12px;">TrustFirst v2.0</p>
     </div>
 </div>
@@ -1513,7 +1673,7 @@ function authenticateUser() {
     <i class="fa-solid fa-location-dot" style="font-size:48px;color:#FF2D55;margin-bottom:24px;display:block;"></i>
     <h2 style="font-size:24px;font-weight:900;line-height:1.3;margin-bottom:24px;">To check in, allow access to your device location</h2>
     <div style="display:flex;flex-direction:column;gap:18px;text-align:left;">
-      <div style="display:flex;gap:14px;align-items:flex-start;"><i class="fa-solid fa-location-dot" style="color:#888;font-size:18px;flex-shrink:0;margin-top:2px;"></i><p style="font-size:14px;color:#555;line-height:1.5;"><b>Add your location when you want</b><br>Choose when to share — checking into places or adding it to a story.</p></div>
+      <div style="display:flex;gap:14px;align-items:flex-start;"><i class="fa-solid fa-location-dot" style="color:#888;font-size:18px;flex-shrink:0;margin-top:2px;"></i><p style="font-size:14px;color:#555;line-height:1.5;"><b>Add your location when you want</b><br>Choose when to share, checking into places or adding it to a story.</p></div>
       <div style="display:flex;gap:14px;align-items:flex-start;"><i class="fa-regular fa-comment" style="color:#888;font-size:18px;flex-shrink:0;margin-top:2px;"></i><p style="font-size:14px;color:#555;line-height:1.5;"><b>We use location to show things nearby</b><br>Location data helps show relevant local content, ads, and events.</p></div>
       <div style="display:flex;gap:14px;align-items:flex-start;"><i class="fa-solid fa-gear" style="color:#888;font-size:18px;flex-shrink:0;margin-top:2px;"></i><p style="font-size:14px;color:#555;line-height:1.5;"><b>Update your settings at any time</b><br>Even if disabled, we may use your IP address to estimate your location.</p></div>
     </div>
@@ -1601,6 +1761,7 @@ function authenticateUser() {
             <i class="fa-regular fa-image" onclick="openMedia()" style="cursor:pointer;"></i>
             <i class="fa-solid fa-camera" onclick="startCamera()" style="cursor:pointer;"></i>
             <i class="fa-solid fa-location-dot" onclick="openLocationPermissionScreen()" style="cursor:pointer;"></i>
+            <i class="fa-solid fa-music" onclick="openComposerMusic()" style="cursor:pointer;"></i>
         </div>
         <div style="display:flex; gap:16px; align-items:center;">
             <div onclick="toggleScheduleMode()" id="schedule-toggle-btn" style="cursor:pointer; color:#aaa; font-size:18px;"><i class="fa-regular fa-calendar"></i></div>
@@ -1694,13 +1855,13 @@ function authenticateUser() {
     <!-- Interactions -->
     <div class="settings-section-title">INTERACTIONS</div>
     <div class="settings-card">
-      <div class="settings-row">
+      <div class="settings-row" onclick="openSettingPicker('msgreq')" style="cursor:pointer;">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-comment-slash" style="color:#888;"></i> Who Can Message Me</div>
-        <span style="color:#888;font-size:13px;">Everyone</span>
+        <span data-setting="msgreq" style="color:#888;font-size:13px;">Everyone</span>
       </div>
-      <div class="settings-row">
+      <div class="settings-row" onclick="openSettingPicker('mention')" style="cursor:pointer;">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-at" style="color:#888;"></i> Who Can Mention Me</div>
-        <span style="color:#888;font-size:13px;">Followers</span>
+        <span data-setting="mention" style="color:#888;font-size:13px;">Everyone</span>
       </div>
       <div class="settings-row" onclick="openStoryRepliesSettings()">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-reply" style="color:#007AFF;"></i> Story &amp; Message Replies</div>
@@ -1808,22 +1969,31 @@ function authenticateUser() {
         <div class="settings-section-title">DEVICES</div>
         <div class="settings-card" id="devices-list"></div>
 
+        <div class="settings-section-title">SIGN IN</div>
+        <div class="settings-card">
+            <div class="two-step-option">
+                <div class="two-step-icon" style="background:rgba(0,122,255,0.1); color:#007AFF;"><i class="fa-solid fa-fingerprint"></i></div>
+                <div style="flex:1;"><b>Passkey</b><br><small style="color:#888;">Sign in with Face ID / fingerprint on this device</small></div>
+                <div class="toggle" id="securityPasskeyToggle" onclick="_togglePasskey(this)"></div>
+            </div>
+        </div>
+
         <div class="settings-section-title">TWO-STEP VERIFICATION</div>
         <div class="settings-card">
             <div class="two-step-option">
                 <div class="two-step-icon" style="background:rgba(0,122,255,0.1); color:#007AFF;"><i class="fa-solid fa-mobile-screen"></i></div>
-                <div style="flex:1;"><b>Phone Number</b><br><small style="color:#888;">SMS verification</small></div>
-                <div class="toggle" onclick="this.classList.toggle('active'); setup2FA('phone');"></div>
+                <div style="flex:1;"><b>Phone Number</b><br><small style="color:#888;" id="twofaPhoneSub">SMS verification</small></div>
+                <div class="toggle" id="twofaPhoneToggle" onclick="toggle2FA(this,'phone')"></div>
             </div>
             <div class="two-step-option">
                 <div class="two-step-icon" style="background:rgba(52,199,89,0.1); color:#34C759;"><i class="fa-solid fa-envelope"></i></div>
-                <div style="flex:1;"><b>Email</b><br><small style="color:#888;">Email code verification</small></div>
-                <div class="toggle" onclick="this.classList.toggle('active'); setup2FA('email');"></div>
+                <div style="flex:1;"><b>Email</b><br><small style="color:#888;" id="twofaEmailSub">Email code verification</small></div>
+                <div class="toggle" id="twofaEmailToggle" onclick="toggle2FA(this,'email')"></div>
             </div>
             <div class="two-step-option">
                 <div class="two-step-icon" style="background:rgba(255,149,0,0.1); color:#FF9500;"><i class="fa-solid fa-shield-halved"></i></div>
                 <div style="flex:1;"><b>Authenticator App</b><br><small style="color:#888;">Google/Microsoft Authenticator</small></div>
-                <div class="toggle" onclick="this.classList.toggle('active'); setup2FA('authenticator');"></div>
+                <div class="toggle" id="twofaAuthToggle" onclick="toggle2FA(this,'authenticator')"></div>
             </div>
             <div class="two-step-option" onclick="openPage('change-password-overlay')">
                 <div class="two-step-icon" style="background:rgba(255,59,48,0.1); color:#FF3B30;"><i class="fa-solid fa-key"></i></div>
@@ -1876,22 +2046,12 @@ function authenticateUser() {
         <div class="settings-card" style="margin-bottom:16px;">
             <div class="settings-row">
                 <div style="display:flex; gap:10px; align-items:center;"><i class="fa-solid fa-language"></i> Auto-Translate Posts</div>
-                <div class="toggle active" id="translate-toggle" onclick="this.classList.toggle('active');"></div>
+                <div class="toggle active" id="translate-toggle" onclick="toggleAutoTranslate(this);"></div>
             </div>
         </div>
         <div class="settings-section-title">APP LANGUAGE</div>
         <div class="settings-card" id="language-list" style="overflow:visible;"></div>
     </div>
-</div>
-
-<!-- TRUST SCORE -->
-<div id="trust-score-overlay" class="white-overlay" style="z-index:7000;">
-    <div class="header-container">
-        <div class="liquid-glass-btn" onclick="closePage('trust-score-overlay')"><i class="fa-solid fa-chevron-left"></i></div>
-        <b>Trust Score</b>
-        <div></div>
-    </div>
-    <div style="padding:20px; padding-bottom:120px;" id="trust-score-content"></div>
 </div>
 
 <!-- LOCAL CIRCLES -->
@@ -1925,7 +2085,7 @@ function authenticateUser() {
 
   <div style="text-align:center; margin-bottom:30px;">
     <h2 style="color:var(--text-primary,#000); font-size:24px; font-weight:900;">TrustFirst</h2>
-    <p style="font-size:13px; color:var(--text-tertiary,#999); margin-top:4px;">Privacy Policy — Effective Date: 20 April 2026</p>
+    <p style="font-size:13px; color:var(--text-tertiary,#999); margin-top:4px;">Privacy Policy, Effective Date: 20 April 2026</p>
   </div>
 
   <p style="margin-bottom:20px;">TrustFirst ("we", "our", "us") is committed to protecting your privacy and ensuring transparency about how your information is collected, used, and shared. By using TrustFirst, you agree to this Privacy Policy.</p>
@@ -1946,7 +2106,7 @@ function authenticateUser() {
 
   <p style="font-weight:700; margin-bottom:6px;">2.2 Verification Information</p>
   <ul style="padding-left:20px; margin-bottom:14px;">
-    <li>Government ID (for verified accounts via Stripe KYC)</li>
+    <li>Government ID (for verified accounts via Didit)</li>
     <li>Facial verification data (via camera-based verification system)</li>
     <li>Device and authentication signals used for identity confirmation</li>
   </ul>
@@ -2012,7 +2172,7 @@ function authenticateUser() {
   </ul>
   <p style="font-weight:700; margin-bottom:6px;">4.2 With Service Providers</p>
   <ul style="padding-left:20px; margin-bottom:14px;">
-    <li>Stripe (identity verification / KYC)</li>
+    <li>Didit (identity verification / KYC)</li>
     <li>Hosting and cloud providers</li>
     <li>Security and anti-fraud systems</li>
   </ul>
@@ -2045,7 +2205,7 @@ function authenticateUser() {
   <p>We may use cookies or similar technologies to keep you logged in, understand app performance, and improve user experience and security.</p>
 
   <h3 style="color:var(--text-primary,#000); margin:25px 0 10px; font-size:17px;">8. Data Security</h3>
-  <p>We use industry-standard security measures including encryption, access controls, fraud detection systems, and secure verification systems (including Stripe KYC). However, no system is 100% secure.</p>
+  <p>We use industry-standard security measures including encryption, access controls, fraud detection systems, and secure verification systems (including Didit). However, no system is 100% secure.</p>
 
   <h3 style="color:var(--text-primary,#000); margin:25px 0 10px; font-size:17px;">9. International Use</h3>
   <p>TrustFirst is a global platform. Your data may be processed in different countries, including servers outside South Africa, to ensure proper operation of the Service.</p>
@@ -2069,7 +2229,7 @@ function authenticateUser() {
   <p>We may update this Privacy Policy from time to time. If changes are significant, users will be notified before they take effect.</p>
 
   <h3 style="color:var(--text-primary,#000); margin:25px 0 10px; font-size:17px;">13. Contact Us</h3>
-  <p>TrustFirst Support Team — Location: Cape Town, South Africa.</p>
+  <p>TrustFirst Support Team, Location: Cape Town, South Africa.</p>
 
   <!-- TERMS DIVIDER -->
   <div style="margin:40px 0 30px; border-top:2px solid var(--border-color,#eee); padding-top:30px; text-align:center;">
@@ -2101,7 +2261,7 @@ function authenticateUser() {
   <p style="font-weight:700; margin-bottom:6px;">3.1 Verified Accounts</p>
   <p>To become a verified user and receive a checkmark, users must complete identity verification through:</p>
   <ul style="padding-left:20px; margin-bottom:14px;">
-    <li>Government-issued ID verification via Stripe KYC services, OR</li>
+    <li>Government-issued ID verification via Didit services, OR</li>
     <li>Alternative camera-based identity verification system (facial verification system)</li>
   </ul>
   <p>Verified users gain full platform access including posting, commenting, starting conversations, and full interaction features.</p>
@@ -2623,7 +2783,7 @@ function authenticateUser() {
                 <small>More</small>
             </div>
         </div>
-        <button style="width:100%; margin-top:20px; padding:15px; background:#f5f5f5; border-radius:15px; border:none;" onclick="document.getElementById('share-sheet').style.display='none'">Close</button>
+        <button style="width:100%; margin-top:20px; padding:15px; background:#f5f5f5; border-radius:15px; border:none;" onclick="closeSharePanel()">Close</button>
     </div>
 
     <!-- ===== DRAFTS OVERLAY ===== -->
@@ -2715,13 +2875,13 @@ function authenticateUser() {
     <div id="contact-profile-overlay" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;z-index:7000;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;animation:slideUpOverlay 0.4s cubic-bezier(0.32,0.72,0,1);background:var(--bg-primary,#fff);flex-direction:column;">
 
     <!-- Sticky glass header -->
-    <div style="position:sticky;top:0;z-index:10;background:rgba(255,255,255,0.75);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);border-bottom:0.5px solid rgba(0,0,0,0.06);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;">
+    <div style="position:sticky;top:0;z-index:10;background:var(--cp-header-bg,rgba(255,255,255,0.75));backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);border-bottom:0.5px solid var(--cp-card-border,rgba(0,0,0,0.06));padding:14px 20px;display:flex;align-items:center;justify-content:space-between;">
         <div class="liquid-glass-btn" onclick="closeContactProfile()" style="cursor:pointer;"><i class="fa-solid fa-chevron-left"></i></div>
         <span style="font-weight:700;font-size:17px;color:var(--text-primary,#000);">Contact Info</span>
     </div>
 
     <!-- Hero pill — avatar + name + status -->
-    <div style="margin:14px;padding:28px 20px 20px;background:rgba(255,255,255,0.55);backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid rgba(255,255,255,0.7);border-radius:28px;box-shadow:0 8px 32px rgba(0,0,0,0.08),0 1.5px 0 rgba(255,255,255,0.9) inset;text-align:center;">
+    <div style="margin:14px;padding:28px 20px 20px;background:var(--cp-card-bg,rgba(255,255,255,0.62));backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid var(--cp-card-border,rgba(0,0,0,0.05));border-radius:28px;box-shadow:var(--cp-card-shadow,0 8px 28px rgba(0,0,0,0.08));text-align:center;">
         <div style="position:relative;display:inline-block;margin-bottom:14px;">
             <div id="cp-avatar-ring" onclick="openCPStoryOrProfile()" style="width:88px;height:88px;border-radius:50%;padding:3px;background:linear-gradient(135deg,#007AFF,#00C2FF);margin:0 auto;box-shadow:0 6px 24px rgba(0,122,255,0.3);cursor:pointer;display:none;">
                 <img id="cp-avatar" src="https://ui-avatars.com/api/?name=U&background=007AFF&color=fff&size=200" style="width:100%;height:100%;border-radius:50%;object-fit:cover;border:3px solid var(--bg-primary,#fff);">
@@ -2736,24 +2896,24 @@ function authenticateUser() {
     </div>
 
     <!-- Action tiles pill -->
-<div style="margin:0 14px 14px;padding:18px 12px;background:rgba(255,255,255,0.55);backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid rgba(255,255,255,0.7);border-radius:28px;box-shadow:0 8px 32px rgba(0,0,0,0.08),0 1.5px 0 rgba(255,255,255,0.9) inset;display:flex;gap:8px;justify-content:center;">
-    <div id="cp-call-btn" onclick="startRealCall(window._currentChatUserId, document.getElementById('cp-name').textContent, false)" style="flex:1;max-width:62px;aspect-ratio:1;border-radius:18px;background:rgba(255,255,255,0.65);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.9);box-shadow:3px 3px 10px rgba(0,0,0,0.08),-1px -1px 6px rgba(255,255,255,0.8);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;">
+<div style="margin:0 14px 14px;padding:18px 12px;background:var(--cp-card-bg,rgba(255,255,255,0.62));backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid var(--cp-card-border,rgba(0,0,0,0.05));border-radius:28px;box-shadow:var(--cp-card-shadow,0 8px 28px rgba(0,0,0,0.08));display:flex;gap:8px;justify-content:center;">
+    <div id="cp-call-btn" onclick="startRealCall(window._currentChatUserId, document.getElementById('cp-name').textContent, false)" style="flex:1;max-width:62px;aspect-ratio:1;border-radius:18px;background:var(--cp-tile-bg,rgba(0,0,0,0.03));backdrop-filter:blur(20px);border:0.5px solid var(--cp-tile-border,rgba(0,0,0,0.06));box-shadow:var(--cp-tile-shadow,0 2px 10px rgba(0,0,0,0.06));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;">
         <i class="fa-solid fa-phone" style="color:#34C759;font-size:18px;"></i>
         <span style="font-size:10px;font-weight:700;color:#888;">Call</span>
     </div>
-    <div onclick="startRealCall(window._currentChatUserId, document.getElementById('cp-name').textContent, true)" style="flex:1;max-width:62px;aspect-ratio:1;border-radius:18px;background:rgba(255,255,255,0.65);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.9);box-shadow:3px 3px 10px rgba(0,0,0,0.08),-1px -1px 6px rgba(255,255,255,0.8);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;">
+    <div onclick="startRealCall(window._currentChatUserId, document.getElementById('cp-name').textContent, true)" style="flex:1;max-width:62px;aspect-ratio:1;border-radius:18px;background:var(--cp-tile-bg,rgba(0,0,0,0.03));backdrop-filter:blur(20px);border:0.5px solid var(--cp-tile-border,rgba(0,0,0,0.06));box-shadow:var(--cp-tile-shadow,0 2px 10px rgba(0,0,0,0.06));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;">
         <i class="fa-solid fa-video" style="color:#007AFF;font-size:18px;"></i>
         <span style="font-size:10px;font-weight:700;color:#888;">Video</span>
     </div>
-    <div id="cp-mute-btn" onclick="toggleCPMute(this)" style="flex:1;max-width:62px;aspect-ratio:1;border-radius:18px;background:rgba(255,255,255,0.65);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.9);box-shadow:3px 3px 10px rgba(0,0,0,0.08),-1px -1px 6px rgba(255,255,255,0.8);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;">
+    <div id="cp-mute-btn" onclick="toggleCPMute(this)" style="flex:1;max-width:62px;aspect-ratio:1;border-radius:18px;background:var(--cp-tile-bg,rgba(0,0,0,0.03));backdrop-filter:blur(20px);border:0.5px solid var(--cp-tile-border,rgba(0,0,0,0.06));box-shadow:var(--cp-tile-shadow,0 2px 10px rgba(0,0,0,0.06));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;">
         <i class="fa-solid fa-bell-slash" style="color:#FF9500;font-size:18px;"></i>
         <span style="font-size:10px;font-weight:700;color:#888;">Mute</span>
     </div>
-    <div onclick="openCPSearch()" style="flex:1;max-width:62px;aspect-ratio:1;border-radius:18px;background:rgba(255,255,255,0.65);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.9);box-shadow:3px 3px 10px rgba(0,0,0,0.08),-1px -1px 6px rgba(255,255,255,0.8);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;">
+    <div onclick="openCPSearch()" style="flex:1;max-width:62px;aspect-ratio:1;border-radius:18px;background:var(--cp-tile-bg,rgba(0,0,0,0.03));backdrop-filter:blur(20px);border:0.5px solid var(--cp-tile-border,rgba(0,0,0,0.06));box-shadow:var(--cp-tile-shadow,0 2px 10px rgba(0,0,0,0.06));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;">
         <i class="fa-solid fa-magnifying-glass" style="color:#5856D6;font-size:18px;"></i>
         <span style="font-size:10px;font-weight:700;color:#888;">Search</span>
     </div>
-    <div onclick="showCPMoreMenu()" style="flex:1;max-width:62px;aspect-ratio:1;border-radius:18px;background:rgba(255,255,255,0.65);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.9);box-shadow:3px 3px 10px rgba(0,0,0,0.08),-1px -1px 6px rgba(255,255,255,0.8);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;">
+    <div onclick="showCPMoreMenu()" style="flex:1;max-width:62px;aspect-ratio:1;border-radius:18px;background:var(--cp-tile-bg,rgba(0,0,0,0.03));backdrop-filter:blur(20px);border:0.5px solid var(--cp-tile-border,rgba(0,0,0,0.06));box-shadow:var(--cp-tile-shadow,0 2px 10px rgba(0,0,0,0.06));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;">
         <i class="fa-solid fa-ellipsis" style="color:#888;font-size:18px;"></i>
         <span style="font-size:10px;font-weight:700;color:#888;">More</span>
     </div>
@@ -2762,7 +2922,7 @@ function authenticateUser() {
     <!-- Chat settings pill -->
 <div style="margin:0 14px 14px;">
     <p style="font-size:11px;font-weight:800;color:#888;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;padding:0 4px;">Options</p>
-    <div style="background:rgba(255,255,255,0.55);backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid rgba(255,255,255,0.7);border-radius:24px;box-shadow:0 8px 32px rgba(0,0,0,0.08),0 1.5px 0 rgba(255,255,255,0.9) inset;overflow:hidden;">
+    <div style="background:var(--cp-card-bg,rgba(255,255,255,0.62));backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid var(--cp-card-border,rgba(0,0,0,0.05));border-radius:24px;box-shadow:var(--cp-card-shadow,0 8px 28px rgba(0,0,0,0.08));overflow:hidden;">
         <div onclick="openNicknameModal()" style="display:flex;align-items:center;gap:14px;padding:16px 18px;border-bottom:0.5px solid rgba(0,0,0,0.06);cursor:pointer;">
             <div style="width:34px;height:34px;border-radius:10px;background:rgba(0,122,255,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-tag" style="color:#007AFF;font-size:14px;"></i></div>
             <div style="flex:1;">
@@ -3092,17 +3252,17 @@ function authenticateUser() {
   <div class="sub-scroll">
     <div class="settings-section-title">HOW PEOPLE CAN REACH YOU</div>
     <div class="settings-card">
-      <div class="settings-row">
+      <div class="settings-row" onclick="openSettingPicker('msgreq')" style="cursor:pointer;">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-inbox" style="color:#007AFF;"></i>
           <div><b style="font-size:15px;">Message Requests</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Filter who can message you</p></div>
         </div>
-        <span style="color:#888;font-size:13px;">Everyone</span>
+        <span data-setting="msgreq" style="color:#888;font-size:13px;">Everyone</span>
       </div>
-      <div class="settings-row">
+      <div class="settings-row" onclick="openSettingPicker('storyreply')" style="cursor:pointer;">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-reply" style="color:#5856D6;"></i>
           <div><b style="font-size:15px;">Story Replies</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Who can reply to your stories</p></div>
         </div>
-        <span style="color:#888;font-size:13px;">Everyone</span>
+        <span data-setting="storyreply" style="color:#888;font-size:13px;">Everyone</span>
       </div>
     </div>
 
@@ -3213,7 +3373,7 @@ function authenticateUser() {
       </div>
       <div style="display:flex;gap:12px;margin-bottom:16px;">
         <i class="fa-solid fa-eye-slash" style="color:#5856D6;margin-top:2px;flex-shrink:0;"></i>
-        <p style="font-size:14px;color:var(--text-primary,#000);line-height:1.5;margin:0;">They can't see your online status or read receipts — messages move to Requests</p>
+        <p style="font-size:14px;color:var(--text-primary,#000);line-height:1.5;margin:0;">They can't see your online status or read receipts, messages move to Requests</p>
       </div>
       <div style="display:flex;gap:12px;">
         <i class="fa-solid fa-comment-slash" style="color:#FF3B30;margin-top:2px;flex-shrink:0;"></i>
@@ -3261,7 +3421,7 @@ function authenticateUser() {
       <div style="position:absolute;left:-14px;top:50%;transform:translateY(-50%);"><i class="fa-solid fa-user-circle" style="color:#aaa;font-size:13px;"></i></div>
     </div>
     <h2 style="font-size:20px;font-weight:800;color:var(--text-primary,#000);margin-bottom:10px;padding:0 20px;">Limit interactions from people who are bothering you</h2>
-    <p style="font-size:13px;color:#888;margin-bottom:24px;padding:0 20px;">A temporary safe zone — no blocking or unfollowing needed.</p>
+    <p style="font-size:13px;color:#888;margin-bottom:24px;padding:0 20px;">A temporary safe zone, no blocking or unfollowing needed.</p>
 
     <div style="text-align:left;">
       <div class="settings-card" style="margin-bottom:12px;">
@@ -3378,11 +3538,11 @@ function authenticateUser() {
         </div>
         <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
       </div>
-      <div class="settings-row">
+      <div class="settings-row" onclick="openSettingPicker('sensitive')" style="cursor:pointer;">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-eye-slash" style="color:#FF9500;"></i>
           <div><b style="font-size:15px;">Sensitive Content</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Control filtering intensity</p></div>
         </div>
-        <span style="color:#888;font-size:13px;">Standard</span>
+        <span data-setting="sensitive" style="color:#888;font-size:13px;">Standard</span>
       </div>
       <div class="settings-row">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-landmark" style="color:#5856D6;"></i>
@@ -3400,21 +3560,15 @@ function authenticateUser() {
         </div>
         <div class="toggle" onclick="this.classList.toggle('active');"></div>
       </div>
-      <div class="settings-row">
-        <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-chart-bar" style="color:#FF3B30;"></i>
-          <div><b style="font-size:15px;">Hide Activity Bubbles</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Remove like/comment counts in Feed and TrustClips</p></div>
-        </div>
-        <div class="toggle" onclick="this.classList.toggle('active');"></div>
-      </div>
     </div>
 
     <div class="settings-section-title">CURATION</div>
     <div class="settings-card">
-      <div class="settings-row" onclick="showToast('Interested history')">
+      <div class="settings-row" onclick="openInterestHistory('interested')" style="cursor:pointer;">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-thumbs-up" style="color:#34C759;"></i><b style="font-size:15px;">Interested</b></div>
         <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
       </div>
-      <div class="settings-row" onclick="showToast('Not interested history')">
+      <div class="settings-row" onclick="openInterestHistory('notinterested')" style="cursor:pointer;">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-thumbs-down" style="color:#FF3B30;"></i><b style="font-size:15px;">Not Interested</b></div>
         <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
       </div>
@@ -3514,13 +3668,13 @@ function authenticateUser() {
     <div class="settings-card">
       <div class="settings-row">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-circle-play" style="color:#007AFF;"></i>
-          <div><b style="font-size:15px;">Save Story to Archive</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Private backup — only you can see it</p></div>
+          <div><b style="font-size:15px;">Save Story to Archive</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Private backup, only you can see it</p></div>
         </div>
         <div class="toggle active" onclick="this.classList.toggle('active');"></div>
       </div>
       <div class="settings-row">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-tower-broadcast" style="color:#FF3B30;"></i>
-          <div><b style="font-size:15px;">Save Live to Archive</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Private backup — only you can see it</p></div>
+          <div><b style="font-size:15px;">Save Live to Archive</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Private backup, only you can see it</p></div>
         </div>
         <div class="toggle active" onclick="this.classList.toggle('active');"></div>
       </div>
@@ -3960,11 +4114,12 @@ function authenticateUser() {
 
 </div>
 
-<script src="{% static 'core/js/feed.js' %}?v=34"></script>
-<script src="{% static 'core/js/feed-legal.js' %}?v=34"></script>
-<script src="{% static 'core/js/verify.js' %}?v=34"></script>
-<script src="{% static 'core/js/story-music.js' %}?v=34"></script>
-<script src="{% static 'core/js/admin.js' %}?v=34"></script>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
+<script src="{% static 'core/js/feed.js' %}?v=89"></script>
+<script src="{% static 'core/js/feed-legal.js' %}?v=74"></script>
+<script src="{% static 'core/js/verify.js' %}?v=73"></script>
+<script src="{% static 'core/js/story-music.js' %}?v=73"></script>
+<script src="{% static 'core/js/admin.js' %}?v=73"></script>
 <!-- ===== LIVE MINI-PLAYER ===== -->
 <div id="liveMiniPlayer" style="display:none;position:absolute;bottom:max(96px,calc(env(safe-area-inset-bottom)+96px));left:12px;right:12px;z-index:9500;border-radius:20px;overflow:hidden;cursor:pointer;" onclick="maximizeLive()">
     <div style="background:rgba(18,18,18,0.88);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);border:0.5px solid rgba(255,255,255,0.14);border-radius:20px;padding:10px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,0.45);">
@@ -4107,3 +4262,4 @@ function authenticateUser() {
 </div>
 </body>
 </html>
+

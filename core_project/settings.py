@@ -140,7 +140,7 @@ GOOGLE_CLOUD_VISION_API_KEY  = os.environ.get('GOOGLE_CLOUD_VISION_API_KEY', '')
 
 # Verification (Didit — replaces Stripe Identity), email (Brevo), voice (ElevenLabs)
 DIDIT_API_KEY                = os.environ.get('DIDIT_API_KEY', '')
-DIDIT_WORKFLOW_ID            = os.environ.get('DIDIT_WORKFLOW_ID', '')  # create a workflow in the Didit dashboard
+DIDIT_WORKFLOW_ID            = os.environ.get('DIDIT_WORKFLOW_ID', '')
 BREVO_API_KEY                = os.environ.get('BREVO_API_KEY', '')
 ELEVENLABS_API_KEY           = os.environ.get('ELEVENLABS_API_KEY', '')
 

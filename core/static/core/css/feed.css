@@ -191,6 +191,8 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     .verify-gold { color: #FFD700; }
     .verify-silver { color: #C0C0C0; }
     .verify-red { color: #FF3B30; }
+    /* AI-content label badge — shown instead of the tick when a creator marks their content as AI */
+    .tf-ai-badge { display:inline-flex; align-items:center; justify-content:center; background:#AF52DE; color:#fff; font-size:9px; font-weight:800; line-height:1; padding:2px 4px; border-radius:5px; letter-spacing:0.5px; vertical-align:middle; font-style:normal; }
 
     .admin-badge {
         background: #000; color: #fff; font-size: 9px;
@@ -203,9 +205,24 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
        ========================================================================== */
    .splash-screen {
     position: fixed; top: 0; left: 0; width: 100%; height: 100dvh;
-    background: #000; z-index: 9999; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; color: #fff;
-    transition: transform 0.6s cubic-bezier(0.65, 0, 0.35, 1);
+    background: #fff; z-index: 9999; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; color: #000;
+    transition: opacity 0.5s ease;
+}
+   [data-theme="dark"] .splash-screen { background: #000; color: #fff; }
+   .splash-screen.splash-fade-out { opacity: 0; pointer-events: none; }
+
+@keyframes vnTrashDrop {
+    0%   { transform: translateY(0) rotate(0);      opacity: 1; }
+    25%  { transform: translateY(-5px) rotate(-16deg); }
+    55%  { transform: translateY(-2px) rotate(13deg); }
+    100% { transform: translateY(44px) rotate(-8deg); opacity: 0; }
+}
+
+@keyframes liveArFloat {
+    0%   { transform: translateY(0) scale(0.8);   opacity: 0; }
+    15%  { opacity: 1; }
+    100% { transform: translateY(-115vh) scale(1.1); opacity: 0; }
 }
 
 @media (min-width: 500px) {
@@ -215,28 +232,131 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     }
 }
 
-    .auth-step { width: 85%; display: none; animation: fadeUp 0.5s ease backwards; }
+    .auth-step { width: 86%; max-width: 400px; display: none; animation: fadeUp 0.45s ease backwards; }
     .auth-step.active { display: block; }
-#step-register.active {
-    overflow-y: auto;
-    max-height: 85vh;
-    padding-right: 4px;
-    -webkit-overflow-scrolling: touch;
-}
+    /* The detailed registration form scrolls; the create-account entry fills height */
+    #step-register-form.active {
+        overflow-y: auto;
+        max-height: 86vh;
+        padding-right: 4px;
+        -webkit-overflow-scrolling: touch;
+    }
+    #step-register.active { display: flex; flex-direction: column; min-height: 82vh; }
+    .auth-create-mid { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+    .auth-brand { font-size: 40px; font-weight: 900; letter-spacing: -0.5px; margin: 0 0 12px; }
+    .auth-create-title { font-size: 29px; font-weight: 800; margin: 0; }
+    .auth-create-bottom { padding-bottom: 6px; }
+    .auth-terms .lnk { color: #007AFF; font-weight: 600; cursor: pointer; }
 
     .auth-input {
-        width: 100%; padding: 18px; background: #1a1a1a;
-        border: 1px solid #333; border-radius: 18px; margin-bottom: 15px;
-        color: white; font-size: 16px; outline: none; transition: 0.3s;
+        width: 100%; padding: 16px 18px; background: #f4f4f6;
+        border: 1px solid #e5e5ea; border-radius: 16px; margin-bottom: 14px;
+        color: #000; font-size: 16px; outline: none; transition: 0.2s; box-sizing: border-box;
     }
-    .auth-input:focus { border-color: #007AFF; background: #222; }
+    .auth-input::placeholder { color: #9a9aa0; }
+    .auth-input:focus { border-color: #007AFF; background: #fff; }
+    [data-theme="dark"] .auth-input { background: #1a1a1a; border-color: #333; color: #fff; }
+    [data-theme="dark"] .auth-input:focus { border-color: #007AFF; background: #222; }
 
     .auth-btn {
-        width: 100%; padding: 18px; background: #007AFF; color: white;
-        border: none; border-radius: 18px; font-weight: bold; font-size: 16px;
-        cursor: pointer; margin-top: 10px; transition: 0.2s;
+        width: 100%; padding: 16px; background: #007AFF; color: white;
+        border: none; border-radius: 30px; font-weight: 700; font-size: 16px;
+        cursor: pointer; margin-top: 10px; transition: 0.15s;
+        display: flex; align-items: center; justify-content: center; gap: 8px;
     }
     .auth-btn:active { transform: scale(0.98); }
+    /* Button variants */
+    .auth-btn-ghost { background: transparent; color: #007AFF; border: 1.5px solid rgba(0,122,255,0.35); }
+    .auth-btn-outline { background: transparent; color: #000; border: 1.5px solid #d5d5da; }
+    [data-theme="dark"] .auth-btn-outline { color: #fff; border-color: #333; }
+    .auth-btn-dark { background: #000; color: #fff; }
+    [data-theme="dark"] .auth-btn-dark { background: #fff; color: #000; }
+
+    /* ===== Modern auth components (create / login / method sheet) ===== */
+    .auth-logo { width: 60px; height: 60px; border-radius: 50%; background: #000; color: #fff;
+        display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 900; margin: 0 auto; line-height: 1; }
+    [data-theme="dark"] .auth-logo { background: #fff; color: #000; }
+    .auth-logo-center { margin: 0 auto 22px; }
+    .auth-title { font-size: 25px; font-weight: 800; margin: 12px 0 22px; text-align: center; }
+    .auth-title-lg { font-size: 30px; font-weight: 900; margin: 0 0 4px; }
+    .auth-sub { color: #8e8e93; font-size: 14px; margin-bottom: 32px; }
+    .auth-sub-left { color: #8e8e93; font-size: 15px; margin: 4px 0 20px; }
+    .auth-topbar { display: flex; margin-bottom: 18px; }
+    .auth-topbar.end { justify-content: flex-end; }
+    .auth-back { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center;
+        justify-content: center; cursor: pointer; font-size: 18px; color: #000; }
+    [data-theme="dark"] .auth-back { color: #fff; }
+    .auth-cta-stack { display: flex; flex-direction: column; gap: 12px; margin-top: 10px; }
+    .auth-circle-row { display: flex; justify-content: center; gap: 20px; margin: 8px 0 6px; }
+    .auth-circle { width: 56px; height: 56px; border-radius: 50%; border: 1px solid #e0e0e5;
+        background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer;
+        font-size: 22px; color: #000; transition: 0.15s; }
+    .auth-circle:active { transform: scale(0.94); }
+    [data-theme="dark"] .auth-circle { background: transparent; border-color: #333; color: #fff; }
+    .auth-divider { display: flex; align-items: center; gap: 14px; margin: 20px 0; }
+    .auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: #e5e5ea; }
+    [data-theme="dark"] .auth-divider::before, [data-theme="dark"] .auth-divider::after { background: #2a2a2a; }
+    .auth-divider span { color: #8e8e93; font-size: 13px; }
+    .auth-terms { text-align: center; font-size: 12.5px; color: #8e8e93; line-height: 1.6; margin-top: 20px; }
+    .auth-terms b { color: #007AFF; font-weight: 600; }
+    .auth-switch { text-align: center; font-size: 14px; color: #8e8e93; margin-top: 22px; }
+    .auth-switch span { color: #007AFF; font-weight: 700; cursor: pointer; }
+    /* Saved accounts switcher */
+    .saved-account-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+        background: #f7f7f9; border-radius: 16px; margin-bottom: 12px; cursor: pointer; transition: 0.15s; }
+    .saved-account-row:active { transform: scale(0.99); }
+    [data-theme="dark"] .saved-account-row { background: #161616; }
+    .saved-account-avatar { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+    .saved-account-info { flex: 1; min-width: 0; }
+    .saved-account-info b { font-size: 16px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .saved-account-info small { color: #8e8e93; font-size: 14px; }
+    .saved-account-del { color: #8e8e93; font-size: 17px; padding: 8px; cursor: pointer; flex-shrink: 0; }
+    .saved-add-row { display: flex; align-items: center; gap: 14px; padding: 15px 16px;
+        background: #f7f7f9; border-radius: 16px; cursor: pointer; }
+    [data-theme="dark"] .saved-add-row { background: #161616; }
+    .saved-add-plus { font-size: 22px; width: 30px; text-align: center; flex-shrink: 0; }
+    .saved-add-row .saved-add-label { flex: 1; font-weight: 700; font-size: 15px; }
+    /* Login-method bottom sheet */
+    .login-methods-sheet { position: fixed; inset: 0; z-index: 10050; background: rgba(0,0,0,0.5);
+        display: none; align-items: flex-end; justify-content: center; }
+    .login-methods-sheet.active { display: flex; }
+    .login-methods-inner { width: 100%; max-width: 500px; background: #fff; border-radius: 26px 26px 0 0;
+        padding: 12px 20px calc(env(safe-area-inset-bottom,0px) + 26px); animation: slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1); }
+    [data-theme="dark"] .login-methods-inner { background: #1c1c1e; }
+    .lm-handle { width: 40px; height: 5px; border-radius: 3px; background: #d0d0d5; margin: 0 auto 18px; }
+    [data-theme="dark"] .lm-handle { background: #3a3a3c; }
+    .lm-title { display: block; text-align: center; font-size: 17px; font-weight: 800; margin-bottom: 18px; color: #000; }
+    [data-theme="dark"] .lm-title { color: #fff; }
+    .login-method-btn { width: 100%; padding: 15px; margin-bottom: 12px; border-radius: 30px;
+        border: 1.5px solid #e0e0e5; background: transparent; color: #000; font-size: 15px; font-weight: 700;
+        cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; }
+    [data-theme="dark"] .login-method-btn { border-color: #3a3a3c; color: #fff; }
+    .login-method-btn:active { transform: scale(0.98); }
+    /* X-style single-field entry pages (email / username / phone / password) */
+    #step-login-email.active, #step-login-username.active, #step-login-phone.active, #step-login-password.active { display: flex; flex-direction: column; min-height: 82vh; }
+    .auth-x-title { font-size: 33px; font-weight: 800; line-height: 1.12; margin: 6px 0 22px; }
+    .auth-x-field-row { display: flex; align-items: center; gap: 8px; }
+    .auth-x-field { flex: 1; width: 100%; border: none; outline: none; background: transparent; font-size: 26px; font-weight: 500; color: #000; padding: 6px 0; caret-color: #007AFF; }
+    .auth-x-field::placeholder { color: #c4c4c8; }
+    [data-theme="dark"] .auth-x-field { color: #fff; }
+    [data-theme="dark"] .auth-x-field::placeholder { color: #4a4a4e; }
+    .auth-x-prefix { font-size: 26px; font-weight: 500; color: #000; flex-shrink: 0; }
+    [data-theme="dark"] .auth-x-prefix { color: #fff; }
+    .auth-x-flag { width: 54px; height: 42px; border-radius: 9px; background: #f0f0f2; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
+    [data-theme="dark"] .auth-x-flag { background: #1a1a1a; }
+    .auth-x-spacer { flex: 1; min-height: 20px; }
+    .auth-x-continue { width: 100%; padding: 17px; border-radius: 30px; border: none; background: #000; color: #fff; font-weight: 700; font-size: 16px; cursor: pointer; transition: 0.15s; }
+    [data-theme="dark"] .auth-x-continue { background: #fff; color: #000; }
+    .auth-x-continue:disabled { background: #e2e2e6; color: #a6a6ab; cursor: default; }
+    [data-theme="dark"] .auth-x-continue:disabled { background: #2a2a2c; color: #666; }
+    .auth-x-continue:active:not(:disabled) { transform: scale(0.98); }
+    .auth-x-forgot { color: #000; font-size: 15px; font-weight: 600; cursor: pointer; }
+    [data-theme="dark"] .auth-x-forgot { color: #fff; }
+    #step-signup-email.active, #step-signup-code.active, #step-signup-password.active, #step-signup-name.active, #step-signup-username.active, #step-signup-profile.active,
+    #step-signup-dob.active, #step-signup-parent.active, #step-signup-phone-num.active, #step-signup-waiting.active { display: flex; flex-direction: column; min-height: 82vh; }
+    .signup-rec-chip { padding: 8px 14px; border-radius: 20px; border: 1.5px solid #e0e0e5; background: transparent; font-size: 14px; font-weight: 600; cursor: pointer; color: #007AFF; }
+    .signup-rec-chip:active { transform: scale(0.96); }
+    [data-theme="dark"] .signup-rec-chip { border-color: #333; }
 
     .stripe-scan-box {
         width: 100%; height: 200px; border: 2px dashed #333;
@@ -361,8 +481,9 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     min-width: unset;
 }
 
-.app.is-others .nav-container .liquid-pill,
-.app.is-search .nav-container .liquid-pill {
+/* Only the "others" (burger) state grows the pill to fill the row.
+   In search mode the pill keeps its normal size — the search pill grows. */
+.app.is-others .nav-container .liquid-pill {
     flex: 1;
     min-width: 0;
 }
@@ -384,21 +505,22 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     padding: 6px 8px;
     min-width: 100px;
     border-radius: 50px;
-    background: rgba(250, 250, 254, 0.48);
-    backdrop-filter: blur(60px) saturate(150%) brightness(1.01);
-    -webkit-backdrop-filter: blur(60px) saturate(150%) brightness(1.01);
-    border: 0.5px solid rgba(255, 255, 255, 0.42);
-    box-shadow:
-        0 6px 22px rgba(0, 0, 0, 0.06),
-        0 1px 0 rgba(255, 255, 255, 0.65) inset,
-        0 -0.5px 0 rgba(0, 0, 0, 0.03) inset;
+    /* True liquid glass: translucent + high saturation so the feed behind
+       refracts through. No white gloss — just a faint edge and soft depth. */
+    background: rgba(255, 255, 255, 0.16);
+    backdrop-filter: blur(26px) saturate(200%);
+    -webkit-backdrop-filter: blur(26px) saturate(200%);
+    border: 0.5px solid rgba(255, 255, 255, 0.20);
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.12);
     overflow: visible;
+    -webkit-tap-highlight-color: transparent;
     transition:
         min-width 0.55s cubic-bezier(0.32, 0.72, 0, 1),
-        padding 0.55s cubic-bezier(0.32, 0.72, 0, 1),
-        background 0.4s ease,
-        box-shadow 0.4s ease;
+        padding 0.55s cubic-bezier(0.32, 0.72, 0, 1);
 }
+/* Icons sit above the sliding droplet selector. */
+.liquid-pill > .nav-icon,
+.liquid-pill > span { position: relative; z-index: 1; }
 
 /* Glass shimmer sweep */
 
@@ -434,14 +556,11 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     background: #111 !important;
 }
 
-/* Liquid Glass pill — dark glass depth fix */
+/* Liquid Glass pill — dark: translucent so the feed refracts through, no gloss. */
 [data-theme="dark"] .liquid-pill {
-    background: rgba(30, 30, 32, 0.72) !important;
-    border-color: rgba(255,255,255,0.09) !important;
-    box-shadow:
-        0 8px 32px rgba(0,0,0,0.55),
-        0 1px 0 rgba(255,255,255,0.07) inset,
-        0 -0.5px 0 rgba(0,0,0,0.4) inset !important;
+    background: rgba(18, 18, 22, 0.38) !important;
+    border-color: rgba(255,255,255,0.08) !important;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45) !important;
 }
 
 /* Liquid Glass search circle — dark */
@@ -546,9 +665,11 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     padding: 6px 6px;
 }
 
+/* Search mode: pill stays at its normal collapsed size (home + burger). */
 .app.is-search .liquid-pill {
-    min-width: 100%;
-    padding: 6px 14px;
+    flex: none;
+    min-width: unset;
+    padding: 6px 8px;
 }
 
 /* --- Nav Icons --- */
@@ -595,13 +716,63 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     88%  { transform: scale(1.04); }
     100% { transform: scale(1); }
 }
+/* Active icon rides ON the sliding droplet — white glyph, no static blue pill. */
 .nav-icon.nav-active {
-    background: #007AFF !important;
+    background: transparent !important;
     color: #ffffff !important;
-    border-radius: 20px !important;
-    padding: 8px 18px !important;
+    border-radius: 50% !important;
+    padding: 10px !important;
     filter: none !important;
     animation: none !important;
+}
+[data-theme="dark"] .nav-icon.nav-active {
+    background: transparent !important;
+    color: #ffffff !important;
+    border-radius: 50% !important;
+    padding: 10px !important;
+}
+/* Icon the droplet is hovering over mid-drag */
+.nav-icon.nav-drop-hover { color: #ffffff !important; transform: scale(1.06); }
+
+/* ── Liquid-glass droplet selector ──────────────────────────────────────────
+   The blue selector is a water droplet you can grab (from the active icon) and
+   slide across the bar; released over an icon, it navigates there. */
+.nav-droplet {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 46px;
+    height: 40px;
+    transform: translateY(-50%);
+    border-radius: 21px;
+    z-index: 0;                     /* behind the icon glyphs */
+    background: rgba(0, 122, 255, 0.9);
+    box-shadow: 0 4px 12px rgba(0, 122, 255, 0.32);
+    pointer-events: none;           /* drag starts from the active icon on top */
+    transition:
+        left 0.42s cubic-bezier(0.32, 0.72, 0, 1),
+        width 0.34s cubic-bezier(0.32, 0.72, 0, 1),
+        transform 0.24s ease,
+        background 0.24s ease,
+        box-shadow 0.24s ease;
+}
+[data-theme="dark"] .nav-droplet {
+    background: rgba(10, 132, 255, 0.92);
+    box-shadow: 0 4px 14px rgba(10, 132, 255, 0.4);
+}
+/* Picked up → blue water droplet: translucent, glossy highlight, refractive. */
+.nav-droplet.dragging {
+    background:
+        radial-gradient(130% 80% at 32% 20%, rgba(255,255,255,0.65), rgba(255,255,255,0) 46%),
+        rgba(10, 132, 255, 0.5);
+    backdrop-filter: blur(3px) saturate(180%);
+    -webkit-backdrop-filter: blur(3px) saturate(180%);
+    box-shadow:
+        0 10px 24px rgba(10, 132, 255, 0.5),
+        0 2px 6px rgba(255, 255, 255, 0.6) inset,
+        0 -7px 14px rgba(0, 74, 190, 0.5) inset;
+    transform: translateY(-50%) scale(1.18);
+    transition: width 0.2s ease, transform 0.2s cubic-bezier(0.34,1.56,0.64,1), background 0.2s, box-shadow 0.2s;
 }
 
 @property --droplet-angle {
@@ -1022,7 +1193,15 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     .share-sheet { position: absolute; bottom: 0; left: 0; width: 100%; height: 50%; background: #fff; border-radius: 30px 30px 0 0; z-index: 6000; display: none; flex-direction: column; animation: slideUpOverlay 0.3s; padding: 20px; box-shadow: 0 -10px 40px rgba(0,0,0,0.1); }
     .share-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-top: 20px; text-align: center; }
 
-    .thought-cloud { position: absolute !important; bottom: 10px !important; left: 50% !important; top: auto !important; right: auto !important; transform: translateX(-50%) !important; background: #fff; color: #000; padding: 8px 15px; border-radius: 20px; font-size: 13px; font-weight: 700; box-shadow: 0 4px 15px rgba(0,0,0,0.1); animation: float 4s infinite ease-in-out; z-index: 20; cursor: pointer; white-space: nowrap; transition: background 0.3s, color 0.3s; }
+    /* Thought cloud floats at the avatar's top-right, like a thought bubble. */
+    .thought-cloud { position: absolute !important; left: 94px !important; bottom: 34px !important; top: auto !important; right: auto !important; transform: none !important; max-width: 168px; background: #fff; color: #000; padding: 8px 13px; border-radius: 16px 16px 16px 5px; font-size: 13px; font-weight: 700; box-shadow: 0 4px 15px rgba(0,0,0,0.12); animation: thoughtBob 4s infinite ease-in-out; z-index: 20; cursor: pointer; white-space: nowrap; transition: background 0.3s, color 0.3s; }
+    /* GIF/rich thoughts get a wider, wrapping card */
+    .thought-cloud.has-media { white-space: normal !important; width: 150px; padding: 7px !important; border-radius: 14px 14px 14px 5px !important; bottom: 30px !important; }
+    /* Little trailing puffs pointing back down to the avatar */
+    .thought-cloud::before, .thought-cloud::after { content: ''; position: absolute; background: inherit; border-radius: 50%; box-shadow: inherit; }
+    .thought-cloud::before { width: 9px; height: 9px; bottom: -7px; left: 5px; }
+    .thought-cloud::after { width: 5px; height: 5px; bottom: -15px; left: -2px; }
+    @keyframes thoughtBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
 
 [data-theme="dark"] .thought-cloud {
     background: #1e1e22 !important;
@@ -1676,6 +1855,15 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     --nav-bg: rgba(0, 0, 0, 0.95);
     --modal-bg: #1a1a1a;
     --hover-bg: #2a2a2a;
+    /* Contact Info glass cards/tiles — dark (no white gloss) */
+    --cp-card-bg: rgba(30,30,34,0.72);
+    --cp-card-border: rgba(255,255,255,0.08);
+    --cp-card-shadow: 0 8px 28px rgba(0,0,0,0.5);
+    --cp-header-bg: rgba(18,18,20,0.8);
+    --cp-tile-bg: rgba(255,255,255,0.06);
+    --cp-tile-border: rgba(255,255,255,0.09);
+    --cp-tile-shadow: 0 2px 10px rgba(0,0,0,0.4);
+    --cp-row-border: rgba(255,255,255,0.07);
 }
 
 [data-theme="light"] {
@@ -1691,6 +1879,15 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     --nav-bg: rgba(255, 255, 255, 0.95);
     --modal-bg: #ffffff;
     --hover-bg: #f0f0f0;
+    /* Contact Info glass cards/tiles — light */
+    --cp-card-bg: rgba(255,255,255,0.62);
+    --cp-card-border: rgba(0,0,0,0.05);
+    --cp-card-shadow: 0 8px 28px rgba(0,0,0,0.08);
+    --cp-header-bg: rgba(255,255,255,0.75);
+    --cp-tile-bg: rgba(0,0,0,0.03);
+    --cp-tile-border: rgba(0,0,0,0.06);
+    --cp-tile-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    --cp-row-border: rgba(0,0,0,0.06);
 }
 
 /* Apply to ALL elements */
@@ -3374,3 +3571,40 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
   90% { transform: translateX(3px); }
 }
 .tf-shake { animation: tfShake 0.45s cubic-bezier(.36,.07,.19,.97); }
+
+/* ===== Music sticker (composer preview + post cards) — 3 styles ===== */
+.tf-ms { display:flex; align-items:center; gap:12px; background:var(--card-bg,#fff); border:0.5px solid var(--border-color,#ececec); border-radius:18px; padding:11px 13px; box-shadow:0 2px 12px rgba(0,0,0,0.05); }
+.tf-ms-play { width:40px; height:40px; border-radius:50%; border:none; background:#007AFF; color:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; box-shadow:0 2px 10px rgba(0,122,255,0.35); font-size:14px; }
+.tf-ms-name { font-weight:700; color:var(--text-primary,#000); }
+.tf-ms-2 .tf-ms2-info, .tf-ms-3 .tf-ms2-info { flex:1; min-width:0; cursor:pointer; }
+.tf-ms2-info b, .tf-ms1-info .tf-ms-name { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:14px; }
+.tf-ms2-info small { color:#888; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
+
+/* Style 1 — compact bar; title wobbles briefly on play */
+.tf-ms-1 .tf-ms1-info { flex:1; min-width:0; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tf-ms1-info .tf-ms-name { display:inline-block; font-size:14px; vertical-align:bottom; max-width:60%; overflow:hidden; text-overflow:ellipsis; }
+.tf-ms1-sep { color:#aaa; }
+.tf-ms1-artist { color:#888; font-size:13px; }
+@keyframes tfWobble { 0%,100%{transform:rotate(0deg);} 20%{transform:rotate(-6deg);} 40%{transform:rotate(5deg);} 60%{transform:rotate(-3deg);} 80%{transform:rotate(2deg);} }
+.tf-wobble { animation: tfWobble 0.5s ease-in-out 3; transform-origin:left center; }
+
+/* Style 2 — album cover with spinning vinyl disc */
+.tf-ms2-cover { position:relative; width:72px; height:48px; flex-shrink:0; }
+.tf-ms2-art { position:absolute; left:0; top:0; width:48px; height:48px; border-radius:10px; object-fit:cover; z-index:2; box-shadow:0 2px 8px rgba(0,0,0,0.2); }
+.tf-ms2-disc { position:absolute; left:26px; top:3px; width:42px; height:42px; border-radius:50%; background-size:cover; background-position:center; z-index:1; border:3px solid #141414; box-shadow:0 2px 8px rgba(0,0,0,0.3); }
+.tf-ms2-disc::after { content:''; position:absolute; top:50%; left:50%; width:9px; height:9px; border-radius:50%; background:var(--card-bg,#fff); border:1px solid rgba(0,0,0,0.25); transform:translate(-50%,-50%); }
+.tf-ms2-disc.spinning { animation: tfDiscSpin 3s linear infinite; }
+@keyframes tfDiscSpin { to { transform:rotate(360deg); } }
+
+/* Style 3 — synced lyrics with a blue highlight */
+.tf-ms-3 { flex-direction:column; align-items:stretch; }
+.tf-ms3-head { display:flex; align-items:center; gap:10px; }
+.tf-ms3-thumb { width:40px; height:40px; border-radius:8px; object-fit:cover; flex-shrink:0; }
+.tf-ms3-lyrics { margin-top:11px; max-height:132px; overflow-y:auto; -webkit-overflow-scrolling:touch; font-size:14px; line-height:1.7; }
+.tf-ms3-note { font-size:18px; margin-bottom:4px; }
+.tf-ms3-line { color:var(--text-secondary,#9a9a9a); transition:color 0.2s ease, font-weight 0.2s ease; }
+.tf-ms3-line.active { color:#007AFF; font-weight:700; }
+
+/* Location card (post) */
+.tf-loc-card { margin:4px 16px 10px; border-radius:16px; overflow:hidden; border:0.5px solid var(--border-color,#ececec); background:var(--card-bg,#fff); }
+.tf-loc-bar { display:flex; align-items:center; gap:10px; padding:10px 12px; }

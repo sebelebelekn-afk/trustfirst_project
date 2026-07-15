@@ -633,3 +633,158 @@ def elevenlabs_translate_result(request):
         )
     except Exception:
         return JsonResponse({'error': 'Server error'}, status=500)
+
+
+# ---------------------------------------------------------------------------
+# 9b. ELEVENLABS SPEECH-TO-TEXT (auto-captions from the clip's real audio)
+# ---------------------------------------------------------------------------
+@ratelimit(key='ip', rate='10/m', method='POST', block=True)
+@csrf_exempt
+@require_http_methods(["POST"])
+def elevenlabs_transcribe(request):
+    """Transcribe an uploaded video/audio clip to timed words via ElevenLabs
+    Scribe. Returns {text, words:[{text,start,end}]} so the editor can build
+    captions synced to what's actually being said."""
+    try:
+        _verify_supabase_jwt(request)
+    except ValueError as e:
+        if str(e) == 'misconfigured':
+            return JsonResponse({'error': 'Server misconfigured'}, status=500)
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+
+    if not settings.ELEVENLABS_API_KEY:
+        return JsonResponse({'error': 'Transcription not configured'}, status=500)
+
+    f = request.FILES.get('file')
+    if not f:
+        return JsonResponse({'error': 'No file'}, status=400)
+    if f.size > 25 * 1024 * 1024:
+        return JsonResponse({'error': 'Clip too large to caption (max 25MB)'}, status=400)
+
+    try:
+        resp = requests.post(
+            'https://api.elevenlabs.io/v1/speech-to-text',
+            headers={'xi-api-key': settings.ELEVENLABS_API_KEY},
+            data={'model_id': 'scribe_v1', 'timestamps_granularity': 'word', 'tag_audio_events': 'false'},
+            files={'file': (f.name or 'clip', f.read(), f.content_type or 'application/octet-stream')},
+            timeout=120,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            words = []
+            for w in (data.get('words') or []):
+                txt = (w.get('text') or '').strip()
+                if txt and w.get('type', 'word') == 'word':
+                    words.append({'text': txt, 'start': w.get('start'), 'end': w.get('end')})
+            return JsonResponse({'text': data.get('text', ''), 'words': words})
+        return JsonResponse({'error': 'Could not transcribe'}, status=502)
+    except Exception:
+        return JsonResponse({'error': 'Server error'}, status=500)
+
+
+# ---------------------------------------------------------------------------
+# 9c. TEXT TRANSLATION (translate the UI/content to any language, server-side)
+# ---------------------------------------------------------------------------
+@ratelimit(key='ip', rate='60/m', method='POST', block=True)
+@csrf_exempt
+@require_http_methods(["POST"])
+def translate_text(request):
+    """Translate a batch of short strings to a target language. Proxies Google's
+    free gtx endpoint so the browser avoids CORS and no key is exposed. Returns
+    {t:[...]} in the same order (untranslated original on any failure)."""
+    try:
+        body = json.loads(request.body or '{}')
+        texts = body.get('q') or []
+        target = (body.get('target') or 'en')[:6]
+        if not isinstance(texts, list) or not texts:
+            return JsonResponse({'error': 'No text'}, status=400)
+        out = []
+        for t in texts[:60]:
+            s = str(t)[:900]
+            if not s.strip():
+                out.append(s); continue
+            try:
+                r = requests.get(
+                    'https://translate.googleapis.com/translate_a/single',
+                    params={'client': 'gtx', 'sl': 'auto', 'tl': target, 'dt': 't', 'q': s},
+                    timeout=8,
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    translated = ''.join(seg[0] for seg in (data[0] or []) if seg and seg[0])
+                    out.append(translated or s)
+                else:
+                    out.append(s)
+            except Exception:
+                out.append(s)
+        return JsonResponse({'t': out})
+    except Exception:
+        return JsonResponse({'error': 'Server error'}, status=500)
+
+
+# ---------------------------------------------------------------------------
+# 6. LIVEKIT — short-lived access token for real live streaming
+# ---------------------------------------------------------------------------
+@ratelimit(key='ip', rate='30/m', method='GET', block=True)
+@csrf_exempt
+@require_http_methods(["GET"])
+def livekit_token(request):
+    """Mint a LiveKit access token for the signed-in user.
+
+    Requires LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET in the env.
+    Query: ?room=<id>&publish=1 (broadcaster) | publish=0 (viewer) &name=<display>.
+    A LiveKit token is just an HS256 JWT with a `video` grant — no SDK needed.
+    """
+    import time
+    import jwt as pyjwt
+
+    try:
+        payload = _verify_supabase_jwt(request)
+    except ValueError as e:
+        if str(e) == 'misconfigured':
+            return JsonResponse({'error': 'Server misconfigured'}, status=500)
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    except Exception:
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+
+    identity = payload.get('sub')
+    if not identity:
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+
+    api_key = os.environ.get('LIVEKIT_API_KEY', '')
+    api_secret = os.environ.get('LIVEKIT_API_SECRET', '')
+    lk_url = os.environ.get('LIVEKIT_URL', '')
+    if not (api_key and api_secret and lk_url):
+        return JsonResponse({'error': 'Live streaming not configured'}, status=503)
+
+    room = (request.GET.get('room') or '').strip()
+    if not room or len(room) > 128 or not re.match(r'^[A-Za-z0-9_\-]+$', room):
+        return JsonResponse({'error': 'Invalid room'}, status=400)
+
+    can_publish = request.GET.get('publish') == '1'
+    display_name = (request.GET.get('name') or identity)[:60]
+
+    now = int(time.time())
+    grant = {
+        'room': room,
+        'roomJoin': True,
+        'canPublish': can_publish,
+        'canPublishData': True,
+        'canSubscribe': True,
+    }
+    token = pyjwt.encode(
+        {
+            'iss': api_key,
+            'sub': identity,
+            'nbf': now,
+            'iat': now,
+            'exp': now + 6 * 3600,
+            'name': display_name,
+            'video': grant,
+        },
+        api_secret,
+        algorithm='HS256',
+    )
+    if isinstance(token, bytes):
+        token = token.decode('utf-8')
+    return JsonResponse({'token': token, 'url': lk_url, 'identity': identity})

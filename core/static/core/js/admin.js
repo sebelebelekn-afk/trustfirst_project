@@ -1,7 +1,5 @@
 // ============================================================
 // ADMIN DASHBOARD — moderation & verification review.
-// Visible only to is_admin users. Reads the moderation tables
-// (RLS already restricts these to admins / owners).
 // ============================================================
 function openAdminDashboard() {
     if (!currentUser || !currentUser.is_admin) { showToast('Admins only'); return; }

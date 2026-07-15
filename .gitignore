@@ -7,3 +7,14 @@ staticfiles/
 node_modules/
 *.log
 media/
+
+# IDE / editor
+.idea/
+.vscode/
+
+# Tooling (Claude Code)
+.claude/
+
+# Remotion promo build artifacts
+.remotion/
+.cache/

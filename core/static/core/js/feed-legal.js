@@ -48,7 +48,7 @@ var _tfPrivacyHTML = `
     </div>
     <div style="border-left:3px solid rgba(0,122,255,0.25);padding-left:16px;margin-bottom:12px;">
       <b style="font-size:14px;color:var(--text-primary,#000);">For verification:</b>
-      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.7;margin:4px 0 0;">Government ID (via Stripe KYC) or facial verification — used strictly for safety, never stored raw.</p>
+      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.7;margin:4px 0 0;">Government ID (via Didit) or facial verification, used strictly for safety, never stored raw.</p>
     </div>
     <div style="border-left:3px solid rgba(0,122,255,0.25);padding-left:16px;">
       <b style="font-size:14px;color:var(--text-primary,#000);">Automatically collected:</b>
@@ -65,7 +65,7 @@ var _tfPrivacyHTML = `
   <div style="margin-bottom:28px;">
     <h2 style="font-size:18px;font-weight:800;color:var(--text-primary,#000);margin:0 0 4px;">3. Sharing</h2>
     <div style="width:32px;height:3px;background:#007AFF;border-radius:2px;margin-bottom:14px;"></div>
-    <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;">Only with trusted service providers (Stripe, cloud hosting) and only when required by South African law. <strong>Never sold to third parties.</strong></p>
+    <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;">Only with trusted service providers (Didit, cloud hosting) and only when required by South African law. <strong>Never sold to third parties.</strong></p>
   </div>
 
   <div style="margin-bottom:28px;">
@@ -74,8 +74,14 @@ var _tfPrivacyHTML = `
     <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;">Access, edit, or delete your data at any time from Settings → Privacy. Account deletion removes all your data immediately from our systems.</p>
   </div>
 
+  <div style="margin-bottom:28px;">
+    <h2 style="font-size:18px;font-weight:800;color:var(--text-primary,#000);margin:0 0 4px;">5. Cookies &amp; Local Storage</h2>
+    <div style="width:32px;height:3px;background:#007AFF;border-radius:2px;margin-bottom:14px;"></div>
+    <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;">We use device storage (cookies and local storage) only to keep you signed in, remember your preferences such as light or dark mode, and let the app work offline. We do <strong>not</strong> use advertising or third-party tracking cookies. You can clear this at any time from your browser or device settings.</p>
+  </div>
+
   <div style="margin-bottom:32px;">
-    <h2 style="font-size:18px;font-weight:800;color:var(--text-primary,#000);margin:0 0 4px;">5. Contact</h2>
+    <h2 style="font-size:18px;font-weight:800;color:var(--text-primary,#000);margin:0 0 4px;">6. Contact</h2>
     <div style="width:32px;height:3px;background:#007AFF;border-radius:2px;margin-bottom:14px;"></div>
     <div style="background:var(--bg-secondary,#f5f5f5);border-radius:16px;padding:18px 20px;">
       <p style="font-size:14px;color:var(--text-secondary,#555);margin:0 0 4px;"><i class="fa-solid fa-envelope" style="color:#007AFF;margin-right:8px;"></i>privacy@trustfirst.app</p>
@@ -104,7 +110,7 @@ var _tfTermsHTML = `
         </div>
         <b style="font-size:16px;color:var(--text-primary,#000);">1. The Service</b>
       </div>
-      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.7;margin:0;">TrustFirst is a global social platform for creating content, following people, messaging, and livestreaming — built on safety and authenticity.</p>
+      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.7;margin:0;">TrustFirst is a global social platform for creating content, following people, messaging, and livestreaming, built on safety and authenticity.</p>
     </div>
 
     <div style="background:var(--bg-secondary,#f8f8f8);border-radius:18px;padding:20px 22px;">
@@ -124,7 +130,7 @@ var _tfTermsHTML = `
         </div>
         <b style="font-size:16px;color:var(--text-primary,#000);">3. Verification</b>
       </div>
-      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.7;margin:0;">Verified users get full platform access — posting, commenting, messaging, going live. Non-verified users can view, bookmark, and share only.</p>
+      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.7;margin:0;">Verified users get full platform access, posting, commenting, messaging, going live. Non-verified users can view, bookmark, and share only.</p>
     </div>
 
     <div style="background:var(--bg-secondary,#f8f8f8);border-radius:18px;padding:20px 22px;">
