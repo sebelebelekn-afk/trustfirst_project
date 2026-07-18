@@ -33212,19 +33212,42 @@ function edFmt(ms) { var s=Math.floor(ms/1000); return Math.floor(s/60)+':'+(s%6
 function editorUndo() {
     if (edState.historyIndex <= 0) { showToast('Nothing to undo'); return; }
     edState.historyIndex--;
-    var snap = JSON.parse(edState.history[edState.historyIndex]);
-    edState.clips = snap.clips; edState.audioTracks = snap.audioTracks; edState.textOverlays = snap.textOverlays;
-    edRenderTimeline(); triggerHaptic(8);
+    _edApplySnapshot(JSON.parse(edState.history[edState.historyIndex]));
+    triggerHaptic(8);
 }
 function editorRedo() {
     if (edState.historyIndex >= edState.history.length - 1) { showToast('Nothing to redo'); return; }
     edState.historyIndex++;
-    var snap = JSON.parse(edState.history[edState.historyIndex]);
-    edState.clips = snap.clips; edState.audioTracks = snap.audioTracks; edState.textOverlays = snap.textOverlays;
-    edRenderTimeline(); triggerHaptic(8);
+    _edApplySnapshot(JSON.parse(edState.history[edState.historyIndex]));
+    triggerHaptic(8);
+}
+// Restoring state is not enough on its own - the text layer and the video's
+// effect are rendered separately, so they have to be re-applied too. Effect CSS
+// is set directly (not via edApplyEffect) so this never pushes new history.
+function _edApplySnapshot(snap) {
+    edState.clips = snap.clips || [];
+    edState.audioTracks = snap.audioTracks || [];
+    edState.textOverlays = snap.textOverlays || [];
+    edRenderTimeline();
+    if (typeof edRenderTextOverlays === 'function') edRenderTextOverlays();
+    var vid = document.getElementById('edVideo');
+    if (vid && typeof _edEffectCss !== 'undefined') {
+        var css = _edEffectCss[snap.effect || 'none'] || { f: 'none' };
+        vid.style.filter = css.f || 'none';
+        vid.style.transform = css.t || '';
+    }
+    window._edCurrentEffect = snap.effect || 'none';
+    edState.isDirty = true;
+    editorSaveDraft(false);
 }
 function edSaveHistory() {
-    var snap = JSON.stringify({ clips: edState.clips, audioTracks: edState.audioTracks, textOverlays: edState.textOverlays });
+    var snap = JSON.stringify({
+        clips: edState.clips,
+        audioTracks: edState.audioTracks,
+        textOverlays: edState.textOverlays,
+        effect: window._edCurrentEffect || 'none'
+    });
+    if (edState.history[edState.historyIndex] === snap) return;   // no-op edits
     edState.history = edState.history.slice(0, edState.historyIndex + 1);
     edState.history.push(snap);
     if (edState.history.length > 50) edState.history.shift();
@@ -34066,63 +34089,94 @@ function edSliderClick(e, type) {
     if (type === 'hue') { var h = Math.round(pct*360); _edTextState.color = 'hsl('+h+',100%,50%)'; }
     edTextTab('color');
 }
-function edApplyText() {
-    var inp = document.getElementById('edTxtInput');
-    if (inp) _edTextState.text = inp.value.trim();
-    if (!_edTextState.text) { document.getElementById('edTextSheet').remove(); return; }
-    var layer = document.getElementById('edTextLayer');
-    if (layer) {
-        var el = document.createElement('div');
-        var fontMap = {Classic:'sans-serif',Modern:'"SF Pro Display",sans-serif',Poster:'Georgia,serif',Bubble:'Arial Rounded MT Bold,sans-serif',Typewriter:'"Courier New",monospace',Serif:'Georgia,serif',Mono:'monospace',Rounded:'Arial,sans-serif'};
-        var effectMap = {Neon:'text-shadow:0 0 10px '+_edTextState.color+',0 0 20px '+_edTextState.color+';','Hard Shadow':'text-shadow:3px 3px 0 #000;','3D Offset':'text-shadow:2px 2px 0 #555,4px 4px 0 #333;',Pixel:'letter-spacing:3px;',Glow:'text-shadow:0 0 14px '+_edTextState.color+',0 0 28px '+_edTextState.color+';',Retro:'letter-spacing:3px;text-transform:uppercase;'};
-        el.textContent = _edTextState.text;
-        // #edTextLayer is pointer-events:none so taps fall through to the video.
-        // Each text item switches them back on, otherwise it can't be moved or
-        // removed at all (which is why dragging silently did nothing before).
-        el.style.cssText = 'position:absolute;left:10%;right:10%;top:40%;text-align:'+_edTextState.align+';color:'+_edTextState.color+';font-size:22px;font-weight:800;font-family:'+fontMap[_edTextState.font]+';cursor:move;padding:4px 8px;pointer-events:auto;touch-action:none;-webkit-user-select:none;user-select:none;'+(effectMap[_edTextState.effect]||'');
+// Text overlays live in edState, so they survive undo/redo and draft restore.
+// They used to be raw DOM nodes, which is why undo could never move them back.
+var _edFontMap = {Classic:'sans-serif',Modern:'"SF Pro Display",sans-serif',Poster:'Georgia,serif',Bubble:'Arial Rounded MT Bold,sans-serif',Typewriter:'"Courier New",monospace',Serif:'Georgia,serif',Mono:'monospace',Rounded:'Arial,sans-serif'};
+function _edTextEffectCss(effect, color) {
+    var m = {
+        'Neon':'text-shadow:0 0 10px '+color+',0 0 20px '+color+';',
+        'Hard Shadow':'text-shadow:3px 3px 0 #000;',
+        '3D Offset':'text-shadow:2px 2px 0 #555,4px 4px 0 #333;',
+        'Pixel':'letter-spacing:3px;',
+        'Glow':'text-shadow:0 0 14px '+color+',0 0 28px '+color+';',
+        'Retro':'letter-spacing:3px;text-transform:uppercase;'
+    };
+    return m[effect] || '';
+}
 
-        // Remove control
+function edRenderTextOverlays() {
+    var layer = document.getElementById('edTextLayer');
+    if (!layer) return;
+    Array.prototype.slice.call(layer.querySelectorAll('.ed-text-item')).forEach(function(n) { n.remove(); });
+    (edState.textOverlays || []).forEach(function(t) {
+        var el = document.createElement('div');
+        el.className = 'ed-text-item';
+        el.setAttribute('data-id', t.id);
+        el.textContent = t.text;
+        // The layer is pointer-events:none so taps reach the video; each item
+        // turns them back on so it can be dragged and removed.
+        el.style.cssText = 'position:absolute;left:' + t.left + ';top:' + t.top + ';' +
+            (t.right ? 'right:' + t.right + ';' : '') +
+            'text-align:' + t.align + ';color:' + t.color + ';font-size:22px;font-weight:800;font-family:' +
+            (_edFontMap[t.font] || 'sans-serif') + ';cursor:move;padding:4px 8px;pointer-events:auto;' +
+            'touch-action:none;-webkit-user-select:none;user-select:none;' + _edTextEffectCss(t.effect, t.color);
+
         var del = document.createElement('div');
         del.textContent = '✕';
         del.title = 'Remove text';
         del.style.cssText = 'position:absolute;top:-11px;right:-11px;width:23px;height:23px;border-radius:50%;background:rgba(0,0,0,0.75);color:#fff;font-size:11px;line-height:23px;text-align:center;cursor:pointer;pointer-events:auto;font-weight:700;';
         del.addEventListener('click', function(ev) {
             ev.stopPropagation();
-            el.remove();
+            edState.textOverlays = edState.textOverlays.filter(function(x) { return x.id !== t.id; });
+            edRenderTextOverlays();
             edState.isDirty = true; edRenderTimeline(); edSaveHistory(); editorSaveDraft(false);
             showToast('Text removed');
         });
         el.appendChild(del);
 
-        // Drag — mouse and touch (desktop editing was impossible before).
-        function edDragFrom(startX, startY) {
+        function from(sx, sy) {
             var ox = el.offsetLeft, oy = el.offsetTop;
             return function(cx, cy) {
-                el.style.left = (ox + cx - startX) + 'px';
-                el.style.top  = (oy + cy - startY) + 'px';
-                el.style.right = 'auto';
+                t.left = (ox + cx - sx) + 'px';
+                t.top  = (oy + cy - sy) + 'px';
+                t.right = '';
+                el.style.left = t.left; el.style.top = t.top; el.style.right = 'auto';
             };
         }
-        function edDragDone() { edState.isDirty = true; editorSaveDraft(false); }
+        function done() { edState.isDirty = true; edSaveHistory(); editorSaveDraft(false); }
         el.addEventListener('touchstart', function(e) {
             if (e.target === del) return;
-            var t = e.touches[0], move = edDragFrom(t.clientX, t.clientY);
+            var pt = e.touches[0], move = from(pt.clientX, pt.clientY);
             function mv(ev) { move(ev.touches[0].clientX, ev.touches[0].clientY); }
-            function en() { document.removeEventListener('touchmove', mv); document.removeEventListener('touchend', en); edDragDone(); }
+            function en() { document.removeEventListener('touchmove', mv); document.removeEventListener('touchend', en); done(); }
             document.addEventListener('touchmove', mv, { passive: true });
             document.addEventListener('touchend', en);
         }, { passive: true });
         el.addEventListener('mousedown', function(e) {
             if (e.target === del) return;
             e.preventDefault();
-            var move = edDragFrom(e.clientX, e.clientY);
+            var move = from(e.clientX, e.clientY);
             function mv(ev) { move(ev.clientX, ev.clientY); }
-            function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); edDragDone(); }
+            function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); done(); }
             document.addEventListener('mousemove', mv);
             document.addEventListener('mouseup', up);
         });
         layer.appendChild(el);
-    }
+    });
+}
+
+function edApplyText() {
+    var inp = document.getElementById('edTxtInput');
+    if (inp) _edTextState.text = inp.value.trim();
+    if (!_edTextState.text) { var s0 = document.getElementById('edTextSheet'); if (s0) s0.remove(); return; }
+    edState.textOverlays = edState.textOverlays || [];
+    edState.textOverlays.push({
+        id: 't_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+        text: _edTextState.text, font: _edTextState.font, color: _edTextState.color,
+        align: _edTextState.align, effect: _edTextState.effect,
+        left: '10%', right: '10%', top: '40%'
+    });
+    edRenderTextOverlays();
     edState.isDirty = true; edRenderTimeline(); edSaveHistory(); editorSaveDraft(false);
     var sheet = document.getElementById('edTextSheet');
     if (sheet) sheet.remove();
@@ -34626,13 +34680,52 @@ function edCutoutApply() {
     edState.isDirty = true;
 }
 
+// Shared confirm dialog. It was being called in two places ("Skip identity
+// verification?", "Delete this draft?") but never defined anywhere, so those
+// flows threw a ReferenceError instead of asking.
+function tfConfirm(title, onConfirm, opts) {
+    opts = opts || {};
+    var existing = document.getElementById('tfConfirmOverlay');
+    if (existing) existing.remove();
+    var ov = document.createElement('div');
+    ov.id = 'tfConfirmOverlay';
+    ov.style.cssText = 'position:absolute;inset:0;z-index:30000;background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:26px;';
+    var iconHtml = opts.icon
+        ? '<div style="width:56px;height:56px;border-radius:50%;background:' + (opts.iconBg || 'rgba(0,122,255,0.1)') + ';display:flex;align-items:center;justify-content:center;margin:0 auto 16px;"><i class="' + opts.icon + '" style="color:' + (opts.iconColor || '#007AFF') + ';font-size:23px;"></i></div>'
+        : '';
+    ov.innerHTML =
+        '<div style="width:100%;max-width:340px;background:var(--card-bg,#fff);border-radius:22px;padding:24px 22px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.35);animation:modalUp 0.28s ease;">' +
+            iconHtml +
+            '<h3 style="font-size:19px;font-weight:800;color:var(--text-primary,#000);margin:0 0 8px;">' + escapeHtml(title || 'Are you sure?') + '</h3>' +
+            (opts.sub ? '<p style="font-size:14px;color:#888;line-height:1.55;margin:0 0 20px;">' + escapeHtml(opts.sub) + '</p>' : '<div style="height:12px;"></div>') +
+            '<button id="tfConfirmYes" style="width:100%;padding:15px;border-radius:14px;border:none;background:' + (opts.confirmBg || '#007AFF') + ';color:#fff;font-size:16px;font-weight:700;cursor:pointer;">' + escapeHtml(opts.confirmLabel || 'Continue') + '</button>' +
+            '<button id="tfConfirmNo" style="width:100%;padding:13px;border-radius:14px;border:none;background:transparent;color:#888;font-size:15px;font-weight:600;cursor:pointer;margin-top:6px;">' + escapeHtml(opts.cancelLabel || 'Cancel') + '</button>' +
+        '</div>';
+    (document.getElementById('app') || document.body).appendChild(ov);
+    ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+    document.getElementById('tfConfirmNo').onclick = function() { ov.remove(); triggerHaptic(8); };
+    document.getElementById('tfConfirmYes').onclick = function() {
+        ov.remove(); triggerHaptic(15);
+        if (typeof onConfirm === 'function') onConfirm();
+    };
+}
+
 function edResetCutout() {
-    var vid = document.getElementById('edVideo');
-    if (vid) vid.style.filter = 'none';
-    var picker = document.getElementById('edChromaPicker');
-    if (picker) picker.remove();
-    showToast('Reset');
-    triggerHaptic(8);
+    tfConfirm('Reset to original?', function() {
+        var vid = document.getElementById('edVideo');
+        if (vid) { vid.style.filter = 'none'; vid.style.transform = ''; }
+        window._edCurrentEffect = 'none';
+        var picker = document.getElementById('edChromaPicker'); if (picker) picker.remove();
+        edState.textOverlays = [];
+        if (typeof edRenderTextOverlays === 'function') edRenderTextOverlays();
+        edState.isDirty = true;
+        edRenderTimeline(); edSaveHistory(); editorSaveDraft(false);
+        showToast('Reset to original');
+    }, {
+        icon: 'fa-solid fa-rotate-left', iconBg: 'rgba(255,59,48,0.1)', iconColor: '#FF3B30',
+        sub: 'All edits made will be removed.',
+        confirmLabel: 'Continue', cancelLabel: 'Cancel', confirmBg: '#FF3B30'
+    });
 }
 
 function edOpenFilterPanel() {
@@ -35006,6 +35099,7 @@ function draftContinue() {
         edState.textOverlays = draft.textOverlays || [];
         edState.playheadMs = draft.playheadMs || 0;
         edState.isDirty = false;
+        if (typeof edRenderTextOverlays === 'function') edRenderTextOverlays();
     } catch(e) { showToast('Could not load draft — starting fresh'); }
     var modal = document.getElementById('draftRecoveryModal');
     if (modal) modal.classList.remove('active');
