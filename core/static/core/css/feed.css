@@ -15,7 +15,7 @@
         display: flex;
         justify-content: center;
         align-items: center;
-        min-height: 100vh;
+        min-height: 100vh; min-height: 100dvh;
     }
 
     /* Device Shell - Responsive to 100% of Viewport */
@@ -239,11 +239,11 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     /* The detailed registration form scrolls; the create-account entry fills height */
     #step-register-form.active {
         overflow-y: auto;
-        max-height: 86vh;
+        max-height: 86dvh;
         padding-right: 4px;
         -webkit-overflow-scrolling: touch;
     }
-    #step-register.active { display: flex; flex-direction: column; min-height: 82vh; }
+    #step-register.active { display: flex; flex-direction: column; min-height: 82dvh; }
     .auth-create-mid { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
     .auth-brand { font-size: 40px; font-weight: 900; letter-spacing: -0.5px; margin: 0 0 12px; }
     .auth-create-title { font-size: 29px; font-weight: 800; margin: 0; }
@@ -335,7 +335,7 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     [data-theme="dark"] .login-method-btn { border-color: #3a3a3c; color: #fff; }
     .login-method-btn:active { transform: scale(0.98); }
     /* X-style single-field entry pages (email / username / phone / password) */
-    #step-login-email.active, #step-login-username.active, #step-login-phone.active, #step-login-password.active { display: flex; flex-direction: column; min-height: 82vh; }
+    #step-login-email.active, #step-login-username.active, #step-login-phone.active, #step-login-password.active { display: flex; flex-direction: column; min-height: 82dvh; }
     .auth-x-title { font-size: 33px; font-weight: 800; line-height: 1.12; margin: 6px 0 22px; }
     .auth-x-field-row { display: flex; align-items: center; gap: 8px; }
     .auth-x-field { flex: 1; width: 100%; border: none; outline: none; background: transparent; font-size: 26px; font-weight: 500; color: #000; padding: 6px 0; caret-color: #007AFF; }
@@ -355,7 +355,7 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     .auth-x-forgot { color: #000; font-size: 15px; font-weight: 600; cursor: pointer; }
     [data-theme="dark"] .auth-x-forgot { color: #fff; }
     #step-signup-email.active, #step-signup-code.active, #step-signup-password.active, #step-signup-name.active, #step-signup-username.active, #step-signup-profile.active,
-    #step-signup-dob.active, #step-signup-parent.active, #step-signup-phone-num.active, #step-signup-waiting.active { display: flex; flex-direction: column; min-height: 82vh; }
+    #step-signup-dob.active, #step-signup-parent.active, #step-signup-phone-num.active, #step-signup-waiting.active { display: flex; flex-direction: column; min-height: 82dvh; }
     .signup-rec-chip { padding: 8px 14px; border-radius: 20px; border: 1.5px solid #e0e0e5; background: transparent; font-size: 14px; font-weight: 600; cursor: pointer; color: #007AFF; }
     .signup-rec-chip:active { transform: scale(0.96); }
     [data-theme="dark"] .signup-rec-chip { border-color: #333; }

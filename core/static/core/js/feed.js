@@ -33738,6 +33738,25 @@ function edPickerFileChosen(inp) {
     document.getElementById('edGalleryPicker')?.remove();
     edAddOverlayItem(url, isVideo, file.name);
 }
+// Keep a dragged overlay/sticker partly inside the frame. Without this a drag
+// can push an item fully off the canvas, taking its ✕ with it, so it can be
+// neither grabbed back nor removed.
+function _edClampPos(wrap, nx, ny) {
+    var area = wrap.offsetParent || wrap.parentElement;
+    var grab = 44;   // always leave a finger-sized handle inside the frame
+    if (area && area.clientWidth) {
+        nx = Math.max(grab - wrap.offsetWidth, Math.min(nx, area.clientWidth - grab));
+        ny = Math.max(12, Math.min(ny, area.clientHeight - grab));
+    }
+    return { x: nx, y: ny };
+}
+
+function _edClampWidth(wrap, w, min) {
+    var area = wrap.offsetParent || wrap.parentElement;
+    var max = (area && area.clientWidth) ? area.clientWidth : 4000;
+    return Math.max(min || 60, Math.min(w, max));
+}
+
 function edAddOverlayItem(url, isVideo, name) {
     var previewArea = document.getElementById('edPreviewArea');
     if (!previewArea) return;
@@ -33766,13 +33785,76 @@ function edAddOverlayItem(url, isVideo, name) {
         wrap.innerHTML = '<img src="'+url+'" style="width:100%;display:block;">';
     }
     previewArea.appendChild(wrap);
-    // Drag
-    var startX, startY, ox, oy;
-    function getPos(e){ return e.touches ? {x:e.touches[0].clientX, y:e.touches[0].clientY} : {x:e.clientX, y:e.clientY}; }
-    wrap.addEventListener('touchstart', function(e){ var pos=getPos(e); startX=pos.x; startY=pos.y; var r=previewArea.getBoundingClientRect(); ox=wrap.offsetLeft; oy=wrap.offsetTop; }, {passive:true});
-    wrap.addEventListener('touchmove', function(e){ var pos=getPos(e); wrap.style.left=(ox+pos.x-startX)+'px'; wrap.style.top=(oy+pos.y-startY)+'px'; }, {passive:true});
-    wrap.onclick = function(e){ if(Math.abs(e.clientX-startX)<5) edShowOverlayPanel(); };
-    showToast('Use as overlay ✅'); triggerHaptic(15); edState.isDirty = true;
+    // Remove + resize controls. Previously the overlay only had touch drag, and
+    // its click handler compared e.clientX against a startX that was set solely
+    // in touchstart — so on desktop that was NaN, the action panel never opened
+    // and the overlay could not be removed at all.
+    var del = document.createElement('div');
+    del.textContent = '✕';
+    del.title = 'Remove overlay';
+    del.style.cssText = 'position:absolute;top:-11px;right:-11px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,0.8);color:#fff;font-size:12px;line-height:24px;text-align:center;cursor:pointer;z-index:2;font-weight:700;';
+    del.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        wrap.remove();
+        var badgeEl = document.getElementById('overlayClipBadge'); if (badgeEl) badgeEl.remove();
+        var pnl = document.getElementById('edOverlayActionPanel'); if (pnl) pnl.remove();
+        edState.isDirty = true;
+        if (typeof edSaveHistory === 'function') edSaveHistory();
+        showToast('Overlay removed');
+    });
+    wrap.appendChild(del);
+
+    var grip = document.createElement('div');
+    grip.title = 'Resize';
+    grip.style.cssText = 'position:absolute;right:-9px;bottom:-9px;width:20px;height:20px;border-radius:50%;background:#5856D6;border:2px solid #fff;cursor:nwse-resize;z-index:2;';
+    wrap.appendChild(grip);
+
+    function pt(e) { var t = (e.touches && e.touches[0]) || e; return { x: t.clientX, y: t.clientY }; }
+
+    function beginDrag(e) {
+        if (e.target === del || e.target === grip) return;
+        if (e.cancelable) e.preventDefault();
+        var p0 = pt(e), ox = wrap.offsetLeft, oy = wrap.offsetTop, moved = false;
+        function mv(ev) {
+            var p = pt(ev);
+            if (Math.abs(p.x - p0.x) > 3 || Math.abs(p.y - p0.y) > 3) moved = true;
+            var c = _edClampPos(wrap, ox + p.x - p0.x, oy + p.y - p0.y);
+            wrap.style.left = c.x + 'px';
+            wrap.style.top = c.y + 'px';
+        }
+        function end() {
+            document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', end);
+            document.removeEventListener('touchmove', mv); document.removeEventListener('touchend', end);
+            if (moved) { edState.isDirty = true; if (typeof edSaveHistory === 'function') edSaveHistory(); }
+            else { edShowOverlayPanel(); }   // a tap (not a drag) opens the actions
+        }
+        document.addEventListener('mousemove', mv); document.addEventListener('mouseup', end);
+        document.addEventListener('touchmove', mv, { passive: false }); document.addEventListener('touchend', end);
+    }
+    wrap.addEventListener('mousedown', beginDrag);
+    wrap.addEventListener('touchstart', beginDrag, { passive: false });
+
+    function beginResize(e) {
+        e.stopPropagation();
+        if (e.cancelable) e.preventDefault();
+        var p0 = pt(e), w0 = wrap.offsetWidth;
+        function mv(ev) {
+            var p = pt(ev);
+            wrap.style.width = _edClampWidth(wrap, w0 + (p.x - p0.x), 60) + 'px';
+        }
+        function end() {
+            document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', end);
+            document.removeEventListener('touchmove', mv); document.removeEventListener('touchend', end);
+            edState.isDirty = true;
+            if (typeof edSaveHistory === 'function') edSaveHistory();
+        }
+        document.addEventListener('mousemove', mv); document.addEventListener('mouseup', end);
+        document.addEventListener('touchmove', mv, { passive: false }); document.addEventListener('touchend', end);
+    }
+    grip.addEventListener('mousedown', beginResize);
+    grip.addEventListener('touchstart', beginResize, { passive: false });
+
+    showToast('Overlay added'); triggerHaptic(15); edState.isDirty = true;
 }
 function edShowOverlayPanel() {
     var existing = document.getElementById('edOverlayActionPanel');
@@ -35113,6 +35195,99 @@ function edApplyFilter(id) {
 }
 
 /* ---- STICKER TRAY ---- */
+// Shared drag / resize / remove for editor stickers.
+function _edMakeAdjustable(wrap, removeMsg) {
+    var del = document.createElement('div');
+    del.textContent = '✕';
+    del.title = 'Remove';
+    del.style.cssText = 'position:absolute;top:-11px;right:-11px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,0.8);color:#fff;font-size:12px;line-height:24px;text-align:center;cursor:pointer;z-index:2;font-weight:700;';
+    del.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        wrap.remove();
+        edState.isDirty = true;
+        if (typeof edSaveHistory === 'function') edSaveHistory();
+        showToast(removeMsg || 'Removed');
+    });
+    wrap.appendChild(del);
+
+    var grip = document.createElement('div');
+    grip.title = 'Resize';
+    grip.style.cssText = 'position:absolute;right:-9px;bottom:-9px;width:20px;height:20px;border-radius:50%;background:#007AFF;border:2px solid #fff;cursor:nwse-resize;z-index:2;';
+    wrap.appendChild(grip);
+
+    function pt(e) { var t = (e.touches && e.touches[0]) || e; return { x: t.clientX, y: t.clientY }; }
+    function commit() { edState.isDirty = true; if (typeof edSaveHistory === 'function') edSaveHistory(); }
+
+    function drag(e) {
+        if (e.target === del || e.target === grip) return;
+        if (e.cancelable) e.preventDefault();
+        var p0 = pt(e), ox = wrap.offsetLeft, oy = wrap.offsetTop;
+        function mv(ev) {
+            var p = pt(ev);
+            var c = _edClampPos(wrap, ox + p.x - p0.x, oy + p.y - p0.y);
+            wrap.style.left = c.x + 'px'; wrap.style.top = c.y + 'px';
+        }
+        function end() {
+            document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', end);
+            document.removeEventListener('touchmove', mv); document.removeEventListener('touchend', end);
+            commit();
+        }
+        document.addEventListener('mousemove', mv); document.addEventListener('mouseup', end);
+        document.addEventListener('touchmove', mv, { passive: false }); document.addEventListener('touchend', end);
+    }
+    function resize(e) {
+        e.stopPropagation();
+        if (e.cancelable) e.preventDefault();
+        var p0 = pt(e), w0 = wrap.offsetWidth;
+        function mv(ev) { var p = pt(ev); wrap.style.width = _edClampWidth(wrap, w0 + (p.x - p0.x), 90) + 'px'; }
+        function end() {
+            document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', end);
+            document.removeEventListener('touchmove', mv); document.removeEventListener('touchend', end);
+            commit();
+        }
+        document.addEventListener('mousemove', mv); document.addEventListener('mouseup', end);
+        document.addEventListener('touchmove', mv, { passive: false }); document.addEventListener('touchend', end);
+    }
+    wrap.addEventListener('mousedown', drag);
+    wrap.addEventListener('touchstart', drag, { passive: false });
+    grip.addEventListener('mousedown', resize);
+    grip.addEventListener('touchstart', resize, { passive: false });
+}
+
+// The Location sticker opens the real place search (same screen the composer
+// uses) instead of dropping a "📍 Location" text label.
+function edPickLocationSticker() {
+    var tray = document.getElementById('edStickerTray');
+    if (tray) tray.remove();
+    window._edLocationPickMode = true;
+    if (typeof openCheckInScreen === 'function') openCheckInScreen();
+    else showToast('Location search unavailable');
+}
+
+function edPlaceLocationSticker(place) {
+    var area = document.getElementById('edPreviewArea');
+    if (!area || !place) return;
+    var old = document.getElementById('edLocationSticker');
+    if (old) old.remove();
+    var wrap = document.createElement('div');
+    wrap.id = 'edLocationSticker';
+    wrap.style.cssText = 'position:absolute;top:30%;left:12%;width:62%;z-index:60;cursor:move;';
+    wrap.innerHTML =
+        '<div style="display:flex;align-items:center;gap:9px;background:rgba(255,255,255,0.95);border-radius:14px;padding:9px 12px;box-shadow:0 4px 18px rgba(0,0,0,0.35);">' +
+            '<i class="fa-solid fa-location-dot" style="color:#FF2D55;font-size:15px;flex-shrink:0;"></i>' +
+            '<div style="flex:1;min-width:0;">' +
+                '<b style="display:block;font-size:13px;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(place.name || 'Location') + '</b>' +
+                (place.sub ? '<small style="font-size:11px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;">' + escapeHtml(place.sub) + '</small>' : '') +
+            '</div>' +
+        '</div>';
+    area.appendChild(wrap);
+    _edMakeAdjustable(wrap, 'Location removed');
+    edState.isDirty = true;
+    if (typeof edSaveHistory === 'function') edSaveHistory();
+    showToast('Location added');
+    triggerHaptic(15);
+}
+
 function edOpenStickerTray() {
     var existing = document.getElementById('edStickerTray');
     if (existing) { existing.remove(); return; }
@@ -35149,7 +35324,10 @@ function edOpenStickerTray() {
             '<p style="color:rgba(255,255,255,0.35);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">All Stickers</p>'+
             '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px;">'+
             STICKERS_FUNCTIONAL.map(function(s){
-                return '<div onclick="edPlaceSticker(\''+s.emoji+' '+s.label+'\',true)" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;border:0.5px solid rgba(255,255,255,0.08);">'+
+                var _click = (s.label === 'Location')
+                    ? 'edPickLocationSticker()'
+                    : 'edPlaceSticker(\''+s.emoji+' '+s.label+'\',true)';
+                return '<div onclick="'+_click+'" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;border:0.5px solid rgba(255,255,255,0.08);">'+
                     '<span style="font-size:26px;">'+s.emoji+'</span>'+
                     '<span style="color:rgba(255,255,255,0.7);font-size:12px;font-weight:600;">'+s.label+'</span>'+
                 '</div>';
@@ -37712,6 +37890,13 @@ function selectCheckInPlaceIdx(i) {
     var p = (window._checkinPlaces || [])[i];
     if (!p) return;
     var el = document.getElementById('checkin-screen'); if (el) el.remove();
+    // Opened from the editor's Location sticker → drop a card instead of
+    // attaching the place to the composer.
+    if (window._edLocationPickMode) {
+        window._edLocationPickMode = false;
+        edPlaceLocationSticker(p);
+        return;
+    }
     attachLocationToComposer(p.name, p.sub, p.lat, p.lng);
 }
 
