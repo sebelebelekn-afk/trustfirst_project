@@ -33298,21 +33298,63 @@ function edOpenEffectsModal() {
             '<button onclick="edEffectsTab(\'sug\',this)" id="edEffTabSug" style="flex:1;padding:7px;border:none;background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);border-radius:0 20px 20px 0;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;"><i class="fa-solid fa-star" style="font-size:12px;"></i><i class="fa-solid fa-star" style="font-size:8px;"></i><i class="fa-solid fa-star" style="font-size:5px;"></i> Suggestions</button>'+
         '</div>'+
         '<div id="edEffectsGrid" style="flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px;">'+
-        EFFECTS.map(function(ef){
-            return '<div onclick="edApplyEffect(\''+ef.id+'\')" id="efItem_'+ef.id+'" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:16px;background:rgba(255,255,255,0.07);border:1.5px solid transparent;cursor:pointer;transition:all 0.2s;" data-label="'+ef.label.toLowerCase()+'">'+
-                '<div style="width:44px;height:44px;border-radius:50%;background:rgba('+
-                (ef.color==='#888'?'140,140,140':ef.color==='#aaa'?'170,170,170':ef.color==='#5AC8FA'?'90,200,250':ef.color==='#C8A96E'?'200,169,110':ef.color==='#BF5AF2'?'191,90,242':ef.color==='#FF2D55'?'255,45,85':ef.color==='#FFD60A'?'255,214,10':ef.color==='#FF9500'?'255,149,0':ef.color==='#34C8FF'?'52,200,255':ef.color==='#30D158'?'48,209,88':ef.color==='#007AFF'?'0,122,255':'255,59,48'
-                )+',0.25);display:flex;align-items:center;justify-content:center;">'+
-                '<i class="fa-solid '+ef.icon+'" style="color:'+ef.color+';font-size:18px;"></i></div>'+
-                '<span style="color:rgba(255,255,255,0.85);font-size:12px;font-weight:600;text-align:center;">'+ef.label+'</span>'+
-            '</div>';
-        }).join('')+
+        (function(){
+            // Grab a real frame so every effect shows a true preview, the same way
+            // the Filters panel does (this grid used to be flat icons).
+            var frameUrl = _edCaptureEffectFrame();
+            return EFFECTS.map(function(ef){
+                var css = _edEffectCss[ef.id] || { f: 'none' };
+                var thumb = frameUrl
+                    ? '<img src="' + frameUrl + '" style="width:100%;height:100%;object-fit:cover;filter:' + css.f + ';transform:' + (css.t || 'none') + ';">'
+                    : '<i class="fa-solid ' + ef.icon + '" style="color:' + ef.color + ';font-size:20px;"></i>';
+                return '<div onclick="edApplyEffect(\''+ef.id+'\')" id="efItem_'+ef.id+'" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px;border-radius:16px;background:rgba(255,255,255,0.07);border:1.5px solid transparent;cursor:pointer;transition:all 0.2s;" data-label="'+ef.label.toLowerCase()+'">'+
+                    '<div style="width:100%;aspect-ratio:3/4;border-radius:12px;overflow:hidden;background:#222;display:flex;align-items:center;justify-content:center;">'+
+                        thumb +
+                    '</div>'+
+                    '<span style="color:rgba(255,255,255,0.85);font-size:12px;font-weight:600;text-align:center;">'+ef.label+'</span>'+
+                '</div>';
+            }).join('');
+        })()+
         '</div>';
     var overlay = document.getElementById('preview-edit-overlay');
     if (overlay) overlay.appendChild(m);
     window._edEffectFavs = window._edEffectFavs || [];
 }
 window._edCurrentEffect = 'none';
+
+// One definition of each effect, used for BOTH the preview thumbnails and the
+// applied result, so a tile always looks like what you get. `f` is a CSS filter,
+// `t` a transform (mirror/zoom aren't filters). Neon was missing before, so it
+// used to apply nothing.
+var _edEffectCss = {
+    none:      { f: 'none' },
+    blur:      { f: 'blur(4px)' },
+    grayscale: { f: 'grayscale(100%)' },
+    sepia:     { f: 'sepia(80%)' },
+    neon:      { f: 'saturate(220%) contrast(1.3) brightness(1.15)' },
+    vhs:       { f: 'contrast(1.2) saturate(60%) hue-rotate(5deg)' },
+    glow:      { f: 'brightness(1.3) contrast(1.1)' },
+    warm:      { f: 'saturate(150%) hue-rotate(-20deg)' },
+    cool:      { f: 'hue-rotate(180deg) saturate(120%)' },
+    mirror:    { f: 'none', t: 'scaleX(-1)' },
+    zoom:      { f: 'none', t: 'scale(1.15)' },
+    glitch:    { f: 'hue-rotate(90deg) saturate(200%) contrast(1.3)' }
+};
+
+// Small still of the current frame, used for effect/filter tiles.
+function _edCaptureEffectFrame() {
+    try {
+        var vid = document.getElementById('edVideo');
+        if (!vid || !vid.videoWidth) return '';
+        var cnv = document.createElement('canvas'); cnv.width = 90; cnv.height = 120;
+        var cx = cnv.getContext('2d');
+        var vw = vid.videoWidth, vh = vid.videoHeight, sc = Math.max(90 / vw, 120 / vh);
+        var dw = vw * sc, dh = vh * sc;
+        cx.drawImage(vid, (90 - dw) / 2, (120 - dh) / 2, dw, dh);
+        return cnv.toDataURL('image/jpeg', 0.6);
+    } catch (e) { return ''; }
+}
+
 function edApplyEffect(id) {
     window._edCurrentEffect = id;
     document.querySelectorAll('[id^="efItem_"]').forEach(function(el){ el.style.border='1.5px solid transparent'; el.style.background='rgba(255,255,255,0.07)'; });
@@ -33320,9 +33362,9 @@ function edApplyEffect(id) {
     if (sel) { sel.style.border='1.5px solid #007AFF'; sel.style.background='rgba(0,122,255,0.15)'; }
     var vid = document.getElementById('edVideo');
     if (vid) {
-        var filters = {none:'none',blur:'blur(4px)',grayscale:'grayscale(100%)',sepia:'sepia(80%)',warm:'saturate(150%) hue-rotate(-20deg)',cool:'hue-rotate(180deg) saturate(120%)',glow:'brightness(1.3) contrast(1.1)',vhs:'contrast(1.2) saturate(60%) hue-rotate(5deg)',mirror:'scaleX(-1)',zoom:'scale(1.15)',glitch:'hue-rotate(90deg) saturate(200%) contrast(1.3)'};
-        vid.style.filter = filters[id] || 'none';
-        if (id === 'mirror') vid.style.transform = 'scaleX(-1)'; else vid.style.transform = '';
+        var css = _edEffectCss[id] || { f: 'none' };
+        vid.style.filter = css.f || 'none';
+        vid.style.transform = css.t || '';
     }
     edState.isDirty = true;
     triggerHaptic(10);
@@ -34034,12 +34076,51 @@ function edApplyText() {
         var fontMap = {Classic:'sans-serif',Modern:'"SF Pro Display",sans-serif',Poster:'Georgia,serif',Bubble:'Arial Rounded MT Bold,sans-serif',Typewriter:'"Courier New",monospace',Serif:'Georgia,serif',Mono:'monospace',Rounded:'Arial,sans-serif'};
         var effectMap = {Neon:'text-shadow:0 0 10px '+_edTextState.color+',0 0 20px '+_edTextState.color+';','Hard Shadow':'text-shadow:3px 3px 0 #000;','3D Offset':'text-shadow:2px 2px 0 #555,4px 4px 0 #333;',Pixel:'letter-spacing:3px;',Glow:'text-shadow:0 0 14px '+_edTextState.color+',0 0 28px '+_edTextState.color+';',Retro:'letter-spacing:3px;text-transform:uppercase;'};
         el.textContent = _edTextState.text;
-        el.style.cssText = 'position:absolute;left:10%;right:10%;top:40%;text-align:'+_edTextState.align+';color:'+_edTextState.color+';font-size:22px;font-weight:800;font-family:'+fontMap[_edTextState.font]+';cursor:move;padding:4px 8px;'+(effectMap[_edTextState.effect]||'');
-        // Drag
-        el.addEventListener('touchstart', function(e){ var sx=e.touches[0].clientX,sy=e.touches[0].clientY; var area=document.getElementById('edPreviewArea'); var rect=area.getBoundingClientRect(); var ox=el.offsetLeft,oy=el.offsetTop;
-            function mv(ev){ el.style.left=(ox+ev.touches[0].clientX-sx)+'px'; el.style.top=(oy+ev.touches[0].clientY-sy)+'px'; el.style.right='auto'; }
-            function en(){ document.removeEventListener('touchmove',mv); document.removeEventListener('touchend',en); }
-            document.addEventListener('touchmove',mv,{passive:true}); document.addEventListener('touchend',en); }, {passive:true});
+        // #edTextLayer is pointer-events:none so taps fall through to the video.
+        // Each text item switches them back on, otherwise it can't be moved or
+        // removed at all (which is why dragging silently did nothing before).
+        el.style.cssText = 'position:absolute;left:10%;right:10%;top:40%;text-align:'+_edTextState.align+';color:'+_edTextState.color+';font-size:22px;font-weight:800;font-family:'+fontMap[_edTextState.font]+';cursor:move;padding:4px 8px;pointer-events:auto;touch-action:none;-webkit-user-select:none;user-select:none;'+(effectMap[_edTextState.effect]||'');
+
+        // Remove control
+        var del = document.createElement('div');
+        del.textContent = '✕';
+        del.title = 'Remove text';
+        del.style.cssText = 'position:absolute;top:-11px;right:-11px;width:23px;height:23px;border-radius:50%;background:rgba(0,0,0,0.75);color:#fff;font-size:11px;line-height:23px;text-align:center;cursor:pointer;pointer-events:auto;font-weight:700;';
+        del.addEventListener('click', function(ev) {
+            ev.stopPropagation();
+            el.remove();
+            edState.isDirty = true; edRenderTimeline(); edSaveHistory(); editorSaveDraft(false);
+            showToast('Text removed');
+        });
+        el.appendChild(del);
+
+        // Drag — mouse and touch (desktop editing was impossible before).
+        function edDragFrom(startX, startY) {
+            var ox = el.offsetLeft, oy = el.offsetTop;
+            return function(cx, cy) {
+                el.style.left = (ox + cx - startX) + 'px';
+                el.style.top  = (oy + cy - startY) + 'px';
+                el.style.right = 'auto';
+            };
+        }
+        function edDragDone() { edState.isDirty = true; editorSaveDraft(false); }
+        el.addEventListener('touchstart', function(e) {
+            if (e.target === del) return;
+            var t = e.touches[0], move = edDragFrom(t.clientX, t.clientY);
+            function mv(ev) { move(ev.touches[0].clientX, ev.touches[0].clientY); }
+            function en() { document.removeEventListener('touchmove', mv); document.removeEventListener('touchend', en); edDragDone(); }
+            document.addEventListener('touchmove', mv, { passive: true });
+            document.addEventListener('touchend', en);
+        }, { passive: true });
+        el.addEventListener('mousedown', function(e) {
+            if (e.target === del) return;
+            e.preventDefault();
+            var move = edDragFrom(e.clientX, e.clientY);
+            function mv(ev) { move(ev.clientX, ev.clientY); }
+            function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); edDragDone(); }
+            document.addEventListener('mousemove', mv);
+            document.addEventListener('mouseup', up);
+        });
         layer.appendChild(el);
     }
     edState.isDirty = true; edRenderTimeline(); edSaveHistory(); editorSaveDraft(false);
@@ -34852,14 +34933,32 @@ function editorRealExit() {
     else openPage('clip-selector-overlay');
 }
 
+// Grab the current preview frame as a small data URL. Clip URLs are blob:,
+// which are dead after a reload — and a reload is exactly when draft recovery
+// runs — so the thumbnail has to be baked into the draft itself.
+function _edCaptureThumb() {
+    try {
+        var v = document.getElementById('edVideo');
+        if (!v || !v.videoWidth) return null;
+        var w = 240, h = Math.round(w * (v.videoHeight / v.videoWidth)) || 135;
+        var c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(v, 0, 0, w, h);
+        return c.toDataURL('image/jpeg', 0.5);
+    } catch (e) { return null; }
+}
+
 // Draft persistence
 function editorSaveDraft(andExit) {
     try {
+        var t = _edCaptureThumb();
+        if (t) edState._lastThumb = t;          // keep the last good frame
         var draft = {
             clips: edState.clips,
             audioTracks: edState.audioTracks,
             textOverlays: edState.textOverlays,
             playheadMs: edState.playheadMs,
+            thumbnail: edState._lastThumb || null,
             savedAt: Date.now(),
             isDraftIncomplete: true
         };
@@ -34889,8 +34988,10 @@ function checkDraftRecovery() {
         if (modal) {
             modal.classList.add('active');
             var thumb = document.getElementById('draftThumb');
-            if (thumb && draft.clips && draft.clips[0] && draft.clips[0].thumbnailUrl) {
-                thumb.innerHTML = '<img src="'+draft.clips[0].thumbnailUrl+'" style="width:100%;height:100%;object-fit:cover;border-radius:16px;">';
+            var thumbSrc = draft.thumbnail ||
+                (draft.clips && draft.clips[0] && draft.clips[0].thumbnailUrl) || null;
+            if (thumb && thumbSrc) {
+                thumb.innerHTML = '<img src="' + thumbSrc + '" style="width:100%;height:100%;object-fit:cover;border-radius:16px;">';
             }
         }
     } catch(e) { if (e) console.warn('[Suppressed error]', e); }
@@ -37496,7 +37597,14 @@ function tfLocationCardHTML(post) {
     if (hasCoords) {
         var lat = post.location_lat, lng = post.location_lng;
         var bbox = (lng - 0.012) + ',' + (lat - 0.008) + ',' + (lng + 0.012) + ',' + (lat + 0.008);
-        top = '<iframe title="map" src="https://www.openstreetmap.org/export/embed.html?bbox=' + bbox + '&layer=mapnik&marker=' + lat + ',' + lng + '" loading="lazy" style="width:100%;height:150px;border:0;display:block;pointer-events:none;"></iframe>';
+        // The OSM embed draws its own "Report a problem | Make a Donation | API
+        // terms" bar along the bottom. It's a cross-origin frame so it can't be
+        // styled — instead the frame is drawn taller than its window and the
+        // strip is clipped off. Attribution still appears in the bar below,
+        // which is what the OSM licence actually requires.
+        top = '<div style="height:150px;overflow:hidden;position:relative;">' +
+                  '<iframe title="map" src="https://www.openstreetmap.org/export/embed.html?bbox=' + bbox + '&layer=mapnik&marker=' + lat + ',' + lng + '" loading="lazy" style="width:100%;height:182px;border:0;display:block;pointer-events:none;"></iframe>' +
+              '</div>';
     } else {
         top = '<div style="height:110px;background:linear-gradient(135deg,#e8f0fe,#d3e3fd);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-location-dot" style="font-size:30px;color:#FF2D55;"></i></div>';
     }
@@ -37504,7 +37612,7 @@ function tfLocationCardHTML(post) {
     return '<div class="tf-loc-card"' + (hasCoords ? ' onclick="' + open + '" style="cursor:pointer;"' : '') + '>' + top +
         '<div class="tf-loc-bar">' +
             '<i class="fa-solid fa-location-dot" style="color:#FF2D55;font-size:15px;flex-shrink:0;"></i>' +
-            '<div style="flex:1;min-width:0;"><b style="font-size:14px;color:var(--text-primary,#000);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + name + '</b>' + (addr ? '<small style="color:#888;font-size:12px;">' + addr + '</small>' : '') + '</div>' +
+            '<div style="flex:1;min-width:0;"><b style="font-size:14px;color:var(--text-primary,#000);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + name + '</b>' + (addr ? '<small style="color:#888;font-size:12px;">' + addr + '</small>' : '') + (hasCoords ? '<small style="color:#c4c4c4;font-size:10px;display:block;">© OpenStreetMap</small>' : '') + '</div>' +
             (hasCoords ? '<i class="fa-solid fa-arrow-up-right-from-square" style="color:#aaa;font-size:12px;"></i>' : '') +
         '</div>' +
     '</div>';
