@@ -34473,6 +34473,314 @@ function edVolumeToggleApplyAll(row) {
 /* ──────────────────────────────────────────
    CUTOUT PANEL
 ────────────────────────────────────────── */
+// ============================================================
+// CUTOUT ENGINE
+// Every cutout tool (auto, brush, eraser, chroma) writes into one alpha mask,
+// and one compositor loop draws the video through that mask onto a canvas
+// sitting over the <video>. Previously all of this was cosmetic.
+//
+//   paint[i] : 0 untouched | 1 brushed out | 2 erased back in
+//   autoMask : 255 keep / 0 drop, from segmentation
+//   chroma   : {r,g,b,intensity,shadow} keyed per frame
+// ============================================================
+var _edCut = {
+    active: false, auto: false, autoMask: null,
+    paint: null, pending: null,
+    chroma: null, tool: null, brushSize: 30, showPaint: false,
+    w: 0, h: 0, raf: null, painting: false,
+    work: null, workCtx: null, outCtx: null
+};
+
+function _edCutCanvas() { return document.getElementById('edCutoutCanvas'); }
+
+// Match the canvas to the video's *rendered* box (object-fit:contain letterboxes it)
+// and keep a capped working resolution so per-pixel work stays cheap.
+function _edCutFit() {
+    var v = document.getElementById('edVideo'), c = _edCutCanvas(), area = document.getElementById('edPreviewArea');
+    if (!v || !c || !area || !v.videoWidth) return false;
+    var ar = v.videoWidth / v.videoHeight;
+    var vb = v.getBoundingClientRect(), ab = area.getBoundingClientRect();
+    var dw = vb.width, dh = vb.width / ar;
+    if (dh > vb.height) { dh = vb.height; dw = vb.height * ar; }
+    c.style.width = dw + 'px';
+    c.style.height = dh + 'px';
+    c.style.left = (vb.left - ab.left + (vb.width - dw) / 2) + 'px';
+    c.style.top = (vb.top - ab.top + (vb.height - dh) / 2) + 'px';
+
+    var W = Math.max(80, Math.min(420, Math.round(dw)));
+    var H = Math.max(1, Math.round(W / ar));
+    if (_edCut.w !== W || _edCut.h !== H) {
+        _edCut.w = W; _edCut.h = H;
+        c.width = W; c.height = H;
+        _edCut.work = document.createElement('canvas');
+        _edCut.work.width = W; _edCut.work.height = H;
+        _edCut.workCtx = _edCut.work.getContext('2d', { willReadFrequently: true });
+        _edCut.outCtx = c.getContext('2d');
+        _edCut.paint = new Uint8Array(W * H);
+        _edCut.pending = new Uint8Array(W * H);
+        _edCut.autoMask = null;
+    }
+    return true;
+}
+
+function _edCutStart() {
+    var c = _edCutCanvas();
+    if (!c || !_edCutFit()) return false;
+    _edCut.active = true;
+    c.style.display = 'block';
+    c.style.pointerEvents = _edCut.tool ? 'auto' : 'none';
+    var v = document.getElementById('edVideo');
+    if (v) v.style.visibility = 'hidden';   // canvas shows the masked result instead
+    _edCutBindPaint();
+    if (!_edCut.raf) _edCutLoop();
+    return true;
+}
+
+function _edCutStop() {
+    _edCut.active = false;
+    if (_edCut.raf) { cancelAnimationFrame(_edCut.raf); _edCut.raf = null; }
+    var c = _edCutCanvas();
+    if (c) { c.style.display = 'none'; c.style.pointerEvents = 'none'; }
+    var v = document.getElementById('edVideo');
+    if (v) v.style.visibility = '';
+}
+
+function _edCutHasEdits() {
+    if (_edCut.auto || _edCut.chroma) return true;
+    var p = _edCut.paint;
+    if (p) { for (var i = 0; i < p.length; i++) { if (p[i] === 1) return true; } }
+    return false;
+}
+
+function _edCutLoop() {
+    _edCut.raf = requestAnimationFrame(_edCutLoop);
+    if (_edCut.active) _edCutRender();
+}
+
+function _edCutRender() {
+    var v = document.getElementById('edVideo');
+    if (!v || !v.videoWidth || !_edCut.workCtx) return;
+    var W = _edCut.w, H = _edCut.h, n = W * H;
+    var wctx = _edCut.workCtx;
+    wctx.clearRect(0, 0, W, H);
+    try { wctx.drawImage(v, 0, 0, W, H); } catch (e) { return; }
+
+    var img, d;
+    try { img = wctx.getImageData(0, 0, W, H); d = img.data; } catch (e) { return; }
+
+    var auto = _edCut.autoMask, paint = _edCut.paint, pend = _edCut.pending, ch = _edCut.chroma;
+    var showPaint = _edCut.showPaint;
+    var tol = 0, soft = 0;
+    if (ch) { tol = 24 + (ch.intensity / 100) * 170; soft = (ch.shadow / 100); }
+
+    for (var px = 0, i = 0; px < n; px++, i += 4) {
+        var keep = true;
+        if (auto && auto[px] === 0) keep = false;
+
+        if (ch && keep) {
+            var dr = d[i] - ch.r, dg = d[i + 1] - ch.g, db = d[i + 2] - ch.b;
+            var dist = Math.sqrt(dr * dr + dg * dg + db * db);
+            if (dist < tol) keep = false;
+            else if (soft > 0 && dist < tol * (1 + soft)) {
+                var f = (dist - tol) / (tol * soft);
+                d[i + 3] = Math.round(d[i + 3] * Math.max(0, Math.min(1, f)));
+            }
+        }
+
+        if (paint[px] === 1) keep = false;   // brushed out
+        if (paint[px] === 2) keep = true;    // erased back in
+
+        if (!keep) d[i + 3] = 0;
+
+        // Blue while a stroke is in progress, and for the stroke "reveal" eye.
+        if (pend[px] === 1 || (showPaint && paint[px] === 1)) {
+            d[i] = 0; d[i + 1] = 122; d[i + 2] = 255; d[i + 3] = 175;
+        }
+    }
+    wctx.putImageData(img, 0, 0);
+    var octx = _edCut.outCtx;
+    octx.clearRect(0, 0, W, H);
+    octx.drawImage(_edCut.work, 0, 0);
+}
+
+// ---- brush / eraser ----
+function _edCutStamp(buf, cx, cy, val) {
+    var W = _edCut.w, H = _edCut.h;
+    var r = Math.max(1, Math.round(_edCut.brushSize * (W / 320)));
+    var r2 = r * r;
+    var x0 = Math.max(0, cx - r), x1 = Math.min(W - 1, cx + r);
+    var y0 = Math.max(0, cy - r), y1 = Math.min(H - 1, cy + r);
+    for (var y = y0; y <= y1; y++) {
+        var dy = y - cy;
+        for (var x = x0; x <= x1; x++) {
+            var dx = x - cx;
+            if (dx * dx + dy * dy <= r2) buf[y * W + x] = val;
+        }
+    }
+}
+
+function _edCutPointToMask(e) {
+    var c = _edCutCanvas();
+    var b = c.getBoundingClientRect();
+    var t = (e.touches && e.touches[0]) || e;
+    return {
+        x: Math.round((t.clientX - b.left) / b.width * _edCut.w),
+        y: Math.round((t.clientY - b.top) / b.height * _edCut.h)
+    };
+}
+
+function _edCutBindPaint() {
+    var c = _edCutCanvas();
+    if (!c || c._edBound) return;
+    c._edBound = true;
+
+    function down(e) {
+        if (!_edCut.tool) return;
+        e.preventDefault();
+        _edCut.painting = true;
+        _edCut.pending.fill(0);
+        var p = _edCutPointToMask(e);
+        _edCutStamp(_edCut.pending, p.x, p.y, 1);
+    }
+    function move(e) {
+        if (!_edCut.painting) return;
+        e.preventDefault();
+        var p = _edCutPointToMask(e);
+        _edCutStamp(_edCut.pending, p.x, p.y, 1);
+    }
+    // On release the stroke is committed: brush removes, eraser restores.
+    function up() {
+        if (!_edCut.painting) return;
+        _edCut.painting = false;
+        var val = (_edCut.tool === 'eraser') ? 2 : 1;
+        var pend = _edCut.pending, paint = _edCut.paint;
+        for (var i = 0; i < pend.length; i++) { if (pend[i] === 1) paint[i] = val; }
+        pend.fill(0);
+        edState.isDirty = true;
+        if (typeof edSaveHistory === 'function') edSaveHistory();
+        triggerHaptic(10);
+    }
+
+    c.addEventListener('mousedown', down);
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+    c.addEventListener('touchstart', down, { passive: false });
+    c.addEventListener('touchmove', move, { passive: false });
+    document.addEventListener('touchend', up);
+}
+
+// ---- chroma key ----
+function _edCutSetChroma(rgb, intensity, shadow) {
+    if (!rgb) { _edCut.chroma = null; }
+    else {
+        _edCut.chroma = {
+            r: rgb.r, g: rgb.g, b: rgb.b,
+            intensity: (intensity == null ? 20 : intensity),
+            shadow: (shadow == null ? 0 : shadow)
+        };
+    }
+    _edCutStart();
+}
+
+function _edCutChromaFromPicker() {
+    // Sample the video colour under the picker circle.
+    var picker = document.getElementById('edChromaPicker');
+    var v = document.getElementById('edVideo');
+    if (!picker || !v || !v.videoWidth) return null;
+    var pb = picker.getBoundingClientRect(), vb = v.getBoundingClientRect();
+    var cx = pb.left + pb.width / 2, cy = pb.top + pb.height / 2;
+    var fx = (cx - vb.left) / vb.width, fy = (cy - vb.top) / vb.height;
+    if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return null;
+    var cn = document.createElement('canvas'); cn.width = 1; cn.height = 1;
+    var cc = cn.getContext('2d', { willReadFrequently: true });
+    try {
+        cc.drawImage(v, Math.round(fx * v.videoWidth), Math.round(fy * v.videoHeight), 1, 1, 0, 0, 1, 1);
+        var p = cc.getImageData(0, 0, 1, 1).data;
+        return { r: p[0], g: p[1], b: p[2] };
+    } catch (e) { return null; }
+}
+
+// ---- auto cutout (segmentation) ----
+function _edLoadSegmenter(cb) {
+    if (window.SelfieSegmentation) return cb(true);
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js';
+    s.crossOrigin = 'anonymous';
+    s.onload = function () { cb(!!window.SelfieSegmentation); };
+    s.onerror = function () { cb(false); };
+    document.head.appendChild(s);
+}
+
+// Runs segmentation on the current frame and stores the mask. onProgress gets
+// 0..100 so the panel can show a real percentage instead of a fake spinner.
+function _edCutRunAuto(onProgress, onDone) {
+    onProgress(5);
+    _edLoadSegmenter(function (ok) {
+        if (!ok) { onDone(false, 'Could not load the cutout model'); return; }
+        onProgress(25);
+        var v = document.getElementById('edVideo');
+        if (!v || !v.videoWidth) { onDone(false, 'No video frame yet'); return; }
+        if (!_edCutFit()) { onDone(false, 'Preview not ready'); return; }
+        var W = _edCut.w, H = _edCut.h;
+        try {
+            var seg = _edCut._seg;
+            if (!seg) {
+                seg = new window.SelfieSegmentation({
+                    locateFile: function (f) { return 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/' + f; }
+                });
+                seg.setOptions({ modelSelection: 1 });
+                _edCut._seg = seg;
+            }
+            onProgress(45);
+            seg.onResults(function (res) {
+                onProgress(80);
+                try {
+                    var mc = document.createElement('canvas');
+                    mc.width = W; mc.height = H;
+                    var mx = mc.getContext('2d', { willReadFrequently: true });
+                    mx.drawImage(res.segmentationMask, 0, 0, W, H);
+                    var md = mx.getImageData(0, 0, W, H).data;
+                    var mask = new Uint8Array(W * H);
+                    for (var i = 0, px = 0; px < W * H; px++, i += 4) {
+                        mask[px] = md[i] > 128 ? 255 : 0;   // keep subject, drop background
+                    }
+                    _edCut.autoMask = mask;
+                    _edCut.auto = true;
+                    onProgress(100);
+                    onDone(true);
+                } catch (err) { onDone(false, 'Could not read the mask'); }
+            });
+            seg.send({ image: v }).catch(function () { onDone(false, 'Segmentation failed'); });
+        } catch (e) { onDone(false, 'Segmentation unavailable'); }
+    });
+}
+
+// Toggle: applying again restores the background that was removed.
+function _edCutToggleAuto(onProgress, onDone) {
+    if (_edCut.auto) {
+        _edCut.auto = false;
+        _edCut.autoMask = null;
+        if (!_edCutHasEdits()) _edCutStop(); else _edCutStart();
+        edState.isDirty = true;
+        if (typeof edSaveHistory === 'function') edSaveHistory();
+        onDone(true, null, true);   // third arg: this was a restore
+        return;
+    }
+    _edCutRunAuto(onProgress, function (ok, err) {
+        if (ok) { _edCutStart(); edState.isDirty = true; if (typeof edSaveHistory === 'function') edSaveHistory(); }
+        onDone(ok, err, false);
+    });
+}
+
+function _edCutResetAll() {
+    _edCut.auto = false; _edCut.autoMask = null; _edCut.chroma = null; _edCut.tool = null;
+    _edCut.showPaint = false; _edCut.painting = false;
+    if (_edCut.paint) _edCut.paint.fill(0);
+    if (_edCut.pending) _edCut.pending.fill(0);
+    _edCutStop();
+}
+
+
 function edOpenCutoutPanel() {
     var existing = document.getElementById('edCutoutPanel');
     if (existing) { existing.remove(); return; }
@@ -34526,24 +34834,22 @@ function edCutoutSelectMode(mode) {
     triggerHaptic(10);
 
     if (mode === 'auto') {
-        // Highlight selected
-        sub.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:12px;background:rgba(48,209,88,0.1);border-radius:14px;border:1px solid rgba(48,209,88,0.3);">' +
+        var restoring = _edCut.auto;
+        sub.innerHTML = '<div id="edAutoBox" style="display:flex;align-items:center;gap:10px;padding:12px;background:rgba(48,209,88,0.1);border-radius:14px;border:1px solid rgba(48,209,88,0.3);">' +
             '<div class="loading-spinner" style="width:22px;height:22px;border-width:2.5px;flex-shrink:0;"></div>' +
-            '<span style="color:rgba(255,255,255,0.7);font-size:14px;">Detecting subject automatically…</span>' +
+            '<span id="edAutoTxt" style="color:rgba(255,255,255,0.75);font-size:14px;">' + (restoring ? 'Restoring background\u2026' : 'Removing background\u2026 0%') + '</span>' +
         '</div>';
-        var vid = document.getElementById('edVideo');
-        if (vid) { vid.style.filter = 'drop-shadow(0 0 0 transparent)'; }
-        setTimeout(function() {
-            if (sub.parentNode) {
-                sub.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:12px;background:rgba(48,209,88,0.1);border-radius:14px;border:1px solid rgba(48,209,88,0.3);">' +
-                    '<i class="fa-solid fa-check-circle" style="color:#30D158;font-size:20px;flex-shrink:0;"></i>' +
-                    '<span style="color:rgba(255,255,255,0.8);font-size:14px;font-weight:600;">Subject detected ✅</span>' +
-                '</div>';
-                if (vid) { vid.style.filter = 'drop-shadow(0 0 12px rgba(0,200,255,0.5))'; }
-                showToast('Auto cutout applied');
-                edState.isDirty = true;
-            }
-        }, 1800);
+        _edCutToggleAuto(function(pct) {
+            var el = document.getElementById('edAutoTxt');
+            if (el) el.textContent = 'Removing background\u2026 ' + pct + '%';
+        }, function(ok, err, wasRestore) {
+            var box = document.getElementById('edAutoBox');
+            if (!box) return;
+            box.innerHTML = '<i class="fa-solid ' + (ok ? 'fa-check-circle' : 'fa-triangle-exclamation') + '" style="color:' + (ok ? '#30D158' : '#FF9500') + ';font-size:20px;flex-shrink:0;"></i>' +
+                '<span style="color:rgba(255,255,255,0.85);font-size:14px;font-weight:600;">' +
+                (ok ? (wasRestore ? 'Background restored' : 'Background removed \u2014 tap again to undo') : escapeHtml(err || 'Could not cut out')) + '</span>';
+            showToast(ok ? (wasRestore ? 'Background restored' : 'Background removed') : (err || 'Cutout failed'));
+        });
     }
 
     if (mode === 'custom') {
@@ -34562,9 +34868,10 @@ function edCutoutSelectMode(mode) {
             }).join('') +
             '</div>' +
             '<div style="display:flex;align-items:center;gap:12px;">' +
+                '<button onclick="_edCutToggleReveal(this)" title="Show what you painted" style="background:rgba(255,255,255,0.08);border:none;color:rgba(255,255,255,0.55);width:34px;height:34px;border-radius:50%;cursor:pointer;flex-shrink:0;"><i class="fa-solid fa-eye"></i></button>' +
                 '<span style="color:rgba(255,255,255,0.5);font-size:13px;white-space:nowrap;">Brush size</span>' +
                 '<input type="range" id="cutBrushSize" min="5" max="80" value="30" ' +
-                    'oninput="triggerHaptic(3);" ' +
+                    'oninput="_edCut.brushSize=parseInt(this.value,10)||30;triggerHaptic(3);" ' +
                     'style="flex:1;height:4px;-webkit-appearance:none;appearance:none;background:linear-gradient(to right,white 37%,rgba(255,255,255,0.2) 37%);border-radius:2px;outline:none;cursor:pointer;">' +
             '</div>';
     }
@@ -34605,7 +34912,7 @@ function edCutoutSelectMode(mode) {
                     '<span style="color:rgba(255,255,255,0.6);font-size:13px;">Intensity</span>' +
                     '<span id="chromaIntVal" style="color:rgba(255,255,255,0.6);font-size:13px;">20</span>' +
                 '</div>' +
-                '<input type="range" min="0" max="100" value="20" oninput="document.getElementById(\'chromaIntVal\').textContent=this.value;triggerHaptic(3);" ' +
+                '<input type="range" min="0" max="100" value="20" oninput="document.getElementById(\'chromaIntVal\').textContent=this.value;_edCutChromaUI();triggerHaptic(3);" ' +
                     'style="width:100%;height:4px;-webkit-appearance:none;appearance:none;background:linear-gradient(to right,white 20%,rgba(255,255,255,0.2) 20%);border-radius:2px;outline:none;cursor:pointer;">' +
             '</div>' +
             '<div>' +
@@ -34613,7 +34920,7 @@ function edCutoutSelectMode(mode) {
                     '<span style="color:rgba(255,255,255,0.6);font-size:13px;">Shadow</span>' +
                     '<span id="chromaShadVal" style="color:rgba(255,255,255,0.6);font-size:13px;">0</span>' +
                 '</div>' +
-                '<input type="range" min="0" max="100" value="0" oninput="document.getElementById(\'chromaShadVal\').textContent=this.value;triggerHaptic(3);" ' +
+                '<input type="range" min="0" max="100" value="0" oninput="document.getElementById(\'chromaShadVal\').textContent=this.value;_edCutChromaUI();triggerHaptic(3);" ' +
                     'style="width:100%;height:4px;-webkit-appearance:none;appearance:none;background:linear-gradient(to right,white 0%,rgba(255,255,255,0.2) 0%);border-radius:2px;outline:none;cursor:pointer;">' +
             '</div>';
     }
@@ -34657,9 +34964,28 @@ function edCutoutBrushMode(mode) {
             btn.style.background = b === mode ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.07)';
         }
     });
+    _edCut.tool = mode;
+    _edCutStart();
+    var c = _edCutCanvas();
+    if (c) c.style.pointerEvents = 'auto';
+    showToast(mode === 'eraser' ? 'Draw to bring the background back' : 'Draw over what you want removed');
     triggerHaptic(8);
 }
 
+function _edCutChromaUI() {
+    var i = parseInt((document.getElementById('chromaIntVal') || {}).textContent, 10) || 0;
+    var s = parseInt((document.getElementById('chromaShadVal') || {}).textContent, 10) || 0;
+    var rgb = _edCutChromaFromPicker() || _edCut.chroma;
+    if (!rgb) { showToast('Drag the circle onto a colour first'); return; }
+    _edCutSetChroma(rgb, i, s);
+}
+
+function _edCutToggleReveal(btn) {
+    _edCut.showPaint = !_edCut.showPaint;
+    if (btn) btn.style.color = _edCut.showPaint ? '#007AFF' : 'rgba(255,255,255,0.55)';
+    _edCutStart();
+    triggerHaptic(8);
+}
 function edCutoutSelectStroke(id) {
     document.querySelectorAll('[id^="strokeOpt_"]').forEach(function(btn) {
         btn.style.border = '2.5px solid rgba(255,255,255,0.2)';
@@ -34714,6 +35040,7 @@ function edResetCutout() {
     tfConfirm('Reset to original?', function() {
         var vid = document.getElementById('edVideo');
         if (vid) { vid.style.filter = 'none'; vid.style.transform = ''; }
+        if (typeof _edCutResetAll === 'function') _edCutResetAll();
         window._edCurrentEffect = 'none';
         var picker = document.getElementById('edChromaPicker'); if (picker) picker.remove();
         edState.textOverlays = [];

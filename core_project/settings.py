@@ -207,6 +207,7 @@ CONTENT_SECURITY_POLICY = {
         "media-src": ["'self'", "data:", "blob:", "https:"],
         "connect-src": [
             "'self'",
+            "https://cdn.jsdelivr.net",               # MediaPipe wasm + model files
             "https://*.supabase.co", "wss://*.supabase.co",
             "https://*.livekit.cloud", "wss://*.livekit.cloud",
             "https://itunes.apple.com",               # music search
