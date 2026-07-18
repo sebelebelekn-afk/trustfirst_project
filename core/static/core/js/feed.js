@@ -648,7 +648,7 @@ function skipVerification() {
         icon: 'fa-solid fa-id-card',
         iconBg: 'rgba(255,149,0,0.1)',
         iconColor: '#FF9500',
-        sub: 'Without verification you cannot post, comment, or message.',
+        sub: 'Without verification you cannot post, comment or start chats.',
         confirmLabel: 'Skip anyway',
         cancelLabel: 'Go back',
         confirmBg: '#FF9500'
@@ -1463,7 +1463,7 @@ function launchApp() {
     if (!isVerified()) {
         const banner = document.createElement('div');
         banner.style.cssText = 'background:#FF9500; color:white; padding:8px 20px; font-size:12px; font-weight:700; text-align:center;';
-        banner.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Unverified — You can browse but cannot post, comment, or message';
+        banner.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Unverified, verify to post, comment and start chats';
         app.insertBefore(banner, app.querySelector('.header-container'));
     }
 
@@ -10776,20 +10776,38 @@ function sendViewerHeart() {
     liveChatHeart();
 }
 
-function openViewerGiftSheet() {
+async function openViewerGiftSheet() {
     var sheet = document.getElementById('viewer-gift-sheet');
     if (!sheet) return;
     sheet.style.display = 'block';
+    var bal = await refreshWalletBalance();          // real balance from the DB
+    var gd = document.getElementById('gift-coins-display');
+    if (gd) gd.textContent = bal;
 }
 
-// Free reactions for now: saved and broadcast to everyone watching. No coins are
-// charged, because there is no real balance to charge yet.
-function sendViewerGift(emoji, name) {
+// Gifts cost coins. The charge happens in spend_coins() on the server: it is
+// atomic, cannot overdraw, and writes a ledger row — the client can't fake it.
+// Only once the charge succeeds do we send the reaction.
+async function sendViewerGift(emoji, name, cost) {
+    cost = parseInt(cost, 10) || 0;
+    if (!window.sb || !currentUser) return;
     var sheet = document.getElementById('viewer-gift-sheet');
-    if (sheet) sheet.style.display = 'none';
-    liveChatGift(emoji);
-    showToast('Sent ' + emoji);
-    triggerHaptic(40);
+    try {
+        var r = await sb.rpc('spend_coins', { p_amount: cost, p_reason: 'gift:' + (name || emoji) });
+        if (r.error) {
+            var m = (r.error.message || '');
+            showToast(/insufficient/i.test(m) ? 'Not enough coins' : 'Could not send gift');
+            return;
+        }
+        var bal = r.data;
+        var el = document.getElementById('wallet-coins'); if (el) el.textContent = bal;
+        var gd = document.getElementById('gift-coins-display'); if (gd) gd.textContent = bal;
+        if (currentUser) currentUser.coins = bal;
+        if (sheet) sheet.style.display = 'none';
+        liveChatGift(emoji);                          // persisted + shown to everyone
+        showToast('Sent ' + emoji + ' ' + (name || ''));
+        triggerHaptic(40);
+    } catch (e) { showToast('Could not send gift'); }
 }
 
 function spawnViewerGift(emoji) {
@@ -20206,7 +20224,7 @@ function openBadgeExplainer() {
             '<h2 style="font-size:22px;font-weight:800;color:var(--text-primary,#000);margin:0 0 10px;">What is it?</h2>' +
             '<p style="font-size:15px;color:var(--text-secondary,#555);line-height:1.6;margin:0 0 26px;">The badge shows an account is who it says it is. It tells everyone on TrustFirst that this person, business or organisation has been verified — so what you see is real.</p>' +
             '<h2 style="font-size:22px;font-weight:800;color:var(--text-primary,#000);margin:0 0 10px;">Do I need it?</h2>' +
-            '<p style="font-size:15px;color:var(--text-secondary,#555);line-height:1.6;margin:0 0 26px;">Verified accounts get full reach, direct messages and every feature. Unverified accounts can still browse and post, but with limited reach — verifying is how people learn to trust you.</p>' +
+            '<p style="font-size:15px;color:var(--text-secondary,#555);line-height:1.6;margin:0 0 26px;">Verified accounts get full reach, direct messages and every feature. Unverified accounts can browse and reply to a verified person who messages them first, but can\'t post, comment or start chats. Verifying is how people learn to trust you.</p>' +
             '<h2 style="font-size:22px;font-weight:800;color:var(--text-primary,#000);margin:0 0 10px;">How do I get it?</h2>' +
             '<p style="font-size:15px;color:var(--text-secondary,#555);line-height:1.6;margin:0 0 4px;">Tap "Got it" and choose your account type — we\'ll show you exactly what each one needs.</p>' +
         '</div>' +
