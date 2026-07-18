@@ -64,36 +64,38 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     /* ==========================================================================
        WELL-BEING OVERLAY — STYLES
        ========================================================================== */
-    @keyframes wbBreathe { 0%,100%{transform:scale(1) translateY(0);} 50%{transform:scale(1.09) translateY(-6px);} }
-    @keyframes wbSipArm  { 0%,100%{transform:rotate(0deg);} 25%,65%{transform:rotate(-30deg) translateY(-4px);} }
-    @keyframes wbStretch { 0%,100%{transform:scaleY(1) translateY(0);} 50%{transform:scaleY(1.13) translateY(-10px);} }
-    @keyframes wbBob     { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-10px);} }
-    @keyframes wbFadeIn  { from{opacity:0;transform:scale(0.93) translateY(24px);} to{opacity:1;transform:scale(1) translateY(0);} }
-    @keyframes wbRingOut { 0%{transform:scale(1);opacity:0.5;} 100%{transform:scale(2.6);opacity:0;} }
+    @keyframes wbFadeIn  { from{opacity:0;} to{opacity:1;} }
     @keyframes modalUp   { from{transform:translateY(100%);opacity:0;} to{transform:translateY(0);opacity:1;} }
     @keyframes edIn      { from{opacity:0;} to{opacity:1;} }
 
+    /* System-style time-limit screen: centred icon + message, actions pinned low. */
     .wb-overlay {
         position:absolute; inset:0; z-index:9200; display:none; flex-direction:column;
-        align-items:center; justify-content:center; gap:22px;
-        animation: wbFadeIn 0.5s cubic-bezier(0.34,1.56,0.64,1) both;
+        align-items:center; justify-content:space-between;
+        padding:0 20px max(30px, env(safe-area-inset-bottom, 30px));
+        animation: wbFadeIn 0.28s ease both;
     }
-    .wb-ring {
-        position:absolute; inset:-22px; border-radius:50%;
-        border:1.5px solid rgba(0,122,255,0.28);
-        animation:wbRingOut 2.2s ease-out infinite;
+    .wb-center {
+        flex:1; width:100%; display:flex; flex-direction:column;
+        align-items:center; justify-content:center; text-align:center;
     }
-    .wb-ring:nth-child(2){ animation-delay:0.75s; }
-    .wb-msg { text-align:center; padding:0 36px; }
-    .wb-msg h2 { font-size:22px; font-weight:800; letter-spacing:-0.4px; margin-bottom:6px; }
-    .wb-msg p  { font-size:14px; opacity:0.5; font-weight:500; }
+    .wb-icon { font-size:60px; color:#007AFF; margin-bottom:20px; line-height:1; }
+    .wb-msg { text-align:center; padding:0 20px; }
+    .wb-msg h2 { font-size:27px; font-weight:800; letter-spacing:-0.5px; margin-bottom:6px; }
+    .wb-msg p  { font-size:19px; opacity:0.45; font-weight:400; line-height:1.35; }
+    .wb-actions { width:100%; max-width:460px; display:flex; flex-direction:column; gap:10px; }
     .wb-btn-primary {
-        width:calc(100% - 64px); padding:17px; border-radius:50px;
-        background:#007AFF; color:#fff; font-size:16px; font-weight:700;
+        width:100%; padding:17px; border-radius:50px;
+        background:#007AFF; color:#fff; font-size:17px; font-weight:600;
         border:none; cursor:pointer; transition:transform 0.15s;
     }
-    .wb-btn-primary:active{ transform:scale(0.97); }
-    .wb-btn-link { font-size:13px; font-weight:600; color:#007AFF; background:none; border:none; cursor:pointer; opacity:0.8; }
+    .wb-btn-secondary {
+        width:100%; padding:17px; border-radius:50px;
+        background:var(--card-bg,#fff); color:var(--text-primary,#000);
+        font-size:17px; font-weight:400; border:none; cursor:pointer;
+        transition:transform 0.15s;
+    }
+    .wb-btn-primary:active, .wb-btn-secondary:active { transform:scale(0.97); }
 
     /* ==========================================================================
        VIDEO EDITOR — STYLES

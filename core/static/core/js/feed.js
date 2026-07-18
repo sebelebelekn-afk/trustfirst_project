@@ -34904,12 +34904,6 @@ function draftDiscardAndClose() {
 var _wbAudioCtx = null;
 var _wbAudioSrc = null;
 
-var WB_VARIANTS = [
-    { headline: 'Maybe it\'s time for a glass of water 💧', mascotAnim: 'sip',     audio: 'water' },
-    { headline: 'Take a breath. You\'ve earned it 🧘',      mascotAnim: 'breathe', audio: 'chimes' },
-    { headline: 'Time to stretch and reset 🌿',              mascotAnim: 'stretch', audio: 'nature' }
-];
-
 function showWellbeingOverlay() {
     var overlay = document.getElementById('wellbeing-overlay');
     if (!overlay) return;
@@ -34919,13 +34913,8 @@ function showWellbeingOverlay() {
         el.style.display = 'none';
     });
     var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    overlay.style.background = isDark ? '#000' : '#fff';
+    overlay.style.background = isDark ? '#000' : '#f2f2f7';
     overlay.style.color = isDark ? '#fff' : '#000';
-    // Pick random variant
-    var v = WB_VARIANTS[Math.floor(Math.random() * WB_VARIANTS.length)];
-    document.getElementById('wbHeadline').textContent = v.headline;
-    applyWbMascotAnim(v.mascotAnim);
-    playWbAudio(v.audio);
     overlay.style.display = 'flex';
     triggerHaptic(20);
 }
@@ -34939,29 +34928,6 @@ function closeWellbeingOverlay() {
         delete el.dataset.wbHidden;
     });
     triggerHaptic(10);
-}
-function applyWbMascotAnim(type) {
-    var head = document.getElementById('wbHead');
-    var armR = document.getElementById('wbArmRight');
-    var cup  = document.getElementById('wbCup');
-    var medit= document.getElementById('wbMeditateRings');
-    // Reset
-    [head, armR].forEach(function(el){ if(el) el.style.animation=''; });
-    if(cup) cup.style.display='none';
-    if(medit) medit.style.display='none';
-
-    if (type === 'sip') {
-        if(cup) cup.style.display='block';
-        if(armR) armR.style.animation = 'wbSipArm 2.4s ease-in-out infinite';
-        if(head) head.style.animation = 'wbBob 2.4s ease-in-out infinite';
-    } else if (type === 'breathe') {
-        if(medit) medit.style.display='block';
-        if(head) head.style.animation = 'wbBreathe 4s ease-in-out infinite';
-        if(armR) armR.style.animation = 'wbBreathe 4s ease-in-out infinite 0.3s';
-    } else if (type === 'stretch') {
-        if(head) head.style.animation = 'wbStretch 3s ease-in-out infinite';
-        if(armR) armR.style.animation = 'wbStretch 3s ease-in-out infinite 0.2s';
-    }
 }
 function playWbAudio(type) {
     try {
