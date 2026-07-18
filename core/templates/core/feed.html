@@ -1401,7 +1401,7 @@ function authenticateUser() {
                 <div style="display:flex; gap:10px; align-items:center;"><i class="fa-solid fa-qrcode"></i> My QR Code</div>
                 <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
             </div>
-<div class="settings-row" onclick="openPage('wallet-overlay')">
+<div class="settings-row" onclick="openPage('wallet-overlay'); refreshWalletBalance();">
     <div style="display:flex; gap:10px; align-items:center;">
         <div style="width:30px;height:30px;border-radius:8px;background:#007AFF;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-wallet" style="color:white;font-size:13px;"></i></div>
         Balance & Wallet
@@ -4087,7 +4087,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=95"></script>
+<script src="{% static 'core/js/feed.js' %}?v=96"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=74"></script>
 <script src="{% static 'core/js/verify.js' %}?v=73"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=73"></script>

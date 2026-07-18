@@ -35965,13 +35965,35 @@ function confirmBuyCoins(amount) {
     showToast('Coin purchases are available in the TrustFirst mobile app.');
 }
 
-// Called by native iOS/Android after successful purchase
-function onNativeIAPSuccess(coins) {
-    var coinsEl = document.getElementById('wallet-coins');
-    if (coinsEl) coinsEl.textContent = (parseInt(coinsEl.textContent)||0) + parseInt(coins);
-    showToast('🪙 ' + coins + ' coins added!');
-    triggerHaptic(40);
-    logWalletTransaction('coins_purchase', coins, 'completed');
+// The real balance lives in users.coins and is written server-side only, so we
+// always read it back rather than trusting anything on the client.
+async function refreshWalletBalance() {
+    var el = document.getElementById('wallet-coins');
+    if (!el || !window.sb || !currentUser) return 0;
+    try {
+        var r = await sb.from('users').select('coins').eq('id', currentUser.id).maybeSingle();
+        var bal = (r.data && r.data.coins) || 0;
+        el.textContent = bal;
+        if (currentUser) currentUser.coins = bal;
+        return bal;
+    } catch (e) { return 0; }
+}
+
+// Called by the native iOS/Android layer after a store purchase. It deliberately
+// does NOT credit anything: the receipt has to be verified against Apple/Google
+// server-side before coins are granted, otherwise anyone could call this from
+// the console and mint their own balance. Fails closed until that endpoint exists.
+function onNativeIAPSuccess(receipt) {
+    showToast('Verifying your purchase…');
+    triggerHaptic(20);
+    if (!window.sb || !currentUser) return;
+    sb.functions.invoke('verify-iap', { body: { receipt: receipt } })
+        .then(function(r) {
+            if (r && r.error) { showToast('Could not verify purchase yet'); return; }
+            refreshWalletBalance();
+            showToast('Coins added');
+        })
+        .catch(function() { showToast('Could not verify purchase yet'); });
 }
 
 function confirmAddMoney(amount) {
