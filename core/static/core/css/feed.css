@@ -3608,3 +3608,9 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
 /* Location card (post) */
 .tf-loc-card { margin:4px 16px 10px; border-radius:16px; overflow:hidden; border:0.5px solid var(--border-color,#ececec); background:var(--card-bg,#fff); }
 .tf-loc-bar { display:flex; align-items:center; gap:10px; padding:10px 12px; }
+
+/* Signup OTP digit boxes */
+.otp-row { display:flex; gap:8px; justify-content:space-between; width:100%; }
+.otp-box { flex:1; min-width:0; height:56px; text-align:center; font-size:24px; font-weight:600; border-radius:14px; border:1.5px solid var(--border-color,#e2e2e2); background:var(--input-bg,#f7f7f8); color:var(--text-primary,#000); outline:none; -webkit-user-select:text; user-select:text; transition:border-color 0.15s ease, background 0.15s ease; box-sizing:border-box; }
+.otp-box:focus { border-color:#007AFF; background:var(--bg-primary,#fff); }
+.otp-box.filled { border-color:#007AFF; }

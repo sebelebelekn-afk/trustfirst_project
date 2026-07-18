@@ -453,6 +453,26 @@ function canPerformAction(actionName) {
     return true;
 }
 
+// Messaging policy for unverified users: they may REPLY to a conversation that a
+// verified person started with them, but cannot START a new conversation (or DM
+// anyone first). Verified users are unaffected; child accounts still route through
+// parent approval. Since unverified users can never start a chat, any existing
+// conversation they're in was, by policy, opened by a verified user — so a set
+// currentConversationId is sufficient proof they're allowed to reply.
+function _canSendDM() {
+    if (typeof isChildAccount === 'function' && isChildAccount()) return canPerformAction('send a message');
+    if (isVerified()) return true;
+    if (currentConversationId) return true;               // replying in an existing thread
+    requireVerification('start a conversation');           // trying to DM someone new
+    return false;
+}
+function _canStartDM() {
+    if (typeof isChildAccount === 'function' && isChildAccount()) return canPerformAction('send a message');
+    if (isVerified()) return true;
+    requireVerification('start a conversation');
+    return false;
+}
+
 // ==========================================================================
 // BLOCK 2D: UPDATED REGISTRATION & LOGIN FLOW
 // Integrates real Supabase auth, password policy, one-account enforcement
@@ -1666,6 +1686,7 @@ async function searchUsersForMessage(query) {
         var div = document.createElement('div');
         div.style.cssText = 'display:flex; align-items:center; gap:12px; padding:13px 0; border-bottom:1px solid var(--border-color,#f5f5f5); cursor:pointer;';
         div.onclick = function() {
+            if (!_canStartDM()) return;   // unverified users can't start a new conversation
             closePage('contacts-overlay');
             window._currentChatUserId = u.id || null;
             currentConversationId = null;
@@ -2007,6 +2028,22 @@ function handleRepost(postId) {
     openRepost(postId);
 }
 
+// Keep the feed DOM bounded so long scroll sessions stay smooth (recycles the
+// oldest post cards off the top and compensates scrollTop so the view is stable).
+function _capFeedDom(f) {
+    if (!f) return;
+    var CAP = 120;
+    var cards = f.querySelectorAll('.post-card');
+    if (cards.length <= CAP) return;
+    var removeCount = cards.length - CAP;
+    // Preserve distance-from-bottom so the viewport stays put after trimming the
+    // top — correct in every browser (unlike manual delta, which fights scroll
+    // anchoring on Chrome and is absent on Safari).
+    var distFromBottom = f.scrollHeight - f.scrollTop;
+    for (var i = 0; i < removeCount; i++) { if (cards[i]) cards[i].remove(); }
+    f.scrollTop = Math.max(0, f.scrollHeight - distFromBottom);
+}
+
 // --- SCROLL HANDLER (single version) ---
 document.addEventListener('DOMContentLoaded', function() {
     var feedEl = document.getElementById('feed-panels');
@@ -2030,6 +2067,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 currentFeedPage = nextPage;
                 var f = document.getElementById('feed-panels');
                 posts.forEach(function(p) { if (f) f.appendChild(renderRealPostCard(p)); });
+                _capFeedDom(f);
             }
             isLoading = false;
         }).catch(function() {
@@ -2188,7 +2226,8 @@ function animateRepost(el) {
 
 // --- MESSAGES ---
 function launchMessageHub() {
-    if (!canPerformAction('send messages')) return;
+    // Everyone can open messages to read and reply; sending is gated per-conversation
+    // (unverified users can reply to verified-initiated chats but can't start new ones).
     const nav = document.querySelector('.nav-container');
     if (nav) nav.style.display = 'none';
     openPage('msg-overlay');
@@ -3962,7 +4001,7 @@ function _openMsgRow(el) {
 }
 
 function sendMessageNew() {
-    if (typeof canPerformAction === 'function' && !canPerformAction('send a message')) return;
+    if (!_canSendDM()) return;
     var input = document.getElementById('chat-msg-input');
     if (!input) return;
     var text = input.value.trim();
@@ -19510,23 +19549,94 @@ function _signupDoSendCode(email, isResend) {
     sb.auth.signInWithOtp({ email: email, options: { shouldCreateUser: true } }).then(function(r) {
         if (r.error) { showToast(r.error.message || 'Could not send code'); return; }
         var lbl = document.getElementById('signup-code-email'); if (lbl) lbl.textContent = email;
-        if (isResend) showToast('Code resent'); else nextAuthStep('step-signup-code');
+        if (isResend) { showToast('Code resent'); }
+        else { nextAuthStep('step-signup-code'); setTimeout(function() { _otpClear(); _signupStartCodeTimer(300); }, 120); }
     }, function() { showToast('Could not send code'); });
 }
 
 function _signupVerifyCode() {
+    if (window._otpBusy) return;
     var code = (document.getElementById('signup-code-in').value || '').trim();
-    if (code.length < 4) { showToast('Enter the code'); return; }
+    if (code.length < 6) { showToast('Enter the 6-digit code'); return; }
     if (!window.sb) return;
     var params = (window._signup.method === 'phone')
         ? { phone: window._signup.phone, token: code, type: 'sms' }
         : { email: window._signup.email, token: code, type: 'email' };
+    window._otpBusy = true;
     showAuthLoader();
     sb.auth.verifyOtp(params).then(function(r) {
+        window._otpBusy = false;
         hideAuthLoader();
-        if (r.error) { showToast(r.error.message || 'Invalid or expired code'); return; }
+        if (r.error) { showToast(r.error.message || 'Invalid or expired code'); _otpShakeClear(); return; }
+        if (_signupCodeTimer) { clearInterval(_signupCodeTimer); _signupCodeTimer = null; }
         nextAuthStep('step-signup-password');
-    }, function() { hideAuthLoader(); showToast('Verification failed'); });
+    }, function() { window._otpBusy = false; hideAuthLoader(); showToast('Verification failed'); _otpShakeClear(); });
+}
+
+// ---- Signup OTP: 6 digit boxes (auto-advance, paste, shake-and-clear on error) ----
+function _otpBoxes() { var r = document.getElementById('signup-otp-row'); return r ? Array.prototype.slice.call(r.querySelectorAll('.otp-box')) : []; }
+function _otpSync() {
+    var v = _otpBoxes().map(function(b) { return (b.value || '').replace(/\D/g, ''); }).join('');
+    var hid = document.getElementById('signup-code-in'); if (hid) hid.value = v;
+    var btn = document.getElementById('signup-code-continue'); if (btn) btn.disabled = v.length !== 6;
+    _otpBoxes().forEach(function(b) { b.classList.toggle('filled', !!b.value); });
+    return v;
+}
+function _otpInput(el, idx) {
+    el.value = (el.value || '').replace(/\D/g, '').slice(-1);
+    var v = _otpSync();
+    if (el.value && idx < 5) { var next = _otpBoxes()[idx + 1]; if (next) next.focus(); }
+    if (v.length === 6 && !window._otpBusy) _signupVerifyCode();
+}
+function _otpKey(e, el, idx) {
+    if (e.key === 'Backspace' && !el.value && idx > 0) { var p = _otpBoxes()[idx - 1]; if (p) { p.focus(); p.value = ''; _otpSync(); } }
+    else if (e.key === 'ArrowLeft' && idx > 0) { _otpBoxes()[idx - 1].focus(); }
+    else if (e.key === 'ArrowRight' && idx < 5) { _otpBoxes()[idx + 1].focus(); }
+}
+function _otpPaste(e) {
+    e.preventDefault();
+    var txt = ((e.clipboardData || window.clipboardData).getData('text') || '');
+    var digits = txt.replace(/\D/g, '').slice(0, 6).split('');
+    var boxes = _otpBoxes();
+    boxes.forEach(function(b, i) { b.value = digits[i] || ''; });
+    var v = _otpSync();
+    var fi = Math.min(digits.length, 5); if (boxes[fi]) boxes[fi].focus();
+    if (v.length === 6 && !window._otpBusy) _signupVerifyCode();
+}
+function _otpClear() {
+    _otpBoxes().forEach(function(b) { b.value = ''; b.classList.remove('filled'); });
+    var hid = document.getElementById('signup-code-in'); if (hid) hid.value = '';
+    var btn = document.getElementById('signup-code-continue'); if (btn) btn.disabled = true;
+    var first = _otpBoxes()[0]; if (first) { try { first.focus(); } catch (e) {} }
+}
+function _otpShakeClear() {
+    var row = document.getElementById('signup-otp-row');
+    if (row) { row.classList.remove('tf-shake'); void row.offsetWidth; row.classList.add('tf-shake'); }
+    setTimeout(_otpClear, 220);
+}
+var _signupCodeTimer = null;
+function _signupStartCodeTimer(seconds) {
+    seconds = seconds || 300;
+    if (_signupCodeTimer) clearInterval(_signupCodeTimer);
+    var end = Date.now() + seconds * 1000;
+    function tick() {
+        var lbl = document.getElementById('signup-code-timer');
+        var left = Math.max(0, Math.round((end - Date.now()) / 1000));
+        var m = Math.floor(left / 60), s = left % 60;
+        if (lbl) {
+            if (left <= 0) { lbl.textContent = 'expired'; lbl.style.color = '#FF3B30'; }
+            else { lbl.textContent = m + ':' + (s < 10 ? '0' : '') + s; lbl.style.color = '#007AFF'; }
+        }
+        if (left <= 0 && _signupCodeTimer) { clearInterval(_signupCodeTimer); _signupCodeTimer = null; }
+    }
+    tick();
+    _signupCodeTimer = setInterval(tick, 1000);
+}
+function _signupResendCode() {
+    _otpClear();
+    _signupStartCodeTimer(300);
+    if (window._signup && window._signup.method === 'phone') _signupSendPhoneCode();
+    else _signupSendCode(true);
 }
 
 function _signupSetPassword() {
@@ -19737,6 +19847,7 @@ function _signupSendPhoneCode() {
         if (r.error) { showToast(r.error.message || 'Phone sign-up isn\'t available yet'); return; }
         var lbl = document.getElementById('signup-code-email'); if (lbl) lbl.textContent = full;
         nextAuthStep('step-signup-code');
+        setTimeout(function() { _otpClear(); _signupStartCodeTimer(300); }, 120);
     }, function() { showToast('Phone sign-up isn\'t available yet'); });
 }
 
@@ -28110,6 +28221,7 @@ function _stopVmRecording(cancel) {
 }
 
 async function sendVoiceMessage() {
+    if (!_canSendDM()) return;
     if (!_vmBlob) { showToast('Record a message first'); return; }
     if (!window.sb || !currentUser || !_callTargetId) { showToast('Not connected'); return; }
     var sendBtn = document.getElementById('vm-send-btn');
@@ -39649,6 +39761,7 @@ function tfToggleTopicFollow(cat, btn) {
 }
 
 async function sendMediaInChat(file, caption) {
+    if (!_canSendDM()) return;
     var chatBody = document.getElementById('chat-body');
     if (!chatBody) return;
     var isVideo = file.type.startsWith('video/');
