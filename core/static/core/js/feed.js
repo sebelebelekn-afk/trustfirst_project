@@ -10689,9 +10689,13 @@ async function liveChatJoin(room, commentsElId, heartCountElId, viewerCountElId)
     chan.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'live_chat_messages', filter: 'room=eq.' + room },
             function(p) { _liveChatRender(p.new); })
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'live_reactions', filter: 'room=eq.' + room },
-            function() {
+            function(p) {
                 _liveChat.hearts++; _liveChatSetHearts();
-                if (typeof spawnViewerGift === 'function') spawnViewerGift('❤️');
+                var e = (p && p.new && p.new.emoji) || '❤️';
+                // Each spawner no-ops if its container isn't on screen, so this
+                // works for the host view and the viewer view alike.
+                if (typeof spawnViewerGift === 'function') spawnViewerGift(e);
+                if (typeof spawnCreatorGift === 'function') spawnCreatorGift(e);
             })
         .on('presence', { event: 'sync' }, function() {
             var n = Object.keys(chan.presenceState() || {}).length;
@@ -10743,10 +10747,18 @@ async function liveChatSend(text) {
     return true;
 }
 
-async function liveChatHeart() {
+// Reactions (hearts and gift emojis) take the same persisted + realtime path,
+// so everyone watching sees them and they survive a refresh.
+async function liveChatReact(emoji) {
     if (!_liveChat.room || !window.sb || !currentUser) return;
-    try { await sb.from('live_reactions').insert({ room: _liveChat.room, user_id: currentUser.id }); } catch (e) {}
+    try {
+        await sb.from('live_reactions').insert({
+            room: _liveChat.room, user_id: currentUser.id, emoji: emoji || '❤️'
+        });
+    } catch (e) {}
 }
+function liveChatHeart() { return liveChatReact('❤️'); }
+function liveChatGift(emoji) { return liveChatReact(emoji || '❤️'); }
 
 function sendViewerComment() {
     var input = document.getElementById('viewer-chat-input');
@@ -10767,26 +10779,16 @@ function sendViewerHeart() {
 function openViewerGiftSheet() {
     var sheet = document.getElementById('viewer-gift-sheet');
     if (!sheet) return;
-    var coinsEl = document.getElementById('wallet-coins');
-    var displayEl = document.getElementById('gift-coins-display');
-    if (displayEl && coinsEl) displayEl.textContent = coinsEl.textContent;
     sheet.style.display = 'block';
 }
 
-function sendViewerGift(emoji, name, cost) {
-    var coinsEl = document.getElementById('wallet-coins');
-    var current = parseInt(coinsEl ? coinsEl.textContent : 0) || 0;
-    if (current < cost) {
-        showToast('Not enough coins. Buy more in Wallet 🪙');
-        document.getElementById('viewer-gift-sheet').style.display = 'none';
-        return;
-    }
-    if (coinsEl) coinsEl.textContent = current - cost;
-    var displayEl = document.getElementById('gift-coins-display');
-    if (displayEl) displayEl.textContent = current - cost;
-    document.getElementById('viewer-gift-sheet').style.display = 'none';
-    spawnViewerGift(emoji);
-    showToast('Sent ' + emoji + ' ' + name + '!');
+// Free reactions for now: saved and broadcast to everyone watching. No coins are
+// charged, because there is no real balance to charge yet.
+function sendViewerGift(emoji, name) {
+    var sheet = document.getElementById('viewer-gift-sheet');
+    if (sheet) sheet.style.display = 'none';
+    liveChatGift(emoji);
+    showToast('Sent ' + emoji);
     triggerHaptic(40);
 }
 

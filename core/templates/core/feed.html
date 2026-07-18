@@ -2580,20 +2580,20 @@ function authenticateUser() {
     <!-- Gift sheet -->
     <div id="viewer-gift-sheet" style="display:none;position:absolute;bottom:0;left:0;right:0;z-index:20;background:rgba(18,18,18,0.97);backdrop-filter:blur(30px);border-radius:26px 26px 0 0;padding:24px 20px max(40px,env(safe-area-inset-bottom,40px));">
         <div style="width:40px;height:4px;background:rgba(255,255,255,0.2);border-radius:4px;margin:0 auto 20px;"></div>
-        <b style="color:white;font-size:17px;display:block;margin-bottom:4px;">Send a Gift</b>
-        <p style="color:rgba(255,255,255,0.4);font-size:13px;margin-bottom:20px;">Your coins balance: <span id="gift-coins-display" style="color:#007AFF;font-weight:700;">0</span> 🪙</p>
+        <b style="color:white;font-size:17px;display:block;margin-bottom:4px;">Send a Reaction</b>
+        <p style="color:rgba(255,255,255,0.4);font-size:13px;margin-bottom:20px;">Everyone watching will see it.</p>
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;">
-            <div onclick="sendViewerGift('🌹','Rose',5)" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,255,255,0.1);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
-                <div style="font-size:28px;">🌹</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Rose</div><div style="color:#007AFF;font-size:11px;">5 🪙</div>
+            <div onclick="sendViewerGift('🌹','Rose')" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,255,255,0.1);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
+                <div style="font-size:28px;">🌹</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Rose</div>
             </div>
-            <div onclick="sendViewerGift('💎','Diamond',50)" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,255,255,0.1);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
-                <div style="font-size:28px;">💎</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Diamond</div><div style="color:#007AFF;font-size:11px;">50 🪙</div>
+            <div onclick="sendViewerGift('💎','Diamond')" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,255,255,0.1);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
+                <div style="font-size:28px;">💎</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Diamond</div>
             </div>
-            <div onclick="sendViewerGift('🚀','Rocket',100)" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,255,255,0.1);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
-                <div style="font-size:28px;">🚀</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Rocket</div><div style="color:#007AFF;font-size:11px;">100 🪙</div>
+            <div onclick="sendViewerGift('🚀','Rocket')" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,255,255,0.1);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
+                <div style="font-size:28px;">🚀</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Rocket</div>
             </div>
-            <div onclick="sendViewerGift('👑','Crown',500)" style="background:linear-gradient(135deg,rgba(255,215,0,0.15),rgba(255,165,0,0.1));border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,215,0,0.3);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
-                <div style="font-size:28px;">👑</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Crown</div><div style="color:#FFD700;font-size:11px;">500 🪙</div>
+            <div onclick="sendViewerGift('👑','Crown')" style="background:linear-gradient(135deg,rgba(255,215,0,0.15),rgba(255,165,0,0.1));border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,215,0,0.3);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
+                <div style="font-size:28px;">👑</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Crown</div>
             </div>
         </div>
         <button onclick="document.getElementById('viewer-gift-sheet').style.display='none'" style="width:100%;padding:14px;border-radius:16px;background:rgba(255,255,255,0.08);color:white;border:0.5px solid rgba(255,255,255,0.1);font-size:15px;font-weight:600;cursor:pointer;">Cancel</button>
@@ -4087,7 +4087,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=94"></script>
+<script src="{% static 'core/js/feed.js' %}?v=95"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=74"></script>
 <script src="{% static 'core/js/verify.js' %}?v=73"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=73"></script>
