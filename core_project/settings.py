@@ -180,61 +180,57 @@ CACHES = {
 RATELIMIT_ENABLE = bool(os.environ.get("REDIS_URL"))
 
 # ------------------------------------------------------------------
-# CONTENT SECURITY POLICY  (single definition — no duplicates)
+# CONTENT SECURITY POLICY
+# django-csp 4.x reads CONTENT_SECURITY_POLICY. The old CSP_* settings are
+# ignored by 4.x, which is why no policy header was being sent at all.
+#
+# 'unsafe-inline' in script-src is unavoidable here: the UI is built on ~700
+# inline on* handlers. Do NOT add a nonce to script-src -- a nonce makes
+# browsers ignore 'unsafe-inline', which would break every onclick in the app.
+# The policy still blocks foreign script sources, plugins, base-tag hijacking
+# and framing, which is the bulk of the practical benefit.
 # ------------------------------------------------------------------
-CSP_INCLUDE_NONCE_IN = ('script-src',)
-
-CSP_DEFAULT_SRC = ("'self'",)
-
-CSP_SCRIPT_SRC = (
-    "'self'",
-    "https://cdn.jsdelivr.net",
-    "https://cdnjs.cloudflare.com",
-    "https://js.stripe.com",
-)
-
-CSP_STYLE_SRC = (
-    "'self'",
-    "'unsafe-inline'",
-    "https://cdnjs.cloudflare.com",
-)
-
-CSP_FONT_SRC = (
-    "'self'",
-    "https://cdnjs.cloudflare.com",
-    "data:",
-)
-
-CSP_IMG_SRC = (
-    "'self'",
-    "data:",
-    "blob:",
-    "https:",
-)
-
-CSP_MEDIA_SRC = (
-    "blob:",
-    "https:",
-)
-
-CSP_FRAME_SRC = (
-    "'self'",
-    "https://js.stripe.com",
-    "https://hooks.stripe.com",
-)
-
-# SINGLE merged CSP_CONNECT_SRC — covers Supabase, Stripe, Paystack, iTunes, ipapi
-CSP_CONNECT_SRC = (
-    "'self'",
-    "https://*.supabase.co",
-    "wss://*.supabase.co",
-    "https://api.stripe.com",
-    "https://itunes.apple.com",
-    "https://ipapi.co",
-    "https://api.resend.com",
-    "https://api.giphy.com",
-    "https://vision.googleapis.com",
-)
+CONTENT_SECURITY_POLICY = {
+    "DIRECTIVES": {
+        "default-src": ["'self'"],
+        "script-src": [
+            "'self'", "'unsafe-inline'",
+            "https://cdn.jsdelivr.net",       # supabase-js, livekit-client
+            "https://cdnjs.cloudflare.com",   # font-awesome, leaflet, qrcode
+            "https://js.stripe.com",
+            "https://js.paystack.co",
+        ],
+        "style-src": ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+        "font-src": ["'self'", "data:", "https://cdnjs.cloudflare.com"],
+        # Avatars, Giphy, OSM tiles and Supabase storage all serve images.
+        "img-src": ["'self'", "data:", "blob:", "https:"],
+        "media-src": ["'self'", "data:", "blob:", "https:"],
+        "connect-src": [
+            "'self'",
+            "https://*.supabase.co", "wss://*.supabase.co",
+            "https://*.livekit.cloud", "wss://*.livekit.cloud",
+            "https://itunes.apple.com",               # music search
+            "https://lrclib.net",                     # synced lyrics
+            "https://overpass-api.de",                # nearby places
+            "https://nominatim.openstreetmap.org",    # reverse geocoding
+            "https://ipapi.co",
+            "https://api.giphy.com",
+            "https://api.stripe.com",
+            "https://api.paystack.co",
+        ],
+        "frame-src": [
+            "'self'",
+            "https://www.openstreetmap.org",  # location map embed
+            "https://js.stripe.com",
+            "https://hooks.stripe.com",
+        ],
+        "worker-src": ["'self'", "blob:"],
+        "object-src": ["'none'"],
+        "base-uri": ["'self'"],
+        "form-action": ["'self'"],
+        "frame-ancestors": ["'self'"],
+    }
+}
 
 # ------------------------------------------------------------------
 # LOGGING
