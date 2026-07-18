@@ -10504,33 +10504,9 @@ async function startLive() {
             if (el) el.textContent = m + ':' + (s < 10 ? '0' : '') + s;
         }, 1000);
 
-        // Real viewer count and chat via Supabase Realtime
-        var liveChannel = sb.channel('live_stream_' + currentUser.id);
-        liveChannel
-            .on('broadcast', { event: 'viewer_join' }, function(payload) {
-                viewers++;
-                var el = document.getElementById('live-viewer-count');
-                if (el) el.textContent = viewers > 999 ? (viewers/1000).toFixed(1)+'K' : viewers;
-            })
-            .on('broadcast', { event: 'chat_message' }, function(payload) {
-                var feed = document.getElementById('live-comments');
-                if (!feed) return;
-                var comment = document.createElement('div');
-                comment.className = 'live-comment';
-                comment.innerHTML = '<b style="color:#007AFF;">' + escapeHtml(payload.payload.handle) + '</b> ' + escapeHtml(payload.payload.text);
-                feed.appendChild(comment);
-                while (feed.children.length > 8) feed.removeChild(feed.firstChild);
-            })
-            .on('broadcast', { event: 'gift' }, function(payload) {
-                var g = payload.payload;
-                showCreatorGiftAlert(g.senderName, g.emoji, g.giftName, g.coins);
-                spawnCreatorGift(g.emoji);
-                _liveHearts += g.coins;
-                var hEl = document.getElementById('live-heart-count');
-                if (hEl) hEl.textContent = _liveHearts > 999 ? (_liveHearts/1000).toFixed(1)+'K' : _liveHearts;
-            })
-            .subscribe();
-        window._liveChannel = liveChannel;
+        // Real chat, hearts and viewer count — saved to Supabase and delivered
+        // over Realtime (presence gives the true number of people watching).
+        liveChatJoin('live_' + currentUser.id, 'live-comments', 'live-heart-count', 'live-viewer-count');
 
     } catch (err) {
         showToast('Camera access needed to go live');
@@ -10664,77 +10640,128 @@ function openViewerLive(streamerName, streamerAvatar, room) {
     var avatarEl = document.getElementById('viewer-streamer-avatar');
     if (nameEl) nameEl.textContent = streamerName || 'Live Stream';
     if (avatarEl && streamerAvatar) avatarEl.src = streamerAvatar;
-    // Real stream when a room + LiveKit are available; otherwise the demo simulation.
-    if (room && window.LivekitClient) {
-        _lkJoinViewer(room).then(function(ok){ if (!ok) startViewerSimulation(); });
-    } else {
-        startViewerSimulation();
-    }
+    // Join the real video when LiveKit is configured; join the real chat either way.
+    if (room && window.LivekitClient) _lkJoinViewer(room);
+    if (room) liveChatJoin(room, 'viewer-live-comments', null, 'viewer-live-count');
     triggerHaptic(20);
 }
 
 function closeViewerLive() {
     var overlay = document.getElementById('live-viewer-overlay');
     if (overlay) overlay.style.display = 'none';
-    clearInterval(_viewerSimInterval);
+    liveChatLeave();
     _lkLeaveViewer();
     var comments = document.getElementById('viewer-live-comments');
     if (comments) comments.innerHTML = '';
 }
 
-var _viewerSimInterval = null;
-function startViewerSimulation() {
-    var count = 0;
-    clearInterval(_viewerSimInterval);
-    var names = ['@sipho_za','@king_ndo','@lebo_ct','@thabo23','@naledi','@musa_jozi'];
-    var msgs = ['🔥🔥','amazing!','W creator','hello from CT!','❤️','first time here!','keep going!'];
-    var gifts = [{e:'💎',n:'Diamond'},{e:'🌹',n:'Rose'},{e:'🚀',n:'Rocket'},{e:'👑',n:'Crown'}];
-    _viewerSimInterval = setInterval(function() {
-        count += Math.floor(Math.random()*5+1);
-        var el = document.getElementById('viewer-live-count');
-        if (el) el.textContent = count > 999 ? (count/1000).toFixed(1)+'K' : count;
+// ==========================================================================
+// LIVE CHAT — real messages and hearts, saved to Supabase and delivered to
+// every viewer over Realtime. Anchored on the stream's room ("live_<userId>"),
+// which both the broadcaster and viewers know. Viewer count uses Realtime
+// presence, so it reflects who is actually watching.
+// ==========================================================================
+var _liveChat = { room: null, chan: null, commentsId: null, heartsId: null, countId: null, hearts: 0 };
 
-        var name = names[Math.floor(Math.random()*names.length)];
-        var msg = msgs[Math.floor(Math.random()*msgs.length)];
-        var isTopDonator = Math.random() > 0.87;
-        var isTopViewer = Math.random() > 0.91;
-        var badge = isTopDonator
-            ? '<span style="background:#007AFF;color:white;font-size:9px;font-weight:800;padding:1px 6px;border-radius:4px;margin-right:4px;">Top Donator</span>'
-            : isTopViewer
-            ? '<span style="background:#007AFF;color:white;font-size:9px;font-weight:800;padding:1px 6px;border-radius:4px;margin-right:4px;">Top Viewer</span>'
-            : '';
-        var row = document.createElement('div');
-        row.className = 'live-comment';
-        row.innerHTML = badge + '<b style="color:#007AFF;">' + name + '</b> ' + msg;
-        var feed = document.getElementById('viewer-live-comments');
-        if (feed) {
-            feed.appendChild(row);
-            while (feed.children.length > 8) feed.removeChild(feed.firstChild);
-        }
-        if (Math.random() > 0.9) {
-            var g = gifts[Math.floor(Math.random()*gifts.length)];
-            spawnViewerGift(g.e);
-        }
-    }, 2200);
+async function liveChatJoin(room, commentsElId, heartCountElId, viewerCountElId) {
+    liveChatLeave();
+    if (!room || !window.sb || !currentUser) return;
+    _liveChat.room = room;
+    _liveChat.commentsId = commentsElId;
+    _liveChat.heartsId = heartCountElId;
+    _liveChat.countId = viewerCountElId;
+
+    var feed = document.getElementById(commentsElId);
+    if (feed) feed.innerHTML = '';
+
+    // Recent history, so someone joining late still sees the conversation.
+    try {
+        var r = await sb.from('live_chat_messages').select('*')
+            .eq('room', room).order('created_at', { ascending: true }).limit(50);
+        (r.data || []).forEach(function(m) { _liveChatRender(m); });
+    } catch (e) {}
+    try {
+        var h = await sb.from('live_reactions').select('id', { count: 'exact', head: true }).eq('room', room);
+        _liveChat.hearts = h.count || 0; _liveChatSetHearts();
+    } catch (e) {}
+
+    var chan = sb.channel('liveroom_' + room, { config: { presence: { key: currentUser.id } } });
+    chan.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'live_chat_messages', filter: 'room=eq.' + room },
+            function(p) { _liveChatRender(p.new); })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'live_reactions', filter: 'room=eq.' + room },
+            function() {
+                _liveChat.hearts++; _liveChatSetHearts();
+                if (typeof spawnViewerGift === 'function') spawnViewerGift('❤️');
+            })
+        .on('presence', { event: 'sync' }, function() {
+            var n = Object.keys(chan.presenceState() || {}).length;
+            _liveChatSetViewers(n);
+        })
+        .subscribe(function(status) { if (status === 'SUBSCRIBED') chan.track({ at: Date.now() }); });
+    _liveChat.chan = chan;
+}
+
+function liveChatLeave() {
+    if (_liveChat.chan) { try { sb.removeChannel(_liveChat.chan); } catch (e) {} }
+    _liveChat = { room: null, chan: null, commentsId: null, heartsId: null, countId: null, hearts: 0 };
+}
+
+function _liveChatRender(m) {
+    if (!m) return;
+    var feed = document.getElementById(_liveChat.commentsId);
+    if (!feed) return;
+    var mine = currentUser && m.user_id === currentUser.id;
+    var row = document.createElement('div');
+    row.className = 'live-comment';
+    row.innerHTML = '<b style="color:' + (mine ? '#34C759' : '#007AFF') + ';">' +
+        escapeHtml(mine ? 'You' : ('@' + (m.username || 'user'))) + '</b> ' + escapeHtml(m.content || '');
+    feed.appendChild(row);
+    while (feed.children.length > 8) feed.removeChild(feed.firstChild);
+}
+function _liveChatSetHearts() {
+    var el = document.getElementById(_liveChat.heartsId);
+    if (el) el.textContent = _liveChat.hearts > 999 ? (_liveChat.hearts / 1000).toFixed(1) + 'K' : _liveChat.hearts;
+}
+function _liveChatSetViewers(n) {
+    var el = document.getElementById(_liveChat.countId);
+    if (el) el.textContent = n > 999 ? (n / 1000).toFixed(1) + 'K' : n;
+}
+
+async function liveChatSend(text) {
+    text = (text || '').trim();
+    if (!text || !_liveChat.room || !window.sb || !currentUser) return false;
+    if (typeof containsBannedWords === 'function' && containsBannedWords(text)) {
+        showToast('Message violates community guidelines.'); return false;
+    }
+    var r = await sb.from('live_chat_messages').insert({
+        room: _liveChat.room, user_id: currentUser.id,
+        username: currentUser.username || currentUser.name || 'user',
+        avatar_url: currentUser.avatar_url || '',
+        content: text.slice(0, 500)
+    });
+    if (r && r.error) { showToast('Could not send'); return false; }
+    return true;
+}
+
+async function liveChatHeart() {
+    if (!_liveChat.room || !window.sb || !currentUser) return;
+    try { await sb.from('live_reactions').insert({ room: _liveChat.room, user_id: currentUser.id }); } catch (e) {}
 }
 
 function sendViewerComment() {
     var input = document.getElementById('viewer-chat-input');
     if (!input || !input.value.trim()) return;
-    var feed = document.getElementById('viewer-live-comments');
-    if (!feed) return;
-    var row = document.createElement('div');
-    row.className = 'live-comment';
-    row.innerHTML = '<b style="color:#34C759;">You</b> ' + escapeHtml(input.value.trim());
-    feed.appendChild(row);
-    while (feed.children.length > 8) feed.removeChild(feed.firstChild);
+    var text = input.value.trim();
     input.value = '';
     triggerHaptic(8);
+    // Saved to Supabase; Realtime echoes it back to us and every other viewer.
+    liveChatSend(text);
 }
 
 function sendViewerHeart() {
-    spawnViewerGift('❤️');
     triggerHaptic(15);
+    // Persisted; the Realtime handler animates the heart for everyone watching.
+    liveChatHeart();
 }
 
 function openViewerGiftSheet() {
@@ -10794,6 +10821,7 @@ function confirmEndLive() {
 
 function endLive() {
     _lkStopBroadcast(); // disconnect LiveKit + remove from the live registry
+    liveChatLeave();    // unsubscribe from the room's chat/presence channel
     if (liveStream) {
         liveStream.getTracks().forEach(t => t.stop());
         liveStream = null;
@@ -11090,13 +11118,9 @@ function sendLiveComment() {
     const input = document.getElementById('live-chat-input');
     const text = input.value.trim();
     if (!text) return;
-    const feed = document.getElementById('live-comments');
-    const comment = document.createElement('div');
-    comment.className = 'live-comment';
-    comment.innerHTML = `<b>You</b> ${escapeHtml(text)}`;
-    feed.appendChild(comment);
-    if (feed.children.length > 8) feed.removeChild(feed.firstChild);
     input.value = '';
+    // Saved + broadcast so viewers actually see the host's messages.
+    liveChatSend(text);
 }
 
 // ==========================================================================
