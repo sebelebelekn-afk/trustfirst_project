@@ -873,14 +873,14 @@ localStorage.setItem('tf_burst', JSON.stringify(burstAttempts));
         // We can't look up their email by username, so tell them to use their email instead
         return showAuthError(
             'Account not found by username. Try logging in with your email address instead.',
-            'step-login'
+            returnStep
         );
     }
 
     if (userProfile.is_locked) {
         return showAuthError(
             'This account is locked. Contact support to unlock it.',
-            'step-login'
+            returnStep
         );
     }
 
@@ -19547,14 +19547,68 @@ function openCountryPicker() {
 // Enable the Continue button only when the field has a value.
 function _xToggle(input, btnId) { var b = document.getElementById(btnId); if (b) b.disabled = !((input.value || '').trim()); }
 // Carry the entered email/username into the hidden identifier, then ask for the password.
+// The username step used to accept anything and only reveal that the account
+// did not exist after you had already typed a password. Username login cannot
+// work without a users row (that row is what maps username -> email), so the
+// check belongs here. Email is deliberately NOT blocked the same way: an
+// account created straight in Supabase has an auth user but no users row, and
+// it can still sign in by email.
 function _loginIdentifierNext(inputId) {
     var el = document.getElementById(inputId);
     var v = el ? (el.value || '').trim() : '';
     if (!v) return;
-    var hidden = document.getElementById('login-user');
-    if (hidden) hidden.value = v;
-    nextAuthStep('step-login-password');
-    setTimeout(function() { var p = document.getElementById('login-pass'); if (p) { try { p.focus(); } catch (e) {} } }, 250);
+
+    function go(value) {
+        var hidden = document.getElementById('login-user');
+        if (hidden) hidden.value = value;
+        nextAuthStep('step-login-password');
+        setTimeout(function () { var p = document.getElementById('login-pass'); if (p) { try { p.focus(); } catch (e) {} } }, 250);
+    }
+
+    if (inputId !== 'login-username-in') { go(v); return; }
+
+    // Signup stores usernames lowercased, so match on the same shape.
+    var clean = v.replace(/^@+/, '').toLowerCase();
+    if (!clean) return;
+
+    var btn = document.getElementById('login-username-continue');
+    if (window._loginCheckBusy) return;          // ignore double taps while in flight
+    window._loginCheckBusy = true;
+    // Restore to a fixed label. Reading it off the button meant that if it was
+    // ever showing "Checking…" when a second attempt started, that string got
+    // captured and "restored", leaving the button stuck on it forever.
+    if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+    function restore() {
+        window._loginCheckBusy = false;
+        if (btn) { btn.disabled = false; btn.textContent = 'Continue'; }
+    }
+
+    // If the lookup is unavailable, fall through rather than lock the user out;
+    // the password step still reports a bad account.
+    if (!window.sb) { restore(); go(clean); return; }
+
+    // This check is a convenience, not the security gate (the password is), so
+    // it fails open. A cold Supabase connection can take several seconds and
+    // must never strand someone on the username screen.
+    var settled = false;
+    function once(fn) { return function (a) { if (settled) return; settled = true; restore(); fn(a); }; }
+    var proceed = once(function () { go(clean); });
+    var reject = once(function () {
+        showToast('No account found with that username');
+        if (el) {
+            el.classList.remove('tf-shake');
+            void el.offsetWidth;                 // restart the animation
+            el.classList.add('tf-shake');
+            setTimeout(function () { el.classList.remove('tf-shake'); }, 500);
+            try { el.focus(); } catch (e) {}
+        }
+        triggerHaptic(20);
+    });
+
+    setTimeout(proceed, 2500);
+    sb.from('users').select('username').eq('username', clean).maybeSingle().then(function (r) {
+        if (r.error || r.data) proceed(); else reject();
+    }, proceed);
 }
 
 // ==========================================================================
@@ -32732,7 +32786,9 @@ function openPreviewEditScreen() {
         }
     });
 
-    // Show overlay
+    // Show overlay. Clear any cutout state first: the mask and stroke belong to
+    // the clip they were made on, and would otherwise carry over to this one.
+    if (typeof _edCutResetAll === 'function') _edCutResetAll();
     var overlay = document.getElementById('preview-edit-overlay');
     if (overlay) { overlay.style.display = 'flex'; }
 
@@ -34570,7 +34626,14 @@ var _edCut = {
     paint: null, pending: null,
     chroma: null, tool: null, brushSize: 30, showPaint: false,
     w: 0, h: 0, raf: null, painting: false,
-    work: null, workCtx: null, outCtx: null
+    work: null, workCtx: null, outCtx: null,
+    // stroke: outlines the cutout. strokeReveal is the eye toggle that tints the
+    // kept subject blue over the untouched background so you can see the shape
+    // the cutout actually found. strokeOwnsAuto records whether the stroke is
+    // what switched segmentation on, so clearing it doesn't undo a cutout the
+    // user made themselves.
+    stroke: 'none', strokeReveal: false, strokeOwnsAuto: false,
+    keepBuf: null, distBuf: null, ringBuf: null, ringValid: false, frame: 0
 };
 
 function _edCutCanvas() { return document.getElementById('edCutoutCanvas'); }
@@ -34600,6 +34663,10 @@ function _edCutFit() {
         _edCut.outCtx = c.getContext('2d');
         _edCut.paint = new Uint8Array(W * H);
         _edCut.pending = new Uint8Array(W * H);
+        _edCut.keepBuf = new Uint8Array(W * H);
+        _edCut.distBuf = new Float32Array(W * H);
+        _edCut.ringBuf = new Uint8Array(W * H * 4);
+        _edCut.ringValid = false;
         _edCut.autoMask = null;
     }
     return true;
@@ -34629,6 +34696,7 @@ function _edCutStop() {
 
 function _edCutHasEdits() {
     if (_edCut.auto || _edCut.chroma) return true;
+    if (_edCut.stroke && _edCut.stroke !== 'none') return true;
     var p = _edCut.paint;
     if (p) { for (var i = 0; i < p.length; i++) { if (p[i] === 1) return true; } }
     return false;
@@ -34655,6 +34723,10 @@ function _edCutRender() {
     var tol = 0, soft = 0;
     if (ch) { tol = 24 + (ch.intensity / 100) * 170; soft = (ch.shadow / 100); }
 
+    var hasStroke = _edCut.stroke && _edCut.stroke !== 'none';
+    var reveal = hasStroke && _edCut.strokeReveal;
+    var keepBuf = _edCut.keepBuf;
+
     for (var px = 0, i = 0; px < n; px++, i += 4) {
         var keep = true;
         if (auto && auto[px] === 0) keep = false;
@@ -34672,17 +34744,170 @@ function _edCutRender() {
         if (paint[px] === 1) keep = false;   // brushed out
         if (paint[px] === 2) keep = true;    // erased back in
 
-        if (!keep) d[i + 3] = 0;
+        if (keepBuf) keepBuf[px] = keep ? 1 : 0;
 
-        // Blue while a stroke is in progress, and for the stroke "reveal" eye.
+        // The reveal deliberately leaves the background visible and tints the
+        // kept subject instead, so you can judge the cutout edge against what
+        // is actually behind it.
+        if (!keep && !reveal) d[i + 3] = 0;
+        else if (reveal && keep) {
+            d[i] = (d[i] * 0.30) | 0;
+            d[i + 1] = (d[i + 1] * 0.30 + 85) | 0;
+            d[i + 2] = (d[i + 2] * 0.30 + 178) | 0;
+        }
+
+        // Blue while a brush stroke is in progress, and for the brush reveal eye.
         if (pend[px] === 1 || (showPaint && paint[px] === 1)) {
             d[i] = 0; d[i + 1] = 122; d[i + 2] = 255; d[i + 3] = 175;
         }
     }
+
+    if (hasStroke && keepBuf) {
+        // The outline only has to be recomputed when the mask changes. Chroma
+        // keying re-keys every frame off live video, so refresh periodically
+        // there; everything else is static until the user edits again.
+        if (!_edCut.ringValid || (ch && (_edCut.frame % 8 === 0))) _edCutBuildStrokeRing(W, H);
+        var ring = _edCut.ringBuf;
+        for (var rp = 0, ri = 0; rp < n; rp++, ri += 4) {
+            var ra = ring[ri + 3];
+            if (!ra) continue;
+            if (ra === 255) {
+                d[ri] = ring[ri]; d[ri + 1] = ring[ri + 1]; d[ri + 2] = ring[ri + 2]; d[ri + 3] = 255;
+            } else {   // soft glow edge: blend over whatever is underneath
+                var af = ra / 255, inv = 1 - af;
+                d[ri] = (ring[ri] * af + d[ri] * inv) | 0;
+                d[ri + 1] = (ring[ri + 1] * af + d[ri + 1] * inv) | 0;
+                d[ri + 2] = (ring[ri + 2] * af + d[ri + 2] * inv) | 0;
+                d[ri + 3] = Math.max(d[ri + 3], ra);
+            }
+        }
+    }
+    _edCut.frame++;
     wctx.putImageData(img, 0, 0);
     var octx = _edCut.outCtx;
     octx.clearRect(0, 0, W, H);
     octx.drawImage(_edCut.work, 0, 0);
+}
+
+// ---- stroke styles ----
+// width/glow are in units of a 320px-wide mask and get scaled to the working
+// resolution, so a stroke looks the same thickness on any screen.
+var _ED_STROKES = [
+    { id: 'none',      label: 'None' },
+    { id: 'torn',      label: 'Torn',   type: 'torn',   color: [255, 255, 255], width: 7 },
+    { id: 'white',     label: 'White',  type: 'solid',  color: [255, 255, 255], width: 8 },
+    { id: 'thin',      label: 'Thin',   type: 'solid',  color: [255, 255, 255], width: 3 },
+    { id: 'dashed',    label: 'Dashed', type: 'dashed', color: [255, 255, 255], width: 4 },
+    { id: 'cyan-pink', label: 'Duo',    type: 'double', color: [0, 207, 255], color2: [255, 51, 153], width: 8 },
+    { id: 'cyan',      label: 'Cyan',   type: 'solid',  color: [64, 224, 224], width: 6 },
+    { id: 'yellow',    label: 'Glow',   type: 'glow',   color: [255, 214, 10], width: 3, glow: 14 },
+    { id: 'pink-neon', label: 'Neon',   type: 'glow',   color: [255, 45, 146], width: 2, glow: 12 }
+];
+
+function _edStrokeStyle(id) {
+    for (var i = 0; i < _ED_STROKES.length; i++) { if (_ED_STROKES[i].id === id) return _ED_STROKES[i]; }
+    return null;
+}
+
+function _edCutInvalidateRing() { _edCut.ringValid = false; }
+
+// Block noise, so the torn edge reads as torn paper rather than per-pixel static.
+function _edStrokeNoise(x, y) {
+    var s = Math.sin((x >> 2) * 12.9898 + (y >> 2) * 78.233) * 43758.5453;
+    return s - Math.floor(s);
+}
+
+// Two-pass chamfer distance transform, then colour the band just outside the
+// kept region. A naive dilation is O(n * r^2) every frame, far too slow on a
+// phone; this is O(n) and only reruns when the mask actually changed.
+function _edCutBuildStrokeRing(W, H) {
+    var st = _edStrokeStyle(_edCut.stroke);
+    var ring = _edCut.ringBuf, dist = _edCut.distBuf, keep = _edCut.keepBuf;
+    if (!ring || !dist || !keep) return;
+    ring.fill(0);
+    if (!st || !st.color) { _edCut.ringValid = true; return; }
+
+    var n = W * H, BIG = 1e9, p, x, y, dv;
+    for (p = 0; p < n; p++) dist[p] = keep[p] ? 0 : BIG;
+
+    for (y = 0; y < H; y++) {
+        for (x = 0; x < W; x++) {
+            p = y * W + x; dv = dist[p];
+            if (dv === 0) continue;
+            if (x > 0)              dv = Math.min(dv, dist[p - 1] + 1);
+            if (y > 0)              dv = Math.min(dv, dist[p - W] + 1);
+            if (x > 0 && y > 0)     dv = Math.min(dv, dist[p - W - 1] + 1.414);
+            if (x < W - 1 && y > 0) dv = Math.min(dv, dist[p - W + 1] + 1.414);
+            dist[p] = dv;
+        }
+    }
+    for (y = H - 1; y >= 0; y--) {
+        for (x = W - 1; x >= 0; x--) {
+            p = y * W + x; dv = dist[p];
+            if (dv === 0) continue;
+            if (x < W - 1)              dv = Math.min(dv, dist[p + 1] + 1);
+            if (y < H - 1)              dv = Math.min(dv, dist[p + W] + 1);
+            if (x < W - 1 && y < H - 1) dv = Math.min(dv, dist[p + W + 1] + 1.414);
+            if (x > 0 && y < H - 1)     dv = Math.min(dv, dist[p + W - 1] + 1.414);
+            dist[p] = dv;
+        }
+    }
+
+    var scale = Math.max(0.5, W / 320);
+    var wpx = st.width * scale;
+    var glow = (st.glow || 0) * scale;
+    var dashLen = Math.max(2, Math.round(5 * scale));
+    var c1 = st.color, c2 = st.color2 || st.color;
+
+    for (y = 0, p = 0; y < H; y++) {
+        for (x = 0; x < W; x++, p++) {
+            if (keep[p]) continue;
+            dv = dist[p];
+            if (dv >= BIG) continue;
+            var edge = (st.type === 'torn') ? wpx * (0.45 + 1.05 * _edStrokeNoise(x, y)) : wpx;
+            if (dv > edge + glow) continue;
+
+            var a = 1;
+            if (dv > edge) {
+                if (!glow) continue;
+                a = Math.max(0, 1 - (dv - edge) / glow);
+                a *= a;
+            }
+            if (st.type === 'dashed' && ((((x + y) / dashLen) | 0) % 2)) continue;
+
+            var col = (st.type === 'double' && dv > edge * 0.5) ? c2 : c1;
+            var ri = p * 4;
+            ring[ri] = col[0]; ring[ri + 1] = col[1]; ring[ri + 2] = col[2];
+            ring[ri + 3] = Math.max(1, Math.round(255 * a));
+        }
+    }
+    _edCut.ringValid = true;
+}
+
+// The eye lives on the preview (not in the panel) so it stays reachable while
+// scrolling the style row, matching where the reference puts it.
+function _edCutStrokeEye(show) {
+    var area = document.getElementById('edPreviewArea');
+    var btn = document.getElementById('edStrokeEye');
+    if (!show) { if (btn) btn.remove(); return; }
+    if (!area) return;
+    if (!btn) {
+        btn = document.createElement('button');
+        btn.id = 'edStrokeEye';
+        btn.title = 'Show what the cutout selected';
+        btn.style.cssText = 'position:absolute;right:14px;bottom:14px;z-index:70;width:42px;height:42px;' +
+            'border-radius:50%;border:none;background:rgba(0,0,0,0.45);color:#fff;font-size:17px;cursor:pointer;';
+        btn.onclick = function () { _edCutToggleStrokeReveal(); };
+        area.appendChild(btn);
+    }
+    btn.innerHTML = '<i class="fa-solid ' + (_edCut.strokeReveal ? 'fa-eye-slash' : 'fa-eye') + '"></i>';
+}
+
+function _edCutToggleStrokeReveal() {
+    _edCut.strokeReveal = !_edCut.strokeReveal;
+    _edCutStrokeEye(true);
+    _edCutStart();
+    triggerHaptic(8);
 }
 
 // ---- brush / eraser ----
@@ -34738,6 +34963,7 @@ function _edCutBindPaint() {
         var pend = _edCut.pending, paint = _edCut.paint;
         for (var i = 0; i < pend.length; i++) { if (pend[i] === 1) paint[i] = val; }
         pend.fill(0);
+        _edCutInvalidateRing();
         edState.isDirty = true;
         if (typeof edSaveHistory === 'function') edSaveHistory();
         triggerHaptic(10);
@@ -34761,6 +34987,7 @@ function _edCutSetChroma(rgb, intensity, shadow) {
             shadow: (shadow == null ? 0 : shadow)
         };
     }
+    _edCutInvalidateRing();
     _edCutStart();
 }
 
@@ -34828,6 +35055,7 @@ function _edCutRunAuto(onProgress, onDone) {
                     }
                     _edCut.autoMask = mask;
                     _edCut.auto = true;
+                    _edCutInvalidateRing();
                     onProgress(100);
                     onDone(true);
                 } catch (err) { onDone(false, 'Could not read the mask'); }
@@ -34842,6 +35070,7 @@ function _edCutToggleAuto(onProgress, onDone) {
     if (_edCut.auto) {
         _edCut.auto = false;
         _edCut.autoMask = null;
+        _edCutInvalidateRing();
         if (!_edCutHasEdits()) _edCutStop(); else _edCutStart();
         edState.isDirty = true;
         if (typeof edSaveHistory === 'function') edSaveHistory();
@@ -34857,8 +35086,11 @@ function _edCutToggleAuto(onProgress, onDone) {
 function _edCutResetAll() {
     _edCut.auto = false; _edCut.autoMask = null; _edCut.chroma = null; _edCut.tool = null;
     _edCut.showPaint = false; _edCut.painting = false;
+    _edCut.stroke = 'none'; _edCut.strokeReveal = false; _edCut.strokeOwnsAuto = false;
     if (_edCut.paint) _edCut.paint.fill(0);
     if (_edCut.pending) _edCut.pending.fill(0);
+    _edCutInvalidateRing();
+    _edCutStrokeEye(false);
     _edCutStop();
 }
 
@@ -35008,30 +35240,37 @@ function edCutoutSelectMode(mode) {
     }
 
     if (mode === 'stroke') {
-        var STROKES = [
-            {id:'none', color:'none'},
-            {id:'white', color:'#FFFFFF'},
-            {id:'cyan-pink', color:'linear-gradient(135deg,#00CFFF,#FF3399)'},
-            {id:'yellow', color:'#FFD60A'},
-            {id:'blue-white', color:'linear-gradient(135deg,#007AFF,#FFFFFF)'}
-        ];
+        var cur = _edCut.stroke || 'none';
         sub.innerHTML =
-            '<p style="color:rgba(255,255,255,0.5);font-size:13px;text-align:center;margin:0 0 12px;">Cutout will be applied if you add a stroke</p>' +
+            '<p id="edStrokeNote" style="color:rgba(255,255,255,0.5);font-size:13px;text-align:center;margin:0 0 12px;">' +
+                (cur === 'none' ? 'Cutout will be applied if you add a stroke' : 'Tap the eye to see what was selected') +
+            '</p>' +
             '<div style="display:flex;gap:10px;overflow-x:auto;scrollbar-width:none;padding-bottom:4px;">' +
-            STROKES.map(function(s, i) {
+            _ED_STROKES.map(function (s) {
+                var inner;
+                if (s.id === 'none') {
+                    inner = '<i class="fa-solid fa-ban" style="font-size:22px;color:rgba(255,255,255,0.4);"></i>';
+                } else if (s.type === 'dashed') {
+                    inner = '<div style="width:38px;height:44px;border:2px dashed #fff;border-radius:42%;display:flex;align-items:center;justify-content:center;">' +
+                            '<i class="fa-solid fa-user" style="font-size:20px;color:#4a4a4e;"></i></div>';
+                } else {
+                    var col = 'rgb(' + s.color.join(',') + ')';
+                    var css = 'font-size:34px;color:#4a4a4e;';
+                    if (s.type === 'glow') {
+                        css += '-webkit-text-stroke:1px ' + col + ';text-shadow:0 0 7px ' + col + ',0 0 14px ' + col + ';';
+                    } else if (s.type === 'double') {
+                        css += '-webkit-text-stroke:2px ' + col + ';text-shadow:0 0 5px rgb(' + s.color2.join(',') + ');';
+                    } else {
+                        css += '-webkit-text-stroke:' + Math.max(1, s.width / 3).toFixed(1) + 'px ' + col + ';';
+                    }
+                    inner = '<i class="fa-solid fa-user" style="' + css + '"></i>';
+                }
                 return '<button id="strokeOpt_' + s.id + '" onclick="edCutoutSelectStroke(\'' + s.id + '\')" ' +
-                    'style="flex-shrink:0;width:72px;height:88px;border-radius:12px;border:2.5px solid ' + (i === 0 ? 'white' : 'rgba(255,255,255,0.2)') + ';' +
+                    'style="flex-shrink:0;width:72px;height:88px;border-radius:12px;border:2.5px solid ' +
+                    (cur === s.id ? 'white' : 'rgba(255,255,255,0.2)') + ';' +
                     'background:rgba(255,255,255,0.06);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer;overflow:hidden;">' +
-                    (s.id === 'none'
-                        ? '<i class="fa-solid fa-ban" style="font-size:22px;color:rgba(255,255,255,0.4);"></i>'
-                        : '<div style="width:44px;height:56px;border-radius:8px;border:3px solid;' +
-                          'border-image:' + (s.color.startsWith('linear') ? s.color + ' 1' : 'none') + ';' +
-                          'border-color:' + (s.color.startsWith('linear') ? 'transparent' : s.color) + ';' +
-                          'background:rgba(50,50,50,0.8);' +
-                          (s.color.startsWith('linear') ? 'outline:3px solid;outline-color:' + (s.id === 'cyan-pink' ? '#00CFFF' : '#007AFF') + ';' : '') +
-                          'display:flex;align-items:center;justify-content:center;">' +
-                          '<i class="fa-solid fa-person" style="color:rgba(255,255,255,0.6);font-size:16px;"></i></div>'
-                    ) +
+                    inner +
+                    '<span style="font-size:10px;color:rgba(255,255,255,0.55);">' + s.label + '</span>' +
                 '</button>';
             }).join('') +
             '</div>';
@@ -35068,15 +35307,69 @@ function _edCutToggleReveal(btn) {
     _edCutStart();
     triggerHaptic(8);
 }
+// Picking a style applies the cutout as well ("Cutout will be applied if you
+// add a stroke") — the outline is meaningless without a mask to trace, so if
+// segmentation has not run yet this runs it first and shows real progress.
 function edCutoutSelectStroke(id) {
-    document.querySelectorAll('[id^="strokeOpt_"]').forEach(function(btn) {
+    document.querySelectorAll('[id^="strokeOpt_"]').forEach(function (btn) {
         btn.style.border = '2.5px solid rgba(255,255,255,0.2)';
     });
     var sel = document.getElementById('strokeOpt_' + id);
     if (sel) sel.style.border = '2.5px solid white';
-    edState.isDirty = true;
     triggerHaptic(8);
-    showToast(id === 'none' ? 'Stroke removed' : 'Stroke applied');
+    edState.isDirty = true;
+
+    var note = document.getElementById('edStrokeNote');
+
+    if (id === 'none') {
+        _edCut.stroke = 'none';
+        _edCut.strokeReveal = false;
+        _edCutStrokeEye(false);
+        // Only undo the cutout if the stroke is what turned it on.
+        if (_edCut.strokeOwnsAuto) {
+            _edCut.auto = false; _edCut.autoMask = null; _edCut.strokeOwnsAuto = false;
+        }
+        _edCutInvalidateRing();
+        if (!_edCutHasEdits()) _edCutStop(); else _edCutStart();
+        if (note) note.textContent = 'Cutout will be applied if you add a stroke';
+        if (typeof edSaveHistory === 'function') edSaveHistory();
+        showToast('Stroke removed');
+        return;
+    }
+
+    _edCut.stroke = id;
+    _edCutInvalidateRing();
+
+    function finish() {
+        _edCutStart();
+        _edCutStrokeEye(true);
+        if (note) note.textContent = 'Tap the eye to see what was selected';
+        if (typeof edSaveHistory === 'function') edSaveHistory();
+        showToast('Stroke applied');
+    }
+
+    if (_edCut.auto) { finish(); return; }   // cutout already there, just outline it
+
+    if (note) note.textContent = 'Removing background… 0%';
+    _edCutRunAuto(
+        function (pct) { if (note) note.textContent = 'Removing background… ' + pct + '%'; },
+        function (ok, err) {
+            if (!ok) {
+                _edCut.stroke = 'none';
+                document.querySelectorAll('[id^="strokeOpt_"]').forEach(function (btn) {
+                    btn.style.border = '2.5px solid rgba(255,255,255,0.2)';
+                });
+                var noneBtn = document.getElementById('strokeOpt_none');
+                if (noneBtn) noneBtn.style.border = '2.5px solid white';
+                if (note) note.textContent = 'Cutout will be applied if you add a stroke';
+                showToast(err || 'Could not cut out');
+                return;
+            }
+            _edCut.strokeOwnsAuto = true;
+            _edCutInvalidateRing();
+            finish();
+        }
+    );
 }
 
 function edCutoutApply() {
