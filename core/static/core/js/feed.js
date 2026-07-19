@@ -35888,6 +35888,14 @@ var TFStickers = {
         el._toggle = function () { m.style = (m.style % 3) + 1; paint(); };
     },
 
+    // Poll and quiz share a card; they differ in what a tap reveals. In the
+    // editor they are inert previews, in the feed they take one answer per
+    // viewer and then show results.
+    _poll: function (el, d, ctx) { _tfRenderChoiceSticker(el, d, ctx, 'poll'); },
+    _quiz: function (el, d, ctx) { _tfRenderChoiceSticker(el, d, ctx, 'quiz'); },
+
+    _emojislider: function (el, d, ctx) { _tfRenderEmojiSlider(el, d, ctx); },
+
     _weather: function (el, d) {
         var w = d.data || {};
         var val = (w.unit === 'F') ? w.tempF : w.tempC;
@@ -35903,6 +35911,207 @@ var TFStickers = {
             '</div>';
     }
 };
+
+// ---- Interactive sticker responses ----
+// Individual answers are private under RLS (a viewer reads only their own row);
+// totals come back through the SECURITY DEFINER aggregate so nobody can see who
+// voted for what.
+function _tfStickerStats(clipId, stickerId) {
+    if (!window.sb || !clipId) return Promise.resolve(null);
+    return sb.rpc('tf_clip_sticker_stats', { p_clip: clipId, p_sticker: stickerId })
+        .then(function (r) { return (r && r.data && r.data[0]) || null; })
+        .catch(function () { return null; });
+}
+function _tfStickerMine(clipId, stickerId) {
+    if (!window.sb || !currentUser || !clipId) return Promise.resolve(null);
+    return sb.from('clip_sticker_responses').select('choice,value')
+        .eq('clip_id', clipId).eq('sticker_id', stickerId).eq('user_id', currentUser.id)
+        .maybeSingle()
+        .then(function (r) { return (r && r.data) || null; })
+        .catch(function () { return null; });
+}
+// One row per viewer per sticker, so answering again updates instead of stacking.
+function _tfStickerRespond(clipId, stickerId, payload) {
+    if (!window.sb || !currentUser || !clipId) return Promise.resolve(false);
+    var row = { clip_id: clipId, sticker_id: stickerId, user_id: currentUser.id,
+                choice: (payload.choice != null ? payload.choice : null),
+                value: (payload.value != null ? payload.value : null),
+                updated_at: new Date().toISOString() };
+    return sb.from('clip_sticker_responses')
+        .upsert(row, { onConflict: 'clip_id,sticker_id,user_id' })
+        .then(function (r) { return !r.error; })
+        .catch(function () { return false; });
+}
+
+// Poll and quiz card. kind decides what answering reveals: a poll shows the
+// split, a quiz shows whether you were right and which option was correct.
+function _tfRenderChoiceSticker(el, d, ctx, kind) {
+    var data = d.data || {};
+    var opts = data.options || ['Yes', 'No'];
+    var live = (ctx && ctx.mode === 'feed');
+    var clipId = ctx && ctx.clipId;
+    var state = { mine: null, stats: null };
+
+    function paint() {
+        var counts = (state.stats && state.stats.counts) || {};
+        var total = (state.stats && state.stats.total) || 0;
+        var answered = state.mine && state.mine.choice != null;
+        var rows = opts.map(function (o, i) {
+            var n = parseInt(counts[String(i)] || 0, 10);
+            var pct = total > 0 ? Math.round((n / total) * 100) : 0;
+            var isMine = answered && state.mine.choice === i;
+            var isRight = (kind === 'quiz' && data.correct === i);
+            var bg = 'rgba(255,255,255,0.14)';
+            if (answered) {
+                if (kind === 'quiz') bg = isRight ? 'rgba(48,209,88,0.45)' : (isMine ? 'rgba(255,59,48,0.4)' : 'rgba(255,255,255,0.12)');
+                else bg = isMine ? 'rgba(0,122,255,0.45)' : 'rgba(255,255,255,0.14)';
+            }
+            return '<button data-i="' + i + '" style="position:relative;display:block;width:100%;text-align:left;border:none;cursor:' + (live && !answered ? 'pointer' : 'default') + ';' +
+                'background:rgba(255,255,255,0.1);border-radius:0.55em;padding:0.5em 0.7em;margin-top:0.4em;color:#fff;font-size:0.82em;font-weight:600;overflow:hidden;">' +
+                (answered && kind === 'poll' ? '<span style="position:absolute;left:0;top:0;bottom:0;width:' + pct + '%;background:' + bg + ';"></span>' : '') +
+                (answered && kind === 'quiz' ? '<span style="position:absolute;inset:0;background:' + bg + ';"></span>' : '') +
+                '<span style="position:relative;display:flex;justify-content:space-between;gap:0.5em;">' +
+                    '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(o) + '</span>' +
+                    (answered ? '<span style="opacity:0.9;flex-shrink:0;">' + (kind === 'poll' ? pct + '%' : (isRight ? '✓' : (isMine ? '✕' : ''))) + '</span>' : '') +
+                '</span></button>';
+        }).join('');
+
+        el.innerHTML = '<div style="background:rgba(0,0,0,0.62);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:0.85em;padding:0.7em 0.75em;box-shadow:0 6px 20px rgba(0,0,0,0.4);">' +
+            '<div style="color:#fff;font-size:0.9em;font-weight:800;margin-bottom:0.15em;">' + escapeHtml(data.q || (kind === 'quiz' ? 'Quiz' : 'Poll')) + '</div>' +
+            rows +
+            (answered ? '<div style="color:rgba(255,255,255,0.6);font-size:0.62em;margin-top:0.5em;">' + total + (total === 1 ? ' response' : ' responses') + '</div>' : '') +
+        '</div>';
+
+        if (live && !answered) {
+            el.querySelectorAll('button[data-i]').forEach(function (b) {
+                b.addEventListener('click', function (ev) {
+                    ev.stopPropagation();
+                    var i = parseInt(b.getAttribute('data-i'), 10);
+                    if (!currentUser) { showToast('Log in to answer'); return; }
+                    state.mine = { choice: i };
+                    paint();                       // optimistic
+                    triggerHaptic(12);
+                    _tfStickerRespond(clipId, d.id, { choice: i }).then(function (ok) {
+                        if (!ok) showToast('Could not save your answer');
+                        return _tfStickerStats(clipId, d.id);
+                    }).then(function (s) { if (s) { state.stats = s; paint(); } });
+                });
+            });
+        }
+    }
+
+    paint();
+    if (live && clipId) {
+        // Show what this viewer already picked, plus the running totals.
+        _tfStickerMine(clipId, d.id).then(function (m) {
+            if (m && m.choice != null) {
+                state.mine = m;
+                return _tfStickerStats(clipId, d.id).then(function (s) { state.stats = s; paint(); });
+            }
+        });
+    }
+}
+
+// Emoji slider. The knob the viewer drags is their own avatar; once they let go
+// their answer is recorded and the average of everyone lands as a white circle.
+function _tfRenderEmojiSlider(el, d, ctx) {
+    var data = d.data || {};
+    var emoji = data.emoji || '😍';
+    var live = (ctx && ctx.mode === 'feed');
+    var clipId = ctx && ctx.clipId;
+    var state = { value: null, avg: null, total: 0, answered: false };
+    var avatar = (currentUser && currentUser.avatar_url) || '';
+
+    function knobHTML(pos, isAvatar) {
+        return '<div class="tf-es-knob" style="position:absolute;left:' + (pos * 100) + '%;top:50%;transform:translate(-50%,-50%);' +
+            'width:1.9em;height:1.9em;border-radius:50%;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.4);' +
+            'display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:1em;">' +
+            (isAvatar && avatar ? '<img src="' + escapeHtml(avatar) + '" style="width:100%;height:100%;object-fit:cover;">' : (isAvatar ? '' : emoji)) +
+            '</div>';
+    }
+
+    function paint() {
+        var shown = (state.value != null) ? state.value : 0.5;
+        el.innerHTML = '<div style="background:rgba(0,0,0,0.62);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:0.85em;padding:0.75em 0.85em 0.95em;box-shadow:0 6px 20px rgba(0,0,0,0.4);">' +
+            (data.q ? '<div style="color:#fff;font-size:0.85em;font-weight:800;margin-bottom:0.6em;text-align:center;">' + escapeHtml(data.q) + '</div>' : '') +
+            '<div class="tf-es-track" style="position:relative;height:0.5em;border-radius:0.25em;background:rgba(255,255,255,0.28);margin:0.9em 0.4em 0;">' +
+                '<div style="position:absolute;left:0;top:0;bottom:0;width:' + (shown * 100) + '%;background:#fff;border-radius:0.25em;opacity:0.9;"></div>' +
+                knobHTML(shown, state.answered || state.dragging) +
+                (state.answered && state.avg != null
+                    ? '<div title="Average" style="position:absolute;left:' + (state.avg * 100) + '%;top:50%;transform:translate(-50%,-50%);width:1.15em;height:1.15em;border-radius:50%;background:#fff;border:0.14em solid rgba(0,0,0,0.35);box-shadow:0 2px 8px rgba(0,0,0,0.45);"></div>'
+                    : '') +
+            '</div>' +
+            (state.answered
+                ? '<div style="color:rgba(255,255,255,0.75);font-size:0.6em;margin-top:0.7em;text-align:center;">Average ' + Math.round((state.avg != null ? state.avg : 0) * 100) + '% · ' + state.total + (state.total === 1 ? ' response' : ' responses') + '</div>'
+                : (live ? '<div style="color:rgba(255,255,255,0.55);font-size:0.6em;margin-top:0.7em;text-align:center;">Slide to answer</div>' : '')) +
+        '</div>';
+        if (live && !state.answered) bindDrag();
+    }
+
+    function bindDrag() {
+        var track = el.querySelector('.tf-es-track');
+        if (!track) return;
+        function down(e) {
+            if (!currentUser) { showToast('Log in to answer'); return; }
+            e.stopPropagation();
+            if (e.cancelable) e.preventDefault();
+            // Measure the track once. Repainting mid-drag replaces the element
+            // this closure holds, and a detached node reports a zero-width rect,
+            // which would slam every drag to the far end.
+            var rect = track.getBoundingClientRect();
+            function posFrom(ev) {
+                var t = (ev.touches && ev.touches[0]) || ev;
+                return Math.max(0, Math.min(1, (t.clientX - rect.left) / (rect.width || 1)));
+            }
+            state.dragging = true;
+            state.value = posFrom(e);
+            paint();   // swaps the knob to the viewer's avatar
+            // Move the live nodes directly instead of repainting each frame, so
+            // the handlers and the measured rect stay valid for the whole drag.
+            var liveTrack = el.querySelector('.tf-es-track');
+            var fill = liveTrack ? liveTrack.firstElementChild : null;
+            var knob = liveTrack ? liveTrack.querySelector('.tf-es-knob') : null;
+            function mv(ev) {
+                if (ev.cancelable) ev.preventDefault();
+                state.value = posFrom(ev);
+                if (fill) fill.style.width = (state.value * 100) + '%';
+                if (knob) knob.style.left = (state.value * 100) + '%';
+            }
+            function up() {
+                document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up);
+                document.removeEventListener('touchmove', mv); document.removeEventListener('touchend', up);
+                state.dragging = false;
+                triggerHaptic(14);
+                _tfStickerRespond(clipId, d.id, { value: state.value }).then(function (ok) {
+                    if (!ok) showToast('Could not save your answer');
+                    return _tfStickerStats(clipId, d.id);
+                }).then(function (s) {
+                    state.answered = true;
+                    if (s) { state.avg = (s.avg_value != null) ? s.avg_value : state.value; state.total = s.total || 1; }
+                    else { state.avg = state.value; state.total = 1; }
+                    paint();
+                });
+            }
+            document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+            document.addEventListener('touchmove', mv, { passive: false }); document.addEventListener('touchend', up);
+        }
+        track.addEventListener('mousedown', down);
+        track.addEventListener('touchstart', down, { passive: false });
+    }
+
+    paint();
+    if (live && clipId) {
+        _tfStickerMine(clipId, d.id).then(function (m) {
+            if (m && m.value != null) {
+                state.value = m.value; state.answered = true;
+                return _tfStickerStats(clipId, d.id).then(function (s) {
+                    if (s) { state.avg = s.avg_value; state.total = s.total || 1; }
+                    paint();
+                });
+            }
+        });
+    }
+}
 
 // Fahrenheit only where it is actually used day to day; Celsius everywhere else.
 function _tfTempUnit() {
@@ -36036,6 +36245,125 @@ function _edGifSearchNow(q) {
         })
         .catch(function () {
             grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:24px;color:rgba(255,255,255,0.4);font-size:13px;">Could not load GIFs</div>';
+        });
+}
+
+// ---- Interactive sticker setup sheets ----
+// Poll, quiz and slider need content before they mean anything, so each opens a
+// small sheet first rather than dropping an empty card on the video.
+function _edStickerConfigSheet(title, bodyHTML, onDone) {
+    var ex = document.getElementById('edStickerConfig');
+    if (ex) ex.remove();
+    var m = document.createElement('div');
+    m.id = 'edStickerConfig';
+    m.style.cssText = 'position:absolute;inset:0;z-index:650;background:rgba(0,0,0,0.9);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);display:flex;flex-direction:column;animation:slideUpOverlay 0.3s ease;';
+    m.innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px 10px;">' +
+            '<button onclick="document.getElementById(\'edStickerConfig\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button>' +
+            '<span style="color:white;font-size:16px;font-weight:700;">' + escapeHtml(title) + '</span>' +
+            '<button id="edCfgDone" style="background:#007AFF;border:none;color:white;font-size:14px;font-weight:700;padding:7px 16px;border-radius:20px;cursor:pointer;">Add</button>' +
+        '</div>' +
+        '<div style="flex:1;overflow-y:auto;padding:6px 18px 24px;">' + bodyHTML + '</div>';
+    var overlay = document.getElementById('preview-edit-overlay');
+    if (overlay) overlay.appendChild(m);
+    var done = document.getElementById('edCfgDone');
+    if (done) done.onclick = function () { if (onDone(m) !== false) m.remove(); };
+    return m;
+}
+function _edCfgInput(id, placeholder, val) {
+    return '<input id="' + id + '" placeholder="' + escapeHtml(placeholder) + '" value="' + escapeHtml(val || '') + '" ' +
+        'style="width:100%;background:rgba(255,255,255,0.09);border:none;outline:none;color:#fff;font-size:15px;padding:12px 14px;border-radius:12px;margin-bottom:10px;box-sizing:border-box;">';
+}
+function _edCfgOptionInputs() {
+    var box = document.getElementById('cfgOpts');
+    return box ? Array.prototype.slice.call(box.querySelectorAll('input')) : [];
+}
+function _edCfgCollectOptions() {
+    return _edCfgOptionInputs().map(function (i) { return (i.value || '').trim(); }).filter(Boolean);
+}
+function _edCfgAddOption() {
+    var box = document.getElementById('cfgOpts');
+    if (!box) return;
+    var n = _edCfgOptionInputs().length;
+    if (n >= 4) { showToast('Four options is the maximum'); return; }
+    var wrap = document.createElement('div');
+    wrap.innerHTML = _edCfgInput('cfgO' + n, 'Option ' + (n + 1), '');
+    box.appendChild(wrap.firstChild);
+    _edCfgRenderCorrect();
+}
+// Quiz only: a row of buttons to mark which option is right.
+function _edCfgRenderCorrect() {
+    var box = document.getElementById('cfgCorrect');
+    if (!box) return;
+    var n = _edCfgOptionInputs().length;
+    if (window._edCfgCorrect == null || window._edCfgCorrect >= n) window._edCfgCorrect = 0;
+    var html = '';
+    for (var i = 0; i < n; i++) {
+        html += '<button onclick="_edCfgPickCorrect(' + i + ')" style="min-width:44px;height:40px;border-radius:12px;cursor:pointer;font-size:14px;font-weight:700;' +
+            'border:2px solid ' + (window._edCfgCorrect === i ? '#30D158' : 'rgba(255,255,255,0.14)') + ';' +
+            'background:' + (window._edCfgCorrect === i ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.07)') + ';color:#fff;">' + (i + 1) + '</button>';
+    }
+    box.innerHTML = html;
+}
+function _edCfgPickCorrect(i) { window._edCfgCorrect = i; _edCfgRenderCorrect(); }
+function _edCfgPickEmoji(btn, e) {
+    window._edCfgEmoji = e;
+    var box = document.getElementById('cfgEmojis');
+    if (box) box.querySelectorAll('button').forEach(function (b) { b.style.border = '2px solid rgba(255,255,255,0.12)'; });
+    if (btn) btn.style.border = '2px solid #007AFF';
+}
+
+function edConfigPoll() {
+    _edStickerConfigSheet('Poll',
+        _edCfgInput('cfgQ', 'Ask a question…', '') +
+        '<div id="cfgOpts">' + _edCfgInput('cfgO0', 'Option 1', 'Yes') + _edCfgInput('cfgO1', 'Option 2', 'No') + '</div>' +
+        '<button onclick="_edCfgAddOption()" style="background:rgba(255,255,255,0.09);border:none;color:#007AFF;font-size:14px;font-weight:700;padding:11px;border-radius:12px;width:100%;cursor:pointer;">+ Add option</button>',
+        function () {
+            var q = ((document.getElementById('cfgQ') || {}).value || '').trim();
+            var opts = _edCfgCollectOptions();
+            if (opts.length < 2) { showToast('Add at least two options'); return false; }
+            _edPlaceOverlay({ type: 'poll', wPct: 0.68, data: { q: q || 'Poll', options: opts } },
+                { removeMsg: 'Poll removed', fontK: 0.085 });
+            showToast('Poll added');
+        });
+}
+
+function edConfigQuiz() {
+    window._edCfgCorrect = 0;
+    _edStickerConfigSheet('Quiz',
+        _edCfgInput('cfgQ', 'Ask a question…', '') +
+        '<div id="cfgOpts">' + _edCfgInput('cfgO0', 'Option 1', '') + _edCfgInput('cfgO1', 'Option 2', '') + '</div>' +
+        '<button onclick="_edCfgAddOption()" style="background:rgba(255,255,255,0.09);border:none;color:#007AFF;font-size:14px;font-weight:700;padding:11px;border-radius:12px;width:100%;cursor:pointer;margin-bottom:16px;">+ Add option</button>' +
+        '<div style="color:rgba(255,255,255,0.6);font-size:13px;margin-bottom:8px;">Which one is correct?</div>' +
+        '<div id="cfgCorrect" style="display:flex;gap:8px;flex-wrap:wrap;"></div>',
+        function () {
+            var q = ((document.getElementById('cfgQ') || {}).value || '').trim();
+            var opts = _edCfgCollectOptions();
+            if (opts.length < 2) { showToast('Add at least two options'); return false; }
+            var correct = Math.min(window._edCfgCorrect || 0, opts.length - 1);
+            _edPlaceOverlay({ type: 'quiz', wPct: 0.68, data: { q: q || 'Quiz', options: opts, correct: correct } },
+                { removeMsg: 'Quiz removed', fontK: 0.085 });
+            showToast('Quiz added');
+        });
+    _edCfgRenderCorrect();
+}
+
+function edConfigEmojiSlider() {
+    var EMOJIS = ['😍', '😂', '😀', '🔥', '😡', '😱', '😢', '🙌', '❤️', '🎉', '👍', '💩', '💯', '🙏'];
+    window._edCfgEmoji = EMOJIS[0];
+    _edStickerConfigSheet('Emoji slider',
+        _edCfgInput('cfgQ', 'Ask a question…', '') +
+        '<div style="color:rgba(255,255,255,0.6);font-size:13px;margin:6px 0 10px;">Pick an emoji</div>' +
+        '<div id="cfgEmojis" style="display:flex;flex-wrap:wrap;gap:8px;">' +
+        EMOJIS.map(function (e, i) {
+            return '<button onclick="_edCfgPickEmoji(this,\'' + e + '\')" style="width:46px;height:46px;border-radius:14px;' +
+                'border:2px solid ' + (i === 0 ? '#007AFF' : 'rgba(255,255,255,0.12)') + ';background:rgba(255,255,255,0.07);font-size:23px;cursor:pointer;">' + e + '</button>';
+        }).join('') + '</div>',
+        function () {
+            var q = ((document.getElementById('cfgQ') || {}).value || '').trim();
+            _edPlaceOverlay({ type: 'emojislider', wPct: 0.7, data: { q: q, emoji: window._edCfgEmoji || '😍' } },
+                { removeMsg: 'Slider removed', fontK: 0.085 });
+            showToast('Emoji slider added');
         });
 }
 
@@ -36207,6 +36535,15 @@ function edStickerTile(label) {
         case 'Gallery':
             window._edGalleryStickerMode = true;
             edOpenOverlayPicker();
+            return;
+        case 'Poll':
+            edConfigPoll();
+            return;
+        case 'Quiz':
+            edConfigQuiz();
+            return;
+        case 'Emoji Slider':
+            edConfigEmojiSlider();
             return;
         default:
             edPlaceSticker(label, true);
