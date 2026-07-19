@@ -219,7 +219,8 @@ CONTENT_SECURITY_POLICY = {
             "https://itunes.apple.com",               # music search
             "https://lrclib.net",                     # synced lyrics
             "https://overpass-api.de",                # nearby places
-            "https://nominatim.openstreetmap.org",    # reverse geocoding
+            "https://nominatim.openstreetmap.org",    # geocoding + place search
+            "https://api.open-meteo.com",             # weather sticker
             "https://ipapi.co",
             "https://api.giphy.com",
             "https://api.stripe.com",

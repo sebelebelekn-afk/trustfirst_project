@@ -35818,8 +35818,93 @@ var TFStickers = {
                     (p.sub ? '<small style="font-size:0.72em;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;">' + escapeHtml(p.sub) + '</small>' : '') +
                 '</div>' +
             '</div>';
+    },
+
+    _weather: function (el, d) {
+        var w = d.data || {};
+        var val = (w.unit === 'F') ? w.tempF : w.tempC;
+        var temp = (val != null) ? (Math.round(val) + '°') : '--°';
+        var sub = w.loading ? 'Loading…' : (w.place || w.label || '');
+        el.innerHTML =
+            '<div style="display:inline-flex;align-items:center;gap:0.5em;background:linear-gradient(135deg,rgba(0,122,255,0.94),rgba(88,86,214,0.94));color:#fff;border-radius:0.75em;padding:0.42em 0.75em;box-shadow:0 4px 16px rgba(0,0,0,0.35);white-space:nowrap;">' +
+                '<i class="fa-solid ' + (w.icon || 'fa-cloud') + '" style="font-size:1.5em;"></i>' +
+                '<div style="display:flex;flex-direction:column;line-height:1.05;">' +
+                    '<span style="font-size:1.55em;font-weight:800;">' + temp + '</span>' +
+                    (sub ? '<span style="font-size:0.6em;opacity:0.92;overflow:hidden;text-overflow:ellipsis;max-width:9em;">' + escapeHtml(sub) + '</span>' : '') +
+                '</div>' +
+            '</div>';
     }
 };
+
+// Fahrenheit only where it is actually used day to day; Celsius everywhere else.
+function _tfTempUnit() {
+    var region = '';
+    try { region = (new Intl.Locale(navigator.language)).region || ''; }
+    catch (e) { region = (/(-|_)([A-Z]{2})/.exec(navigator.language || '') || [])[2] || ''; }
+    return (['US', 'LR', 'MM', 'BS', 'BZ', 'KY', 'PW', 'FM', 'MH'].indexOf(region) >= 0) ? 'F' : 'C';
+}
+function _tfWeatherMeta(c) {
+    if (c == null) return { label: '', icon: 'fa-cloud' };
+    if (c === 0) return { label: 'Clear', icon: 'fa-sun' };
+    if (c <= 2) return { label: 'Partly cloudy', icon: 'fa-cloud-sun' };
+    if (c === 3) return { label: 'Cloudy', icon: 'fa-cloud' };
+    if (c <= 48) return { label: 'Fog', icon: 'fa-smog' };
+    if (c <= 57) return { label: 'Drizzle', icon: 'fa-cloud-rain' };
+    if (c <= 67) return { label: 'Rain', icon: 'fa-cloud-showers-heavy' };
+    if (c <= 77) return { label: 'Snow', icon: 'fa-snowflake' };
+    if (c <= 82) return { label: 'Showers', icon: 'fa-cloud-showers-heavy' };
+    if (c <= 86) return { label: 'Snow showers', icon: 'fa-snowflake' };
+    if (c <= 99) return { label: 'Thunderstorm', icon: 'fa-cloud-bolt' };
+    return { label: '', icon: 'fa-cloud' };
+}
+// Real current weather. Uses geolocation, falling back to IP location, then
+// Open-Meteo (keyless). Best-effort: cb(null) if none of it is reachable.
+function _tfFetchWeather(cb) {
+    function withCoords(lat, lng, place) {
+        fetch('https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lng + '&current=temperature_2m,weather_code')
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                var cur = (j && j.current) || {};
+                if (cur.temperature_2m == null) return cb(null);
+                var meta = _tfWeatherMeta(cur.weather_code);
+                cb({ tempC: cur.temperature_2m, tempF: cur.temperature_2m * 9 / 5 + 32,
+                     code: cur.weather_code, label: meta.label, icon: meta.icon, place: place || '' });
+            })
+            .catch(function () { cb(null); });
+    }
+    function viaIp() {
+        fetch('https://ipapi.co/json/').then(function (r) { return r.json(); })
+            .then(function (j) { if (j && j.latitude) withCoords(j.latitude, j.longitude, j.city || ''); else cb(null); })
+            .catch(function () { cb(null); });
+    }
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            function (pos) { withCoords(pos.coords.latitude, pos.coords.longitude, ''); },
+            viaIp, { timeout: 8000, maximumAge: 300000 });
+    } else viaIp();
+}
+
+// Weather sticker: placed immediately with a loading state, then filled in with
+// the real current reading. Mutates data in place so the descriptor that gets
+// serialised on post carries the frozen weather.
+function edAddWeatherSticker() {
+    var desc = { type: 'weather', wPct: 0.4,
+        data: { unit: _tfTempUnit(), tempC: null, tempF: null, label: '', icon: 'fa-cloud', place: '', loading: true } };
+    var wrap = _edPlaceOverlay(desc, { removeMsg: 'Weather removed' });
+    if (!wrap) return null;
+    _tfFetchWeather(function (w) {
+        if (w) { Object.assign(desc.data, w, { loading: false }); }
+        else { desc.data.loading = false; desc.data.label = 'Weather unavailable'; }
+        if (wrap._ovBody) {
+            var nb = TFStickers.render(desc, { mode: 'editor' });
+            nb.style.pointerEvents = 'none';
+            wrap.replaceChild(nb, wrap._ovBody);
+            wrap._ovBody = nb;
+        }
+    });
+    showToast('Weather added');
+    return wrap;
+}
 
 // Clock data is frozen at placement: the digital face shows the time it was
 // overlaid, and the analog hands match it. Storing h/m directly makes it
@@ -35961,6 +36046,9 @@ function edStickerTile(label) {
                 { removeMsg: 'Clock removed' });
             showToast('Tap the clock to switch analog or digital');
             return;
+        case 'Weather':
+            edAddWeatherSticker();
+            return;
         default:
             edPlaceSticker(label, true);
     }
@@ -35973,7 +36061,7 @@ function edOpenStickerTray() {
     t.id = 'edStickerTray';
     t.style.cssText = 'position:absolute;inset:0;z-index:500;background:rgba(0,0,0,0.9);backdrop-filter:blur(20px);display:flex;flex-direction:column;animation:slideUpOverlay 0.3s ease;';
     var STICKERS_FUNCTIONAL = [
-        {emoji:'📍',label:'Location'},{emoji:'💬',label:'Caption'},{emoji:'❓',label:'Quiz'},
+        {emoji:'📍',label:'Location'},{emoji:'🌡️',label:'Weather'},{emoji:'❓',label:'Quiz'},
         {emoji:'📊',label:'Poll'},{emoji:'🎞',label:'GIF'},{emoji:'🎵',label:'Music'},
         {emoji:'❤️',label:'Emoji Slider'},{emoji:'🕐',label:'Clock'},{emoji:'🖼',label:'Gallery'}
     ];
@@ -38457,10 +38545,9 @@ function buildCheckInList() {
 function loadCheckInPlaces() {
     var listEl = document.querySelector('#checkin-screen .check-in-list');
     if (!listEl) return;
-    if (!navigator.geolocation) {
-        listEl.innerHTML = '<p style="text-align:center;padding:24px;color:#aaa;font-size:14px;">Location not available on this device</p>';
-        return;
-    }
+    // Nearby places are a convenience, not a gate. If geolocation is missing or
+    // denied, the user can still search by name.
+    if (!navigator.geolocation) { _checkinPromptSearch(); return; }
     navigator.geolocation.getCurrentPosition(function(pos) {
         var lat = pos.coords.latitude, lng = pos.coords.longitude;
         window._checkinCoords = { lat: lat, lng: lng };
@@ -38479,7 +38566,8 @@ function loadCheckInPlaces() {
                 _loadNearbyPlaces(lat, lng, city, country, base);
             });
     }, function() {
-        if (listEl) listEl.innerHTML = '<p style="text-align:center;padding:20px;color:#aaa;font-size:14px;">Location permission denied. Enable location to check in.</p>';
+        // Denied or timed out — fall back to search instead of a dead end.
+        _checkinPromptSearch();
     }, { enableHighAccuracy: true, timeout: 9000, maximumAge: 60000 });
 }
 
@@ -38558,11 +38646,67 @@ function renderCheckInList(places) {
     }).join('');
 }
 
+// Searching must work whether or not location permission was granted, so a
+// typed query hits the geocoder directly instead of only filtering the nearby
+// list. Local matches show instantly; a debounced remote search follows.
+var _checkinSearchTimer = null;
 function filterCheckInPlaces(query) {
-    var q = (query || '').toLowerCase().trim();
-    var all = window._checkinAllPlaces || [];
-    var filtered = q ? all.filter(function(p){ return p.name.toLowerCase().indexOf(q) >= 0 || (p.sub || '').toLowerCase().indexOf(q) >= 0; }) : all;
-    renderCheckInList(filtered);
+    var q = (query || '').trim();
+    if (_checkinSearchTimer) { clearTimeout(_checkinSearchTimer); _checkinSearchTimer = null; }
+    if (q.length < 2) {
+        var all = window._checkinAllPlaces || [];
+        if (all.length) renderCheckInList(all); else _checkinPromptSearch();
+        return;
+    }
+    var ql = q.toLowerCase();
+    var local = (window._checkinAllPlaces || []).filter(function (p) {
+        return p.name.toLowerCase().indexOf(ql) >= 0 || (p.sub || '').toLowerCase().indexOf(ql) >= 0;
+    });
+    if (local.length) renderCheckInList(local);
+    _checkinSearchTimer = setTimeout(function () { _checkinRemoteSearch(q); }, 420);
+}
+
+function _checkinPromptSearch() {
+    var listEl = document.querySelector('#checkin-screen .check-in-list');
+    if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:34px 24px;color:#aaa;">' +
+        '<i class="fa-solid fa-magnifying-glass-location" style="font-size:26px;color:#007AFF;margin-bottom:12px;display:block;"></i>' +
+        '<p style="font-size:14px;">Search for a place to check in</p></div>';
+}
+
+// Free-text place search via Nominatim (keyless). Biased toward the user's area
+// when a location is known, but never requires it.
+function _checkinRemoteSearch(q) {
+    var listEl = document.querySelector('#checkin-screen .check-in-list');
+    var c = window._checkinCoords;
+    var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&namedetails=1&limit=15&q=' + encodeURIComponent(q);
+    if (c) url += '&viewbox=' + (c.lng - 0.6) + ',' + (c.lat + 0.6) + ',' + (c.lng + 0.6) + ',' + (c.lat - 0.6);
+    fetch(url, { headers: { 'Accept-Language': 'en' } })
+        .then(function (r) { return r.json(); })
+        .then(function (rows) {
+            if (!Array.isArray(rows) || !rows.length) {
+                // Keep any local matches already shown; only show empty-state if none.
+                if (!(window._checkinPlaces || []).length && listEl) {
+                    listEl.innerHTML = '<p style="text-align:center;padding:28px;color:#aaa;font-size:14px;">No places found for "' + escapeHtml(q) + '"</p>';
+                }
+                return;
+            }
+            var places = rows.map(function (r) {
+                var tags = {}; if (r.category && r.type) tags[r.category] = r.type;
+                var name = (r.namedetails && r.namedetails.name) || (r.display_name || '').split(',')[0];
+                var parts = (r.display_name || '').split(',').map(function (s) { return s.trim(); });
+                var lat = parseFloat(r.lat), lng = parseFloat(r.lon);
+                var p = {
+                    name: name || 'Place',
+                    sub: parts.slice(1, 3).join(', '),
+                    lat: lat, lng: lng,
+                    icon: _tfPlaceIcon(tags) || 'fa-location-dot'
+                };
+                if (c && !isNaN(lat)) p._d = _tfDist(c.lat, c.lng, lat, lng);
+                return p;
+            });
+            renderCheckInList(places);
+        })
+        .catch(function () { /* keep whatever is shown */ });
 }
 
 function selectCheckInPlaceIdx(i) {
