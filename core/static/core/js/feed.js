@@ -863,6 +863,17 @@ localStorage.setItem('tf_burst', JSON.stringify(burstAttempts));
     try {
         let email = identifier;
 
+        // Phone login: Supabase signs in on the number directly, so there is no
+        // email to resolve. loginWithPhone puts E.164 in the identifier field.
+        if (/^\+[0-9]{7,15}$/.test(identifier)) {
+            const phoneAuth = await sb.auth.signInWithPassword({ phone: identifier, password });
+            if (phoneAuth.error || !phoneAuth.data || !phoneAuth.data.user) {
+                return showAuthError('Wrong password. Try again or use a code instead.', returnStep);
+            }
+            hideAuthLoader();
+            return _finishPhoneLogin(phoneAuth.data.user);
+        }
+
         // If user entered a username instead of email, look up the email
        if (!isValidEmail(identifier)) {
     const cleanUsername = identifier.replace('@', '').toLowerCase();
@@ -19461,7 +19472,156 @@ function _togglePasskey(el) {
     else disablePasskey();
 }
 function signUpWithPhone() { showToast('Phone sign-up is coming soon'); }
-function loginWithPhone() { showToast('Phone login is coming soon'); }
+// ---- Phone login: password or SMS code, depending on the account ----
+// An account that has a password gets the password screen (with a "use a code
+// instead" escape); one created by phone alone has no password, so a code is
+// the only way in and we skip straight to it.
+
+// Combine the country dial code with the typed national number into E.164.
+// The leading 0 South Africans (and most of the list) write out has to go, or
+// +27 082… reaches nobody.
+function _loginPhoneE164() {
+    var num = (document.getElementById('login-phone-in') || {}).value || '';
+    num = num.replace(/\D/g, '').replace(/^0+/, '');
+    var dial = ((document.getElementById('phone-dial') || {}).textContent || '+27').replace(/\s/g, '');
+    if (num.length < 6) return null;
+    return dial + num;
+}
+
+function _loginPhoneShake() {
+    var el = document.getElementById('login-phone-in');
+    if (!el) return;
+    el.classList.remove('tf-shake');
+    void el.offsetWidth;
+    el.classList.add('tf-shake');
+    setTimeout(function () { el.classList.remove('tf-shake'); }, 500);
+    try { el.focus(); } catch (e) {}
+    triggerHaptic(20);
+}
+
+function loginWithPhone() {
+    var phone = _loginPhoneE164();
+    if (!phone) { showToast('Enter your phone number'); _loginPhoneShake(); return; }
+    if (!window.sb) { showToast('Loading… try again'); return; }
+    if (window._loginCheckBusy) return;
+    window._loginCheckBusy = true;
+
+    var btn = document.getElementById('login-phone-continue');
+    if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+    function restore() {
+        window._loginCheckBusy = false;
+        if (btn) { btn.disabled = false; btn.textContent = 'Continue'; }
+    }
+
+    sb.rpc('tf_phone_login_info', { p: phone }).then(function (r) {
+        restore();
+        var info = (r.data && r.data[0]) || null;
+        if (r.error) { showToast('Could not check that number'); return; }
+        if (!info || !info.found) {
+            showToast('No account found with that number');
+            _loginPhoneShake();
+            return;
+        }
+        if (info.is_banned) { showAuthError('This account has been permanently banned for policy violations.', 'step-login-phone'); return; }
+        if (info.is_locked) { showAuthError('This account is locked. Contact support to unlock it.', 'step-login-phone'); return; }
+
+        window._loginPhone = phone;
+        if (info.has_password) {
+            var hidden = document.getElementById('login-user');
+            if (hidden) hidden.value = phone;      // authenticateUser detects E.164
+            var alt = document.getElementById('login-pass-usecode');
+            if (alt) alt.style.display = 'block';  // offer the code as a fallback
+            nextAuthStep('step-login-password');
+            setTimeout(function () { var p = document.getElementById('login-pass'); if (p) { try { p.focus(); } catch (e) {} } }, 250);
+        } else {
+            _loginSendPhoneCode(false);
+        }
+    }, function () { restore(); showToast('Could not check that number'); });
+}
+
+// shouldCreateUser stays false: logging in must never quietly mint a new
+// account for a mistyped number.
+function _loginSendPhoneCode(isResend) {
+    var phone = window._loginPhone || _loginPhoneE164();
+    if (!phone) { showToast('Enter your phone number'); return; }
+    window._loginPhone = phone;
+    showToast(isResend ? 'Resending code…' : 'Sending code…');
+    sb.auth.signInWithOtp({ phone: phone, options: { shouldCreateUser: false } }).then(function (r) {
+        if (r.error) { showToast(_smsErrorText(r.error)); return; }
+        window._loginOtp = { phone: phone };
+        var lbl = document.getElementById('signup-code-email'); if (lbl) lbl.textContent = phone;
+        if (isResend) { showToast('Code resent'); return; }
+        nextAuthStep('step-signup-code');
+        setTimeout(function () { _otpClear(); _signupStartCodeTimer(300); }, 120);
+    }, function () { showToast('Could not send the code'); });
+}
+
+// Supabase returns a generic error when no SMS provider is configured, which
+// reads like a bug. Say what is actually wrong instead.
+function _smsErrorText(err) {
+    var m = (err && err.message ? err.message : '').toLowerCase();
+    if (m.indexOf('provider') > -1 || m.indexOf('not enabled') > -1 ||
+        m.indexOf('unsupported') > -1 || m.indexOf('sms') > -1) {
+        return 'Text messages aren\'t set up yet. Log in with your email instead.';
+    }
+    if (m.indexOf('rate') > -1 || m.indexOf('too many') > -1) return 'Too many codes requested. Wait a minute and try again.';
+    return (err && err.message) || 'Could not send the code';
+}
+
+function _loginPhoneUseCode() {
+    var alt = document.getElementById('login-pass-usecode');
+    if (alt) alt.style.display = 'none';
+    _loginSendPhoneCode(false);
+}
+
+// Verifying an SMS code returns a real session, so this finishes the login the
+// same way the password path does.
+function _loginVerifyPhoneCode() {
+    if (window._otpBusy) return;
+    var code = (document.getElementById('signup-code-in').value || '').trim();
+    if (code.length < 6) { showToast('Enter the 6-digit code'); return; }
+    var phone = (window._loginOtp && window._loginOtp.phone) || window._loginPhone;
+    if (!phone || !window.sb) return;
+    window._otpBusy = true;
+    showAuthLoader();
+    sb.auth.verifyOtp({ phone: phone, token: code, type: 'sms' }).then(function (r) {
+        window._otpBusy = false;
+        hideAuthLoader();
+        if (r.error || !r.data || !r.data.user) {
+            showToast((r.error && r.error.message) || 'Invalid or expired code');
+            _otpShakeClear();
+            return;
+        }
+        if (_signupCodeTimer) { clearInterval(_signupCodeTimer); _signupCodeTimer = null; }
+        window._loginOtp = null;
+        _finishPhoneLogin(r.data.user);
+    }, function () { window._otpBusy = false; hideAuthLoader(); showToast('Verification failed'); _otpShakeClear(); });
+}
+
+async function _finishPhoneLogin(authUser) {
+    try {
+        var profile = await DB.getUserProfile(authUser.id);
+        if (!profile) {
+            // Verified by SMS but no profile yet: this number belongs to a
+            // half-finished signup, so send them through the rest of it.
+            window._signup = window._signup || {};
+            window._signup.method = 'phone';
+            window._signup.phone = window._loginPhone;
+            showToast('Finish setting up your account');
+            nextAuthStep('step-signup-password');
+            return;
+        }
+        if (profile.is_banned) { await DB.signOut(); return showAuthError('This account has been permanently banned for policy violations.', 'step-login-phone'); }
+        if (profile.is_locked) { await DB.signOut(); return showAuthError('This account is locked and frozen. Contact support to unlock.', 'step-login-phone'); }
+        currentUser = profile;
+        window.currentUser = profile;
+        try { localStorage.setItem('tf_user', JSON.stringify(profile)); } catch (e) {}
+        triggerHaptic(20);
+        launchApp();
+    } catch (e) {
+        showToast('Signed in, but your profile did not load. Try again.');
+    }
+}
 
 // ---- Auth: phone country picker (auto-detected, tappable, per-country example) ----
 // Flags are derived from the ISO code, so the data only needs code/name/dial/example.
@@ -19584,6 +19744,12 @@ function _loginIdentifierNext(inputId) {
     if (!v) return;
 
     function go(value) {
+        // Coming in by email or username, so drop any leftover phone-login
+        // state and hide its code fallback.
+        window._loginOtp = null;
+        window._loginPhone = null;
+        var alt = document.getElementById('login-pass-usecode');
+        if (alt) alt.style.display = 'none';
         var hidden = document.getElementById('login-user');
         if (hidden) hidden.value = value;
         nextAuthStep('step-login-password');
@@ -19668,6 +19834,7 @@ function _signupSendCode(isResend) {
     _signupDoSendCode(email, true);
 }
 function _signupDoSendCode(email, isResend) {
+    window._loginOtp = null;   // shared code screen: this one is a signup
     showToast(isResend ? 'Resending code…' : 'Sending code…');
     sb.auth.signInWithOtp({ email: email, options: { shouldCreateUser: true } }).then(function(r) {
         if (r.error) { showToast(r.error.message || 'Could not send code'); return; }
@@ -19678,6 +19845,9 @@ function _signupDoSendCode(email, isResend) {
 }
 
 function _signupVerifyCode() {
+    // The code screen is shared with phone login; _loginOtp marks that case so
+    // a login code doesn't get treated as a signup verification.
+    if (window._loginOtp && window._loginOtp.phone) { _loginVerifyPhoneCode(); return; }
     if (window._otpBusy) return;
     var code = (document.getElementById('signup-code-in').value || '').trim();
     if (code.length < 6) { showToast('Enter the 6-digit code'); return; }
@@ -19758,7 +19928,9 @@ function _signupStartCodeTimer(seconds) {
 function _signupResendCode() {
     _otpClear();
     _signupStartCodeTimer(300);
-    if (window._signup && window._signup.method === 'phone') _signupSendPhoneCode();
+    // Shared code screen: resend has to go back to whichever flow sent it.
+    if (window._loginOtp && window._loginOtp.phone) _loginSendPhoneCode(true);
+    else if (window._signup && window._signup.method === 'phone') _signupSendPhoneCode();
     else _signupSendCode(true);
 }
 
@@ -19964,10 +20136,11 @@ function _signupSendPhoneCode() {
     var full = dial + num.replace(/^0+/, '');
     window._signup.method = 'phone';
     window._signup.phone = full;
+    window._loginOtp = null;   // shared code screen: this one is a signup
     if (!window.sb) { showToast('Loading… try again'); return; }
     showToast('Sending code…');
     sb.auth.signInWithOtp({ phone: full }).then(function(r) {
-        if (r.error) { showToast(r.error.message || 'Phone sign-up isn\'t available yet'); return; }
+        if (r.error) { showToast(_smsErrorText(r.error)); return; }
         var lbl = document.getElementById('signup-code-email'); if (lbl) lbl.textContent = full;
         nextAuthStep('step-signup-code');
         setTimeout(function() { _otpClear(); _signupStartCodeTimer(300); }, 120);
