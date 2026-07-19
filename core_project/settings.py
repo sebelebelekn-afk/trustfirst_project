@@ -195,6 +195,12 @@ CONTENT_SECURITY_POLICY = {
         "default-src": ["'self'"],
         "script-src": [
             "'self'", "'unsafe-inline'",
+            # MediaPipe's segmentation model is WebAssembly, and a CSP without
+            # this blocks WebAssembly.instantiate outright -- which silently
+            # broke every cutout with "Segmentation failed". This is the narrow
+            # directive: it permits wasm compilation WITHOUT allowing eval() of
+            # arbitrary strings, so do NOT relax it to 'unsafe-eval'.
+            "'wasm-unsafe-eval'",
             "https://cdn.jsdelivr.net",       # supabase-js, livekit-client
             "https://cdnjs.cloudflare.com",   # font-awesome, leaflet, qrcode
             "https://js.stripe.com",

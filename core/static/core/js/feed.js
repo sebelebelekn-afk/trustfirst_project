@@ -35347,6 +35347,14 @@ function edCutoutSelectMode(mode) {
     if (!sub) return;
     triggerHaptic(10);
 
+    // The colour picker belongs to chroma mode only. It used to be removed just
+    // by Apply and the panel's X, so switching to another mode left the circle
+    // floating over the preview with nothing driving it.
+    if (mode !== 'chroma') {
+        var stalePicker = document.getElementById('edChromaPicker');
+        if (stalePicker) stalePicker.remove();
+    }
+
     if (mode === 'auto') {
         var restoring = _edCut.auto;
         sub.innerHTML = '<div id="edAutoBox" style="display:flex;align-items:center;gap:10px;padding:12px;background:rgba(48,209,88,0.1);border-radius:14px;border:1px solid rgba(48,209,88,0.3);">' +
