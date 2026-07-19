@@ -1,3 +1,4 @@
+﻿anthropic==0.117.0
 anyio==4.13.0
 asgiref==3.8.1
 certifi==2026.2.25
@@ -5,11 +6,11 @@ charset-normalizer==3.4.6
 cryptography==49.0.0
 dj-config-url==0.1.1
 dj-database-url==3.1.2
-Django==4.2.30
 django-cors-headers==4.9.0
 django-csp==4.0
-django-ratelimit==4.1.0
 django-ratelimit2==0.4.2
+django-ratelimit==4.1.0
+Django==4.2.30
 djangorestframework==3.16.1
 gunicorn==26.0.0
 h11==0.16.0
@@ -18,8 +19,8 @@ httpx==0.28.1
 idna==3.11
 packaging==26.0
 pillow==12.1.0
-psycopg==3.3.3
 psycopg2-binary==2.9.11
+psycopg==3.3.3
 PyJWT==2.12.1
 python-dotenv==1.2.2
 requests==2.33.0

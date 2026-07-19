@@ -138,6 +138,17 @@ GIPHY_API_KEY                = os.environ.get('GIPHY_API_KEY', '')
 RESEND_API_KEY               = os.environ.get('RESEND_API_KEY', '')
 GOOGLE_CLOUD_VISION_API_KEY  = os.environ.get('GOOGLE_CLOUD_VISION_API_KEY', '')
 
+# Eddie, the in-app assistant. The key is server-side only and must never be
+# returned by /api/config/ — the browser talks to /api/eddie/*, never to
+# api.anthropic.com directly.
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+EDDIE_MODEL       = os.environ.get('EDDIE_MODEL', 'claude-opus-4-8')
+
+# Daily per-user caps, enforced server-side before any model call.
+EDDIE_LIMIT_MESSAGES    = int(os.environ.get('EDDIE_LIMIT_MESSAGES', '40'))
+EDDIE_LIMIT_ATTACHMENTS = int(os.environ.get('EDDIE_LIMIT_ATTACHMENTS', '10'))
+EDDIE_LIMIT_IMAGES      = int(os.environ.get('EDDIE_LIMIT_IMAGES', '5'))
+
 # Verification (Didit — replaces Stripe Identity), email (Brevo), voice (ElevenLabs)
 DIDIT_API_KEY                = os.environ.get('DIDIT_API_KEY', '')
 DIDIT_WORKFLOW_ID            = os.environ.get('DIDIT_WORKFLOW_ID', '')

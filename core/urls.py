@@ -3,10 +3,13 @@ from django.views.generic import TemplateView
 from django.contrib.staticfiles.views import serve as static_serve
 from . import views
 from . import api_views
+from . import eddie_views
 
 urlpatterns = [
     path('', views.feed, name='feed'),
     path('api/config/', api_views.get_config, name='api_config'),
+    path('api/eddie/chat/', eddie_views.eddie_chat, name='api_eddie_chat'),
+    path('api/eddie/usage/', eddie_views.eddie_usage, name='api_eddie_usage'),
     path('api/stripe/create-verification/', api_views.create_stripe_verification, name='api_stripe_verification'),
     path('api/stripe/webhook/', api_views.stripe_webhook, name='api_stripe_webhook'),
     path('api/email/send/', api_views.send_email, name='api_email_send'),
