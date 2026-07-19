@@ -11499,7 +11499,7 @@ async function verifyMentions(root) {
 function openMentionUser(e, username) {
     if (e) { try { e.stopPropagation(); e.preventDefault(); } catch (_) {} }
     if (!window.sb) return;
-    sb.from('users').select('*').eq('username', username).maybeSingle().then(function(r) {
+    sb.from('users').select(USER_PUBLIC_COLS).eq('username', username).maybeSingle().then(function(r) {
         if (r && r.data && !r.data.is_banned && !r.data.is_locked) {
             if (typeof openUserProfile === 'function') openUserProfile(r.data);
             else if (typeof viewUserProfile === 'function') viewUserProfile(r.data.id);
@@ -12693,26 +12693,55 @@ DB.getUser = async function() {
     return user;
 };
 
+// The users table no longer exposes PII columns (email, phone, gov_*,
+// stripe_identity_id, lock_reason, parent_id) to the anon/authenticated roles,
+// because RLS is row-level and cannot hide columns. Anything that genuinely
+// needs those goes through a SECURITY DEFINER function instead. Practical rule:
+// never `select('*')` on users -- it now fails on the protected columns.
+const USER_PUBLIC_COLS = [
+    'id', 'username', 'full_name', 'display_name', 'account_type', 'verified',
+    'badge_tier', 'badge_status', 'avatar_url', 'cover_url', 'bio', 'trust_score',
+    'is_locked', 'is_banned', 'last_seen', 'created_at', 'updated_at',
+    'privacy_settings', 'website', 'website_url', 'location', 'country',
+    'verification_method', 'is_child', 'is_kid', 'gov_verified', 'face_verified',
+    'id_verified', 'is_admin', 'followers_count', 'following_count',
+    'follower_count', 'post_count', 'liveness_verified', 'liveness_steps',
+    'pronouns', 'profile_links', 'ai_label', 'coins'
+].join(',');
+
 DB.createUserProfile = async function(profile) {
-    const { data, error } = await sb.from('users').insert(profile).select().single();
+    const { data, error } = await sb.from('users').insert(profile).select(USER_PUBLIC_COLS).single();
     if (error) throw error;
     return data;
 };
 
+// Own profile comes back complete (the owner is entitled to their own email);
+// anyone else's is limited to the public columns.
 DB.getUserProfile = async function(userId) {
-    const { data, error } = await sb.from('users').select('*, is_admin').eq('id', userId).maybeSingle();
+    let ownId = null;
+    try { ownId = (await sb.auth.getSession()).data.session?.user?.id || null; } catch (e) {}
+    if (ownId && userId === ownId) {
+        const { data, error } = await sb.rpc('tf_my_profile');
+        if (error) throw error;
+        return (data && data[0]) || null;
+    }
+    const { data, error } = await sb.from('users').select(USER_PUBLIC_COLS).eq('id', userId).maybeSingle();
     if (error) throw error;
     return data;
 };
 
+// Login only: resolves a username to the email Supabase auth needs. Returns
+// just email + lock state, never a whole profile.
 DB.getUserByUsername = async function(username) {
-    const { data, error } = await sb.from('users').select('*').eq('username', username).maybeSingle();
+    const { data, error } = await sb.rpc('tf_login_email', { uname: username });
     if (error) return null;
-    return data;
+    return (data && data[0]) || null;
 };
 
 DB.updateUserProfile = async function(userId, updates) {
-    const { data, error } = await sb.from('users').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', userId).select().single();
+    const { data, error } = await sb.from('users')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('id', userId).select(USER_PUBLIC_COLS).single();
     if (error) throw error;
     return data;
 };
@@ -15145,10 +15174,9 @@ const OneAccountPolicy = {
     // Check if email is already registered
     async checkEmailAvailable(email) {
         try {
-            const { data, error } = await sb.from('users')
-                .select('id')
-                .eq('email', email.toLowerCase().trim())
-                .maybeSingle();
+            // email is no longer a selectable column, so this goes through a
+            // function that answers yes/no without returning anyone's address.
+            const { data, error } = await sb.rpc('tf_email_taken', { e: email });
 
             if (error) throw error;
             return !data; // true if available
@@ -15181,10 +15209,7 @@ const OneAccountPolicy = {
         if (!stripeIdentityId) return true;
 
         try {
-            const { data, error } = await sb.from('users')
-                .select('id')
-                .eq('stripe_identity_id', stripeIdentityId)
-                .maybeSingle();
+            const { data, error } = await sb.rpc('tf_identity_taken', { sid: stripeIdentityId });
 
             if (error) throw error;
             return !data;
@@ -19628,7 +19653,7 @@ function _signupSendCode(isResend) {
     if (!isResend) {
         // Already have an account with this email? Skip signup, go straight to password login.
         showToast('Checking…');
-        sb.from('users').select('id').eq('email', email).maybeSingle().then(function(r) {
+        sb.rpc('tf_email_taken', { e: email }).then(function(r) {
             if (r.data) {
                 var hidden = document.getElementById('login-user'); if (hidden) hidden.value = email;
                 showToast('You already have an account — log in');
@@ -19988,8 +20013,10 @@ function openAccountInformation() {
         '</div>';
     (document.getElementById('app') || document.body).appendChild(ov);
     if (window.sb && u.id) {
-        sb.from('users').select('*').eq('id', u.id).maybeSingle().then(function(r) {
-            var d = r.data || {};
+        // Own row, and it needs the phone, so go through the profile helper
+        // (it uses the SECURITY DEFINER function for your own account).
+        DB.getUserProfile(u.id).then(function(d) {
+            d = d || {};
             var ph = d.phone || d.phone_number || 'Not set';
             var co = d.country || d.location_country || 'Not set';
             var pe = document.getElementById('acct-phone'); if (pe) pe.textContent = ph;
@@ -26495,7 +26522,7 @@ if (!window.sb) {
     if (window._currentChatUser) { openUserProfile(window._currentChatUser); return; }
     openContactProfile(); return;
 }
-    window.sb.from('users').select('*').eq('username', username).maybeSingle().then(function(res) {
+    window.sb.from('users').select(USER_PUBLIC_COLS).eq('username', username).maybeSingle().then(function(res) {
         if (res.data) { openUserProfile(res.data); }
         else { openContactProfile(); }
     });
