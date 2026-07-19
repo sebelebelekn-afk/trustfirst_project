@@ -16445,7 +16445,8 @@ async function loadReels() {
                 hide_likes: !!clip.hide_likes,
                 hide_shares: !!clip.hide_shares,
                 no_comments: !!clip.no_comments,
-                no_downloads: !!clip.no_downloads
+                no_downloads: !!clip.no_downloads,
+                stickers: Array.isArray(clip.stickers) ? clip.stickers : []
             };
         });
 
@@ -16560,6 +16561,19 @@ function renderReel(index) {
             </div>` : ''}
         </div>
     `;
+
+    // Render the creator's stickers over the video. The slide fills the screen,
+    // so the overlay box is the slide itself; normalised coords place each one.
+    if (reel.stickers && reel.stickers.length) {
+        var _slide = document.getElementById('currentReel');
+        if (_slide) {
+            _tfRenderClipOverlays(
+                _slide,
+                { left: 0, top: 0, width: _slide.clientWidth, height: _slide.clientHeight },
+                reel.stickers, reel.id
+            );
+        }
+    }
 
     // Play video if available
     const video = document.getElementById('reelVideo');
@@ -35696,8 +35710,10 @@ function edApplyFilter(id) {
 }
 
 /* ---- STICKER TRAY ---- */
-// Shared drag / resize / remove for editor stickers.
-function _edMakeAdjustable(wrap, removeMsg) {
+// Shared drag / resize / remove for editor stickers. onTap (optional) fires on a
+// press that did not turn into a drag, so a sticker like the clock can toggle its
+// style without a stray move being read as a tap.
+function _edMakeAdjustable(wrap, removeMsg, onTap) {
     var del = document.createElement('div');
     del.textContent = '✕';
     del.title = 'Remove';
@@ -35722,16 +35738,18 @@ function _edMakeAdjustable(wrap, removeMsg) {
     function drag(e) {
         if (e.target === del || e.target === grip) return;
         if (e.cancelable) e.preventDefault();
-        var p0 = pt(e), ox = wrap.offsetLeft, oy = wrap.offsetTop;
+        var p0 = pt(e), ox = wrap.offsetLeft, oy = wrap.offsetTop, moved = false;
         function mv(ev) {
             var p = pt(ev);
+            if (Math.abs(p.x - p0.x) > 4 || Math.abs(p.y - p0.y) > 4) moved = true;
             var c = _edClampPos(wrap, ox + p.x - p0.x, oy + p.y - p0.y);
             wrap.style.left = c.x + 'px'; wrap.style.top = c.y + 'px';
         }
         function end() {
             document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', end);
             document.removeEventListener('touchmove', mv); document.removeEventListener('touchend', end);
-            commit();
+            if (moved) commit();
+            else if (onTap) onTap();
         }
         document.addEventListener('mousemove', mv); document.addEventListener('mouseup', end);
         document.addEventListener('touchmove', mv, { passive: false }); document.addEventListener('touchend', end);
@@ -35740,7 +35758,12 @@ function _edMakeAdjustable(wrap, removeMsg) {
         e.stopPropagation();
         if (e.cancelable) e.preventDefault();
         var p0 = pt(e), w0 = wrap.offsetWidth;
-        function mv(ev) { var p = pt(ev); wrap.style.width = _edClampWidth(wrap, w0 + (p.x - p0.x), 90) + 'px'; }
+        function mv(ev) {
+            var p = pt(ev), nw = _edClampWidth(wrap, w0 + (p.x - p0.x), 60);
+            wrap.style.width = nw + 'px';
+            // Bodies size in em, so scale the wrapper font with its width.
+            if (wrap._ovFontK) wrap.style.fontSize = (nw * wrap._ovFontK) + 'px';
+        }
         function end() {
             document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', end);
             document.removeEventListener('touchmove', mv); document.removeEventListener('touchend', end);
@@ -35755,6 +35778,153 @@ function _edMakeAdjustable(wrap, removeMsg) {
     grip.addEventListener('touchstart', resize, { passive: false });
 }
 
+// ==========================================================================
+// CLIP STICKER FRAMEWORK
+// Stickers are saved on the clip as descriptors {id,type,xPct,yPct,wPct,data}
+// with normalised positions, then rendered over the video at playback by the
+// SAME renderer used in the editor, so they look identical in both places.
+// Interactive types (poll/quiz/emoji slider) are live overlays, which is what
+// lets viewers answer them after the clip is posted.
+// ==========================================================================
+var TFStickers = {
+    render: function (d, ctx) {
+        ctx = ctx || {};
+        var el = document.createElement('div');
+        el.className = 'tf-stk tf-stk-' + d.type;
+        el.style.width = '100%';
+        var fn = TFStickers['_' + d.type];
+        if (fn) { try { fn(el, d, ctx); } catch (e) { el.textContent = ''; } }
+        return el;
+    },
+
+    _clock: function (el, d, ctx) {
+        var data = d.data || (d.data = _tfClockData('digital'));
+        function paint() { el.innerHTML = (data.style === 'analog') ? _tfClockAnalogSVG(data) : _tfClockDigitalHTML(data); }
+        paint();
+        el._toggle = function () { data.style = (data.style === 'analog') ? 'digital' : 'analog'; paint(); };
+        if (ctx.mode === 'feed') {
+            el.style.cursor = 'pointer';
+            el.addEventListener('click', function (e) { e.stopPropagation(); el._toggle(); });
+        }
+    },
+
+    _location: function (el, d) {
+        var p = d.data || {};
+        el.innerHTML =
+            '<div style="display:flex;align-items:center;gap:0.55em;background:rgba(255,255,255,0.95);border-radius:0.9em;padding:0.55em 0.75em;box-shadow:0 4px 18px rgba(0,0,0,0.35);">' +
+                '<i class="fa-solid fa-location-dot" style="color:#FF2D55;font-size:1em;flex-shrink:0;"></i>' +
+                '<div style="flex:1;min-width:0;">' +
+                    '<b style="display:block;font-size:0.92em;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(p.name || 'Location') + '</b>' +
+                    (p.sub ? '<small style="font-size:0.72em;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;">' + escapeHtml(p.sub) + '</small>' : '') +
+                '</div>' +
+            '</div>';
+    }
+};
+
+// Clock data is frozen at placement: the digital face shows the time it was
+// overlaid, and the analog hands match it. Storing h/m directly makes it
+// timezone-proof (a viewer in another zone sees the creator's time, not theirs).
+function _tfClockData(style) {
+    var now = new Date();
+    var h = now.getHours(), m = now.getMinutes();
+    var h12 = h % 12; if (h12 === 0) h12 = 12;
+    return { style: style || 'digital', h: h, m: m, h12: h12, ampm: (h >= 12 ? 'PM' : 'AM') };
+}
+function _tfClockDigitalHTML(d) {
+    return '<div style="display:inline-flex;align-items:baseline;gap:0.18em;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);color:#fff;border-radius:0.55em;padding:0.32em 0.7em;font-weight:800;font-variant-numeric:tabular-nums;box-shadow:0 4px 14px rgba(0,0,0,0.4);white-space:nowrap;">' +
+        '<span style="font-size:1.55em;letter-spacing:0.01em;">' + d.h12 + ':' + (d.m < 10 ? '0' : '') + d.m + '</span>' +
+        '<span style="font-size:0.68em;opacity:0.85;">' + d.ampm + '</span></div>';
+}
+function _tfClockAnalogSVG(d) {
+    var hAng = ((d.h % 12) + d.m / 60) * 30, mAng = d.m * 6, ticks = '';
+    for (var i = 0; i < 12; i++) {
+        var a = i * 30 * Math.PI / 180, big = (i % 3 === 0);
+        var x1 = 50 + Math.sin(a) * 43, y1 = 50 - Math.cos(a) * 43;
+        var x2 = 50 + Math.sin(a) * (big ? 36 : 39), y2 = 50 - Math.cos(a) * (big ? 36 : 39);
+        ticks += '<line x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) + '" x2="' + x2.toFixed(1) + '" y2="' + y2.toFixed(1) + '" stroke="#111" stroke-width="' + (big ? 2.4 : 1.1) + '" stroke-linecap="round"/>';
+    }
+    return '<svg viewBox="0 0 100 100" style="width:100%;height:auto;display:block;filter:drop-shadow(0 4px 12px rgba(0,0,0,0.4));">' +
+        '<circle cx="50" cy="50" r="48" fill="#fff"/>' + ticks +
+        '<line x1="50" y1="50" x2="50" y2="27" stroke="#111" stroke-width="3.2" stroke-linecap="round" transform="rotate(' + hAng.toFixed(1) + ' 50 50)"/>' +
+        '<line x1="50" y1="50" x2="50" y2="17" stroke="#111" stroke-width="2.1" stroke-linecap="round" transform="rotate(' + mAng.toFixed(1) + ' 50 50)"/>' +
+        '<circle cx="50" cy="50" r="2.6" fill="#FF2D55"/></svg>';
+}
+
+// Place a sticker in the editor: positioned, drag/resize/removable, and marked
+// data-ov="1" so _edCollectOverlays() serialises it on post. fontK ties the
+// body's em sizing to the wrapper width, so resizing scales the whole sticker.
+function _edPlaceOverlay(descriptor, opts) {
+    opts = opts || {};
+    var area = document.getElementById('edPreviewArea');
+    if (!area) return null;
+    descriptor.id = descriptor.id || ('stk_' + Math.random().toString(36).slice(2, 9));
+    descriptor.data = descriptor.data || {};
+    var wrap = document.createElement('div');
+    wrap.id = descriptor.id;
+    wrap.setAttribute('data-ov', '1');
+    wrap._ovType = descriptor.type;
+    wrap._ovData = descriptor.data;
+    var aw = area.clientWidth || 320, ah = area.clientHeight || 480;
+    var wPct = (descriptor.wPct != null) ? descriptor.wPct : (opts.wPct || 0.42);
+    var w = Math.max(40, Math.round(aw * wPct));
+    var left = (descriptor.xPct != null) ? descriptor.xPct * aw : (aw - w) / 2;
+    var top = (descriptor.yPct != null) ? descriptor.yPct * ah : ah * 0.34;
+    wrap._ovFontK = (opts.fontK != null) ? opts.fontK : 0.11;
+    wrap.style.cssText = 'position:absolute;z-index:60;cursor:move;touch-action:none;' +
+        'left:' + left + 'px;top:' + top + 'px;width:' + w + 'px;font-size:' + (w * wrap._ovFontK) + 'px;';
+    var body = TFStickers.render(descriptor, { mode: 'editor' });
+    body.style.pointerEvents = 'none';   // taps reach the wrapper for drag/tap detection
+    wrap.appendChild(body);
+    wrap._ovBody = body;
+    area.appendChild(wrap);
+    var onTap = opts.onTap || (body._toggle ? function () { body._toggle(); triggerHaptic(6); } : null);
+    _edMakeAdjustable(wrap, opts.removeMsg || 'Removed', onTap);
+    edState.isDirty = true;
+    if (typeof edSaveHistory === 'function') edSaveHistory();
+    triggerHaptic(12);
+    return wrap;
+}
+
+// Serialise every placed sticker to descriptors with normalised coordinates.
+function _edCollectOverlays() {
+    var area = document.getElementById('edPreviewArea');
+    if (!area) return [];
+    var aw = area.clientWidth || 1, ah = area.clientHeight || 1;
+    var out = [];
+    area.querySelectorAll('[data-ov="1"]').forEach(function (w) {
+        out.push({
+            id: w.id,
+            type: w._ovType,
+            xPct: +(w.offsetLeft / aw).toFixed(4),
+            yPct: +(w.offsetTop / ah).toFixed(4),
+            wPct: +(w.offsetWidth / aw).toFixed(4),
+            data: w._ovData || {}
+        });
+    });
+    return out;
+}
+
+// Render a clip's stickers over its video in the feed. box is the video's
+// rendered rectangle within host; overlays are positioned by their normalised
+// coordinates so they land where the creator put them on any screen size.
+function _tfRenderClipOverlays(host, box, stickers, clipId) {
+    if (!host || !stickers || !stickers.length) return;
+    var old = host.querySelector('.tf-clip-overlays');
+    if (old) old.remove();
+    var layer = document.createElement('div');
+    layer.className = 'tf-clip-overlays';
+    layer.style.cssText = 'position:absolute;left:' + box.left + 'px;top:' + box.top + 'px;width:' + box.width + 'px;height:' + box.height + 'px;pointer-events:none;z-index:24;';
+    stickers.forEach(function (d) {
+        if (!d || !d.type) return;
+        var w = (d.wPct || 0.42) * box.width;
+        var cell = document.createElement('div');
+        cell.style.cssText = 'position:absolute;left:' + ((d.xPct || 0) * box.width) + 'px;top:' + ((d.yPct || 0) * box.height) + 'px;width:' + w + 'px;font-size:' + (w * 0.11) + 'px;pointer-events:auto;';
+        cell.appendChild(TFStickers.render(d, { mode: 'feed', clipId: clipId }));
+        layer.appendChild(cell);
+    });
+    host.appendChild(layer);
+}
+
 // The Location sticker opens the real place search (same screen the composer
 // uses) instead of dropping a "📍 Location" text label.
 function edPickLocationSticker() {
@@ -35766,27 +35936,34 @@ function edPickLocationSticker() {
 }
 
 function edPlaceLocationSticker(place) {
-    var area = document.getElementById('edPreviewArea');
-    if (!area || !place) return;
+    if (!place) return;
     var old = document.getElementById('edLocationSticker');
     if (old) old.remove();
-    var wrap = document.createElement('div');
-    wrap.id = 'edLocationSticker';
-    wrap.style.cssText = 'position:absolute;top:30%;left:12%;width:62%;z-index:60;cursor:move;';
-    wrap.innerHTML =
-        '<div style="display:flex;align-items:center;gap:9px;background:rgba(255,255,255,0.95);border-radius:14px;padding:9px 12px;box-shadow:0 4px 18px rgba(0,0,0,0.35);">' +
-            '<i class="fa-solid fa-location-dot" style="color:#FF2D55;font-size:15px;flex-shrink:0;"></i>' +
-            '<div style="flex:1;min-width:0;">' +
-                '<b style="display:block;font-size:13px;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(place.name || 'Location') + '</b>' +
-                (place.sub ? '<small style="font-size:11px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;">' + escapeHtml(place.sub) + '</small>' : '') +
-            '</div>' +
-        '</div>';
-    area.appendChild(wrap);
-    _edMakeAdjustable(wrap, 'Location removed');
-    edState.isDirty = true;
-    if (typeof edSaveHistory === 'function') edSaveHistory();
-    showToast('Location added');
-    triggerHaptic(15);
+    var wrap = _edPlaceOverlay(
+        { id: 'edLocationSticker', type: 'location', wPct: 0.6, yPct: 0.3,
+          data: { name: place.name || 'Location', sub: place.sub || '', lat: place.lat, lng: place.lng } },
+        { removeMsg: 'Location removed' }
+    );
+    if (wrap) { showToast('Location added'); }
+}
+
+// Routes each functional sticker tile to its real handler. Types not yet wired
+// fall back to the old text label so nothing breaks mid-build.
+function edStickerTile(label) {
+    var tray = document.getElementById('edStickerTray');
+    if (tray) tray.remove();
+    switch (label) {
+        case 'Location':
+            edPickLocationSticker();
+            return;
+        case 'Clock':
+            _edPlaceOverlay({ type: 'clock', wPct: 0.34, data: _tfClockData('digital') },
+                { removeMsg: 'Clock removed' });
+            showToast('Tap the clock to switch analog or digital');
+            return;
+        default:
+            edPlaceSticker(label, true);
+    }
 }
 
 function edOpenStickerTray() {
@@ -35825,10 +36002,7 @@ function edOpenStickerTray() {
             '<p style="color:rgba(255,255,255,0.35);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">All Stickers</p>'+
             '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px;">'+
             STICKERS_FUNCTIONAL.map(function(s){
-                var _click = (s.label === 'Location')
-                    ? 'edPickLocationSticker()'
-                    : 'edPlaceSticker(\''+s.emoji+' '+s.label+'\',true)';
-                return '<div onclick="'+_click+'" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;border:0.5px solid rgba(255,255,255,0.08);">'+
+                return '<div onclick="edStickerTile(\''+s.label+'\')" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;border:0.5px solid rgba(255,255,255,0.08);">'+
                     '<span style="font-size:26px;">'+s.emoji+'</span>'+
                     '<span style="color:rgba(255,255,255,0.7);font-size:12px;font-weight:600;">'+s.label+'</span>'+
                 '</div>';
@@ -36195,6 +36369,9 @@ function stopWbAudio() {
 }
 
 function openNewTrustClipPost() {
+    // Capture placed stickers before the editor DOM is torn down; they ride
+    // along to the trustclips insert and render over the video in the feed.
+    try { window._pendingClipStickers = _edCollectOverlays(); } catch (e) { window._pendingClipStickers = []; }
     closePage('preview-edit-overlay');
     openPage('new-trust-clip-overlay');
     var tcVid = document.getElementById('tcThumbVid');
@@ -36320,7 +36497,8 @@ is_demo: window._tcIsDemoClip || false,
                 no_comments: document.getElementById('moNoComments') && document.getElementById('moNoComments').classList.contains('active'),
                 no_downloads: document.getElementById('moAllowDownloads') && !document.getElementById('moAllowDownloads').classList.contains('active'),
                 allow_template: !(document.getElementById('moNoTemplate') && document.getElementById('moNoTemplate').classList.contains('active')),
-                scheduled_at: window._tcScheduledAt || null
+                scheduled_at: window._tcScheduledAt || null,
+                stickers: window._pendingClipStickers || []
             };
             var clipSaved = true;
             var { error: insertErr } = await sb.from('trustclips').insert(insertRow);
