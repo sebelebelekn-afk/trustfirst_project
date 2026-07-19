@@ -1,4 +1,4 @@
-﻿window.addEventListener('unhandledrejection', function(e) {
+window.addEventListener('unhandledrejection', function(e) {
     var msg = (e.reason && e.reason.message) ? e.reason.message : String(e.reason || '');
     if (msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('networkerror')) {
         console.warn('[Offline]', msg); return;
@@ -43328,3 +43328,434 @@ async function _qcSend() {
         } else if (tries > 80) { clearInterval(iv); showToast('Could not open chat'); }
     }, 100);
 }
+
+// ==========================================================================
+// EDDIE — the in-app AI assistant
+// Chat streams over SSE from /api/eddie/chat/. The key is server-side; this
+// code only ever talks to our own origin.
+// ==========================================================================
+var _eddie = { turns: [], busy: false, attachments: [], abort: null };
+
+function _eddieStyles() {
+    if (document.getElementById('eddieStyles')) return;
+    var s = document.createElement('style');
+    s.id = 'eddieStyles';
+    s.textContent =
+        '@keyframes eddieDot{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}' +
+        '.eddie-dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;animation:eddieDot 1.1s infinite;}' +
+        '.eddie-dot:nth-child(2){animation-delay:.15s}.eddie-dot:nth-child(3){animation-delay:.3s}' +
+        '@keyframes eddieShimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}' +
+        '.eddie-shimmer{background:linear-gradient(90deg,rgba(255,255,255,.35),rgba(255,255,255,.9),rgba(255,255,255,.35));' +
+        'background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:eddieShimmer 1.8s linear infinite;}' +
+        '.eddie-act{background:none;border:none;color:rgba(255,255,255,.45);cursor:pointer;font-size:13px;padding:6px;border-radius:8px;}' +
+        '.eddie-act:hover{color:#fff;background:rgba(255,255,255,.08);}' +
+        '.eddie-act.on{color:#0A84FF;}';
+    document.head.appendChild(s);
+}
+
+async function _eddieToken() {
+    try {
+        var s = await sb.auth.getSession();
+        return (s && s.data && s.data.session && s.data.session.access_token) || '';
+    } catch (e) { return ''; }
+}
+
+function _eddieEsc(t) { return escapeHtml(t == null ? '' : String(t)); }
+
+// Small, deliberate subset of markdown: bold, inline code, and line breaks.
+function _eddieFormat(text) {
+    var h = _eddieEsc(text);
+    h = h.replace(/`([^`\n]+)`/g, '<code style="background:rgba(0,0,0,0.08);padding:1px 5px;border-radius:5px;font-size:0.9em;">$1</code>');
+    h = h.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+    return h.replace(/\n/g, '<br>');
+}
+
+function openEddieChat() {
+    _eddieStyles();
+    var existing = document.getElementById('eddie-overlay');
+    if (existing) { existing.style.display = 'flex'; return; }
+
+    var ov = document.createElement('div');
+    ov.id = 'eddie-overlay';
+    ov.style.cssText = 'position:absolute;inset:0;z-index:7000;background:#000;display:flex;flex-direction:column;';
+    ov.innerHTML =
+        '<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;flex-shrink:0;">' +
+            '<button onclick="closeEddieChat()" style="background:rgba(255,255,255,0.1);border:none;color:#fff;width:34px;height:34px;border-radius:50%;cursor:pointer;"><i class="fa-solid fa-arrow-left"></i></button>' +
+            '<b style="flex:1;color:#fff;font-size:17px;">Eddie</b>' +
+            '<button onclick="eddieNewChat()" title="New chat" style="background:rgba(255,255,255,0.1);border:none;color:#fff;width:34px;height:34px;border-radius:50%;cursor:pointer;"><i class="fa-solid fa-pen-to-square" style="font-size:13px;"></i></button>' +
+        '</div>' +
+        '<div id="eddieScroll" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;position:relative;padding:8px 14px 20px;">' +
+            // The faint centred wordmark, behind everything.
+            '<div id="eddieMark" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">' +
+                '<span style="color:rgba(255,255,255,0.07);font-size:34px;font-weight:900;letter-spacing:1px;">Eddie AI</span>' +
+            '</div>' +
+            '<div id="eddieList" style="position:relative;"></div>' +
+        '</div>' +
+        '<div id="eddieAtts" style="display:none;gap:8px;padding:0 14px 8px;flex-wrap:wrap;"></div>' +
+        '<div style="flex-shrink:0;padding:8px 12px calc(14px + env(safe-area-inset-bottom));">' +
+            '<div style="display:flex;align-items:flex-end;gap:8px;background:rgba(255,255,255,0.08);border-radius:22px;padding:6px 6px 6px 10px;">' +
+                '<button onclick="eddiePickAttachment()" title="Attach an image" style="background:none;border:none;color:rgba(255,255,255,0.6);font-size:17px;cursor:pointer;padding:8px;flex-shrink:0;"><i class="fa-solid fa-paperclip"></i></button>' +
+                '<textarea id="eddieInput" rows="1" placeholder="Ask anything" ' +
+                    'style="flex:1;background:transparent;border:none;outline:none;color:#fff;font-size:15px;resize:none;max-height:120px;padding:8px 0;font-family:inherit;"></textarea>' +
+                '<button id="eddieSend" onclick="eddieSend()" style="background:#fff;border:none;color:#000;width:36px;height:36px;border-radius:50%;cursor:pointer;flex-shrink:0;"><i class="fa-solid fa-arrow-up"></i></button>' +
+            '</div>' +
+            '<div id="eddieHint" style="color:rgba(255,255,255,0.3);font-size:11px;text-align:center;margin-top:7px;">Eddie can search the web. Check anything important.</div>' +
+        '</div>' +
+        '<input id="eddieFile" type="file" accept="image/*" multiple hidden onchange="eddieAttachChosen(this)">';
+    (document.getElementById('app') || document.body).appendChild(ov);
+
+    var ta = document.getElementById('eddieInput');
+    ta.addEventListener('input', function () {
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(120, ta.scrollHeight) + 'px';
+    });
+    ta.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); eddieSend(); }
+    });
+
+    hideNavBar && hideNavBar();
+    _eddieRender();
+    eddieRefreshUsage();
+}
+
+function closeEddieChat() {
+    if (_eddie.abort) { try { _eddie.abort.abort(); } catch (e) {} _eddie.abort = null; }
+    try { window.speechSynthesis.cancel(); } catch (e) {}
+    var ov = document.getElementById('eddie-overlay');
+    if (ov) ov.remove();
+    showNavBar && showNavBar();
+}
+
+function eddieNewChat() {
+    if (_eddie.busy) { showToast('Eddie is still replying'); return; }
+    _eddie.turns = [];
+    _eddie.attachments = [];
+    _eddieRenderAttachments();
+    _eddieRender();
+    triggerHaptic(8);
+}
+
+async function eddieRefreshUsage() {
+    try {
+        var token = await _eddieToken();
+        var r = await fetch('/api/eddie/usage/', { headers: { 'Authorization': 'Bearer ' + token } });
+        if (!r.ok) return;
+        var j = await r.json();
+        var hint = document.getElementById('eddieHint');
+        if (!hint) return;
+        if (!j.configured) {
+            hint.textContent = 'Eddie is not switched on yet.';
+            return;
+        }
+        var left = Math.max(0, (j.limits.messages || 0) - (j.used.messages || 0));
+        hint.textContent = left + ' of ' + j.limits.messages + ' messages left today · Eddie can search the web';
+    } catch (e) {}
+}
+
+function _eddieRender() {
+    var list = document.getElementById('eddieList');
+    if (!list) return;
+    var mark = document.getElementById('eddieMark');
+    if (mark) mark.style.opacity = _eddie.turns.length ? '0.35' : '1';
+
+    list.innerHTML = _eddie.turns.map(function (t, i) { return _eddieTurnHTML(t, i); }).join('');
+    _eddieScrollDown();
+}
+
+function _eddieTurnHTML(t, i) {
+    if (t.role === 'user') {
+        var atts = (t.attachments || []).map(function (a) {
+            return '<img src="data:' + a.media_type + ';base64,' + a.data + '" style="width:100%;border-radius:12px;margin-bottom:6px;display:block;">';
+        }).join('');
+        // User bubble: black.
+        return '<div style="display:flex;justify-content:flex-end;margin:10px 0;">' +
+            '<div style="max-width:82%;background:#000;border:1px solid rgba(255,255,255,0.16);color:#fff;border-radius:18px 18px 5px 18px;padding:10px 14px;font-size:15px;line-height:1.45;">' +
+                atts + _eddieFormat(t.content) +
+            '</div></div>';
+    }
+
+    // Assistant bubble: white.
+    var thinking = '';
+    if (t.thinking) {
+        var open = t.showThinking ? '' : 'display:none;';
+        thinking =
+            '<div style="margin-bottom:8px;">' +
+                '<button onclick="eddieToggleThoughts(' + i + ')" style="background:rgba(0,0,0,0.06);border:none;color:#555;font-size:12px;font-weight:600;padding:5px 11px;border-radius:20px;cursor:pointer;">' +
+                    '<i class="fa-solid fa-lightbulb" style="margin-right:5px;"></i>' + (t.showThinking ? 'Hide thoughts' : 'Show thoughts') +
+                '</button>' +
+                '<div style="' + open + 'margin-top:8px;padding:10px 12px;background:rgba(0,0,0,0.045);border-radius:12px;color:#4a4a4a;font-size:13px;line-height:1.5;white-space:pre-wrap;">' +
+                    _eddieEsc(t.thinking) +
+                '</div>' +
+            '</div>';
+    }
+
+    var status = '';
+    if (t.status === 'thinking') {
+        status = '<div style="display:flex;align-items:center;gap:7px;color:#777;font-size:13px;">' +
+            '<span class="eddie-dot"></span><span class="eddie-dot"></span><span class="eddie-dot"></span>' +
+            '<span style="margin-left:4px;">Thinking</span></div>';
+    } else if (t.status === 'searching') {
+        status = '<div style="display:flex;align-items:center;gap:8px;color:#777;font-size:13px;">' +
+            '<i class="fa-solid fa-globe" style="animation:spin 2.4s linear infinite;"></i>' +
+            '<span>Searching the web…</span></div>';
+    }
+
+    var sources = '';
+    if (t.sources && t.sources.length) {
+        sources = '<div style="margin-top:10px;padding-top:9px;border-top:1px solid rgba(0,0,0,0.08);">' +
+            '<div style="color:#888;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Sources</div>' +
+            '<div style="display:flex;flex-wrap:wrap;gap:6px;">' +
+            t.sources.map(function (s, n) {
+                var host = '';
+                try { host = new URL(s.url).hostname.replace(/^www\./, ''); } catch (e) { host = s.url; }
+                return '<a href="' + _eddieEsc(s.url) + '" target="_blank" rel="noopener noreferrer" ' +
+                    'style="display:inline-flex;align-items:center;gap:5px;background:rgba(0,0,0,0.05);color:#333;text-decoration:none;font-size:12px;padding:5px 10px;border-radius:20px;max-width:100%;">' +
+                    '<span style="color:#888;">' + (n + 1) + '</span>' +
+                    '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _eddieEsc(host) + '</span></a>';
+            }).join('') + '</div></div>';
+    }
+
+    var actions = '';
+    if (t.status === 'done' && t.content) {
+        actions = '<div style="display:flex;gap:2px;margin-top:6px;margin-left:4px;">' +
+            '<button class="eddie-act" title="Copy" onclick="eddieCopy(' + i + ')"><i class="fa-regular fa-copy"></i></button>' +
+            '<button class="eddie-act" title="Share" onclick="eddieShare(' + i + ')"><i class="fa-solid fa-arrow-up-from-bracket"></i></button>' +
+            '<button class="eddie-act" title="Read aloud" onclick="eddiePlay(' + i + ')"><i class="fa-solid fa-volume-high"></i></button>' +
+            '<button class="eddie-act" title="Retry" onclick="eddieRetry(' + i + ')"><i class="fa-solid fa-rotate-right"></i></button>' +
+            '<button class="eddie-act' + (t.rating === 1 ? ' on' : '') + '" title="Good answer" onclick="eddieRate(' + i + ',1)"><i class="fa-regular fa-thumbs-up"></i></button>' +
+            '<button class="eddie-act' + (t.rating === -1 ? ' on' : '') + '" title="Bad answer" onclick="eddieRate(' + i + ',-1)"><i class="fa-regular fa-thumbs-down"></i></button>' +
+        '</div>';
+    }
+
+    var body = t.image
+        ? '<img src="' + _eddieEsc(t.image) + '" style="width:100%;border-radius:12px;display:block;">'
+        : (_eddieFormat(t.content) || status);
+
+    return '<div style="display:flex;flex-direction:column;align-items:flex-start;margin:10px 0;">' +
+        '<div style="max-width:88%;background:#fff;color:#111;border-radius:18px 18px 18px 5px;padding:11px 14px;font-size:15px;line-height:1.5;box-shadow:0 2px 10px rgba(0,0,0,0.25);">' +
+            thinking + body + (t.content && status ? '<div style="margin-top:6px;">' + status + '</div>' : '') + sources +
+        '</div>' + actions +
+    '</div>';
+}
+
+function _eddieScrollDown() {
+    var sc = document.getElementById('eddieScroll');
+    if (sc) sc.scrollTop = sc.scrollHeight;
+}
+
+function eddieToggleThoughts(i) {
+    var t = _eddie.turns[i];
+    if (!t) return;
+    t.showThinking = !t.showThinking;
+    _eddieRender();
+}
+
+// ---- attachments ----
+function eddiePickAttachment() {
+    var f = document.getElementById('eddieFile');
+    if (f) f.click();
+}
+function eddieAttachChosen(input) {
+    var files = Array.prototype.slice.call(input.files || []).slice(0, 4);
+    input.value = '';
+    files.forEach(function (file) {
+        if (!file.type.startsWith('image/')) { showToast('Images only for now'); return; }
+        if (file.size > 4 * 1024 * 1024) { showToast('That image is too large (4MB max)'); return; }
+        var reader = new FileReader();
+        reader.onload = function () {
+            var b64 = String(reader.result).split(',')[1] || '';
+            _eddie.attachments.push({ media_type: file.type, data: b64 });
+            _eddieRenderAttachments();
+        };
+        reader.readAsDataURL(file);
+    });
+}
+function _eddieRenderAttachments() {
+    var box = document.getElementById('eddieAtts');
+    if (!box) return;
+    if (!_eddie.attachments.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.style.display = 'flex';
+    box.innerHTML = _eddie.attachments.map(function (a, i) {
+        return '<div style="position:relative;">' +
+            '<img src="data:' + a.media_type + ';base64,' + a.data + '" style="width:54px;height:54px;object-fit:cover;border-radius:10px;display:block;">' +
+            '<button onclick="eddieDropAttachment(' + i + ')" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:#000;border:1px solid rgba(255,255,255,0.3);color:#fff;font-size:10px;cursor:pointer;line-height:1;">✕</button>' +
+        '</div>';
+    }).join('');
+}
+function eddieDropAttachment(i) {
+    _eddie.attachments.splice(i, 1);
+    _eddieRenderAttachments();
+}
+
+// ---- send / stream ----
+function eddieSend() {
+    var ta = document.getElementById('eddieInput');
+    if (!ta) return;
+    var text = (ta.value || '').trim();
+    if (!text) return;
+    if (_eddie.busy) { showToast('Eddie is still replying'); return; }
+    ta.value = '';
+    ta.style.height = 'auto';
+    _eddieAsk(text, _eddie.attachments.slice());
+    _eddie.attachments = [];
+    _eddieRenderAttachments();
+}
+
+// "draw me a…" routes to image generation instead of chat.
+function _eddieWantsImage(text) {
+    return /^\s*(draw|generate|make|create)\s+(me\s+)?(an?\s+)?(image|picture|photo|drawing|illustration|logo)\b/i.test(text)
+        || /^\s*\/image\b/i.test(text);
+}
+
+async function _eddieAsk(text, attachments) {
+    _eddie.turns.push({ role: 'user', content: text, attachments: attachments });
+    var turn = { role: 'assistant', content: '', thinking: '', sources: [], status: 'thinking', showThinking: true };
+    _eddie.turns.push(turn);
+    _eddie.busy = true;
+    _eddieRender();
+
+    if (_eddieWantsImage(text)) { return _eddieMakeImage(text, turn); }
+
+    var history = _eddie.turns.slice(0, -2).filter(function (t) { return t.content; })
+        .map(function (t) { return { role: t.role, content: t.content }; });
+
+    try {
+        var token = await _eddieToken();
+        _eddie.abort = new AbortController();
+        var resp = await fetch('/api/eddie/chat/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ message: text, history: history, attachments: attachments }),
+            signal: _eddie.abort.signal
+        });
+
+        if (!resp.ok) {
+            var err = {};
+            try { err = await resp.json(); } catch (e) {}
+            turn.status = 'done';
+            turn.content = err.error || 'Eddie could not answer that.';
+            _eddie.busy = false; _eddieRender(); eddieRefreshUsage();
+            return;
+        }
+
+        var reader = resp.body.getReader();
+        var dec = new TextDecoder();
+        var buf = '';
+        while (true) {
+            var chunk = await reader.read();
+            if (chunk.done) break;
+            buf += dec.decode(chunk.value, { stream: true });
+            var frames = buf.split('\n\n');
+            buf = frames.pop();
+            frames.forEach(function (frame) {
+                var line = frame.trim();
+                if (!line.startsWith('data:')) return;
+                var ev;
+                try { ev = JSON.parse(line.slice(5).trim()); } catch (e) { return; }
+                _eddieEvent(turn, ev);
+            });
+            _eddieRender();
+        }
+    } catch (e) {
+        if (!(e && e.name === 'AbortError')) {
+            turn.content = turn.content || 'Connection interrupted.';
+        }
+    }
+    turn.status = 'done';
+    // Collapse the reasoning once the answer has landed.
+    if (turn.content) turn.showThinking = false;
+    _eddie.busy = false;
+    _eddie.abort = null;
+    _eddieRender();
+    eddieRefreshUsage();
+}
+
+function _eddieEvent(turn, ev) {
+    if (ev.type === 'thinking') { turn.thinking += ev.text || ''; turn.status = 'thinking'; }
+    else if (ev.type === 'searching') { turn.status = 'searching'; }
+    else if (ev.type === 'text') { turn.content += ev.text || ''; turn.status = 'writing'; }
+    else if (ev.type === 'sources') { turn.sources = ev.sources || []; }
+    else if (ev.type === 'error') { turn.content += (turn.content ? '\n\n' : '') + (ev.message || 'Something went wrong.'); }
+}
+
+async function _eddieMakeImage(prompt, turn) {
+    turn.status = 'searching';
+    turn.thinking = '';
+    _eddieRender();
+    try {
+        var token = await _eddieToken();
+        var r = await fetch('/api/eddie/image/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ prompt: prompt })
+        });
+        var j = await r.json();
+        if (!r.ok) {
+            turn.content = j.error || 'Could not make that image.';
+        } else if (j.url) {
+            turn.image = j.url;
+            turn.content = '';
+        } else if (j.image_b64) {
+            turn.image = 'data:image/png;base64,' + j.image_b64;
+            turn.content = '';
+        } else {
+            turn.content = 'Could not make that image.';
+        }
+    } catch (e) {
+        turn.content = 'Could not reach the image service.';
+    }
+    turn.status = 'done';
+    _eddie.busy = false;
+    _eddieRender();
+    eddieRefreshUsage();
+}
+
+// ---- per-message actions ----
+function _eddieTurnText(i) {
+    var t = _eddie.turns[i];
+    return t ? (t.content || '') : '';
+}
+function eddieCopy(i) {
+    var text = _eddieTurnText(i);
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(function () { showToast('Copied'); triggerHaptic(8); },
+        function () { showToast('Could not copy'); });
+}
+function eddieShare(i) {
+    var text = _eddieTurnText(i);
+    if (!text) return;
+    if (navigator.share) {
+        navigator.share({ text: text }).catch(function () {});
+    } else {
+        navigator.clipboard.writeText(text).then(function () { showToast('Copied to share'); });
+    }
+}
+function eddiePlay(i) {
+    var text = _eddieTurnText(i);
+    if (!text) return;
+    try {
+        if (window.speechSynthesis.speaking) { window.speechSynthesis.cancel(); return; }
+        var u = new SpeechSynthesisUtterance(text);
+        u.rate = 1.02;
+        window.speechSynthesis.speak(u);
+    } catch (e) { showToast('Read aloud is not available here'); }
+}
+function eddieRetry(i) {
+    if (_eddie.busy) { showToast('Eddie is still replying'); return; }
+    // Find the user turn that produced this answer, drop both, ask again.
+    var userIdx = i - 1;
+    while (userIdx >= 0 && _eddie.turns[userIdx].role !== 'user') userIdx--;
+    if (userIdx < 0) return;
+    var prev = _eddie.turns[userIdx];
+    _eddie.turns = _eddie.turns.slice(0, userIdx);
+    _eddieAsk(prev.content, prev.attachments || []);
+}
+function eddieRate(i, value) {
+    var t = _eddie.turns[i];
+    if (!t) return;
+    t.rating = (t.rating === value) ? 0 : value;
+    _eddieRender();
+    triggerHaptic(8);
+    showToast(t.rating === 1 ? 'Thanks for the feedback' : (t.rating === -1 ? 'Noted, thanks' : 'Feedback cleared'));
+}
+

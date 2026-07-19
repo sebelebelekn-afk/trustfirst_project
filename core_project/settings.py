@@ -144,6 +144,11 @@ GOOGLE_CLOUD_VISION_API_KEY  = os.environ.get('GOOGLE_CLOUD_VISION_API_KEY', '')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 EDDIE_MODEL       = os.environ.get('EDDIE_MODEL', 'claude-opus-4-8')
 
+# Image generation runs on OpenAI (Claude reads images but does not create them).
+# Chat stays on Claude; the two are kept in separate modules.
+OPENAI_API_KEY     = os.environ.get('OPENAI_API_KEY', '')
+EDDIE_IMAGE_MODEL  = os.environ.get('EDDIE_IMAGE_MODEL', 'gpt-image-1')
+
 # Daily per-user caps, enforced server-side before any model call.
 EDDIE_LIMIT_MESSAGES    = int(os.environ.get('EDDIE_LIMIT_MESSAGES', '40'))
 EDDIE_LIMIT_ATTACHMENTS = int(os.environ.get('EDDIE_LIMIT_ATTACHMENTS', '10'))
