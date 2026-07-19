@@ -33530,7 +33530,9 @@ function edOpenPanel(type) {
     if (type === 'effects') { edOpenEffectsModal(); return; }
     if (type === 'voice') { edOpenVoicePanel(); return; }
     if (type === 'captions') { edOpenCaptionsPanel(); return; }
-    if (type === 'overlay') { edOpenOverlayPicker(); return; }
+    // Plain overlay tool, not the Gallery sticker: make sure a stale sticker
+    // flag from a cancelled pick does not turn this into a sticker.
+    if (type === 'overlay') { window._edGalleryStickerMode = false; edOpenOverlayPicker(); return; }
     if (type === 'sticker') { edOpenStickerTray(); return; }
     if (type === 'filter') { edOpenFilterPanel(); return; }
     if (type === 'crop')   { edOpenCropPanel();   return; }
@@ -33991,6 +33993,9 @@ function edOpenOverlayPicker() {
                     '<div style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.6);border-radius:4px;padding:2px 6px;font-size:10px;color:white;font-weight:700;">Clip '+(edState.clips.indexOf(c)+1)+'</div>';
                 div.onclick = function() {
                     document.getElementById('edGalleryPicker').remove();
+                    // An existing clip is a local blob, so it stays an in-editor
+                    // overlay rather than an uploaded sticker.
+                    window._edGalleryStickerMode = false;
                     edAddOverlayItem(src, true, 'Clip '+(edState.clips.indexOf(c)+1));
                 };
                 grid.appendChild(div);
@@ -34006,6 +34011,27 @@ function edPickerFileChosen(inp) {
     var url = URL.createObjectURL(file);
     var isVideo = file.type.startsWith('video');
     document.getElementById('edGalleryPicker')?.remove();
+
+    // Opened from the Gallery sticker tile: place it as a real sticker so it
+    // persists to the feed. Shows the local file immediately, then swaps in the
+    // uploaded url once it lands.
+    if (window._edGalleryStickerMode) {
+        window._edGalleryStickerMode = false;
+        var desc = { type: isVideo ? 'video' : 'image', wPct: 0.5, data: { url: url, uploading: true } };
+        var wrap = _edPlaceOverlay(desc, { removeMsg: isVideo ? 'Video removed' : 'Image removed', fontK: 0.08 });
+        _tfUploadStickerMedia(file).then(function (publicUrl) {
+            desc.data.uploading = false;
+            if (publicUrl) desc.data.url = publicUrl;
+            else showToast('Could not upload — this overlay will not show after posting');
+            if (wrap && wrap._ovBody) {
+                var nb = TFStickers.render(desc, { mode: 'editor' });
+                nb.style.pointerEvents = 'none';
+                wrap.replaceChild(nb, wrap._ovBody);
+                wrap._ovBody = nb;
+            }
+        });
+        return;
+    }
     edAddOverlayItem(url, isVideo, file.name);
 }
 // Keep a dragged overlay/sticker partly inside the frame. Without this a drag
@@ -34258,6 +34284,20 @@ async function edSearchMusicReal(query) {
     }
 }
 function edAddMusicTrackReal(title, artist, previewUrl, artUrl) {
+    // Opened from the Music sticker tile: drop a music sticker on the video
+    // instead of adding the track to the audio timeline.
+    if (window._edMusicStickerMode) {
+        window._edMusicStickerMode = false;
+        var mm = document.getElementById('edMusicModal'); if (mm) mm.remove();
+        _edPlaceOverlay(
+            { type: 'music', wPct: 0.66,
+              data: { name: title, artist: artist, previewUrl: previewUrl, artUrl: artUrl, style: 1 } },
+            { removeMsg: 'Music removed', fontK: 0.075 }
+        );
+        showToast('Tap the sticker to switch style');
+        triggerHaptic(15);
+        return;
+    }
     // If called from story post context, play audio instead of adding to editor
     if (window._spMusicModalActive) {
         window._spMusicModalActive = false;
@@ -35820,6 +35860,34 @@ var TFStickers = {
             '</div>';
     },
 
+    // GIFs and gallery photos. GIF urls are remote already; gallery picks are
+    // uploaded first, so both survive to the feed.
+    _image: function (el, d) {
+        var u = (d.data || {}).url || '';
+        el.innerHTML = '<img src="' + escapeHtml(u) + '" alt="" style="width:100%;height:auto;display:block;border-radius:0.5em;box-shadow:0 4px 14px rgba(0,0,0,0.35);">' +
+            ((d.data || {}).uploading ? '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.35);border-radius:0.5em;"><i class="fa-solid fa-spinner fa-spin" style="color:#fff;font-size:1.2em;"></i></div>' : '');
+        el.style.position = 'relative';
+    },
+
+    _video: function (el, d) {
+        var u = (d.data || {}).url || '';
+        el.innerHTML = '<video src="' + escapeHtml(u) + '" autoplay muted loop playsinline style="width:100%;height:auto;display:block;border-radius:0.5em;box-shadow:0 4px 14px rgba(0,0,0,0.35);"></video>' +
+            ((d.data || {}).uploading ? '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.35);border-radius:0.5em;"><i class="fa-solid fa-spinner fa-spin" style="color:#fff;font-size:1.2em;"></i></div>' : '');
+        el.style.position = 'relative';
+    },
+
+    // Reuses the same three music styles as the composer. In the editor the body
+    // is pointer-events:none, so a tap reaches the wrapper and cycles the style;
+    // in the feed the body is live, so the play button works for viewers.
+    _music: function (el, d, ctx) {
+        var m = d.data || {};
+        if (!m.style) m.style = 1;
+        var rid = (d.id || 'mus') + '_' + ((ctx && ctx.mode) || 'x');
+        function paint() { el.innerHTML = tfMusicStickerHTML(m, { context: 'post', id: rid }); }
+        paint();
+        el._toggle = function () { m.style = (m.style % 3) + 1; paint(); };
+    },
+
     _weather: function (el, d) {
         var w = d.data || {};
         var val = (w.unit === 'F') ? w.tempF : w.tempC;
@@ -35904,6 +35972,86 @@ function edAddWeatherSticker() {
     });
     showToast('Weather added');
     return wrap;
+}
+
+// ---- GIF sticker ----
+// Uses the same server-proxied Giphy endpoint the chat picker uses, so no key
+// is exposed in the browser. Giphy urls are remote, so the chosen GIF persists
+// to the feed with no upload.
+function edOpenGifStickerModal() {
+    var ex = document.getElementById('edGifModal');
+    if (ex) { ex.remove(); return; }
+    var m = document.createElement('div');
+    m.id = 'edGifModal';
+    m.style.cssText = 'position:absolute;inset:0;z-index:600;background:rgba(0,0,0,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);display:flex;flex-direction:column;animation:slideUpOverlay 0.3s ease;';
+    m.innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px 10px;">' +
+            '<span style="color:white;font-size:17px;font-weight:700;">GIFs</span>' +
+            '<button onclick="document.getElementById(\'edGifModal\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button>' +
+        '</div>' +
+        '<div style="padding:0 14px 10px;"><div style="display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.08);border-radius:14px;padding:8px 12px;">' +
+            '<i class="fa-solid fa-magnifying-glass" style="color:rgba(255,255,255,0.4);font-size:14px;"></i>' +
+            '<input id="edGifSearch" placeholder="Search GIFs…" oninput="edSearchGifs(this.value)" style="flex:1;background:transparent;border:none;outline:none;color:white;font-size:14px;">' +
+        '</div></div>' +
+        '<div id="edGifGrid" style="flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:0 14px 20px;align-content:start;"></div>';
+    var overlay = document.getElementById('preview-edit-overlay');
+    if (overlay) overlay.appendChild(m);
+    _edGifSearchNow('');
+}
+var _edGifTimer = null;
+function edSearchGifs(q) {
+    clearTimeout(_edGifTimer);
+    _edGifTimer = setTimeout(function () { _edGifSearchNow(q); }, 380);
+}
+function _edGifSearchNow(q) {
+    var grid = document.getElementById('edGifGrid');
+    if (!grid) return;
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:24px;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:20px;"></i></div>';
+    fetch('/api/giphy/search/?q=' + encodeURIComponent((q || '').trim() || 'trending') + '&type=gifs')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            var items = (data && data.data) || [];
+            if (!items.length) {
+                grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:24px;color:rgba(255,255,255,0.4);font-size:13px;">No GIFs found</div>';
+                return;
+            }
+            grid.innerHTML = '';
+            items.forEach(function (it) {
+                var imgs = it && it.images; if (!imgs || !imgs.original) return;
+                var thumb = (imgs.fixed_height_small || imgs.original).url, orig = imgs.original.url;
+                var cell = document.createElement('div');
+                cell.style.cssText = 'aspect-ratio:1;border-radius:8px;overflow:hidden;background:#222;cursor:pointer;';
+                var img = document.createElement('img');
+                img.src = thumb; img.loading = 'lazy';
+                img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+                cell.appendChild(img);
+                cell.onclick = function () {
+                    var mm = document.getElementById('edGifModal'); if (mm) mm.remove();
+                    _edPlaceOverlay({ type: 'image', wPct: 0.45, data: { url: orig, gif: true } },
+                        { removeMsg: 'GIF removed', fontK: 0.08 });
+                    showToast('GIF added');
+                };
+                grid.appendChild(cell);
+            });
+        })
+        .catch(function () {
+            grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:24px;color:rgba(255,255,255,0.4);font-size:13px;">Could not load GIFs</div>';
+        });
+}
+
+// Gallery picks are local blob: urls, which are dead once the clip is posted,
+// so the file is uploaded and the sticker points at the public url instead.
+function _tfUploadStickerMedia(file) {
+    if (!window.sb || !currentUser || !file) return Promise.resolve(null);
+    var ext = ((file.name || '').split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!ext) ext = (file.type.indexOf('video') >= 0) ? 'mp4' : 'jpg';
+    var path = 'stickers/' + currentUser.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
+    return sb.storage.from('media').upload(path, file, { contentType: file.type, upsert: false })
+        .then(function (up) {
+            if (up.error || !up.data) return null;
+            return sb.storage.from('media').getPublicUrl(up.data.path).data.publicUrl;
+        })
+        .catch(function () { return null; });
 }
 
 // Clock data is frozen at placement: the digital face shows the time it was
@@ -36048,6 +36196,17 @@ function edStickerTile(label) {
             return;
         case 'Weather':
             edAddWeatherSticker();
+            return;
+        case 'GIF':
+            edOpenGifStickerModal();
+            return;
+        case 'Music':
+            window._edMusicStickerMode = true;
+            edOpenMusicModal();
+            return;
+        case 'Gallery':
+            window._edGalleryStickerMode = true;
+            edOpenOverlayPicker();
             return;
         default:
             edPlaceSticker(label, true);
