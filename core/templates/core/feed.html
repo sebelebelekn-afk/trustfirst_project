@@ -22,7 +22,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=61">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=66">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -2321,14 +2321,30 @@ function authenticateUser() {
 /* Shared by every skeleton loader; without this the placeholder rows sit
    static instead of pulsing. */
 @keyframes skeletonPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-#commentSortRow::-webkit-scrollbar { display: none; }
+/* The sort menu anchors against the sheet, so the sheet must be its containing
+   block; without this it would position against the page. */
+#comment-overlay { position: absolute; }
+#commentSortMenu div:hover { background: var(--hover-bg, rgba(127,127,127,0.1)); }
+/* Styled here rather than inline. The menu is created at click time, and an
+   inline var() on a fresh node resolved against the wrong theme. */
+#commentSortMenu { background: #fff; border-color: #e8e8e8; }
+#commentSortMenu > div { color: #000; }
+/* A step lighter than the sheet, not the same colour, so the menu reads as
+   sitting above it rather than as a hole with a border. */
+[data-theme="dark"] #commentSortMenu { background: #2c2c2e !important; border-color: #3a3a3c !important; }
+[data-theme="dark"] #commentSortMenu > div { color: #fff !important; }
 </style>
 <div id="comment-overlay">
     <div class="comment-header">
         <b id="commentSheetTitle">Comments</b>
-        <i class="fa-solid fa-xmark" style="font-size:20px; cursor:pointer; color:#888;" onclick="closeComments()"></i>
+        <div style="display:flex;align-items:center;gap:14px;">
+            <div id="commentSortBtn" onclick="toggleCommentSortMenu(event)" style="display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text-secondary,#888);font-size:13px;font-weight:600;">
+                <span id="commentSortLabel">Newest</span>
+                <i class="fa-solid fa-chevron-down" style="font-size:10px;"></i>
+            </div>
+            <i class="fa-solid fa-xmark" style="font-size:20px; cursor:pointer; color:#888;" onclick="closeComments()"></i>
+        </div>
     </div>
-    <div id="commentSortRow" style="display:flex;gap:8px;overflow-x:auto;padding:2px 16px 10px;scrollbar-width:none;-webkit-overflow-scrolling:touch;"></div>
     <div class="comment-list" id="comment-list"></div>
     <div id="gif-panel" style="display:none;">
         <div class="gif-grid" id="gif-grid"></div>
@@ -4098,7 +4114,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=126"></script>
+<script src="{% static 'core/js/feed.js' %}?v=128"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=74"></script>
 <script src="{% static 'core/js/verify.js' %}?v=73"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=73"></script>

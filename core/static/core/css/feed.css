@@ -548,9 +548,8 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
 
 /* Header */
 [data-theme="dark"] .header-container {
-    background: rgba(18, 18, 18, 0.88) !important;
+    background: #1a1a1a !important;
     border-bottom-color: rgba(255,255,255,0.06) !important;
-    backdrop-filter: blur(20px) !important;
 }
 
 /* White overlays (msg, profile, settings sub-pages) */
@@ -624,9 +623,12 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
 [data-theme="dark"] .repost-sheet { background: #161616 !important; }
 
 /* Comment overlay */
-[data-theme="dark"] #comment-overlay { background: #161616 !important; }
-[data-theme="dark"] .comment-input-bar { background: #161616 !important; border-top-color: #222 !important; }
-[data-theme="dark"] .comment-input-bar input { background: #222 !important; color: #fff !important; }
+/* One surface for the whole sheet. This block and the later dark overrides
+   disagreed (#161616 vs #1a1a1a), so the header and the input bar could end up
+   a different shade from the list between them. */
+[data-theme="dark"] #comment-overlay { background: #1a1a1a !important; }
+[data-theme="dark"] .comment-input-bar { background: #1a1a1a !important; border-top-color: #2a2a2a !important; }
+[data-theme="dark"] .comment-input-bar input { background: #2a2a2a !important; color: #fff !important; }
 [data-theme="dark"] #chat-bottom-bar {
     background: rgba(18,18,18,0.97) !important;
     border-top-color: rgba(255,255,255,0.07) !important;
@@ -762,19 +764,42 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     background: rgba(10, 132, 255, 0.92);
     box-shadow: 0 4px 14px rgba(10, 132, 255, 0.4);
 }
-/* Picked up → blue water droplet: translucent, glossy highlight, refractive. */
+/* Picked up → a real bead of blue glass, not a glossy cartoon bubble.
+   What made the old one read as cartoon was a single huge soft-white blob
+   covering half the top, like sticker gloss. A real droplet instead has:
+   a tight specular dot where the light hits, a brighter caustic pooling at the
+   opposite lower edge as light refracts through and focuses, a crisp rim from
+   total internal reflection, and genuine translucency so the feed shows
+   through it like water rather than a solid plastic pill. */
 .nav-droplet.dragging {
     background:
-        radial-gradient(130% 80% at 32% 20%, rgba(255,255,255,0.65), rgba(255,255,255,0) 46%),
-        rgba(10, 132, 255, 0.5);
-    backdrop-filter: blur(3px) saturate(180%);
-    -webkit-backdrop-filter: blur(3px) saturate(180%);
+        /* tight specular highlight, upper-left */
+        radial-gradient(circle at 33% 24%, rgba(255,255,255,0.95), rgba(255,255,255,0) 13%),
+        /* refracted light pooling lower-right — the tell of a real bead */
+        radial-gradient(circle at 67% 84%, rgba(198,232,255,0.62), rgba(198,232,255,0) 32%),
+        /* faint curved sheen so the body reads as rounded glass, not flat */
+        linear-gradient(158deg, rgba(255,255,255,0.16), rgba(255,255,255,0) 42%),
+        /* translucent blue tint — enough to stay clearly the same blue as the
+           resting droplet, still see-through; saturate() deepens what refracts */
+        rgba(10, 132, 255, 0.46);
+    backdrop-filter: blur(7px) saturate(210%);
+    -webkit-backdrop-filter: blur(7px) saturate(210%);
     box-shadow:
-        0 10px 24px rgba(10, 132, 255, 0.5),
-        0 2px 6px rgba(255, 255, 255, 0.6) inset,
-        0 -7px 14px rgba(0, 74, 190, 0.5) inset;
-    transform: translateY(-50%) scale(1.18);
-    transition: width 0.2s ease, transform 0.2s cubic-bezier(0.34,1.56,0.64,1), background 0.2s, box-shadow 0.2s;
+        /* soft blue halo cast on the bar */
+        0 10px 24px rgba(10, 132, 255, 0.42),
+        /* tight contact shadow so it reads as lifted off the surface */
+        0 3px 6px rgba(0, 0, 0, 0.22),
+        /* crisp edge — total internal reflection around the rim */
+        inset 0 0 0 1px rgba(255, 255, 255, 0.42),
+        /* top edge catches the light */
+        inset 0 3px 5px rgba(255, 255, 255, 0.38),
+        /* bottom edge glows where light refracts through and focuses */
+        inset 0 -8px 12px rgba(150, 210, 255, 0.5);
+    transform: translateY(-50%) scale(1.16);
+    transition:
+        width 0.2s ease,
+        transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
+        background 0.2s, box-shadow 0.2s, backdrop-filter 0.2s;
 }
 
 @property --droplet-angle {
@@ -1897,13 +1922,22 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
 .settings-overlay, .settings-card, .settings-row,
 .header-container, .msg-header, .activity-item,
 .channel-card, .device-card, .trust-factor,
-.comment-item, .comment-input-bar, #comment-overlay,
+.comment-input-bar, #comment-overlay,
 .local-user-card, .scan-result-card, .hashtag-result,
 .two-step-option, .request-card, .msg-row,
 .activity-tab, .cal-day, .search-tab {
     background-color: var(--bg-primary);
     color: var(--text-primary);
     transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Comment rows sit on the sheet rather than painting their own background.
+   They used to take --bg-primary, which is pure black in dark mode, so every
+   row was a black band on the sheet's lighter grey. */
+.comment-item {
+    background-color: transparent;
+    color: var(--text-primary);
+    transition: color 0.3s ease;
 }
 
 [data-theme="dark"] .app,
@@ -1924,9 +1958,14 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     border-color: #2a2a2a !important;
 }
 
+/* The feed header. This was pure black while every panel below it sits on
+   #1a1a1a, so the top of the app read as a separate black slab. Matched to the
+   same surface, and kept opaque so it stays that colour rather than darkening
+   as black content scrolls under it. There is an earlier .header-container
+   rule in this file too; both now agree. */
 [data-theme="dark"] .header-container {
-    background: rgba(0, 0, 0, 0.95) !important;
-    border-color: #222 !important;
+    background: #1a1a1a !important;
+    border-color: rgba(255, 255, 255, 0.06) !important;
 }
 
 [data-theme="dark"] .post-content,
@@ -1941,9 +1980,11 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
 
 [data-theme="dark"] #feed-panels { background: #000 !important; }
 [data-theme="dark"] .offline-banner { background: rgba(255,59,48,0.95); }
-[data-theme="dark"] .comment-input-bar { background: #1a1a1a !important; border-color: #333 !important; }
+[data-theme="dark"] .comment-input-bar { background: #1a1a1a !important; border-color: #2a2a2a !important; }
 [data-theme="dark"] .comment-input-bar input { background: #2a2a2a !important; color: #fff !important; }
 [data-theme="dark"] #comment-overlay { background: #1a1a1a !important; }
+/* The header divider was a light-mode grey, which read as a hard line. */
+[data-theme="dark"] .comment-header { border-bottom-color: #2a2a2a !important; }
 [data-theme="dark"] .activity-tabs { border-color: #333 !important; }
 [data-theme="dark"] .calendar-picker { background: #1a1a1a !important; border-color: #333 !important; }
 [data-theme="dark"] .cal-day { color: #fff !important; }

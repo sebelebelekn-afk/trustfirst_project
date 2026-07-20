@@ -23790,22 +23790,61 @@ function _setCommentSheetCount(n) {
     if (t) t.textContent = n ? (n.toLocaleString() + ' comment' + (n === 1 ? '' : 's')) : 'Comments';
 }
 
+// The sort lives behind a label in the header rather than a row of chips: five
+// of them overflowed the sheet and pushed the comments down.
 function _renderSortChips() {
-    var row = document.getElementById('commentSortRow');
-    if (!row) return;
+    var label = document.getElementById('commentSortLabel');
+    if (!label) return;
     var cur = window._commentSort || 'newest';
-    row.innerHTML = _COMMENT_SORTS.map(function (s) {
-        var on = s.key === cur;
-        return '<button onclick="setCommentSort(\'' + s.key + '\')" style="flex-shrink:0;border:none;cursor:pointer;' +
-            'padding:6px 13px;border-radius:16px;font-size:12px;font-weight:600;white-space:nowrap;' +
-            'background:' + (on ? 'var(--text-primary,#000)' : 'rgba(127,127,127,0.12)') + ';' +
-            'color:' + (on ? 'var(--bg-primary,#fff)' : 'var(--text-secondary,#666)') + ';">' +
-            s.label + '</button>';
+    var match = _COMMENT_SORTS.filter(function (s) { return s.key === cur; })[0];
+    label.textContent = match ? match.label : 'Newest';
+}
+
+function toggleCommentSortMenu(evt) {
+    if (evt) evt.stopPropagation();
+    var open = document.getElementById('commentSortMenu');
+    if (open) { open.remove(); return; }
+
+    var btn = document.getElementById('commentSortBtn');
+    var sheet = document.getElementById('comment-overlay');
+    if (!btn || !sheet) return;
+    var cur = window._commentSort || 'newest';
+
+    var menu = document.createElement('div');
+    menu.id = 'commentSortMenu';
+    // Anchored under the button, inside the sheet so it scrolls away with it.
+    var b = btn.getBoundingClientRect(), s = sheet.getBoundingClientRect();
+    menu.style.cssText = 'position:absolute;z-index:20;min-width:186px;' +
+        'top:' + (b.bottom - s.top + 6) + 'px;right:' + (s.right - b.right) + 'px;' +
+        'border:1px solid;border-radius:14px;' +
+        'box-shadow:0 10px 34px rgba(0,0,0,0.22);overflow:hidden;padding:5px;';
+    menu.innerHTML = _COMMENT_SORTS.map(function (opt) {
+        var on = opt.key === cur;
+        return '<div onclick="setCommentSort(\'' + opt.key + '\')" ' +
+            'style="display:flex;align-items:center;justify-content:space-between;gap:14px;' +
+            'padding:11px 12px;border-radius:9px;cursor:pointer;font-size:14px;' +
+            (on ? 'font-weight:700;' : 'font-weight:500;') +
+            'color:var(--text-primary,#000);">' +
+            '<span>' + opt.label + '</span>' +
+            (on ? '<i class="fa-solid fa-check" style="color:#0A84FF;font-size:12px;"></i>' : '') +
+            '</div>';
     }).join('');
+    sheet.appendChild(menu);
+
+    // Close on the next tap anywhere else.
+    setTimeout(function () {
+        document.addEventListener('click', function once() {
+            var m = document.getElementById('commentSortMenu');
+            if (m) m.remove();
+            document.removeEventListener('click', once);
+        });
+    }, 0);
 }
 
 function setCommentSort(mode) {
     window._commentSort = mode;
+    var menu = document.getElementById('commentSortMenu');
+    if (menu) menu.remove();
     _renderSortChips();
     _renderCommentList();
     if (typeof triggerHaptic === 'function') triggerHaptic(10);
