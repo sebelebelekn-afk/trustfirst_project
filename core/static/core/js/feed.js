@@ -9524,7 +9524,7 @@ async function postGifComment(src) {
                 <i class="fa-solid fa-circle-check ${tier}" style="font-size:9px;"></i>
                 <small style="color:#aaa;font-size:11px;margin-left:4px;">now</small>
             </div>
-            <img src="${escapeHtml(src)}" style="width:150px;border-radius:12px;display:block;">
+            <img src="${escapeHtml(src)}" style="width:140px;max-width:60%;aspect-ratio:1;object-fit:cover;border-radius:12px;display:block;">
             <div style="display:flex;align-items:center;gap:14px;margin-top:6px;">
                 <div onclick="toggleCommentLike(this)" style="display:flex;align-items:center;gap:4px;cursor:pointer;">
                     <i class="fa-regular fa-heart" style="font-size:13px;color:#888;"></i>
@@ -11266,7 +11266,9 @@ content.innerHTML = [0,1,2,3].map(function(){return '<div style="display:flex;al
         })();
 
     } else if (tabName === 'channels') {
-        content.innerHTML = renderSkeletonHTML('message', 4);
+        // Last render shows instantly; the fetch refreshes it behind the
+        // scenes. The skeleton is only for the very first visit.
+        content.innerHTML = window._channelsHTML || renderSkeletonHTML('message', 4);
         (async function() {
             var html = '<div style="padding:10px 20px 4px;font-size:11px;font-weight:800;color:#888;text-transform:uppercase;letter-spacing:0.06em;">Channels</div>';
             if (window.sb) {
@@ -11327,7 +11329,10 @@ content.innerHTML = [0,1,2,3].map(function(){return '<div style="display:flex;al
             } else {
                 html += '<div style="text-align:center;padding:40px 20px;color:#888;font-size:13px;">Not connected</div>';
             }
-            content.innerHTML = html;
+            if (window.sb) window._channelsHTML = html;
+            // Only paint if the viewer is still on this tab; they may have
+            // switched away while the fetch ran.
+            if (window._activeMsgTab === 'channels') content.innerHTML = html;
         })();
     }
 }
@@ -23264,13 +23269,14 @@ var userId = session.user.id;
         }
     },
 
-    async postComment(postId, text) {
+    async postComment(postId, text, parentCommentId) {
         var session = await DB.getSession();
         if (!session) return null;
         var { data, error } = await sb.from('comments').insert({
             user_id: session.user.id,
             post_id: postId,
-            text_content: text
+            text_content: text,
+            parent_comment_id: parentCommentId || null
         }).select('*, users:user_id (full_name, username, avatar_url, badge_tier, verified)').single();
         if (error) { console.error('[Comment]', error); return null; }
         return data;
@@ -23727,19 +23733,25 @@ async function realOpenComments(postId) {
     if (typeof syncCommentBarAvatar === 'function') syncCommentBarAvatar();
 
     var list = document.getElementById('comment-list');
-    if (list) list.innerHTML = '<div style="text-align:center;padding:30px;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:20px;"></i></div>';
+    // Skeleton only when there is nothing to show. Reopening the same post
+    // keeps the existing list on screen while fresh data loads behind it.
+    var hadCache = window._cmt && window._cmt.postId === postId;
+    if (list && !hadCache) list.innerHTML = renderSkeletonHTML('message', 4);
 
-    var comments = await RealData.getComments(postId);
+    // The owner id powers the "From creator" filter; fetched alongside the
+    // comments rather than after them, because this network bills per trip.
+    var results = await Promise.all([
+        RealData.getComments(postId),
+        (async function () {
+            try {
+                var r = await sb.from('posts').select('user_id').eq('id', postId).single();
+                return (r.data && r.data.user_id) || null;
+            } catch (e) { return null; }
+        })()
+    ]);
+    var comments = results[0];
+    if (currentCommentPostId !== postId) return;   // viewer moved on mid-fetch
     if (!list) return;
-
-    if (comments.length === 0) {
-        list.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">' +
-            '<i class="fa-regular fa-comment" style="font-size:30px;color:#ccc;display:block;margin-bottom:10px;"></i>' +
-            'No comments yet. Be the first!</div>';
-        return;
-    }
-
-    list.innerHTML = '';
 
     // Fetch like counts + current user's liked state for all comments in one query
     var likeCountMap = {};
@@ -23757,41 +23769,180 @@ async function realOpenComments(postId) {
         } catch(e) { /* non-critical */ }
     }
 
-    comments.forEach(function(c) {
+    window._cmt = { postId: postId, comments: comments, likes: likeCountMap,
+                    liked: userLikedSet, ownerId: results[1] };
+    _renderSortChips();
+    _renderCommentList();
+}
+
+// ---- comment sheet: sorting, counting, in-place updates -------------------
+
+var _COMMENT_SORTS = [
+    { key: 'newest',   label: 'Newest' },
+    { key: 'relevant', label: 'Most relevant' },
+    { key: 'media',    label: 'With media' },
+    { key: 'creator',  label: 'From creator' },
+    { key: 'all',      label: 'All comments' }
+];
+
+function _setCommentSheetCount(n) {
+    var t = document.getElementById('commentSheetTitle');
+    if (t) t.textContent = n ? (n.toLocaleString() + ' comment' + (n === 1 ? '' : 's')) : 'Comments';
+}
+
+function _renderSortChips() {
+    var row = document.getElementById('commentSortRow');
+    if (!row) return;
+    var cur = window._commentSort || 'newest';
+    row.innerHTML = _COMMENT_SORTS.map(function (s) {
+        var on = s.key === cur;
+        return '<button onclick="setCommentSort(\'' + s.key + '\')" style="flex-shrink:0;border:none;cursor:pointer;' +
+            'padding:6px 13px;border-radius:16px;font-size:12px;font-weight:600;white-space:nowrap;' +
+            'background:' + (on ? 'var(--text-primary,#000)' : 'rgba(127,127,127,0.12)') + ';' +
+            'color:' + (on ? 'var(--bg-primary,#fff)' : 'var(--text-secondary,#666)') + ';">' +
+            s.label + '</button>';
+    }).join('');
+}
+
+function setCommentSort(mode) {
+    window._commentSort = mode;
+    _renderSortChips();
+    _renderCommentList();
+    if (typeof triggerHaptic === 'function') triggerHaptic(10);
+}
+
+function _renderCommentList() {
+    var list = document.getElementById('comment-list');
+    var st = window._cmt;
+    if (!list || !st) return;
+    var mode = window._commentSort || 'newest';
+
+    _setCommentSheetCount(st.comments.length);
+
+    var comments = st.comments.slice();
+    if (mode === 'media')   comments = comments.filter(function (c) { return c.gif_url || c.clip_id; });
+    if (mode === 'creator') comments = comments.filter(function (c) { return st.ownerId && c.user_id === st.ownerId; });
+
+    if (!comments.length) {
+        var msg = mode === 'media' ? 'No comments with media yet.'
+                : mode === 'creator' ? 'Nothing from the creator yet.'
+                : 'No comments yet. Be the first!';
+        list.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">' +
+            '<i class="fa-regular fa-comment" style="font-size:30px;color:#ccc;display:block;margin-bottom:10px;"></i>' +
+            msg + '</div>';
+        return;
+    }
+
+    // Build the thread. Replies read oldest-first under their parent so a
+    // back-and-forth with Eddie reads top to bottom like a conversation. A
+    // reply whose parent got filtered out or deleted is promoted, not lost.
+    var repliesOf = {}, roots = [], idSet = {};
+    comments.forEach(function (c) { idSet[c.id] = true; });
+    comments.forEach(function (c) {
+        if (c.parent_comment_id && idSet[c.parent_comment_id]) {
+            (repliesOf[c.parent_comment_id] = repliesOf[c.parent_comment_id] || []).push(c);
+        } else {
+            roots.push(c);
+        }
+    });
+    Object.keys(repliesOf).forEach(function (k) {
+        repliesOf[k].sort(function (a, b) { return new Date(a.created_at) - new Date(b.created_at); });
+    });
+
+    if (mode === 'relevant') {
+        roots.sort(function (a, b) {
+            return (st.likes[b.id] || 0) - (st.likes[a.id] || 0) ||
+                   (new Date(b.created_at) - new Date(a.created_at));
+        });
+    } else if (mode === 'all') {
+        roots.sort(function (a, b) { return new Date(a.created_at) - new Date(b.created_at); });
+    } else {
+        roots.sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); });
+    }
+
+    list.innerHTML = '';
+    roots.forEach(function (c) {
+        list.appendChild(_buildCommentNode(c, 0));
+        (repliesOf[c.id] || []).forEach(function (child) {
+            list.appendChild(_buildCommentNode(child, 1));
+        });
+    });
+}
+
+// Drop one new comment into the open sheet without rebuilding it, so posting
+// never yanks the reader back to the top of the thread.
+function _appendCommentInPlace(c) {
+    var st = window._cmt;
+    var list = document.getElementById('comment-list');
+    if (!st || !list) return null;
+    st.comments.push(c);
+    _setCommentSheetCount(st.comments.length);
+
+    // An empty state has no node to insert next to; rebuild cleanly.
+    if (!list.querySelector('.comment-item')) { _renderCommentList(); return null; }
+
+    var node = _buildCommentNode(c, c.parent_comment_id ? 1 : 0);
+    if (c.parent_comment_id) {
+        var parent = list.querySelector('[data-comment-id="' + c.parent_comment_id + '"]');
+        if (parent) {
+            // After the parent's last already-rendered reply, keeping the
+            // thread in conversation order.
+            var anchor = parent, sib = parent.nextElementSibling;
+            while (sib && sib.classList.contains('comment-reply')) { anchor = sib; sib = sib.nextElementSibling; }
+            anchor.insertAdjacentElement('afterend', node);
+        } else {
+            list.insertBefore(node, list.firstChild);
+        }
+    } else if ((window._commentSort || 'newest') === 'all') {
+        list.appendChild(node);
+    } else {
+        list.insertBefore(node, list.firstChild);
+    }
+    try { node.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {}
+    return node;
+}
+
+function _buildCommentNode(c, depth) {
         var u = c.users || {};
         var avatar = u.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff';
-        var userLiked = userLikedSet.has(c.id);
-        var likeCount = likeCountMap[c.id] || 0;
+        var userLiked = window._cmt ? window._cmt.liked.has(c.id) : false;
+        var likeCount = (window._cmt && window._cmt.likes[c.id]) || 0;
+        var isBot = (c.user_id === _EDDIE_USER_ID);
         var item = document.createElement('div');
-        item.className = 'comment-item';
+        item.className = 'comment-item' + (depth ? ' comment-reply' : '');
+        if (depth) item.style.cssText = 'margin-left:38px;';
         item.setAttribute('data-comment-id', c.id || '');
         item.setAttribute('data-user-id', c.user_id || '');
         item.setAttribute('data-username', u.username || u.full_name || 'User');
         item.setAttribute('data-comment-text', c.text_content || '');
         item.innerHTML =
-            '<img src="' + escapeHtml(avatar) + '" class="comment-avatar" style="align-self:flex-start;">' +
+            '<img src="' + escapeHtml(avatar) + '" class="comment-avatar" style="align-self:flex-start;' + (depth ? 'width:28px;height:28px;' : '') + '">' +
             '<div class="comment-bubble" style="flex:1;">' +
                 '<div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;">' +
                     '<b style="font-size:13px;color:var(--text-primary,#000);cursor:pointer;" onclick="viewUserProfile(\'' + escapeHtml(c.user_id || '') + '\')">' + escapeHtml(u.full_name || u.username || 'User') + '</b>' +
-                    (u.verified ? '<i class="fa-solid fa-circle-check ' + (u.badge_tier || 'verify-blue') + '" style="font-size:9px;"></i>' : '') +
+                    (isBot
+                        ? '<span style="font-size:9px;font-weight:700;letter-spacing:0.4px;background:#000;color:#fff;padding:1px 5px;border-radius:4px;">AI</span>'
+                        : (u.verified ? '<i class="fa-solid fa-circle-check ' + (u.badge_tier || 'verify-blue') + '" style="font-size:9px;"></i>' : '')) +
                     '<small style="color:#aaa;font-size:11px;margin-left:4px;">' + getTimeAgo(c.created_at) + '</small>' +
                 '</div>' +
                 (c.clip_id
                     ? '<div onclick="openClipFromComment(\'' + escapeHtml(c.clip_id) + '\')" style="display:inline-flex;align-items:center;gap:8px;background:rgba(255,149,0,0.12);border:1px solid rgba(255,149,0,0.3);border-radius:12px;padding:8px 12px;margin:2px 0 6px;cursor:pointer;"><i class="fa-solid fa-clapperboard" style="color:#FF9500;font-size:14px;"></i><span style="font-size:13px;font-weight:600;color:var(--text-primary,#000);">' + escapeHtml(c.text_content || 'Replied with a TrustClip') + '</span><i class="fa-solid fa-play" style="color:#FF9500;font-size:10px;"></i></div>'
                     : (c.gif_url
-                        ? '<img src="' + escapeHtml(c.gif_url) + '" style="max-width:160px;border-radius:12px;display:block;margin:2px 0 6px;">'
+                        ? '<img src="' + escapeHtml(c.gif_url) + '" style="width:140px;max-width:60%;aspect-ratio:1;object-fit:cover;border-radius:12px;display:block;margin:2px 0 6px;">'
                         : '<p style="font-size:14px;line-height:1.4;margin:0 0 6px;">' + escapeHtml(c.text_content || '') + '</p>')) +
                 '<div style="display:flex;align-items:center;gap:14px;">' +
                     '<div onclick="toggleCommentLike(this,\'' + c.id + '\')" style="display:flex;align-items:center;gap:4px;cursor:pointer;">' +
                         '<i class="fa-' + (userLiked ? 'solid' : 'regular') + ' fa-heart" style="font-size:13px;color:' + (userLiked ? '#FF3B30' : '#888') + ';transition:0.2s;"></i>' +
                         '<span style="font-size:11px;color:#888;">' + likeCount + '</span>' +
                     '</div>' +
-                    '<span onclick="openCommentReply(\'' + escapeHtml(u.full_name || u.username || 'User') + '\')" style="font-size:12px;color:#888;cursor:pointer;font-weight:600;">Reply</span>' +
+                    '<span onclick="openCommentReply(\'' + escapeHtml(u.full_name || u.username || 'User') + '\',\'' + escapeHtml(c.id || '') + '\',' + (isBot ? 'true' : 'false') + ')" style="font-size:12px;color:#888;cursor:pointer;font-weight:600;">Reply</span>' +
                 '</div>' +
             '</div>';
-        list.appendChild(item);
-    });
+        return item;
 }
+
+// Eddie's fixed bot account. Matches EDDIE_USER_ID in core/eddie_views.py.
+var _EDDIE_USER_ID = 'edd1e000-0000-4000-8000-000000000001';
 
 // ==========================================================================
 // OVERRIDE: postComment — make it real
@@ -23818,10 +23969,28 @@ postComment = async function() {
         return;
     }
 
-    var result = await RealData.postComment(currentCommentPostId, text);
+    // One tap, one comment. The insert can take seconds on a slow network and
+    // nothing visible happened during it, so people tapped send again and got
+    // duplicates. Re-entry is ignored until the first insert settles.
+    if (window._cmtPosting) return;
+    window._cmtPosting = true;
+
+    var replyCtx = window._replyingTo;
+    var result = null;
+    try {
+        result = await RealData.postComment(currentCommentPostId, text,
+                                            replyCtx && replyCtx.id);
+    } finally {
+        window._cmtPosting = false;
+    }
     if (result) {
         input.value = '';
+        window._replyingTo = null;
+        _renderReplyBar();
         triggerHaptic(15);
+        // The new comment drops straight into the open sheet; reloading the
+        // whole list scrolled the reader back to the top every time.
+        _appendCommentInPlace(result);
         // Immediately update the comment count on the post card in the feed
         var postCard = document.querySelector('[data-post-id="' + currentCommentPostId + '"]');
         if (postCard) {
@@ -23847,8 +24016,11 @@ postComment = async function() {
                 }
             } catch(e) { /* notification failure is non-critical */ }
         }
-        await realOpenComments(currentCommentPostId);
-        _eddieAnswerMention('comment', result.id, text, currentCommentPostId);
+        // Eddie answers when tagged, and also when this is a reply to something
+        // Eddie itself said, so a thread carries on without re-tagging.
+        var replyingToEddie = !!(replyCtx && replyCtx.eddie);
+        _eddieAnswerMention('comment', result.id, text, currentCommentPostId,
+                            replyingToEddie);
     } else {
         showToast('Comment failed');
     }
@@ -23863,33 +24035,15 @@ function _eddieTagged(text) {
     return /@eddie\b/i.test(text || '');
 }
 
-// A placeholder in the thread while the model runs. Answers take a good few
-// seconds, and without this the tag looks like it did nothing.
-function _eddieThinkingRow() {
-    var list = document.getElementById('comment-list');
-    if (!list) return null;
-    var row = document.createElement('div');
-    row.className = 'comment-item';
-    row.id = 'eddieThinkingRow';
-    row.style.cssText = 'align-items:center;gap:10px;padding:10px 4px;';
-    row.innerHTML =
-        '<div style="width:34px;height:34px;border-radius:50%;background:#000;display:flex;' +
-        'align-items:center;justify-content:center;flex-shrink:0;">' +
-            '<i class="fa-solid fa-sparkles" style="color:#fff;font-size:13px;"></i></div>' +
-        '<span style="font-size:13px;color:#888;">Eddie is thinking' +
-            '<span class="eddie-dots">...</span></span>';
-    list.insertBefore(row, list.firstChild);
-    return row;
-}
-
 // Ask the server to answer a mention. The server re-reads the text from the
-// database and checks it really was tagged, so nothing here is trusted; this
-// is only the nudge and the progress indicator.
-async function _eddieAnswerMention(sourceType, sourceId, text, postId) {
-    if (!sourceId || !_eddieTagged(text)) return;
-
-    var row = (sourceType === 'comment') ? _eddieThinkingRow() : null;
-    if (!row) showToast('Eddie is thinking...');
+// database and decides for itself whether Eddie was addressed, so nothing here
+// is trusted; this is only the nudge.
+//
+// No thinking indicator: a comment thread is not a chat window, and a spinner
+// sitting in someone else's conversation is noise. The reply simply appears.
+async function _eddieAnswerMention(sourceType, sourceId, text, postId, replyingToEddie) {
+    if (!sourceId) return;
+    if (!replyingToEddie && !_eddieTagged(text)) return;
 
     try {
         var token = await _eddieToken();
@@ -23900,21 +24054,24 @@ async function _eddieAnswerMention(sourceType, sourceId, text, postId) {
             body: JSON.stringify({ source_type: sourceType, source_id: sourceId })
         });
         var j = await r.json().catch(function(){ return {}; });
-        if (row) row.remove();
 
-        if (!r.ok) { showToast(j.error || 'Eddie could not reply'); return; }
+        if (!r.ok) {
+            // Out of quota is that person's own limit, and it stops Eddie only
+            // for them. Say it once, quietly, and never in the thread itself.
+            if (r.status === 429) showToast(j.error || 'You have used up Eddie for today');
+            return;
+        }
         if (j.duplicate) return;
 
-        // Only refresh if the reader is still looking at that thread.
-        if (postId && currentCommentPostId === postId &&
-            typeof realOpenComments === 'function') {
-            await realOpenComments(postId);
-        } else if (postId) {
-            _eddieBumpCommentCount(postId);
+        // Eddie's reply drops into the open thread in place; a full reload
+        // would scroll the reader away from the conversation.
+        if (postId) _eddieBumpCommentCount(postId);
+        if (j.comment && postId && currentCommentPostId === postId) {
+            j.comment.users = { full_name: 'Eddie', username: 'eddie' };
+            _appendCommentInPlace(j.comment);
         }
     } catch (e) {
-        if (row) row.remove();
-        showToast('Eddie could not reply');
+        /* Eddie staying quiet is better than an error toast on someone's post. */
     }
 }
 
@@ -25689,8 +25846,15 @@ async function loadGroups() {
     var myList   = document.getElementById('my-groups-list');
     var discList = document.getElementById('discover-groups-list');
 
-    if (myList)   myList.innerHTML   = '<div style="text-align:center;padding:20px;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:20px;"></i></div>';
-    if (discList) discList.innerHTML = myList.innerHTML;
+    // Show the last render instantly and refresh behind it. The full-page
+    // spinner on every visit is what made Groups feel like it reloads.
+    if (window._groupsHTML) {
+        if (myList)   myList.innerHTML   = window._groupsHTML.my;
+        if (discList) discList.innerHTML = window._groupsHTML.disc;
+    } else {
+        if (myList)   myList.innerHTML   = '<div style="text-align:center;padding:20px;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:20px;"></i></div>';
+        if (discList) discList.innerHTML = myList ? myList.innerHTML : '';
+    }
 
     var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
 
@@ -25744,19 +25908,21 @@ async function loadGroups() {
         '</div>';
     }
 
-    if (myList) {
-        if (!myGroups.length) {
-            myList.innerHTML = '<div style="text-align:center;padding:20px;color:#888;font-size:14px;">No groups yet</div>';
-        } else {
-            myList.innerHTML = myGroups.map(function(g){ return buildGroupCard(g, true); }).join('');
-        }
+    var myHTML = myGroups.length
+        ? myGroups.map(function(g){ return buildGroupCard(g, true); }).join('')
+        : '<div style="text-align:center;padding:20px;color:#888;font-size:14px;">No groups yet</div>';
+    var notMine = allGroups.filter(function(g){ return !myGroups.some(function(m){ return m.id === g.id; }); });
+    var discHTML = notMine.length
+        ? notMine.map(function(g){ return buildGroupCard(g, false); }).join('')
+        : '<div style="text-align:center;padding:20px;color:#888;font-size:14px;">No other groups found</div>';
+
+    // Cache only a render that actually has data; an offline pass must not
+    // blank out a good previous one.
+    if (myGroups.length || allGroups.length) {
+        window._groupsHTML = { my: myHTML, disc: discHTML };
     }
-    if (discList) {
-        var notMine = allGroups.filter(function(g){ return !myGroups.some(function(m){ return m.id === g.id; }); });
-        discList.innerHTML = notMine.length
-            ? notMine.map(function(g){ return buildGroupCard(g, false); }).join('')
-            : '<div style="text-align:center;padding:20px;color:#888;font-size:14px;">No other groups found</div>';
-    }
+    if (myList)   myList.innerHTML   = myHTML;
+    if (discList) discList.innerHTML = discHTML;
 }
 
 function renderGroupCard(group, isMember) {
@@ -26426,7 +26592,157 @@ function gsShareGroup() {
     if (navigator.share) navigator.share({ text: 'Join my group on TrustFirst', url: url }).catch(function () {});
     else navigator.clipboard.writeText(url).then(function () { showToast('Group link copied'); });
 }
-function gsShareToStory() { showToast('Sharing to your story is coming soon'); }
+// Share the group as a story card: cover photo, name, privacy and member
+// count, and a Visit group button. Painted to a canvas rather than composed in
+// the story editor, so what gets posted is exactly the card people see.
+async function gsShareToStory() {
+    var groupId = (_gsetup && _gsetup.groupId) || window.currentGroupId;
+    if (!groupId) { showToast('No group to share'); return; }
+    if (!window.sb || !currentUser) { showToast('Sign in to share'); return; }
+
+    showToast('Making your story...');
+    try {
+        var res = await sb.from('groups')
+            .select('id,name,privacy,cover_url,member_count').eq('id', groupId).single();
+        var g = res.data;
+        if (!g) { showToast('Could not load that group'); return; }
+
+        var blob = await _groupStoryCanvas(g);
+        if (!blob) { showToast('Could not build the story'); return; }
+
+        var path = 'stories/' + currentUser.id + '/' + Date.now() + '-group.png';
+        var up = await sb.storage.from('media').upload(path, blob, {
+            contentType: 'image/png', upsert: false
+        });
+        if (up.error) throw up.error;
+        var pub = sb.storage.from('media').getPublicUrl(path);
+        var url = pub && pub.data && pub.data.publicUrl;
+        if (!url) throw new Error('no public url');
+
+        var ins = await sb.from('stories').insert({
+            user_id: currentUser.id,
+            media_url: url,
+            media_type: 'image',
+            caption: null,
+            audience: 'everyone',
+            created_at: new Date().toISOString(),
+            expires_at: new Date(Date.now() + 86400000).toISOString(),
+            group_id: groupId
+        });
+        // group_id is optional on stories; retry without it on older schemas
+        // rather than losing the share entirely.
+        if (ins.error) {
+            var retry = await sb.from('stories').insert({
+                user_id: currentUser.id, media_url: url, media_type: 'image',
+                audience: 'everyone', created_at: new Date().toISOString(),
+                expires_at: new Date(Date.now() + 86400000).toISOString()
+            });
+            if (retry.error) throw retry.error;
+        }
+        showToast('Shared to your story');
+        triggerHaptic(30);
+    } catch (e) {
+        console.warn('[group story]', e && e.message);
+        showToast('Could not share to your story');
+    }
+}
+
+// Draw the group card at story resolution. Returns a PNG blob, or null.
+function _groupStoryCanvas(g) {
+    return new Promise(function (resolve) {
+        var W = 1080, H = 1920;
+        var canvas = document.createElement('canvas');
+        canvas.width = W; canvas.height = H;
+        var ctx = canvas.getContext('2d');
+
+        function roundRect(x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + w, y, x + w, y + h, r);
+            ctx.arcTo(x + w, y + h, x, y + h, r);
+            ctx.arcTo(x, y + h, x, y, r);
+            ctx.arcTo(x, y, x + w, y, r);
+            ctx.closePath();
+        }
+
+        function paint(coverImg) {
+            var grad = ctx.createLinearGradient(0, 0, W, H);
+            grad.addColorStop(0, '#c98fb0');
+            grad.addColorStop(1, '#b57fa8');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, W, H);
+
+            var cardW = 700, cardX = (W - cardW) / 2;
+            var coverH = 470, infoH = 320;
+            var cardH = coverH + infoH, cardY = (H - cardH) / 2;
+
+            ctx.save();
+            ctx.shadowColor = 'rgba(0,0,0,0.22)';
+            ctx.shadowBlur = 40; ctx.shadowOffsetY = 12;
+            ctx.fillStyle = '#fff';
+            roundRect(cardX, cardY, cardW, cardH, 28);
+            ctx.fill();
+            ctx.restore();
+
+            // Cover, cropped to fill, with only the top corners rounded.
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(cardX + 28, cardY);
+            ctx.arcTo(cardX + cardW, cardY, cardX + cardW, cardY + coverH, 28);
+            ctx.lineTo(cardX + cardW, cardY + coverH);
+            ctx.lineTo(cardX, cardY + coverH);
+            ctx.arcTo(cardX, cardY, cardX + cardW, cardY, 28);
+            ctx.closePath();
+            ctx.clip();
+            if (coverImg) {
+                var s = Math.max(cardW / coverImg.width, coverH / coverImg.height);
+                var dw = coverImg.width * s, dh = coverImg.height * s;
+                ctx.drawImage(coverImg, cardX + (cardW - dw) / 2, cardY + (coverH - dh) / 2, dw, dh);
+            } else {
+                ctx.fillStyle = '#0A84FF';
+                ctx.fillRect(cardX, cardY, cardW, coverH);
+            }
+            ctx.restore();
+
+            ctx.textAlign = 'center';
+            var name = g.name || 'Group';
+            ctx.fillStyle = '#111';
+            ctx.font = '700 54px -apple-system, "Segoe UI", Roboto, sans-serif';
+            // Long names would run past the card edge, so trim to fit.
+            while (ctx.measureText(name).width > cardW - 80 && name.length > 4) {
+                name = name.slice(0, -2);
+            }
+            if (name !== (g.name || '')) name += '...';
+            ctx.fillText(name, W / 2, cardY + coverH + 88);
+
+            var n = g.member_count || 1;
+            ctx.fillStyle = '#65676b';
+            ctx.font = '400 34px -apple-system, "Segoe UI", Roboto, sans-serif';
+            ctx.fillText((g.privacy || 'Public') + ' group · ' + n + ' member' + (n === 1 ? '' : 's'),
+                         W / 2, cardY + coverH + 150);
+
+            var bw = cardW - 100, bx = cardX + 50, by = cardY + coverH + 196;
+            ctx.fillStyle = '#1877F2';
+            roundRect(bx, by, bw, 92, 12);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = '700 38px -apple-system, "Segoe UI", Roboto, sans-serif';
+            ctx.fillText('Visit group', W / 2, by + 60);
+
+            canvas.toBlob(function (b) { resolve(b); }, 'image/png');
+        }
+
+        var src = g.cover_url || (typeof _gsPresetCover === 'function' ? _gsPresetCover(0) : '');
+        if (!src) { paint(null); return; }
+        var img = new Image();
+        img.crossOrigin = 'anonymous';
+        // A cover hosted elsewhere can taint the canvas and make toBlob throw,
+        // so a failed load falls back to a plain panel instead of no story.
+        img.onload = function () { paint(img); };
+        img.onerror = function () { paint(null); };
+        img.src = src;
+    });
+}
 function gsInviteByEmail() {
     var url = window.location.origin + '/?group=' + _gsetup.groupId;
     window.location.href = 'mailto:?subject=' + encodeURIComponent('Join my group on TrustFirst') +
@@ -29849,13 +30165,45 @@ async function toggleCommentLike(el, commentId) {
     }
 }
 
-function openCommentReply(userName) {
+function openCommentReply(userName, commentId, isEddie) {
     var input = document.getElementById('comment-input');
     if (!input) return;
+    // Remembering the id is what makes this a reply rather than another
+    // top-level comment; the @mention alone only looked like one.
+    window._replyingTo = commentId
+        ? { id: commentId, name: userName, eddie: !!isEddie }
+        : null;
+    _renderReplyBar();
     input.value = '@' + userName.replace('@','') + ' ';
     input.focus();
     input.setSelectionRange(input.value.length, input.value.length);
-    // No toast — the @mention in the input is enough feedback
+}
+
+function cancelCommentReply() {
+    window._replyingTo = null;
+    _renderReplyBar();
+    var input = document.getElementById('comment-input');
+    if (input) input.value = input.value.replace(/^@\S+\s*/, '');
+}
+
+// A visible "replying to X" bar, so nobody sends a reply thinking it is a new
+// comment or the other way round.
+function _renderReplyBar() {
+    var existing = document.getElementById('commentReplyBar');
+    if (existing) existing.remove();
+    var ctx = window._replyingTo;
+    if (!ctx) return;
+    var input = document.getElementById('comment-input');
+    if (!input || !input.parentElement) return;
+    var bar = document.createElement('div');
+    bar.id = 'commentReplyBar';
+    bar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;' +
+        'padding:6px 14px;font-size:12px;color:#888;background:rgba(127,127,127,0.08);';
+    bar.innerHTML =
+        '<span>Replying to <b>' + escapeHtml(ctx.name) + '</b></span>' +
+        '<i class="fa-solid fa-xmark" onclick="cancelCommentReply()" style="cursor:pointer;padding:4px;"></i>';
+    var host = input.closest('.comment-input-bar') || input.parentElement;
+    host.parentElement.insertBefore(bar, host);
 }
 
 // ============================================================
@@ -44093,20 +44441,29 @@ async function openEddieHistory() {
             '<b style="flex:1;text-align:center;color:#fff;font-size:19px;">Chat History</b>' +
             '<button onclick="eddieNewChat();closeEddieHistory();" title="New chat" style="background:none;border:none;color:#fff;font-size:19px;cursor:pointer;padding:4px 8px;"><i class="fa-solid fa-pen-to-square"></i></button>' +
         '</div>' +
-        '<div id="eddieHistBody" style="flex:1;overflow-y:auto;padding:0 16px 30px;">' +
-            '<div style="text-align:center;padding:40px;color:rgba(255,255,255,0.35);"><i class="fa-solid fa-spinner fa-spin"></i></div>' +
-        '</div>';
+        '<div id="eddieHistBody" style="flex:1;overflow-y:auto;padding:0 16px 30px;"></div>';
     (document.getElementById('eddie-overlay') || document.getElementById('app') || document.body).appendChild(p);
 
     _eddieLoadHistory();
 }
 
 // Split out so the retry button can call it again without rebuilding the page.
+// Dark-tuned skeleton rows; the shared renderSkeletonHTML assumes a light
+// surface and would glare on Eddie's black history page.
+function _eddieHistSkeleton() {
+    var row = '<div style="display:flex;align-items:center;gap:12px;padding:13px 2px;">' +
+        '<div style="width:44px;height:44px;border-radius:12px;background:rgba(255,255,255,0.08);animation:skeletonPulse 1.4s ease-in-out infinite;flex-shrink:0;"></div>' +
+        '<div style="flex:1;">' +
+            '<div style="height:13px;width:62%;border-radius:6px;background:rgba(255,255,255,0.08);animation:skeletonPulse 1.4s ease-in-out infinite;margin-bottom:8px;"></div>' +
+            '<div style="height:11px;width:34%;border-radius:6px;background:rgba(255,255,255,0.06);animation:skeletonPulse 1.4s ease-in-out infinite;"></div>' +
+        '</div></div>';
+    return '<div style="padding:10px 0;">' + row + row + row + row + row + row + '</div>';
+}
+
 async function _eddieLoadHistory() {
     var body = document.getElementById('eddieHistBody');
     if (!body) return;
-    body.innerHTML = '<div style="text-align:center;padding:40px;color:rgba(255,255,255,0.35);">' +
-        '<i class="fa-solid fa-spinner fa-spin"></i></div>';
+    body.innerHTML = _eddieHistSkeleton();
 
     function fail(msg) {
         body.innerHTML =

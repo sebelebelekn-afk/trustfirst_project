@@ -2317,11 +2317,18 @@ function authenticateUser() {
 </div>
 
     <!-- COMMENT SECTION -->
+<style>
+/* Shared by every skeleton loader; without this the placeholder rows sit
+   static instead of pulsing. */
+@keyframes skeletonPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+#commentSortRow::-webkit-scrollbar { display: none; }
+</style>
 <div id="comment-overlay">
     <div class="comment-header">
-        <b>Comments</b>
+        <b id="commentSheetTitle">Comments</b>
         <i class="fa-solid fa-xmark" style="font-size:20px; cursor:pointer; color:#888;" onclick="closeComments()"></i>
     </div>
+    <div id="commentSortRow" style="display:flex;gap:8px;overflow-x:auto;padding:2px 16px 10px;scrollbar-width:none;-webkit-overflow-scrolling:touch;"></div>
     <div class="comment-list" id="comment-list"></div>
     <div id="gif-panel" style="display:none;">
         <div class="gif-grid" id="gif-grid"></div>
@@ -4091,7 +4098,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=124"></script>
+<script src="{% static 'core/js/feed.js' %}?v=126"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=74"></script>
 <script src="{% static 'core/js/verify.js' %}?v=73"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=73"></script>
