@@ -23848,10 +23848,86 @@ postComment = async function() {
             } catch(e) { /* notification failure is non-critical */ }
         }
         await realOpenComments(currentCommentPostId);
+        _eddieAnswerMention('comment', result.id, text, currentCommentPostId);
     } else {
         showToast('Comment failed');
     }
 };
+
+// ==========================================================================
+// @eddie mentions — tag Eddie on a post or comment and it replies in thread
+// ==========================================================================
+
+// \b after "eddie" so "@eddies" and "@eddie_smith" do not summon the bot.
+function _eddieTagged(text) {
+    return /@eddie\b/i.test(text || '');
+}
+
+// A placeholder in the thread while the model runs. Answers take a good few
+// seconds, and without this the tag looks like it did nothing.
+function _eddieThinkingRow() {
+    var list = document.getElementById('comment-list');
+    if (!list) return null;
+    var row = document.createElement('div');
+    row.className = 'comment-item';
+    row.id = 'eddieThinkingRow';
+    row.style.cssText = 'align-items:center;gap:10px;padding:10px 4px;';
+    row.innerHTML =
+        '<div style="width:34px;height:34px;border-radius:50%;background:#000;display:flex;' +
+        'align-items:center;justify-content:center;flex-shrink:0;">' +
+            '<i class="fa-solid fa-sparkles" style="color:#fff;font-size:13px;"></i></div>' +
+        '<span style="font-size:13px;color:#888;">Eddie is thinking' +
+            '<span class="eddie-dots">...</span></span>';
+    list.insertBefore(row, list.firstChild);
+    return row;
+}
+
+// Ask the server to answer a mention. The server re-reads the text from the
+// database and checks it really was tagged, so nothing here is trusted; this
+// is only the nudge and the progress indicator.
+async function _eddieAnswerMention(sourceType, sourceId, text, postId) {
+    if (!sourceId || !_eddieTagged(text)) return;
+
+    var row = (sourceType === 'comment') ? _eddieThinkingRow() : null;
+    if (!row) showToast('Eddie is thinking...');
+
+    try {
+        var token = await _eddieToken();
+        var r = await fetch('/api/eddie/mention/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json',
+                       'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ source_type: sourceType, source_id: sourceId })
+        });
+        var j = await r.json().catch(function(){ return {}; });
+        if (row) row.remove();
+
+        if (!r.ok) { showToast(j.error || 'Eddie could not reply'); return; }
+        if (j.duplicate) return;
+
+        // Only refresh if the reader is still looking at that thread.
+        if (postId && currentCommentPostId === postId &&
+            typeof realOpenComments === 'function') {
+            await realOpenComments(postId);
+        } else if (postId) {
+            _eddieBumpCommentCount(postId);
+        }
+    } catch (e) {
+        if (row) row.remove();
+        showToast('Eddie could not reply');
+    }
+}
+
+function _eddieBumpCommentCount(postId) {
+    var card = document.querySelector('[data-post-id="' + postId + '"]');
+    if (!card) return;
+    card.querySelectorAll('button, div').forEach(function(btn) {
+        if (btn.querySelector('.fa-comment, .fa-comment-dots')) {
+            var span = btn.querySelector('span');
+            if (span) span.textContent = (parseInt(span.textContent) || 0) + 1;
+        }
+    });
+}
 
 // ==========================================================================
 // OVERRIDE: initFeed — load real posts
@@ -25723,25 +25799,112 @@ async function openGroup(groupId) {
         memberCount = count || memberCount;
     }
 
-    const color = group.color || '#007AFF';
-    const emoji = group.emoji || '👥';
+    window._currentGroup = group;
+    const isAdmin = currentUser && group.admin_id === currentUser.id;
+    const cover = group.cover_url || _gsPresetCover(0);
+    const privacyLabel = (group.privacy || 'Public') + ' group';
+
     if (header) {
-        header.innerHTML = `
-            <div style="background:linear-gradient(135deg,${color},${color}aa);padding:70px 20px 24px;text-align:center;color:white;">
-                <div style="font-size:52px;margin-bottom:10px;">${emoji}</div>
-                <h2 style="font-size:22px;font-weight:900;margin-bottom:6px;">${escapeHtml(group.name)}</h2>
-                ${group.description ? `<p style="font-size:13px;opacity:0.85;margin-bottom:12px;max-width:260px;margin-left:auto;margin-right:auto;line-height:1.5;">${escapeHtml(group.description)}</p>` : ''}
-                <div style="display:flex;justify-content:center;gap:24px;font-size:13px;opacity:0.9;margin-bottom:18px;">
-                    <span><b>${memberCount}</b> member${memberCount !== 1 ? 's' : ''}</span>
-                    <span>${group.privacy || 'Public'}</span>
-                </div>
-                <button id="group-join-btn" onclick="toggleGroupMembership('${groupId}',${isMember})" style="padding:10px 30px;border-radius:25px;border:2px solid white;background:${isMember ? 'white' : 'transparent'};color:${isMember ? color : 'white'};font-weight:800;font-size:14px;cursor:pointer;transition:0.3s;">
-                    ${isMember ? '✓ Joined' : 'Join Group'}
-                </button>
-            </div>`;
+        header.innerHTML =
+            // Cover hero
+            '<div style="position:relative;">' +
+                '<img src="' + escapeHtml(cover) + '" style="width:100%;display:block;aspect-ratio:15/8;object-fit:cover;">' +
+                '<div style="position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:14px 16px;">' +
+                    '<div onclick="closePage(\'group-page-overlay\')" style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+                        '<i class="fa-solid fa-chevron-left" style="color:#fff;font-size:16px;"></i></div>' +
+                    '<div style="display:flex;gap:10px;">' +
+                        '<div onclick="showToast(\'Search in this group is coming soon\')" style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+                            '<i class="fa-solid fa-magnifying-glass" style="color:#fff;font-size:15px;"></i></div>' +
+                        (isAdmin ? '<div onclick="openManageGroup(\'' + groupId + '\')" style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+                            '<i class="fa-solid fa-shield-halved" style="color:#fff;font-size:15px;"></i></div>' : '') +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+
+            // Name, meta, actions
+            '<div style="padding:16px 18px 0;">' +
+                '<div style="display:flex;align-items:center;gap:7px;">' +
+                    '<h2 style="font-size:27px;font-weight:800;color:var(--text-primary,#000);margin:0;">' + escapeHtml(group.name) + '</h2>' +
+                    '<i class="fa-solid fa-chevron-right" style="color:var(--text-primary,#000);font-size:15px;opacity:0.6;"></i>' +
+                '</div>' +
+                '<div style="display:flex;align-items:center;gap:6px;color:#6b6b6b;font-size:16px;margin-top:6px;">' +
+                    '<i class="fa-solid ' + ((group.privacy === 'Private') ? 'fa-lock' : 'fa-earth-africa') + '" style="font-size:13px;"></i>' +
+                    '<span>' + escapeHtml(privacyLabel) + ' · <b style="color:var(--text-primary,#000);">' + memberCount + '</b> member' + (memberCount !== 1 ? 's' : '') + '</span>' +
+                '</div>' +
+                '<div style="display:flex;gap:10px;margin-top:14px;">' +
+                    (isAdmin
+                        ? '<button onclick="openManageGroup(\'' + groupId + '\')" style="flex:1;padding:11px;border-radius:9px;border:none;background:#0A84FF;color:#fff;font-size:16px;font-weight:700;cursor:pointer;"><i class="fa-solid fa-shield-halved" style="margin-right:7px;"></i>Manage</button>'
+                        : '<button onclick="toggleGroupMembership(\'' + groupId + '\',' + isMember + ')" style="flex:1;padding:11px;border-radius:9px;border:none;background:' + (isMember ? 'var(--input-bg,#e9e9e9)' : '#0A84FF') + ';color:' + (isMember ? 'var(--text-primary,#000)' : '#fff') + ';font-size:16px;font-weight:700;cursor:pointer;">' + (isMember ? 'Joined' : 'Join Group') + '</button>') +
+                    '<button onclick="gsOpenInvite(\'' + groupId + '\')" style="flex:1;padding:11px;border-radius:9px;border:none;background:var(--input-bg,#e9e9e9);color:var(--text-primary,#000);font-size:16px;font-weight:700;cursor:pointer;"><i class="fa-solid fa-user-plus" style="margin-right:7px;"></i>Invite</button>' +
+                '</div>' +
+                '<div style="display:flex;gap:9px;overflow-x:auto;margin-top:14px;padding-bottom:12px;scrollbar-width:none;">' +
+                    ['Featured', 'You', 'About', 'Photos', 'Events'].map(function (t) {
+                        return '<div onclick="showToast(\'' + t + ' is coming soon\')" style="flex-shrink:0;padding:9px 18px;border-radius:20px;background:var(--input-bg,#e9e9e9);color:var(--text-primary,#000);font-size:16px;font-weight:600;cursor:pointer;">' + t + '</div>';
+                    }).join('') +
+                '</div>' +
+            '</div>' +
+            (isAdmin && !group.setup_dismissed ? _groupSetupCard(group, memberCount) : '');
     }
 
     switchGroupTab('posts');
+}
+
+// The "Finish setting up your group" checklist, admin-only and dismissible.
+function _groupSetupCard(group, memberCount) {
+    var items = [
+        { icon: 'fa-envelope-open-text', title: 'Invite people to join', sub: 'Invite at least 15 people.',
+          done: memberCount >= 15, fn: "gsOpenInvite('" + group.id + "')" },
+        { icon: 'fa-image', title: 'Add a Cover Photo', sub: 'Show what your group is all about.',
+          done: !!group.cover_url, fn: "gsOpenCoverFor('" + group.id + "')" },
+        { icon: 'fa-pencil', title: 'Add a Description', sub: 'Tell people what they can expect.',
+          done: !!group.description, fn: "gsEditDescription('" + group.id + "')" },
+        { icon: 'fa-pen-to-square', title: 'Create a Post', sub: 'Share why you created your group.',
+          done: false, fn: "postToGroup('" + group.id + "')" }
+    ];
+    return '<div style="border-top:8px solid var(--input-bg,#f0f0f0);padding:18px 18px 8px;">' +
+        '<div style="display:flex;align-items:flex-start;gap:12px;">' +
+            '<div style="flex:1;min-width:0;">' +
+                '<div style="font-size:23px;font-weight:800;color:var(--text-primary,#000);line-height:1.2;">Finish setting up your group</div>' +
+                '<div style="font-size:17px;color:#6b6b6b;line-height:1.35;margin-top:5px;">Continue adding key details and start engaging with your community.</div>' +
+            '</div>' +
+            '<div onclick="gsDismissSetup(\'' + group.id + '\')" style="font-size:22px;color:var(--text-primary,#000);cursor:pointer;padding:0 2px;">✕</div>' +
+        '</div>' +
+        '<div style="margin-top:14px;">' +
+        items.map(function (it) {
+            return '<div onclick="' + it.fn + '" style="display:flex;align-items:center;gap:14px;padding:13px 0;border-bottom:0.5px solid var(--border-color,#ececec);cursor:pointer;">' +
+                '<i class="fa-solid ' + it.icon + '" style="font-size:22px;color:var(--text-primary,#000);width:30px;text-align:center;"></i>' +
+                '<div style="flex:1;min-width:0;">' +
+                    '<div style="font-size:18px;font-weight:700;color:var(--text-primary,#000);">' + it.title + '</div>' +
+                    '<div style="font-size:15px;color:#6b6b6b;margin-top:1px;">' + it.sub + '</div>' +
+                '</div>' +
+                (it.done
+                    ? '<div style="width:38px;height:32px;border-radius:8px;background:rgba(48,209,88,0.15);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-check" style="color:#30D158;font-size:15px;"></i></div>'
+                    : '<div style="width:38px;height:32px;border-radius:8px;background:rgba(10,132,255,0.12);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-plus" style="color:#0A84FF;font-size:15px;"></i></div>') +
+            '</div>';
+        }).join('') +
+        '</div></div>';
+}
+
+async function gsDismissSetup(groupId) {
+    try { await sb.from('groups').update({ setup_dismissed: true }).eq('id', groupId); } catch (e) {}
+    openGroup(groupId);
+}
+
+// Cover step reached from the checklist rather than from setup.
+function gsOpenCoverFor(groupId) {
+    _gsetup = { groupId: groupId, picked: {}, autoInvite: false, cover: null };
+    gsOpenCover();
+}
+
+async function gsEditDescription(groupId) {
+    var current = (window._currentGroup && window._currentGroup.description) || '';
+    var text = prompt('Tell people what they can expect in this group:', current);
+    if (text === null) return;
+    try {
+        await sb.from('groups').update({ description: text.trim() || null }).eq('id', groupId);
+        showToast('Description saved');
+        openGroup(groupId);
+    } catch (e) { showToast('Could not save the description'); }
 }
 
 function switchGroupTab(tab) {
@@ -25848,105 +26011,569 @@ async function toggleGroupMembership(groupId, isMember) {
     openGroup(groupId);
 }
 
+// ==========================================================================
+// CREATE GROUP
+// A full page rather than a bottom-sheet modal: name, privacy, and (for
+// private groups only) visibility. Privacy is who can SEE the posts;
+// visibility is who can FIND the group, which is why a public group has no
+// visibility choice -- it is always findable.
+// ==========================================================================
+var _newGroup = { name: '', privacy: '', visibility: 'Visible', invite: true };
+
 function showCreateGroupModal() {
-    window._grpEmoji = '👥';
-    window._grpColor = '#007AFF';
-    window._grpPrivacy = 'Public';
+    var existing = document.getElementById('createGroupPage');
+    if (existing) existing.remove();
+    _newGroup = { name: '', privacy: '', visibility: 'Visible', invite: true };
 
-    var colors = ['#007AFF','#34C759','#FF9500','#FF3B30','#5856D6','#FF2D55','#AF52DE','#00C7BE'];
-    var emojis = ['👥','🎮','💼','🏋️','🎨','📚','🌍','🎵','🍕','⚽','🚀','💡','🌸','🏔️','🎯','🦁','🌊','🍀'];
+    var p = document.createElement('div');
+    p.id = 'createGroupPage';
+    p.style.cssText = 'position:absolute;inset:0;z-index:8000;background:var(--bg-primary,#fff);display:flex;flex-direction:column;';
+    p.innerHTML =
+        '<div style="display:flex;align-items:center;padding:14px 18px;flex-shrink:0;border-bottom:0.5px solid var(--border-color,#e8e8e8);">' +
+            '<button onclick="closeCreateGroup()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-primary,#000);padding:0;width:32px;text-align:left;">✕</button>' +
+            '<b style="flex:1;text-align:center;font-size:19px;color:var(--text-primary,#000);">Create</b>' +
+            '<div style="width:32px;"></div>' +
+        '</div>' +
+        '<div style="flex:1;overflow-y:auto;padding:22px 18px 30px;">' +
+            '<div style="font-size:22px;font-weight:800;color:var(--text-primary,#000);margin-bottom:14px;">Name</div>' +
+            '<input id="cgName" maxlength="60" placeholder="Name your group" oninput="cgSetName(this.value)" ' +
+                'style="width:100%;padding:16px;border-radius:12px;border:1px solid var(--border-color,#ddd);background:transparent;' +
+                'font-size:17px;outline:none;color:var(--text-primary,#000);box-sizing:border-box;">' +
 
-    var modal = document.createElement('div');
-    modal.id = 'createGroupModal';
-    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:10000;background:rgba(0,0,0,0.5);backdrop-filter:blur(10px);display:flex;align-items:flex-end;justify-content:center;';
+            '<div style="height:1px;background:var(--border-color,#e8e8e8);margin:24px 0;"></div>' +
 
-    modal.innerHTML = `
-        <div style="background:var(--card-bg,#fff);border-radius:20px 20px 0 0;width:100%;max-width:500px;max-height:88vh;overflow-y:auto;padding:20px;padding-bottom:40px;">
-            <div style="width:40px;height:4px;background:#ccc;border-radius:2px;margin:0 auto 20px;"></div>
-            <h2 style="font-size:20px;font-weight:800;margin-bottom:20px;color:var(--text-primary,#000);">Create a Group</h2>
+            '<div style="font-size:22px;font-weight:800;color:var(--text-primary,#000);margin-bottom:14px;">Privacy</div>' +
+            '<div id="cgPrivacyBtn" onclick="cgOpenPrivacySheet()" ' +
+                'style="display:flex;align-items:center;gap:10px;padding:16px;border-radius:12px;border:1px solid var(--border-color,#ddd);cursor:pointer;">' +
+                '<div id="cgPrivacyLabel" style="flex:1;min-width:0;color:#888;font-size:17px;">Choose privacy</div>' +
+                '<i class="fa-solid fa-caret-down" style="color:#666;font-size:15px;"></i>' +
+            '</div>' +
+            '<div id="cgPrivacyNote"></div>' +
+            '<div id="cgVisibilityBlock"></div>' +
 
-            <p style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Icon</p>
-            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px;" id="cgEmojiGrid">
-                ${emojis.map(e => `<div onclick="window._grpEmoji='${e}';document.querySelectorAll('#cgEmojiGrid .cg-emoji').forEach(el=>el.style.background='transparent');this.style.background='rgba(0,122,255,0.1)';" class="cg-emoji" style="width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;transition:0.2s;background:${e==='👥'?'rgba(0,122,255,0.1)':'transparent'};">${e}</div>`).join('')}
-            </div>
-
-            <p style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Color</p>
-            <div style="display:flex;gap:8px;margin-bottom:18px;" id="cgColorGrid">
-                ${colors.map(c => `<div onclick="window._grpColor='${c}';document.querySelectorAll('#cgColorGrid .cg-color').forEach(el=>el.style.boxShadow='none');this.style.boxShadow='0 0 0 3px white,0 0 0 5px ${c}';" class="cg-color" style="width:32px;height:32px;border-radius:50%;background:${c};cursor:pointer;box-shadow:${c==='#007AFF'?`0 0 0 3px white,0 0 0 5px ${c}`:'none'};"></div>`).join('')}
-            </div>
-
-            <p style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Group Name</p>
-            <input id="group-name-input" type="text" maxlength="50" placeholder="e.g. Cape Town Creatives" style="width:100%;padding:14px;border-radius:14px;border:1px solid var(--border-color,#eee);font-size:15px;outline:none;background:var(--input-bg,#f5f5f5);color:var(--text-primary,#000);box-sizing:border-box;margin-bottom:14px;">
-
-            <p style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Description (optional)</p>
-            <textarea id="group-desc-input" placeholder="What's this group about?" style="width:100%;height:80px;padding:14px;border-radius:14px;border:1px solid var(--border-color,#eee);font-size:15px;resize:none;outline:none;background:var(--input-bg,#f5f5f5);color:var(--text-primary,#000);box-sizing:border-box;margin-bottom:14px;"></textarea>
-
-            <p style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Privacy</p>
-            <div style="display:flex;gap:8px;margin-bottom:24px;">
-                <button id="cgPrivPub" onclick="window._grpPrivacy='Public';document.getElementById('cgPrivPub').style.borderColor='#007AFF';document.getElementById('cgPrivPub').style.color='#007AFF';document.getElementById('cgPrivPub').style.background='rgba(0,122,255,0.06)';document.getElementById('cgPrivPriv').style.borderColor='#eee';document.getElementById('cgPrivPriv').style.color='#888';document.getElementById('cgPrivPriv').style.background='transparent';" style="flex:1;padding:12px;border-radius:12px;border:2px solid #007AFF;background:rgba(0,122,255,0.06);color:#007AFF;font-weight:700;font-size:13px;cursor:pointer;">🌐 Public</button>
-                <button id="cgPrivPriv" onclick="window._grpPrivacy='Private';document.getElementById('cgPrivPriv').style.borderColor='#007AFF';document.getElementById('cgPrivPriv').style.color='#007AFF';document.getElementById('cgPrivPriv').style.background='rgba(0,122,255,0.06)';document.getElementById('cgPrivPub').style.borderColor='#eee';document.getElementById('cgPrivPub').style.color='#888';document.getElementById('cgPrivPub').style.background='transparent';" style="flex:1;padding:12px;border-radius:12px;border:2px solid #eee;background:transparent;color:#888;font-weight:700;font-size:13px;cursor:pointer;">🔒 Private</button>
-            </div>
-
-            <button onclick="createGroup(window._grpEmoji, window._grpColor)" style="width:100%;padding:16px;border-radius:14px;border:none;background:#007AFF;color:white;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:10px;">Create Group</button>
-            <button onclick="document.getElementById('createGroupModal').remove()" style="width:100%;padding:14px;border-radius:14px;border:none;background:transparent;color:#888;font-size:14px;cursor:pointer;">Cancel</button>
-        </div>`;
-
-    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
-    document.body.appendChild(modal);
+            '<div style="display:flex;align-items:flex-start;gap:14px;margin-top:26px;">' +
+                '<div style="width:44px;height:44px;border-radius:50%;background:var(--input-bg,#efefef);display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+                    '<i class="fa-solid fa-user-plus" style="color:var(--text-primary,#000);font-size:17px;"></i></div>' +
+                '<div style="flex:1;min-width:0;">' +
+                    '<div style="font-size:19px;font-weight:700;color:var(--text-primary,#000);">Invite suggested users</div>' +
+                    '<div style="font-size:15px;color:#6b6b6b;line-height:1.35;margin-top:2px;">Send one-off group invitations to people who may be interested in joining your group.</div>' +
+                '</div>' +
+                '<div id="cgInviteToggle" onclick="cgToggleInvite()" ' +
+                    'style="width:52px;height:31px;border-radius:16px;background:#0A84FF;flex-shrink:0;position:relative;cursor:pointer;transition:background 0.2s;margin-top:4px;">' +
+                    '<div id="cgInviteKnob" style="position:absolute;top:2px;left:23px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.3);transition:left 0.2s;"></div>' +
+                '</div>' +
+            '</div>' +
+        '</div>' +
+        '<div style="flex-shrink:0;border-top:0.5px solid var(--border-color,#e8e8e8);padding:12px 18px calc(16px + env(safe-area-inset-bottom));">' +
+            '<button id="cgCreateBtn" onclick="cgSubmit()" disabled ' +
+                'style="width:100%;padding:15px;border-radius:10px;border:none;background:var(--input-bg,#e9e9e9);color:#9a9a9a;font-size:17px;font-weight:700;cursor:not-allowed;">Create</button>' +
+        '</div>';
+    (document.getElementById('app') || document.body).appendChild(p);
+    hideNavBar && hideNavBar();
+    setTimeout(function () { var n = document.getElementById('cgName'); if (n) try { n.focus(); } catch (e) {} }, 120);
 }
 
-function previewGroupPic(input) {
-    var file = input.files[0];
-    if (!file || file.size > 5*1024*1024) { showToast('Max 5MB'); return; }
+function closeCreateGroup() {
+    var p = document.getElementById('createGroupPage');
+    if (p) p.remove();
+    showNavBar && showNavBar();
+}
+
+function cgSetName(v) {
+    _newGroup.name = (v || '').trim();
+    cgRefreshCreateBtn();
+}
+
+function cgRefreshCreateBtn() {
+    var b = document.getElementById('cgCreateBtn');
+    if (!b) return;
+    var ready = !!_newGroup.name && !!_newGroup.privacy;
+    b.disabled = !ready;
+    b.style.background = ready ? '#0A84FF' : 'var(--input-bg,#e9e9e9)';
+    b.style.color = ready ? '#fff' : '#9a9a9a';
+    b.style.cursor = ready ? 'pointer' : 'not-allowed';
+}
+
+function cgToggleInvite() {
+    _newGroup.invite = !_newGroup.invite;
+    var t = document.getElementById('cgInviteToggle'), k = document.getElementById('cgInviteKnob');
+    if (t) t.style.background = _newGroup.invite ? '#0A84FF' : '#c7c7cc';
+    if (k) k.style.left = _newGroup.invite ? '23px' : '2px';
+    triggerHaptic(8);
+}
+
+// ---- shared bottom sheet for the two pickers ----
+function _cgSheet(title, rowsHTML, opts) {
+    opts = opts || {};
+    var old = document.getElementById('cgSheet');
+    if (old) old.remove();
+    var s = document.createElement('div');
+    s.id = 'cgSheet';
+    s.style.cssText = 'position:absolute;inset:0;z-index:8100;background:rgba(0,0,0,0.35);display:flex;align-items:flex-end;';
+    s.innerHTML =
+        '<div style="width:100%;background:var(--bg-primary,#fff);border-radius:16px 16px 0 0;padding-bottom:calc(18px + env(safe-area-inset-bottom));animation:modalUp 0.25s ease;max-height:80vh;overflow-y:auto;">' +
+            '<div style="width:38px;height:5px;border-radius:3px;background:#c4c4c6;margin:9px auto 4px;"></div>' +
+            '<div style="display:flex;align-items:center;padding:10px 18px 14px;">' +
+                '<div style="width:52px;"></div>' +
+                '<b style="flex:1;text-align:center;font-size:18px;color:var(--text-primary,#000);">' + escapeHtml(title) + '</b>' +
+                (opts.done
+                    ? '<span onclick="cgCloseSheet()" style="width:52px;text-align:right;color:#0A84FF;font-size:17px;font-weight:600;cursor:pointer;">Done</span>'
+                    : '<div style="width:52px;"></div>') +
+            '</div>' +
+            rowsHTML +
+            (opts.footer || '') +
+        '</div>';
+    s.addEventListener('click', function (e) { if (e.target === s) cgCloseSheet(); });
+    (document.getElementById('createGroupPage') || document.body).appendChild(s);
+}
+
+function cgCloseSheet() {
+    var s = document.getElementById('cgSheet');
+    if (s) s.remove();
+}
+
+function _cgRow(icon, title, desc, sub, selected, onclick) {
+    return '<div onclick="' + onclick + '" style="display:flex;align-items:flex-start;gap:14px;padding:14px 18px;cursor:pointer;border-top:0.5px solid var(--border-color,#ececec);">' +
+        '<div style="width:44px;height:44px;border-radius:50%;background:var(--input-bg,#efefef);display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+            '<i class="fa-solid ' + icon + '" style="color:var(--text-primary,#000);font-size:17px;"></i></div>' +
+        '<div style="flex:1;min-width:0;">' +
+            '<div style="font-size:18px;font-weight:700;color:var(--text-primary,#000);">' + escapeHtml(title) + '</div>' +
+            '<div style="font-size:15px;color:#5c5c5c;line-height:1.35;margin-top:1px;">' + escapeHtml(desc) + '</div>' +
+            (sub ? '<div style="font-size:14px;color:#9a9a9a;line-height:1.35;margin-top:4px;">' + escapeHtml(sub) + '</div>' : '') +
+        '</div>' +
+        '<div style="width:23px;height:23px;border-radius:50%;flex-shrink:0;margin-top:10px;' +
+            (selected ? 'border:7px solid #0A84FF;background:#fff;' : 'border:2px solid #b0b0b0;') + '"></div>' +
+    '</div>';
+}
+
+function cgOpenPrivacySheet() {
+    _cgSheet('Choose privacy',
+        _cgRow('fa-earth-africa', 'Public',
+               "Anyone can see who's in the group and what they post.",
+               "Depending on your group's size and age, you might be able to change to private later.",
+               _newGroup.privacy === 'Public', "cgPickPrivacy('Public')") +
+        _cgRow('fa-lock', 'Private',
+               "Only members can see who's in the group and what they post.",
+               'You might be able to change to public later.',
+               _newGroup.privacy === 'Private', "cgPickPrivacy('Private')"),
+        {
+            done: true,
+            footer: '<div style="padding:14px 18px 4px;"><span onclick="showToast(\'Public groups are open to everyone. Private groups keep posts and members to the group.\')" style="color:#0A84FF;font-size:15px;cursor:pointer;">Learn more about group privacy</span></div>'
+        });
+}
+
+function cgPickPrivacy(value) {
+    _newGroup.privacy = value;
+    // A public group is always findable, so its visibility resets.
+    if (value === 'Public') _newGroup.visibility = 'Visible';
+    triggerHaptic(8);
+    cgOpenPrivacySheet();      // re-render so the radio moves
+    cgRenderPrivacy();
+}
+
+function cgRenderPrivacy() {
+    var label = document.getElementById('cgPrivacyLabel');
+    var note = document.getElementById('cgPrivacyNote');
+    var visBlock = document.getElementById('cgVisibilityBlock');
+    if (!label || !note || !visBlock) return;
+
+    if (!_newGroup.privacy) {
+        label.textContent = 'Choose privacy';
+        label.style.color = '#888';
+        note.innerHTML = '';
+        visBlock.innerHTML = '';
+        cgRefreshCreateBtn();
+        return;
+    }
+
+    // Two-line label once chosen, matching the other pickers.
+    label.innerHTML = '<div style="font-size:12px;color:#8a8a8a;line-height:1.1;">Privacy</div>' +
+        '<div style="font-size:17px;color:var(--text-primary,#000);">' + _newGroup.privacy + '</div>';
+    label.style.color = 'var(--text-primary,#000)';
+
+    note.innerHTML = '<div style="background:var(--input-bg,#f0f0f0);border-radius:12px;padding:14px 16px;margin-top:12px;">' +
+        '<div style="font-size:15px;color:var(--text-primary,#000);line-height:1.4;">' +
+            (_newGroup.privacy === 'Private'
+                ? "Only members can see who's in the group and what they post. You might be able to change this group to public later."
+                : "Anyone can see who's in the group and what they post. Depending on your group's size and age, you might be able to change it to private later.") +
+        '</div>' +
+        '<div onclick="showToast(\'Public groups are open to everyone. Private groups keep posts and members to the group.\')" style="color:#0A84FF;font-size:15px;margin-top:10px;cursor:pointer;">Learn more</div>' +
+    '</div>';
+
+    // Visibility only exists for private groups.
+    if (_newGroup.privacy === 'Private') {
+        visBlock.innerHTML =
+            '<div style="height:1px;background:var(--border-color,#e8e8e8);margin:24px 0;"></div>' +
+            '<div style="font-size:22px;font-weight:800;color:var(--text-primary,#000);margin-bottom:14px;">Visibility</div>' +
+            '<div onclick="cgOpenVisibilitySheet()" style="display:flex;align-items:center;gap:10px;padding:16px;border-radius:12px;border:1px solid var(--border-color,#ddd);cursor:pointer;">' +
+                '<div style="flex:1;min-width:0;">' +
+                    '<div style="font-size:12px;color:#8a8a8a;line-height:1.1;">Visibility</div>' +
+                    '<div style="font-size:17px;color:var(--text-primary,#000);">' + _newGroup.visibility + '</div>' +
+                '</div>' +
+                '<i class="fa-solid fa-caret-down" style="color:#666;font-size:15px;"></i>' +
+            '</div>';
+    } else {
+        visBlock.innerHTML = '';
+    }
+    cgRefreshCreateBtn();
+}
+
+function cgOpenVisibilitySheet() {
+    _cgSheet('Visibility',
+        _cgRow('fa-eye', 'Visible', 'Anyone can find this group.', '',
+               _newGroup.visibility === 'Visible', "cgPickVisibility('Visible')") +
+        _cgRow('fa-eye-slash', 'Hidden', 'Only members can find this group.', '',
+               _newGroup.visibility === 'Hidden', "cgPickVisibility('Hidden')"));
+}
+
+function cgPickVisibility(value) {
+    _newGroup.visibility = value;
+    triggerHaptic(8);
+    cgCloseSheet();
+    cgRenderPrivacy();
+}
+
+async function cgSubmit() {
+    if (!_newGroup.name || !_newGroup.privacy) return;
+    if (!currentUser) { showToast('Please log in'); return; }
+    if (!window.sb) { showToast('Not connected. Try again.'); return; }
+
+    var btn = document.getElementById('cgCreateBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+
+    try {
+        var res = await sb.from('groups').insert({
+            name: _newGroup.name,
+            privacy: _newGroup.privacy,
+            visibility: _newGroup.privacy === 'Private' ? _newGroup.visibility : 'Visible',
+            invite_suggested: _newGroup.invite,
+            admin_id: currentUser.id,
+            member_count: 1,
+            is_active: true
+        }).select().single();
+
+        if (res.error || !res.data) {
+            showToast('Could not create the group: ' + ((res.error && res.error.message) || 'try again'));
+            if (btn) { btn.disabled = false; btn.textContent = 'Create'; }
+            return;
+        }
+        var group = res.data;
+        await sb.from('group_members').insert({ group_id: group.id, user_id: currentUser.id, role: 'admin' });
+        closeCreateGroup();
+        triggerHaptic(30);
+        if (typeof loadGroups === 'function') await loadGroups();
+        // Straight into setup: invite people, then a cover photo, then the group.
+        gsOpenInvite(group.id);
+    } catch (e) {
+        showToast('Could not create the group');
+        if (btn) { btn.disabled = false; btn.textContent = 'Create'; }
+    }
+}
+
+// ==========================================================================
+// GROUP SETUP — runs once, right after a group is created.
+// Step 1 invite people, step 2 cover photo, then the group page.
+// ==========================================================================
+var _gsetup = { groupId: null, picked: {}, autoInvite: false, cover: null };
+
+function _gsPage(id, innerHTML) {
+    var old = document.getElementById(id);
+    if (old) old.remove();
+    var p = document.createElement('div');
+    p.id = id;
+    p.style.cssText = 'position:absolute;inset:0;z-index:8000;background:var(--bg-primary,#fff);display:flex;flex-direction:column;';
+    p.innerHTML = innerHTML;
+    (document.getElementById('app') || document.body).appendChild(p);
+    hideNavBar && hideNavBar();
+    return p;
+}
+
+function _gsRow(icon, title, sub, right, onclick) {
+    return '<div ' + (onclick ? 'onclick="' + onclick + '" ' : '') +
+        'style="display:flex;align-items:flex-start;gap:14px;padding:13px 18px;cursor:' + (onclick ? 'pointer' : 'default') + ';">' +
+        '<div style="width:42px;height:42px;border-radius:50%;background:var(--input-bg,#efefef);display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+            '<i class="fa-solid ' + icon + '" style="color:var(--text-primary,#000);font-size:16px;"></i></div>' +
+        '<div style="flex:1;min-width:0;padding-top:2px;">' +
+            '<div style="font-size:17px;font-weight:600;color:var(--text-primary,#000);">' + title + '</div>' +
+            (sub ? '<div style="font-size:14px;color:#6b6b6b;line-height:1.35;margin-top:2px;">' + sub + '</div>' : '') +
+        '</div>' + (right || '') +
+    '</div>';
+}
+
+// ---- step 1: invite people ----
+async function gsOpenInvite(groupId) {
+    _gsetup = { groupId: groupId, picked: {}, autoInvite: false, cover: null };
+    _gsPage('gsInvitePage',
+        '<div style="display:flex;align-items:center;padding:14px 18px;flex-shrink:0;">' +
+            '<div style="width:60px;"></div>' +
+            '<b style="flex:1;text-align:center;font-size:19px;color:var(--text-primary,#000);">Invite people</b>' +
+            '<span onclick="gsOpenCover()" style="width:60px;text-align:right;color:#0A84FF;font-size:17px;font-weight:600;cursor:pointer;">Next</span>' +
+        '</div>' +
+        '<div style="flex:1;overflow-y:auto;padding-bottom:20px;">' +
+            _gsRow('fa-share', 'Share group', '', '', 'gsShareGroup()') +
+            _gsRow('fa-book-open', 'Share to your story', '', '', 'gsShareToStory()') +
+            _gsRow('fa-envelope', 'Invite via email', 'Send an email invitation to people', '', 'gsInviteByEmail()') +
+            _gsRow('fa-user-tag', 'Auto-invite followers',
+                   'Automatically send group invitations to people who follow you.',
+                   '<div id="gsAutoToggle" onclick="gsToggleAuto(event)" style="width:52px;height:31px;border-radius:16px;background:#c7c7cc;flex-shrink:0;position:relative;cursor:pointer;margin-top:6px;">' +
+                   '<div id="gsAutoKnob" style="position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.3);transition:left 0.2s;"></div></div>') +
+            '<div style="padding:8px 18px 4px;">' +
+                '<div style="display:flex;align-items:center;gap:9px;background:var(--input-bg,#efefef);border-radius:20px;padding:9px 14px;">' +
+                    '<i class="fa-solid fa-magnifying-glass" style="color:#8a8a8a;font-size:14px;"></i>' +
+                    '<input id="gsSearch" placeholder="Search for people" oninput="gsFilterPeople(this.value)" ' +
+                        'style="flex:1;background:transparent;border:none;outline:none;font-size:16px;color:var(--text-primary,#000);"></div>' +
+            '</div>' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px 8px;">' +
+                '<b style="font-size:20px;color:var(--text-primary,#000);">Suggested</b>' +
+                '<span onclick="gsSelectAll()" style="color:#0A84FF;font-size:16px;font-weight:600;cursor:pointer;">Select All</span>' +
+            '</div>' +
+            '<div id="gsPeople"><div style="text-align:center;padding:30px;color:#999;"><i class="fa-solid fa-spinner fa-spin"></i></div></div>' +
+        '</div>' +
+        '<div style="flex-shrink:0;padding:10px 18px calc(16px + env(safe-area-inset-bottom));">' +
+            '<button id="gsSendInvite" onclick="gsSendInvites()" disabled ' +
+                'style="width:100%;padding:14px;border-radius:10px;border:none;background:var(--input-bg,#e9e9e9);color:#9a9a9a;font-size:17px;font-weight:600;cursor:not-allowed;">Send Invitation</button>' +
+        '</div>');
+    gsLoadPeople();
+}
+
+async function gsLoadPeople() {
+    var box = document.getElementById('gsPeople');
+    if (!box || !window.sb || !currentUser) return;
+    try {
+        var r = await sb.from('users')
+            .select('id,username,full_name,avatar_url')
+            .neq('id', currentUser.id).limit(25);
+        window._gsPeople = r.data || [];
+        gsRenderPeople(window._gsPeople);
+    } catch (e) {
+        box.innerHTML = '<p style="text-align:center;padding:24px;color:#999;font-size:14px;">Could not load people</p>';
+    }
+}
+
+function gsRenderPeople(list) {
+    var box = document.getElementById('gsPeople');
+    if (!box) return;
+    if (!list.length) {
+        box.innerHTML = '<p style="text-align:center;padding:24px;color:#999;font-size:14px;">No one to suggest yet</p>';
+        return;
+    }
+    box.innerHTML = list.map(function (u) {
+        var on = !!_gsetup.picked[u.id];
+        var name = u.full_name || u.username || 'User';
+        var av = u.avatar_url
+            ? '<img src="' + escapeHtml(u.avatar_url) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;">'
+            : '<div style="width:44px;height:44px;border-radius:50%;background:#c9c9cf;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;">' + escapeHtml(name.charAt(0).toUpperCase()) + '</div>';
+        return '<div onclick="gsTogglePerson(\'' + u.id + '\')" style="display:flex;align-items:center;gap:13px;padding:9px 18px;cursor:pointer;">' +
+            av +
+            '<div style="flex:1;min-width:0;font-size:17px;color:var(--text-primary,#000);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(name) + '</div>' +
+            '<div style="width:24px;height:24px;border-radius:5px;flex-shrink:0;' +
+                (on ? 'background:#0A84FF;border:2px solid #0A84FF;display:flex;align-items:center;justify-content:center;'
+                    : 'border:2px solid #b7b7bd;') + '">' +
+                (on ? '<i class="fa-solid fa-check" style="color:#fff;font-size:12px;"></i>' : '') +
+            '</div></div>';
+    }).join('');
+}
+
+function _gsRefreshSendBtn() {
+    var n = Object.keys(_gsetup.picked).length;
+    var b = document.getElementById('gsSendInvite');
+    if (!b) return;
+    b.disabled = !n;
+    b.style.background = n ? '#0A84FF' : 'var(--input-bg,#e9e9e9)';
+    b.style.color = n ? '#fff' : '#9a9a9a';
+    b.style.cursor = n ? 'pointer' : 'not-allowed';
+    b.textContent = n ? ('Send Invitation (' + n + ')') : 'Send Invitation';
+}
+
+function gsTogglePerson(id) {
+    if (_gsetup.picked[id]) delete _gsetup.picked[id]; else _gsetup.picked[id] = true;
+    gsRenderPeople(window._gsFiltered || window._gsPeople || []);
+    _gsRefreshSendBtn();
+}
+
+function gsSelectAll() {
+    var list = window._gsFiltered || window._gsPeople || [];
+    // If everything shown is already picked, the button clears them instead.
+    var allOn = list.length > 0 && list.every(function (u) { return _gsetup.picked[u.id]; });
+    list.forEach(function (u) {
+        if (allOn) delete _gsetup.picked[u.id]; else _gsetup.picked[u.id] = true;
+    });
+    gsRenderPeople(list);
+    _gsRefreshSendBtn();
+}
+
+function gsFilterPeople(q) {
+    q = (q || '').toLowerCase().trim();
+    var all = window._gsPeople || [];
+    window._gsFiltered = q ? all.filter(function (u) {
+        return (u.full_name || '').toLowerCase().indexOf(q) >= 0 ||
+               (u.username || '').toLowerCase().indexOf(q) >= 0;
+    }) : null;
+    gsRenderPeople(window._gsFiltered || all);
+}
+
+function gsToggleAuto(ev) {
+    if (ev) ev.stopPropagation();
+    _gsetup.autoInvite = !_gsetup.autoInvite;
+    var t = document.getElementById('gsAutoToggle'), k = document.getElementById('gsAutoKnob');
+    if (t) t.style.background = _gsetup.autoInvite ? '#0A84FF' : '#c7c7cc';
+    if (k) k.style.left = _gsetup.autoInvite ? '23px' : '2px';
+    triggerHaptic(8);
+}
+
+function gsShareGroup() {
+    var url = window.location.origin + '/?group=' + _gsetup.groupId;
+    if (navigator.share) navigator.share({ text: 'Join my group on TrustFirst', url: url }).catch(function () {});
+    else navigator.clipboard.writeText(url).then(function () { showToast('Group link copied'); });
+}
+function gsShareToStory() { showToast('Sharing to your story is coming soon'); }
+function gsInviteByEmail() {
+    var url = window.location.origin + '/?group=' + _gsetup.groupId;
+    window.location.href = 'mailto:?subject=' + encodeURIComponent('Join my group on TrustFirst') +
+        '&body=' + encodeURIComponent(url);
+}
+
+async function gsSendInvites() {
+    var ids = Object.keys(_gsetup.picked);
+    if (!ids.length || !window.sb) return;
+    var b = document.getElementById('gsSendInvite');
+    if (b) { b.disabled = true; b.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    try {
+        await sb.from('group_invites').insert(ids.map(function (id) {
+            return { group_id: _gsetup.groupId, invited_user_id: id, invited_by: currentUser.id };
+        }));
+        showToast('Invitations sent');
+    } catch (e) {
+        // The invites table may not exist yet; do not block setup on it.
+        showToast('Invitations could not be sent');
+    }
+    _gsetup.picked = {};
+    gsOpenCover();
+}
+
+// ---- step 2: cover photo ----
+// Presets are generated locally so there is nothing to download and no
+// third-party artwork involved.
+function _gsPresetCover(i) {
+    var sets = [
+        ['#FF9A5A', '#FF5E7E', '#3B2E8C'], ['#5AC8FA', '#0A84FF', '#1B2A6B'],
+        ['#34C759', '#0FB9A0', '#0B3D3B'], ['#FFD60A', '#FF9500', '#7A3E00'],
+        ['#BF5AF2', '#FF2D55', '#2C0B4E'], ['#64D2FF', '#5E5CE6', '#101A4D']
+    ];
+    var c = sets[i % sets.length];
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="420">' +
+        '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+        '<stop offset="0" stop-color="' + c[0] + '"/><stop offset="0.55" stop-color="' + c[1] + '"/>' +
+        '<stop offset="1" stop-color="' + c[2] + '"/></linearGradient></defs>' +
+        '<rect width="900" height="420" fill="url(#g)"/>' +
+        '<circle cx="150" cy="330" r="140" fill="rgba(255,255,255,0.13)"/>' +
+        '<circle cx="760" cy="110" r="105" fill="rgba(255,255,255,0.10)"/>' +
+        '<circle cx="480" cy="220" r="70" fill="rgba(255,255,255,0.16)"/>' +
+        '<path d="M0 380 Q225 300 450 370 T900 340 V420 H0 Z" fill="rgba(0,0,0,0.16)"/></svg>';
+    return 'data:image/svg+xml;base64,' + btoa(svg);
+}
+
+function gsOpenCover() {
+    var page = document.getElementById('gsInvitePage');
+    if (page) page.remove();
+    if (!_gsetup.cover) _gsetup.cover = _gsPresetCover(0);
+    _gsPage('gsCoverPage',
+        '<div style="display:flex;align-items:center;padding:14px 18px;flex-shrink:0;">' +
+            '<button onclick="gsBackToInvite()" style="background:none;border:none;font-size:22px;color:var(--text-primary,#000);cursor:pointer;padding:0;width:60px;text-align:left;"><i class="fa-solid fa-chevron-left"></i></button>' +
+            '<div style="flex:1;"></div>' +
+            '<span onclick="gsFinishSetup()" style="color:#0A84FF;font-size:17px;font-weight:600;cursor:pointer;">Close</span>' +
+        '</div>' +
+        '<div style="flex:1;overflow-y:auto;padding:8px 20px 20px;">' +
+            '<div style="font-size:27px;font-weight:800;color:var(--text-primary,#000);line-height:1.2;">Add a cover photo</div>' +
+            '<div style="font-size:17px;color:#6b6b6b;line-height:1.35;margin-top:8px;">Get noticed with an image that helps show what your group is all about.</div>' +
+            '<div style="position:relative;margin-top:22px;border-radius:14px;overflow:hidden;">' +
+                '<img id="gsCoverPreview" src="' + _gsetup.cover + '" style="width:100%;display:block;aspect-ratio:15/7;object-fit:cover;">' +
+                '<div onclick="gsPickCoverFile()" style="position:absolute;right:12px;bottom:12px;display:flex;align-items:center;gap:7px;background:rgba(0,0,0,0.55);border-radius:9px;padding:8px 13px;cursor:pointer;">' +
+                    '<i class="fa-solid fa-pen" style="color:#fff;font-size:13px;"></i>' +
+                    '<span style="color:#fff;font-size:15px;font-weight:600;">Edit</span></div>' +
+            '</div>' +
+            '<div style="display:flex;gap:10px;overflow-x:auto;margin-top:16px;padding-bottom:4px;scrollbar-width:none;">' +
+                [0, 1, 2, 3, 4, 5].map(function (i) {
+                    return '<img onclick="gsUseCover(' + i + ')" src="' + _gsPresetCover(i) + '" ' +
+                        'style="width:74px;height:74px;border-radius:12px;object-fit:cover;flex-shrink:0;cursor:pointer;">';
+                }).join('') +
+            '</div>' +
+        '</div>' +
+        '<div style="flex-shrink:0;padding:10px 20px calc(16px + env(safe-area-inset-bottom));">' +
+            '<div style="display:flex;gap:7px;margin-bottom:14px;">' +
+                '<div style="flex:1;height:5px;border-radius:3px;background:#0A84FF;"></div>' +
+                '<div style="flex:1;height:5px;border-radius:3px;background:#0A84FF;"></div>' +
+                '<div style="flex:1;height:5px;border-radius:3px;background:var(--input-bg,#d8d8dc);"></div>' +
+                '<div style="flex:1;height:5px;border-radius:3px;background:var(--input-bg,#d8d8dc);"></div>' +
+            '</div>' +
+            '<button onclick="gsSaveCover()" style="width:100%;padding:15px;border-radius:10px;border:none;background:#0A84FF;color:#fff;font-size:17px;font-weight:700;cursor:pointer;">Next</button>' +
+        '</div>' +
+        '<input id="gsCoverFile" type="file" accept="image/*" hidden onchange="gsCoverFileChosen(this)">');
+}
+
+function gsBackToInvite() {
+    var p = document.getElementById('gsCoverPage');
+    if (p) p.remove();
+    gsOpenInvite(_gsetup.groupId);
+}
+
+function gsUseCover(i) {
+    _gsetup.cover = _gsPresetCover(i);
+    var img = document.getElementById('gsCoverPreview');
+    if (img) img.src = _gsetup.cover;
+    triggerHaptic(8);
+}
+
+function gsPickCoverFile() {
+    var f = document.getElementById('gsCoverFile');
+    if (f) f.click();
+}
+
+function gsCoverFileChosen(input) {
+    var file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { showToast('That image is too large (5MB max)'); return; }
     var reader = new FileReader();
-    reader.onload = function(e) {
-        var prev = document.getElementById('groupPicPreview');
-        if (prev) prev.innerHTML = '<img src="' + e.target.result + '" style="width:100%;height:100%;object-fit:cover;">';
+    reader.onload = function () {
+        _gsetup.cover = String(reader.result);
+        var img = document.getElementById('gsCoverPreview');
+        if (img) img.src = _gsetup.cover;
     };
     reader.readAsDataURL(file);
 }
 
-function setGroupPrivacy(p) {
-    selectedGroupPrivacy = p;
-    const pub = document.getElementById('privacy-public');
-    const priv = document.getElementById('privacy-private');
-    if (pub) { pub.style.borderColor = p === 'Public' ? '#007AFF' : '#eee'; pub.style.color = p === 'Public' ? '#007AFF' : '#888'; pub.style.background = p === 'Public' ? 'rgba(0,122,255,0.06)' : 'transparent'; }
-    if (priv) { priv.style.borderColor = p === 'Private' ? '#007AFF' : '#eee'; priv.style.color = p === 'Private' ? '#007AFF' : '#888'; priv.style.background = p === 'Private' ? 'rgba(0,122,255,0.06)' : 'transparent'; }
-}
-
-async function createGroup(emoji, color) {
-    const name = document.getElementById('group-name-input')?.value.trim();
-    const desc = document.getElementById('group-desc-input')?.value.trim();
-    if (!name) { showToast('Enter a group name'); return; }
-    if (!currentUser) { showToast('Please log in'); return; }
-
-    const submitBtn = document.querySelector('#createGroupModal button[onclick*="createGroup"]');
-    if (submitBtn) { submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; submitBtn.disabled = true; }
-
-    if (!window.sb) { showToast('Not connected. Try again.'); if (submitBtn) { submitBtn.textContent = 'Create Group'; submitBtn.disabled = false; } return; }
+async function gsSaveCover() {
+    if (!window.sb || !_gsetup.groupId) { gsFinishSetup(); return; }
+    var cover = _gsetup.cover;
     try {
-        const privacy = window._grpPrivacy || 'Public';
-        const { data: group, error } = await sb.from('groups').insert({
-            name, description: desc || null, emoji, color,
-            privacy: privacy, admin_id: currentUser.id, member_count: 1, is_active: true
-        }).select().single();
-
-        if (group) {
-            await sb.from('group_members').insert({ group_id: group.id, user_id: currentUser.id, role: 'admin' });
-            document.getElementById('createGroupModal')?.remove();
-            showToast('Group created! 🎉');
-            triggerHaptic(50);
-            await loadGroups();
-            openGroup(group.id);
-        } else {
-            showToast('Failed: ' + (error?.message || 'Try again'));
-            if (submitBtn) { submitBtn.textContent = 'Create Group'; submitBtn.disabled = false; }
+        // A data: URI would bloat every row, so an uploaded file goes to storage
+        // and only the URL is stored. Generated presets are small SVGs and are
+        // fine to keep inline.
+        if (cover && cover.indexOf('data:image/svg+xml') !== 0) {
+            var blob = await (await fetch(cover)).blob();
+            var path = 'groups/' + _gsetup.groupId + '/cover_' + Date.now() + '.jpg';
+            var up = await sb.storage.from('media').upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: true });
+            if (!up.error && up.data) {
+                cover = sb.storage.from('media').getPublicUrl(up.data.path).data.publicUrl;
+            }
         }
-    } catch(e) {
-        showToast('Failed: ' + (e?.message || 'Try again'));
-        if (submitBtn) { submitBtn.textContent = 'Create Group'; submitBtn.disabled = false; }
-    }
+        await sb.from('groups').update({ cover_url: cover }).eq('id', _gsetup.groupId);
+    } catch (e) { /* cover is optional; do not block setup */ }
+    gsFinishSetup();
 }
+
+function gsFinishSetup() {
+    ['gsInvitePage', 'gsCoverPage'].forEach(function (id) {
+        var p = document.getElementById(id);
+        if (p) p.remove();
+    });
+    showNavBar && showNavBar();
+    if (typeof openGroup === 'function') openGroup(_gsetup.groupId);
+}
+
+// The old create-group modal's helpers (previewGroupPic, setGroupPrivacy,
+// createGroup) were removed with it -- the new page uses cgSubmit().
 
 function postToGroup(groupId) {
     if (!groupId) return;
@@ -29430,6 +30057,7 @@ requires_approval: (document.getElementById('groupApprovalToggle')?.classList.co
                     if (profileGrid && profileGrid.offsetParent !== null) {
                         loadProfilePosts(profileGrid);
                     }
+                    _eddieAnswerMention('post', result.data.id, postText, result.data.id);
                     return;
                 }
             } catch(dbErr) { console.warn('[Post DB]', dbErr); }
@@ -43334,7 +43962,7 @@ async function _qcSend() {
 // Chat streams over SSE from /api/eddie/chat/. The key is server-side; this
 // code only ever talks to our own origin.
 // ==========================================================================
-var _eddie = { turns: [], busy: false, attachments: [], abort: null };
+var _eddie = { turns: [], busy: false, attachments: [], abort: null, convoId: null };
 
 function _eddieStyles() {
     if (document.getElementById('eddieStyles')) return;
@@ -43382,7 +44010,7 @@ function openEddieChat() {
         '<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;flex-shrink:0;">' +
             '<button onclick="closeEddieChat()" style="background:rgba(255,255,255,0.1);border:none;color:#fff;width:34px;height:34px;border-radius:50%;cursor:pointer;"><i class="fa-solid fa-arrow-left"></i></button>' +
             '<b style="flex:1;color:#fff;font-size:17px;">Eddie</b>' +
-            '<button onclick="eddieNewChat()" title="New chat" style="background:rgba(255,255,255,0.1);border:none;color:#fff;width:34px;height:34px;border-radius:50%;cursor:pointer;"><i class="fa-solid fa-pen-to-square" style="font-size:13px;"></i></button>' +
+            '<button onclick="openEddieHistory()" title="Chat history" style="background:rgba(255,255,255,0.1);border:none;color:#fff;width:34px;height:34px;border-radius:50%;cursor:pointer;"><i class="fa-solid fa-clock-rotate-left" style="font-size:14px;"></i></button>' +
         '</div>' +
         '<div id="eddieScroll" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;position:relative;padding:8px 14px 20px;">' +
             // The faint centred wordmark, behind everything.
@@ -43394,14 +44022,15 @@ function openEddieChat() {
         '<div id="eddieAtts" style="display:none;gap:8px;padding:0 14px 8px;flex-wrap:wrap;"></div>' +
         '<div style="flex-shrink:0;padding:8px 12px calc(14px + env(safe-area-inset-bottom));">' +
             '<div style="display:flex;align-items:flex-end;gap:8px;background:rgba(255,255,255,0.08);border-radius:22px;padding:6px 6px 6px 10px;">' +
-                '<button onclick="eddiePickAttachment()" title="Attach an image" style="background:none;border:none;color:rgba(255,255,255,0.6);font-size:17px;cursor:pointer;padding:8px;flex-shrink:0;"><i class="fa-solid fa-paperclip"></i></button>' +
+                '<button onclick="eddieToggleAttachMenu(event)" title="Attach" style="background:none;border:none;color:rgba(255,255,255,0.6);font-size:17px;cursor:pointer;padding:8px;flex-shrink:0;"><i class="fa-solid fa-paperclip"></i></button>' +
                 '<textarea id="eddieInput" rows="1" placeholder="Ask anything" ' +
                     'style="flex:1;background:transparent;border:none;outline:none;color:#fff;font-size:15px;resize:none;max-height:120px;padding:8px 0;font-family:inherit;"></textarea>' +
                 '<button id="eddieSend" onclick="eddieSend()" style="background:#fff;border:none;color:#000;width:36px;height:36px;border-radius:50%;cursor:pointer;flex-shrink:0;"><i class="fa-solid fa-arrow-up"></i></button>' +
             '</div>' +
-            '<div id="eddieHint" style="color:rgba(255,255,255,0.3);font-size:11px;text-align:center;margin-top:7px;">Eddie can search the web. Check anything important.</div>' +
+            '<div id="eddieHint" style="color:rgba(255,255,255,0.3);font-size:11px;text-align:center;margin-top:7px;">Eddie is an AI and can make mistakes, please check responses.</div>' +
         '</div>' +
-        '<input id="eddieFile" type="file" accept="image/*" multiple hidden onchange="eddieAttachChosen(this)">';
+        '<input id="eddieFile" type="file" accept="image/*" multiple hidden onchange="eddieAttachChosen(this)">' +
+        '<input id="eddieFileAny" type="file" accept="image/*,application/pdf" multiple hidden onchange="eddieAttachChosen(this)">';
     (document.getElementById('app') || document.body).appendChild(ov);
 
     var ta = document.getElementById('eddieInput');
@@ -43430,9 +44059,169 @@ function eddieNewChat() {
     if (_eddie.busy) { showToast('Eddie is still replying'); return; }
     _eddie.turns = [];
     _eddie.attachments = [];
+    _eddie.convoId = null;          // next message starts a fresh thread
     _eddieRenderAttachments();
     _eddieRender();
     triggerHaptic(8);
+}
+
+// ---- chat history ----
+function _eddieWhen(iso) {
+    try {
+        var d = new Date(iso), now = new Date();
+        var sameDay = d.toDateString() === now.toDateString();
+        var yest = new Date(now); yest.setDate(now.getDate() - 1);
+        var time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        if (sameDay) return 'Today at ' + time;
+        if (d.toDateString() === yest.toDateString()) return 'Yesterday at ' + time;
+        var withinYear = d.getFullYear() === now.getFullYear();
+        return d.toLocaleDateString([], withinYear
+            ? { weekday: 'long', day: 'numeric', month: 'long' }
+            : { day: '2-digit', month: 'long', year: 'numeric' }) + ' at ' + time;
+    } catch (e) { return ''; }
+}
+
+async function openEddieHistory() {
+    var ex = document.getElementById('eddieHistoryPage');
+    if (ex) ex.remove();
+    var p = document.createElement('div');
+    p.id = 'eddieHistoryPage';
+    p.style.cssText = 'position:absolute;inset:0;z-index:7100;background:#000;display:flex;flex-direction:column;';
+    p.innerHTML =
+        '<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;flex-shrink:0;">' +
+            '<button onclick="closeEddieHistory()" style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer;padding:4px 8px;"><i class="fa-solid fa-arrow-left"></i></button>' +
+            '<b style="flex:1;text-align:center;color:#fff;font-size:19px;">Chat History</b>' +
+            '<button onclick="eddieNewChat();closeEddieHistory();" title="New chat" style="background:none;border:none;color:#fff;font-size:19px;cursor:pointer;padding:4px 8px;"><i class="fa-solid fa-pen-to-square"></i></button>' +
+        '</div>' +
+        '<div id="eddieHistBody" style="flex:1;overflow-y:auto;padding:0 16px 30px;">' +
+            '<div style="text-align:center;padding:40px;color:rgba(255,255,255,0.35);"><i class="fa-solid fa-spinner fa-spin"></i></div>' +
+        '</div>';
+    (document.getElementById('eddie-overlay') || document.getElementById('app') || document.body).appendChild(p);
+
+    _eddieLoadHistory();
+}
+
+// Split out so the retry button can call it again without rebuilding the page.
+async function _eddieLoadHistory() {
+    var body = document.getElementById('eddieHistBody');
+    if (!body) return;
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:rgba(255,255,255,0.35);">' +
+        '<i class="fa-solid fa-spinner fa-spin"></i></div>';
+
+    function fail(msg) {
+        body.innerHTML =
+            '<div style="text-align:center;padding:50px 20px;color:rgba(255,255,255,0.4);">' +
+                '<p style="font-size:14px;margin-bottom:16px;">' + _eddieEsc(msg) + '</p>' +
+                '<button onclick="_eddieLoadHistory()" style="background:rgba(255,255,255,0.1);' +
+                'border:none;color:#fff;padding:9px 20px;border-radius:20px;font-size:14px;' +
+                'cursor:pointer;">Try again</button>' +
+            '</div>';
+    }
+
+    // Without an abort the spinner spins forever on a stalled connection, which
+    // reads as "broken" rather than "slow".
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, 20000);
+    try {
+        var token = await _eddieToken();
+        var r = await fetch('/api/eddie/history/', {
+            headers: { 'Authorization': 'Bearer ' + token },
+            signal: ctrl.signal
+        });
+        clearTimeout(timer);
+        var j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { fail(j.error || 'Could not load history'); return; }
+        body.innerHTML = _eddieHistoryHTML(j);
+    } catch (e) {
+        clearTimeout(timer);
+        fail(e && e.name === 'AbortError'
+            ? 'That took too long. Check your connection.'
+            : 'Could not load history');
+    }
+}
+
+function _eddieHistoryHTML(j) {
+    var images = j.images || [], convos = j.conversations || [];
+    if (!images.length && !convos.length) {
+        return '<div style="text-align:center;padding:60px 20px;color:rgba(255,255,255,0.35);">' +
+            '<i class="fa-solid fa-clock-rotate-left" style="font-size:30px;display:block;margin-bottom:14px;"></i>' +
+            '<p style="font-size:14px;">Nothing here yet. Your chats with Eddie will show up here.</p></div>';
+    }
+
+    var html = '';
+    if (images.length) {
+        html += '<div style="color:#fff;font-size:19px;font-weight:800;margin:10px 0 14px;">Images</div>' +
+            '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:28px;">' +
+            images.map(function (im) {
+                return '<div onclick="eddieViewImage(\'' + _eddieEsc(im.image_url) + '\')" ' +
+                    'style="aspect-ratio:1;border-radius:12px;overflow:hidden;background:#111;cursor:pointer;">' +
+                    '<img src="' + _eddieEsc(im.image_url) + '" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;"></div>';
+            }).join('') + '</div>';
+    }
+
+    if (convos.length) {
+        html += '<div style="color:#fff;font-size:19px;font-weight:800;margin:6px 0 12px;">Conversations</div>' +
+            convos.map(function (c) {
+                return '<div style="display:flex;align-items:flex-start;gap:10px;padding:12px 0;">' +
+                    '<div onclick="eddieOpenConversation(\'' + _eddieEsc(c.id) + '\')" style="flex:1;min-width:0;cursor:pointer;">' +
+                        '<div style="color:#fff;font-size:17px;font-weight:700;line-height:1.3;">' + _eddieEsc(c.title || 'New chat') + '</div>' +
+                        '<div style="color:rgba(255,255,255,0.4);font-size:14px;margin-top:4px;">' + _eddieEsc(_eddieWhen(c.updated_at)) + '</div>' +
+                    '</div>' +
+                    '<button onclick="eddieDeleteConversation(\'' + _eddieEsc(c.id) + '\',event)" title="Delete" style="background:none;border:none;color:rgba(255,255,255,0.3);cursor:pointer;padding:6px;"><i class="fa-solid fa-trash-can" style="font-size:13px;"></i></button>' +
+                '</div>';
+            }).join('');
+    }
+    return html;
+}
+
+function closeEddieHistory() {
+    var p = document.getElementById('eddieHistoryPage');
+    if (p) p.remove();
+}
+
+function eddieViewImage(url) {
+    var v = document.createElement('div');
+    v.style.cssText = 'position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,0.95);display:flex;align-items:center;justify-content:center;padding:20px;';
+    v.onclick = function () { v.remove(); };
+    v.innerHTML = '<img src="' + _eddieEsc(url) + '" style="max-width:100%;max-height:100%;border-radius:12px;">';
+    document.body.appendChild(v);
+}
+
+async function eddieOpenConversation(id) {
+    if (_eddie.busy) { showToast('Eddie is still replying'); return; }
+    try {
+        var token = await _eddieToken();
+        var r = await fetch('/api/eddie/conversation/?id=' + encodeURIComponent(id),
+            { headers: { 'Authorization': 'Bearer ' + token } });
+        var j = await r.json();
+        if (!r.ok) { showToast('Could not open that chat'); return; }
+        _eddie.convoId = id;
+        _eddie.turns = (j.messages || []).map(function (m) {
+            return {
+                role: m.role, content: m.content || '', thinking: m.thinking || '',
+                sources: m.sources || [], image: m.image_url || null,
+                status: 'done', showThinking: false, attachments: []
+            };
+        });
+        closeEddieHistory();
+        _eddieRender();
+    } catch (e) { showToast('Could not open that chat'); }
+}
+
+async function eddieDeleteConversation(id, ev) {
+    if (ev) ev.stopPropagation();
+    try {
+        var token = await _eddieToken();
+        var r = await fetch('/api/eddie/delete/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ id: id })
+        });
+        if (!r.ok) { showToast('Could not delete'); return; }
+        if (_eddie.convoId === id) eddieNewChat();
+        openEddieHistory();
+        showToast('Chat deleted');
+    } catch (e) { showToast('Could not delete'); }
 }
 
 async function eddieRefreshUsage() {
@@ -43447,8 +44236,23 @@ async function eddieRefreshUsage() {
             hint.textContent = 'Eddie is not switched on yet.';
             return;
         }
+        // The disclaimer is the point of this line; the quota only earns a
+        // mention once it is nearly gone.
         var left = Math.max(0, (j.limits.messages || 0) - (j.used.messages || 0));
-        hint.textContent = left + ' of ' + j.limits.messages + ' messages left today · Eddie can search the web';
+        var disclaimer = 'Eddie is an AI and can make mistakes, please check responses.';
+        var line = (left <= 5)
+            ? (left + ' messages left today · ' + disclaimer)
+            : disclaimer;
+        // Eddie runs on a free tier, and free tiers train on what you send
+        // them. People should know that before they paste something personal,
+        // so the notice shows only while that is actually true.
+        if (j.provider === 'gemini') {
+            hint.innerHTML = escapeHtml(line) +
+                '<br><span style="opacity:0.7;">Chats are processed by Google and may be ' +
+                'used to improve their models.</span>';
+        } else {
+            hint.textContent = line;
+        }
     } catch (e) {}
 }
 
@@ -43551,16 +44355,163 @@ function eddieToggleThoughts(i) {
 }
 
 // ---- attachments ----
-function eddiePickAttachment() {
-    var f = document.getElementById('eddieFile');
+// The paperclip opens a small menu rather than jumping straight to the OS
+// picker, so Camera / Photos / Files are all reachable.
+function eddieToggleAttachMenu(ev) {
+    if (ev) ev.stopPropagation();
+    var existing = document.getElementById('eddieAttachMenu');
+    if (existing) { existing.remove(); return; }
+
+    var m = document.createElement('div');
+    m.id = 'eddieAttachMenu';
+    m.style.cssText = 'position:absolute;left:12px;bottom:78px;z-index:30;min-width:190px;' +
+        'background:rgba(38,38,40,0.96);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);' +
+        'border:0.5px solid rgba(255,255,255,0.14);border-radius:20px;padding:8px;' +
+        'box-shadow:0 12px 40px rgba(0,0,0,0.55);animation:modalUp 0.18s ease;';
+    m.innerHTML = [
+        { icon: 'fa-camera', label: 'Camera', fn: 'eddieOpenCamera()' },
+        { icon: 'fa-image', label: 'Photos', fn: "eddiePickFrom('eddieFile')" },
+        { icon: 'fa-file', label: 'Files', fn: "eddiePickFrom('eddieFileAny')" }
+    ].map(function (o) {
+        return '<div onclick="' + o.fn + '" style="display:flex;align-items:center;gap:14px;padding:10px 10px;border-radius:14px;cursor:pointer;">' +
+            '<div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+                '<i class="fa-solid ' + o.icon + '" style="color:#fff;font-size:15px;"></i></div>' +
+            '<span style="color:#fff;font-size:16px;font-weight:600;">' + o.label + '</span>' +
+        '</div>';
+    }).join('');
+    var ov = document.getElementById('eddie-overlay');
+    if (ov) ov.appendChild(m);
+
+    // Close on the next tap anywhere else.
+    setTimeout(function () {
+        document.addEventListener('click', function close(e) {
+            if (m.contains(e.target)) return;
+            m.remove();
+            document.removeEventListener('click', close);
+        });
+    }, 0);
+}
+
+function eddieCloseAttachMenu() {
+    var m = document.getElementById('eddieAttachMenu');
+    if (m) m.remove();
+}
+
+function eddiePickFrom(inputId) {
+    eddieCloseAttachMenu();
+    var f = document.getElementById(inputId);
     if (f) f.click();
+}
+
+function eddiePickAttachment() { eddiePickFrom('eddieFile'); }
+
+// ---- in-app camera ----
+// Eddie takes photos only: its attachments are images, so a video tab here
+// would produce something it cannot read.
+function eddieOpenCamera() {
+    eddieCloseAttachMenu();
+    if (document.getElementById('eddieCamPage')) return;
+
+    var p = document.createElement('div');
+    p.id = 'eddieCamPage';
+    p.style.cssText = 'position:fixed;inset:0;z-index:9000;background:#000;display:flex;flex-direction:column;';
+    p.innerHTML =
+        '<div style="position:absolute;top:0;left:0;right:0;display:flex;justify-content:flex-end;padding:14px 16px;z-index:5;">' +
+            '<div onclick="eddieToggleCamFlash(this)" style="width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+                '<i id="eddieCamFlash" class="fa-solid fa-bolt-slash" style="color:rgba(255,255,255,0.6);font-size:17px;"></i></div>' +
+        '</div>' +
+        '<video id="eddieCamPreview" autoplay playsinline muted style="flex:1;width:100%;object-fit:cover;background:#000;"></video>' +
+        '<div style="flex-shrink:0;background:#000;padding:18px 0 calc(22px + env(safe-area-inset-bottom));">' +
+            '<div style="display:flex;align-items:center;justify-content:center;gap:44px;">' +
+                '<div onclick="eddieCloseCamera()" style="width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+                    '<i class="fa-solid fa-xmark" style="color:#fff;font-size:19px;"></i></div>' +
+                '<div onclick="eddieCapturePhoto()" style="width:74px;height:74px;border-radius:50%;background:#fff;border:4px solid rgba(255,255,255,0.35);cursor:pointer;"></div>' +
+                '<div onclick="eddieFlipCam()" style="width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+                    '<i class="fa-solid fa-camera-rotate" style="color:#fff;font-size:19px;"></i></div>' +
+            '</div>' +
+            '<div style="text-align:center;margin-top:14px;color:#FFD60A;font-size:13px;font-weight:700;letter-spacing:0.8px;">PHOTO</div>' +
+        '</div>';
+    document.body.appendChild(p);
+    window._eddieCamFront = false;
+    _eddieStartCam();
+}
+
+function _eddieStartCam() {
+    navigator.mediaDevices.getUserMedia({
+        video: { facingMode: window._eddieCamFront ? 'user' : 'environment',
+                 width: { ideal: 1440 }, height: { ideal: 1920 } },
+        audio: false
+    }).then(function (stream) {
+        window._eddieCamStream = stream;
+        var v = document.getElementById('eddieCamPreview');
+        if (v) {
+            v.srcObject = stream;
+            v.style.transform = window._eddieCamFront ? 'scaleX(-1)' : '';
+        }
+    }).catch(function () {
+        showToast('Camera permission needed');
+        eddieCloseCamera();
+    });
+}
+
+function eddieCloseCamera() {
+    if (window._eddieCamStream) {
+        window._eddieCamStream.getTracks().forEach(function (t) { t.stop(); });
+        window._eddieCamStream = null;
+    }
+    var p = document.getElementById('eddieCamPage');
+    if (p) p.remove();
+}
+
+function eddieFlipCam() {
+    window._eddieCamFront = !window._eddieCamFront;
+    if (window._eddieCamStream) {
+        window._eddieCamStream.getTracks().forEach(function (t) { t.stop(); });
+    }
+    _eddieStartCam();
+}
+
+function eddieToggleCamFlash(btn) {
+    var icon = document.getElementById('eddieCamFlash');
+    if (!icon) return;
+    var turningOn = icon.classList.contains('fa-bolt-slash');
+    var track = window._eddieCamStream && window._eddieCamStream.getVideoTracks()[0];
+    var caps = track && track.getCapabilities ? track.getCapabilities() : {};
+    if (!caps || !caps.torch) { showToast('No flash on this camera'); return; }
+    try {
+        track.applyConstraints({ advanced: [{ torch: turningOn }] });
+        icon.classList.replace(turningOn ? 'fa-bolt-slash' : 'fa-bolt',
+                               turningOn ? 'fa-bolt' : 'fa-bolt-slash');
+        icon.style.color = turningOn ? '#FFD60A' : 'rgba(255,255,255,0.6)';
+    } catch (e) { showToast('No flash on this camera'); }
+}
+
+function eddieCapturePhoto() {
+    var v = document.getElementById('eddieCamPreview');
+    if (!v || !v.videoWidth) { showToast('Camera not ready'); return; }
+    var c = document.createElement('canvas');
+    c.width = v.videoWidth; c.height = v.videoHeight;
+    var ctx = c.getContext('2d');
+    if (window._eddieCamFront) {   // un-mirror the selfie preview
+        ctx.translate(c.width, 0);
+        ctx.scale(-1, 1);
+    }
+    ctx.drawImage(v, 0, 0, c.width, c.height);
+    var data = c.toDataURL('image/jpeg', 0.85).split(',')[1] || '';
+    _eddie.attachments.push({ media_type: 'image/jpeg', data: data });
+    _eddieRenderAttachments();
+    triggerHaptic(15);
+    eddieCloseCamera();
+    showToast('Photo attached');
 }
 function eddieAttachChosen(input) {
     var files = Array.prototype.slice.call(input.files || []).slice(0, 4);
     input.value = '';
     files.forEach(function (file) {
-        if (!file.type.startsWith('image/')) { showToast('Images only for now'); return; }
-        if (file.size > 4 * 1024 * 1024) { showToast('That image is too large (4MB max)'); return; }
+        var isImage = file.type.startsWith('image/');
+        var isPdf = file.type === 'application/pdf';
+        if (!isImage && !isPdf) { showToast('Eddie can read images and PDFs'); return; }
+        if (file.size > 4 * 1024 * 1024) { showToast('That file is too large (4MB max)'); return; }
         var reader = new FileReader();
         reader.onload = function () {
             var b64 = String(reader.result).split(',')[1] || '';
@@ -43576,8 +44527,10 @@ function _eddieRenderAttachments() {
     if (!_eddie.attachments.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
     box.style.display = 'flex';
     box.innerHTML = _eddie.attachments.map(function (a, i) {
-        return '<div style="position:relative;">' +
-            '<img src="data:' + a.media_type + ';base64,' + a.data + '" style="width:54px;height:54px;object-fit:cover;border-radius:10px;display:block;">' +
+        var thumb = (a.media_type === 'application/pdf')
+            ? '<div style="width:54px;height:54px;border-radius:10px;background:rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-file-pdf" style="color:#FF453A;font-size:22px;"></i></div>'
+            : '<img src="data:' + a.media_type + ';base64,' + a.data + '" style="width:54px;height:54px;object-fit:cover;border-radius:10px;display:block;">';
+        return '<div style="position:relative;">' + thumb +
             '<button onclick="eddieDropAttachment(' + i + ')" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:#000;border:1px solid rgba(255,255,255,0.3);color:#fff;font-size:10px;cursor:pointer;line-height:1;">✕</button>' +
         '</div>';
     }).join('');
@@ -43625,7 +44578,10 @@ async function _eddieAsk(text, attachments) {
         var resp = await fetch('/api/eddie/chat/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-            body: JSON.stringify({ message: text, history: history, attachments: attachments }),
+            body: JSON.stringify({
+                message: text, history: history, attachments: attachments,
+                conversation_id: _eddie.convoId
+            }),
             signal: _eddie.abort.signal
         });
 
@@ -43671,7 +44627,8 @@ async function _eddieAsk(text, attachments) {
 }
 
 function _eddieEvent(turn, ev) {
-    if (ev.type === 'thinking') { turn.thinking += ev.text || ''; turn.status = 'thinking'; }
+    if (ev.type === 'conversation') { _eddie.convoId = ev.id || _eddie.convoId; }
+    else if (ev.type === 'thinking') { turn.thinking += ev.text || ''; turn.status = 'thinking'; }
     else if (ev.type === 'searching') { turn.status = 'searching'; }
     else if (ev.type === 'text') { turn.content += ev.text || ''; turn.status = 'writing'; }
     else if (ev.type === 'sources') { turn.sources = ev.sources || []; }
@@ -43730,15 +44687,181 @@ function eddieShare(i) {
         navigator.clipboard.writeText(text).then(function () { showToast('Copied to share'); });
     }
 }
-function eddiePlay(i) {
-    var text = _eddieTurnText(i);
-    if (!text) return;
+// ---- Read aloud ----------------------------------------------------------
+//
+// The default system voice is usually a decades-old formant synth, which is
+// why it sounded like a robot. Browsers now ship neural voices alongside it,
+// but only if you go looking: they are never the default, and they arrive
+// asynchronously after voiceschanged fires.
+
+// Ranked best first. Matched against the voice name, case-insensitively.
+var _EDDIE_VOICE_RANK = [
+    'natural',      // Microsoft Aria/Jenny Online (Natural) — best on Windows
+    'neural',
+    'online',
+    'google',       // Google UK/US English — best on Chrome and Android
+    'premium',
+    'enhanced',     // Apple's better-than-default tier
+    'siri',
+    'samantha'      // decent macOS/iOS fallback
+];
+
+function _eddieVoices() {
+    // Voices populate asynchronously; the first call often returns [].
+    return new Promise(function (resolve) {
+        var got = window.speechSynthesis.getVoices();
+        if (got && got.length) { resolve(got); return; }
+        var done = false;
+        function finish() {
+            if (done) return;
+            done = true;
+            resolve(window.speechSynthesis.getVoices() || []);
+        }
+        window.speechSynthesis.addEventListener('voiceschanged', finish, { once: true });
+        setTimeout(finish, 1200);   // some browsers never fire the event
+    });
+}
+
+async function _eddiePickVoice() {
+    if (window._eddieVoice !== undefined) return window._eddieVoice;
+    var voices = await _eddieVoices();
+    if (!voices.length) { window._eddieVoice = null; return null; }
+
+    var want = (navigator.language || 'en-US').toLowerCase();
+    var lang = want.split('-')[0];
+
+    function score(v) {
+        var name = (v.name || '').toLowerCase();
+        var rank = _EDDIE_VOICE_RANK.findIndex(function (k) { return name.indexOf(k) > -1; });
+        if (rank < 0) rank = _EDDIE_VOICE_RANK.length;
+        var s = (_EDDIE_VOICE_RANK.length - rank) * 10;
+        var vl = (v.lang || '').toLowerCase();
+        if (vl === want) s += 6;              // exact locale, e.g. en-ZA
+        else if (vl.split('-')[0] === lang) s += 3;
+        else s -= 20;                          // wrong language reads badly
+        if (v.localService === false) s += 2;  // cloud voices are the good ones
+        return s;
+    }
+
+    var best = voices.slice().sort(function (a, b) { return score(b) - score(a); })[0];
+    window._eddieVoice = best || null;
+    return window._eddieVoice;
+}
+
+// Speech reads punctuation and markup literally, so strip what Eddie writes
+// for the eye before handing it to the ear.
+function _eddieSpeakable(text) {
+    return String(text || '')
+        .replace(/```[\s\S]*?```/g, ' code block. ')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/^\s*[-*]\s+/gm, ', ')
+        .replace(/https?:\/\/\S+/g, ' link ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+// Chrome silently truncates long utterances, so feed it sentence-sized pieces.
+function _eddieChunks(text, max) {
+    var out = [], buf = '';
+    var pieces = text.match(/[^.!?]+[.!?]*\s*/g) || [text];
+    pieces.forEach(function (p) {
+        if ((buf + p).length > max && buf) { out.push(buf.trim()); buf = ''; }
+        buf += p;
+    });
+    if (buf.trim()) out.push(buf.trim());
+    return out;
+}
+
+function _eddieSpeakIcon(on) {
+    document.querySelectorAll('.eddie-act i.fa-volume-high, .eddie-act i.fa-stop')
+        .forEach(function (ic) {
+            ic.className = on ? 'fa-solid fa-stop' : 'fa-solid fa-volume-high';
+        });
+}
+
+// Server-side neural voice. Returns true if it played, false to fall back.
+// One failure disables it for the session: if the model's terms are not
+// accepted, every later attempt would fail the same way after the same wait.
+async function _eddieSpeakServer(text) {
+    if (window._eddieServerVoiceOff) return false;
     try {
-        if (window.speechSynthesis.speaking) { window.speechSynthesis.cancel(); return; }
-        var u = new SpeechSynthesisUtterance(text);
-        u.rate = 1.02;
-        window.speechSynthesis.speak(u);
-    } catch (e) { showToast('Read aloud is not available here'); }
+        var token = await _eddieToken();
+        var r = await fetch('/api/eddie/speak/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json',
+                       'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ text: text.slice(0, 1200) })
+        });
+        if (!r.ok) { window._eddieServerVoiceOff = true; return false; }
+
+        // The server returns a URL, not bytes, so a replay is a CDN hit that
+        // costs no synthesis quota. The browser caches it too.
+        var j = await r.json().catch(function () { return {}; });
+        if (!j.url) { window._eddieServerVoiceOff = true; return false; }
+
+        var audio = new Audio(j.url);
+        window._eddieAudio = audio;
+        audio.onended = function () { _eddieSpeakIcon(false); };
+        audio.onerror = function () { _eddieSpeakIcon(false); };
+        await audio.play();
+        return true;
+    } catch (e) {
+        window._eddieServerVoiceOff = true;
+        return false;
+    }
+}
+
+function _eddieStopSpeech() {
+    try { window.speechSynthesis.cancel(); } catch (e) {}
+    if (window._eddieAudio) {
+        try { window._eddieAudio.pause(); } catch (e) {}
+        window._eddieAudio = null;
+    }
+    _eddieSpeakIcon(false);
+}
+
+async function eddiePlay(i) {
+    var text = _eddieSpeakable(_eddieTurnText(i));
+    if (!text) return;
+
+    var speaking = (window._eddieAudio && !window._eddieAudio.paused) ||
+                   ('speechSynthesis' in window &&
+                    (window.speechSynthesis.speaking || window.speechSynthesis.pending));
+    if (speaking) { _eddieStopSpeech(); return; }
+
+    _eddieSpeakIcon(true);
+
+    // Natural voice first; the browser's own synth is the safety net.
+    if (await _eddieSpeakServer(text)) return;
+
+    if (!('speechSynthesis' in window)) {
+        _eddieSpeakIcon(false);
+        showToast('Read aloud is not available here');
+        return;
+    }
+    try {
+        var voice = await _eddiePickVoice();
+        var chunks = _eddieChunks(text, 200);
+        _eddieSpeakIcon(true);
+
+        chunks.forEach(function (chunk, idx) {
+            var u = new SpeechSynthesisUtterance(chunk);
+            if (voice) { u.voice = voice; u.lang = voice.lang; }
+            // Slightly under natural pace reads as considered rather than rushed.
+            u.rate = 0.97;
+            u.pitch = 1.0;
+            u.volume = 1.0;
+            if (idx === chunks.length - 1) {
+                u.onend = function () { _eddieSpeakIcon(false); };
+                u.onerror = function () { _eddieSpeakIcon(false); };
+            }
+            window.speechSynthesis.speak(u);
+        });
+    } catch (e) {
+        _eddieSpeakIcon(false);
+        showToast('Read aloud is not available here');
+    }
 }
 function eddieRetry(i) {
     if (_eddie.busy) { showToast('Eddie is still replying'); return; }
@@ -43759,3 +44882,713 @@ function eddieRate(i, value) {
     showToast(t.rating === 1 ? 'Thanks for the feedback' : (t.rating === -1 ? 'Noted, thanks' : 'Feedback cleared'));
 }
 
+
+// ==========================================================================
+// MANAGE GROUP
+// One scrolling page. Every counter reads real rows, and every row opens
+// something that does real work.
+// ==========================================================================
+var _mg = { groupId: null, group: null, counts: {} };
+
+function _mgPage(id, title, bodyHTML, onBack) {
+    var old = document.getElementById(id);
+    if (old) old.remove();
+    var p = document.createElement('div');
+    p.id = id;
+    p.style.cssText = 'position:absolute;inset:0;z-index:8200;background:var(--bg-secondary,#f0f2f5);display:flex;flex-direction:column;';
+    p.innerHTML =
+        '<div style="display:flex;align-items:center;padding:14px 16px;flex-shrink:0;background:var(--bg-primary,#fff);">' +
+            '<button onclick="' + (onBack || ("document.getElementById('" + id + "').remove()")) + '" ' +
+                'style="background:none;border:none;font-size:20px;color:var(--text-primary,#000);cursor:pointer;padding:0;width:40px;text-align:left;"><i class="fa-solid fa-chevron-left"></i></button>' +
+            '<b style="flex:1;text-align:center;font-size:19px;color:var(--text-primary,#000);">' + escapeHtml(title) + '</b>' +
+            '<div style="width:40px;"></div>' +
+        '</div>' +
+        '<div style="flex:1;overflow-y:auto;padding-bottom:30px;">' + bodyHTML + '</div>';
+    (document.getElementById('app') || document.body).appendChild(p);
+    hideNavBar && hideNavBar();
+    return p;
+}
+
+function _mgCard(inner, pad) {
+    return '<div style="background:var(--bg-primary,#fff);border-radius:12px;margin:10px 10px 0;padding:' +
+        (pad || '6px 0') + ';">' + inner + '</div>';
+}
+
+function _mgItem(icon, title, sub, right, onclick) {
+    return '<div ' + (onclick ? 'onclick="' + onclick + '"' : '') +
+        ' style="display:flex;align-items:center;gap:15px;padding:13px 16px;cursor:' + (onclick ? 'pointer' : 'default') + ';">' +
+        '<i class="fa-solid ' + icon + '" style="font-size:20px;width:26px;text-align:center;color:var(--text-primary,#000);"></i>' +
+        '<div style="flex:1;min-width:0;">' +
+            '<div style="font-size:17px;font-weight:600;color:var(--text-primary,#000);">' + escapeHtml(title) + '</div>' +
+            (sub ? '<div style="font-size:14px;color:#65676b;line-height:1.3;margin-top:1px;">' + escapeHtml(sub) + '</div>' : '') +
+        '</div>' +
+        (right || '') +
+    '</div>';
+}
+
+function _mgSectionTitle(t) {
+    return '<div style="font-size:20px;font-weight:800;color:var(--text-primary,#000);padding:14px 16px 8px;">' + escapeHtml(t) + '</div>';
+}
+
+async function openManageGroup(groupId) {
+    _mg = { groupId: groupId, group: null, counts: {} };
+    _mgPage('mgPage', 'Manage group',
+        '<div style="text-align:center;padding:40px;color:#999;"><i class="fa-solid fa-spinner fa-spin"></i></div>');
+    if (!window.sb) return;
+
+    var g = (await sb.from('groups').select('*').eq('id', groupId).single()).data;
+    if (!g) { showToast('Group not found'); return; }
+    _mg.group = g;
+
+    var counts = await _mgLoadCounts(groupId);
+    _mg.counts = counts;
+    _mgRender();
+}
+
+// Real counts. Reports are stored generically, so group content is resolved
+// first and the reports are matched against those ids.
+async function _mgLoadCounts(groupId) {
+    var out = { reported: 0, pending: 0, alerts: 0, spam: 0, members: 0, rules: 0, scheduled: 0 };
+    try {
+        var posts = (await sb.from('posts').select('id,approved').eq('group_id', groupId)).data || [];
+        var ids = posts.map(function (p) { return p.id; });
+        out.pending = posts.filter(function (p) { return p.approved === false; }).length;
+
+        if (ids.length) {
+            var reps = (await sb.from('reports')
+                .select('id,reason,status')
+                .eq('target_type', 'post')
+                .in('target_id', ids)).data || [];
+            var open = reps.filter(function (r) { return (r.status || 'pending') !== 'resolved'; });
+            out.reported = open.length;
+            out.spam = open.filter(function (r) { return /spam/i.test(r.reason || ''); }).length;
+        }
+
+        var mem = await sb.from('group_members').select('id', { count: 'exact', head: true }).eq('group_id', groupId);
+        out.members = mem.count || 0;
+
+        var rules = await sb.from('group_admin_rules').select('id', { count: 'exact', head: true })
+            .eq('group_id', groupId).eq('enabled', true);
+        out.rules = rules.count || 0;
+
+        // Anything Admin Assist acted on automatically.
+        var alerts = await sb.from('group_activity_log').select('id', { count: 'exact', head: true })
+            .eq('group_id', groupId).like('action', 'auto_%');
+        out.alerts = alerts.count || 0;
+    } catch (e) { /* counts stay at zero rather than showing a wrong number */ }
+    return out;
+}
+
+function _mgCountRight(n) {
+    return '<span style="font-size:17px;color:#65676b;flex-shrink:0;">' + n + '</span>';
+}
+
+function _mgRender() {
+    var g = _mg.group, c = _mg.counts;
+    var body = document.querySelector('#mgPage > div:last-child');
+    if (!body || !g) return;
+
+    var cover = g.cover_url || (typeof _gsPresetCover === 'function' ? _gsPresetCover(0) : '');
+    var privacyLabel = (g.privacy || 'Public') + ' group';
+    var rulesSub = c.rules ? (c.rules + (c.rules === 1 ? ' rule active' : ' rules active')) : 'No rules yet';
+
+    body.innerHTML =
+        // Group header row
+        '<div onclick="mgOpenGroupPage()" style="display:flex;align-items:center;gap:13px;padding:14px 16px;background:var(--bg-primary,#fff);cursor:pointer;">' +
+            '<img src="' + escapeHtml(cover) + '" style="width:52px;height:52px;border-radius:10px;object-fit:cover;flex-shrink:0;">' +
+            '<div style="flex:1;min-width:0;">' +
+                '<div style="font-size:19px;font-weight:800;color:var(--text-primary,#000);">' + escapeHtml(g.name) + '</div>' +
+                '<div style="font-size:15px;color:#65676b;">' + escapeHtml(privacyLabel) + ' · ' + c.members + ' member' + (c.members !== 1 ? 's' : '') + '</div>' +
+            '</div>' +
+            '<i class="fa-solid fa-chevron-right" style="color:#8a8d91;font-size:15px;"></i>' +
+        '</div>' +
+
+        // Admin Assist suggestion (only while no rule exists)
+        (c.rules ? '' :
+        _mgCard(
+            '<div style="display:flex;align-items:flex-start;gap:12px;padding:14px 14px 0;">' +
+                '<i class="fa-solid fa-user-gear" style="color:#0A84FF;font-size:22px;margin-top:2px;"></i>' +
+                '<div style="flex:1;min-width:0;">' +
+                    '<div style="font-size:18px;font-weight:700;color:var(--text-primary,#000);">New Admin Assist criteria</div>' +
+                    '<div style="font-size:15px;color:#65676b;line-height:1.35;margin-top:3px;">Move posts and comments reported three times by members to the review queue.</div>' +
+                '</div>' +
+                '<div onclick="event.stopPropagation();mgDismissAssist(this)" style="width:32px;height:32px;border-radius:50%;background:var(--input-bg,#e4e6eb);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;">' +
+                    '<i class="fa-solid fa-xmark" style="color:#050505;font-size:14px;"></i></div>' +
+            '</div>' +
+            '<div style="padding:14px;">' +
+                '<button onclick="mgCreateDefaultRule()" style="width:100%;padding:12px;border-radius:8px;border:none;background:#0A84FF;color:#fff;font-size:17px;font-weight:700;cursor:pointer;">Set up</button>' +
+            '</div>', '0')) +
+
+        // Action items
+        _mgCard(
+            _mgSectionTitle('Action items') +
+            _mgItem('fa-comment-slash', 'Reported content', '', _mgCountRight(c.reported), 'mgOpenReported()') +
+            _mgItem('fa-clock-rotate-left', 'Pending posts', '', _mgCountRight(c.pending), 'mgOpenPending()') +
+            _mgItem('fa-comment-dots', 'Moderation alerts', '', _mgCountRight(c.alerts), 'mgOpenAlerts()') +
+            _mgItem('fa-triangle-exclamation', 'Potential spam', '', _mgCountRight(c.spam), 'mgOpenSpam()')
+        ) +
+
+        // Tool shortcuts
+        _mgCard(
+            '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 8px;">' +
+                '<b style="font-size:20px;color:var(--text-primary,#000);">Tool shortcuts</b>' +
+                '<span onclick="showToast(\'All tools are listed below\')" style="color:#0A84FF;font-size:16px;font-weight:600;cursor:pointer;">See all</span>' +
+            '</div>' +
+            _mgItem('fa-user-gear', 'Admin Assist', rulesSub, '', 'mgOpenAdminAssist()') +
+            _mgItem('fa-chart-simple', 'Insights', '', '', 'mgOpenInsights()') +
+            _mgItem('fa-award', 'Community roles', '', '', 'mgOpenRoles()') +
+            _mgItem('fa-users', 'People', '', '', 'mgOpenPeople()') +
+            _mgItem('fa-clock', 'Activity log', '', '', 'mgOpenActivity()') +
+            _mgItem('fa-calendar-days', 'Scheduled posts', '', '', 'mgOpenScheduled()') +
+            _mgItem('fa-shield-halved', 'Group status', '', '', 'mgOpenStatus()')
+        ) +
+
+        // Settings
+        _mgCard(
+            _mgSectionTitle('Settings') +
+            _mgItem('fa-gear', 'Group settings', 'Manage discussions, permissions and roles', '', 'mgOpenSettings()') +
+            _mgItem('fa-user-gear', 'Personal settings', 'Change notifications and see your content', '', 'mgOpenPersonal()')
+        ) +
+
+        // Support
+        _mgCard(
+            _mgSectionTitle('Support') +
+            _mgItem('fa-circle-question', 'Help Centre', '', '', 'mgOpenHelp()') +
+            _mgItem('fa-lightbulb', 'Groups Hub', '', '', 'mgOpenHub()')
+        ) +
+
+        // Bottom actions
+        '<div style="display:flex;justify-content:center;gap:34px;padding:26px 16px 10px;">' +
+            _mgBigAction('fa-share', 'Share group', 'mgShare()') +
+            _mgBigAction(g.is_paused ? 'fa-play' : 'fa-pause', g.is_paused ? 'Resume group' : 'Pause group', 'mgTogglePause()') +
+            _mgBigAction('fa-right-from-bracket', 'Delete group', 'mgDelete()') +
+        '</div>';
+}
+
+function _mgBigAction(icon, label, fn) {
+    return '<div onclick="' + fn + '" style="text-align:center;cursor:pointer;width:96px;">' +
+        '<div style="width:56px;height:56px;border-radius:50%;background:var(--bg-primary,#fff);display:flex;align-items:center;justify-content:center;margin:0 auto 8px;">' +
+            '<i class="fa-solid ' + icon + '" style="font-size:20px;color:var(--text-primary,#000);"></i></div>' +
+        '<div style="font-size:16px;font-weight:600;color:var(--text-primary,#000);line-height:1.2;">' + escapeHtml(label) + '</div>' +
+    '</div>';
+}
+
+function mgOpenGroupPage() {
+    var p = document.getElementById('mgPage');
+    if (p) p.remove();
+    showNavBar && showNavBar();
+    if (typeof openGroup === 'function') openGroup(_mg.groupId);
+}
+
+async function _mgLog(action, detail) {
+    try {
+        await sb.from('group_activity_log').insert({
+            group_id: _mg.groupId, actor_id: currentUser && currentUser.id,
+            action: action, detail: detail || null
+        });
+    } catch (e) {}
+}
+
+// ---- Admin Assist ----
+function mgDismissAssist(el) {
+    var card = el.closest('div[style*="border-radius:12px"]');
+    if (card) card.style.display = 'none';
+}
+
+async function mgCreateDefaultRule() {
+    try {
+        await sb.from('group_admin_rules').insert({
+            group_id: _mg.groupId,
+            criterion: 'reported_at_least',
+            action: 'move_to_review_queue',
+            threshold: 3,
+            enabled: true,
+            created_by: currentUser && currentUser.id
+        });
+        await _mgLog('rule_created', 'Reported 3+ times moves to the review queue');
+        showToast('Admin Assist rule created');
+        openManageGroup(_mg.groupId);
+    } catch (e) { showToast('Could not create the rule'); }
+}
+
+async function mgOpenAdminAssist() {
+    var rules = [];
+    try {
+        rules = (await sb.from('group_admin_rules').select('*').eq('group_id', _mg.groupId)
+            .order('created_at', { ascending: false })).data || [];
+    } catch (e) {}
+    var CRITERIA = {
+        reported_at_least: 'Reported by members at least',
+        contains_link: 'Contains a link, from members joined under',
+        new_member_post: 'Posted by a member who joined under'
+    };
+    var ACTIONS = {
+        move_to_review_queue: 'Move to the review queue',
+        auto_decline: 'Decline automatically',
+        auto_approve: 'Approve automatically'
+    };
+    _mgPage('mgAssist', 'Admin Assist',
+        _mgCard(
+            '<div style="padding:14px 16px;font-size:15px;color:#65676b;line-height:1.4;">' +
+                'Rules run automatically on new posts and comments. Anything a rule acts on shows up under Moderation alerts.' +
+            '</div>') +
+        _mgCard(rules.length
+            ? rules.map(function (r) {
+                return '<div style="display:flex;align-items:center;gap:14px;padding:13px 16px;">' +
+                    '<i class="fa-solid fa-wand-magic-sparkles" style="font-size:18px;color:#0A84FF;width:24px;text-align:center;"></i>' +
+                    '<div style="flex:1;min-width:0;">' +
+                        '<div style="font-size:16px;font-weight:600;color:var(--text-primary,#000);">' +
+                            escapeHtml((CRITERIA[r.criterion] || r.criterion) + ' ' + r.threshold) + '</div>' +
+                        '<div style="font-size:14px;color:#65676b;">' + escapeHtml(ACTIONS[r.action] || r.action) + '</div>' +
+                    '</div>' +
+                    '<div onclick="mgToggleRule(\'' + r.id + '\',' + (!r.enabled) + ')" style="width:48px;height:28px;border-radius:15px;background:' +
+                        (r.enabled ? '#0A84FF' : '#c7c7cc') + ';position:relative;cursor:pointer;flex-shrink:0;">' +
+                        '<div style="position:absolute;top:2px;left:' + (r.enabled ? '22px' : '2px') + ';width:24px;height:24px;border-radius:50%;background:#fff;"></div></div>' +
+                    '<i onclick="mgDeleteRule(\'' + r.id + '\')" class="fa-solid fa-trash-can" style="color:#8a8d91;font-size:15px;cursor:pointer;padding:6px;"></i>' +
+                '</div>';
+            }).join('')
+            : '<div style="padding:26px 16px;text-align:center;color:#8a8d91;font-size:15px;">No rules yet</div>') +
+        _mgCard(_mgItem('fa-plus', 'Add a rule', 'Reported 3+ times moves to review', '', 'mgCreateDefaultRule()')),
+        "document.getElementById('mgAssist').remove()");
+}
+
+async function mgToggleRule(id, enabled) {
+    try {
+        await sb.from('group_admin_rules').update({ enabled: enabled }).eq('id', id);
+        mgOpenAdminAssist();
+    } catch (e) { showToast('Could not update the rule'); }
+}
+async function mgDeleteRule(id) {
+    try {
+        await sb.from('group_admin_rules').delete().eq('id', id);
+        await _mgLog('rule_deleted', null);
+        mgOpenAdminAssist();
+    } catch (e) { showToast('Could not delete the rule'); }
+}
+
+// ---- Action item lists ----
+async function _mgPostList(title, filterFn, emptyText) {
+    var rows = [];
+    try {
+        var posts = (await sb.from('posts')
+            .select('id,text_content,created_at,approved,user_id')
+            .eq('group_id', _mg.groupId).order('created_at', { ascending: false }).limit(50)).data || [];
+        rows = await filterFn(posts);
+    } catch (e) {}
+    _mgPage('mgList', title,
+        _mgCard(rows.length ? rows.map(function (p) {
+            return '<div style="padding:13px 16px;border-bottom:0.5px solid var(--border-color,#eee);">' +
+                '<div style="font-size:15px;color:var(--text-primary,#000);line-height:1.4;">' +
+                    escapeHtml((p.text_content || '(no text)').slice(0, 160)) + '</div>' +
+                '<div style="display:flex;gap:10px;margin-top:10px;">' +
+                    '<button onclick="mgApprovePost(\'' + p.id + '\')" style="flex:1;padding:9px;border-radius:8px;border:none;background:#0A84FF;color:#fff;font-size:15px;font-weight:600;cursor:pointer;">Approve</button>' +
+                    '<button onclick="mgRemovePost(\'' + p.id + '\')" style="flex:1;padding:9px;border-radius:8px;border:none;background:var(--input-bg,#e4e6eb);color:#050505;font-size:15px;font-weight:600;cursor:pointer;">Remove</button>' +
+                '</div></div>';
+        }).join('') : '<div style="padding:34px 16px;text-align:center;color:#8a8d91;font-size:15px;">' + escapeHtml(emptyText) + '</div>'),
+        "document.getElementById('mgList').remove()");
+}
+
+function mgOpenPending() {
+    return _mgPostList('Pending posts', async function (posts) {
+        return posts.filter(function (p) { return p.approved === false; });
+    }, 'Nothing waiting for approval');
+}
+
+async function _mgReportedIds(spamOnly) {
+    var posts = (await sb.from('posts').select('id').eq('group_id', _mg.groupId)).data || [];
+    var ids = posts.map(function (p) { return p.id; });
+    if (!ids.length) return [];
+    var reps = (await sb.from('reports').select('target_id,reason,status')
+        .eq('target_type', 'post').in('target_id', ids)).data || [];
+    return reps.filter(function (r) {
+        if ((r.status || 'pending') === 'resolved') return false;
+        return spamOnly ? /spam/i.test(r.reason || '') : true;
+    }).map(function (r) { return r.target_id; });
+}
+
+function mgOpenReported() {
+    return _mgPostList('Reported content', async function (posts) {
+        var ids = await _mgReportedIds(false);
+        return posts.filter(function (p) { return ids.indexOf(p.id) >= 0; });
+    }, 'Nothing has been reported');
+}
+
+function mgOpenSpam() {
+    return _mgPostList('Potential spam', async function (posts) {
+        var ids = await _mgReportedIds(true);
+        return posts.filter(function (p) { return ids.indexOf(p.id) >= 0; });
+    }, 'No suspected spam');
+}
+
+async function mgApprovePost(id) {
+    try {
+        await sb.from('posts').update({ approved: true }).eq('id', id);
+        await _mgLog('post_approved', id);
+        showToast('Post approved');
+        var l = document.getElementById('mgList'); if (l) l.remove();
+        openManageGroup(_mg.groupId);
+    } catch (e) { showToast('Could not approve'); }
+}
+async function mgRemovePost(id) {
+    try {
+        await sb.from('posts').delete().eq('id', id);
+        await _mgLog('post_removed', id);
+        showToast('Post removed');
+        var l = document.getElementById('mgList'); if (l) l.remove();
+        openManageGroup(_mg.groupId);
+    } catch (e) { showToast('Could not remove'); }
+}
+
+async function mgOpenAlerts() {
+    var rows = [];
+    try {
+        rows = (await sb.from('group_activity_log').select('*')
+            .eq('group_id', _mg.groupId).like('action', 'auto_%')
+            .order('created_at', { ascending: false }).limit(50)).data || [];
+    } catch (e) {}
+    _mgPage('mgList', 'Moderation alerts',
+        _mgCard(rows.length ? rows.map(_mgLogRow).join('')
+            : '<div style="padding:34px 16px;text-align:center;color:#8a8d91;font-size:15px;">Nothing has been auto-moderated yet</div>'),
+        "document.getElementById('mgList').remove()");
+}
+
+function _mgLogRow(r) {
+    var when = '';
+    try { when = new Date(r.created_at).toLocaleString(); } catch (e) {}
+    return '<div style="padding:12px 16px;border-bottom:0.5px solid var(--border-color,#eee);">' +
+        '<div style="font-size:16px;color:var(--text-primary,#000);">' + escapeHtml((r.action || '').replace(/_/g, ' ')) + '</div>' +
+        (r.detail ? '<div style="font-size:14px;color:#65676b;margin-top:2px;">' + escapeHtml(r.detail) + '</div>' : '') +
+        '<div style="font-size:13px;color:#8a8d91;margin-top:3px;">' + escapeHtml(when) + '</div></div>';
+}
+
+// ---- Tools ----
+async function mgOpenInsights() {
+    var s = { members: _mg.counts.members || 0, posts: 0, week: 0, joinedWeek: 0 };
+    try {
+        var since = new Date(Date.now() - 7 * 864e5).toISOString();
+        var pc = await sb.from('posts').select('id', { count: 'exact', head: true }).eq('group_id', _mg.groupId);
+        s.posts = pc.count || 0;
+        var wc = await sb.from('posts').select('id', { count: 'exact', head: true })
+            .eq('group_id', _mg.groupId).gte('created_at', since);
+        s.week = wc.count || 0;
+        var jc = await sb.from('group_members').select('id', { count: 'exact', head: true })
+            .eq('group_id', _mg.groupId).gte('joined_at', since);
+        s.joinedWeek = jc.count || 0;
+    } catch (e) {}
+    function stat(label, value) {
+        return '<div style="flex:1;text-align:center;padding:18px 6px;">' +
+            '<div style="font-size:27px;font-weight:800;color:var(--text-primary,#000);">' + value + '</div>' +
+            '<div style="font-size:14px;color:#65676b;margin-top:3px;">' + escapeHtml(label) + '</div></div>';
+    }
+    _mgPage('mgInsights', 'Insights',
+        _mgCard('<div style="display:flex;">' + stat('Members', s.members) + stat('Posts', s.posts) + '</div>') +
+        _mgCard('<div style="display:flex;">' + stat('Posts this week', s.week) + stat('New members', s.joinedWeek) + '</div>') +
+        _mgCard('<div style="padding:16px;font-size:15px;color:#65676b;line-height:1.4;">Counts come straight from the group. They update as people post and join.</div>'),
+        "document.getElementById('mgInsights').remove()");
+}
+
+async function _mgMembers() {
+    var rows = (await sb.from('group_members').select('id,user_id,role,joined_at')
+        .eq('group_id', _mg.groupId).order('joined_at', { ascending: true }).limit(100)).data || [];
+    if (!rows.length) return [];
+    var ids = rows.map(function (r) { return r.user_id; });
+    var users = (await sb.from('users').select('id,username,full_name,avatar_url').in('id', ids)).data || [];
+    var byId = {};
+    users.forEach(function (u) { byId[u.id] = u; });
+    return rows.map(function (r) { return Object.assign({}, r, { user: byId[r.user_id] || {} }); });
+}
+
+function _mgPersonRow(m, actions) {
+    var name = m.user.full_name || m.user.username || 'Member';
+    var av = m.user.avatar_url
+        ? '<img src="' + escapeHtml(m.user.avatar_url) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;">'
+        : '<div style="width:44px;height:44px;border-radius:50%;background:#c9c9cf;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;">' + escapeHtml(name.charAt(0).toUpperCase()) + '</div>';
+    return '<div style="display:flex;align-items:center;gap:13px;padding:11px 16px;">' + av +
+        '<div style="flex:1;min-width:0;">' +
+            '<div style="font-size:17px;color:var(--text-primary,#000);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(name) + '</div>' +
+            '<div style="font-size:14px;color:#65676b;text-transform:capitalize;">' + escapeHtml(m.role || 'member') + '</div>' +
+        '</div>' + (actions || '') + '</div>';
+}
+
+async function mgOpenPeople() {
+    var members = [];
+    try { members = await _mgMembers(); } catch (e) {}
+    _mgPage('mgPeople', 'People',
+        _mgCard(members.length ? members.map(function (m) {
+            var isAdmin = m.role === 'admin';
+            return _mgPersonRow(m,
+                isAdmin ? '<span style="font-size:14px;color:#8a8d91;">Admin</span>'
+                        : '<i onclick="mgMemberMenu(\'' + m.id + '\',\'' + m.user_id + '\',\'' + escapeHtml(m.role || 'member') + '\')" class="fa-solid fa-ellipsis" style="color:#65676b;font-size:18px;cursor:pointer;padding:8px;"></i>');
+        }).join('') : '<div style="padding:30px;text-align:center;color:#8a8d91;">No members yet</div>'),
+        "document.getElementById('mgPeople').remove()");
+}
+
+function mgMemberMenu(rowId, userId, role) {
+    var sheet = document.createElement('div');
+    sheet.id = 'mgMemberSheet';
+    sheet.style.cssText = 'position:absolute;inset:0;z-index:8400;background:rgba(0,0,0,0.35);display:flex;align-items:flex-end;';
+    sheet.innerHTML = '<div style="width:100%;background:var(--bg-primary,#fff);border-radius:16px 16px 0 0;padding:10px 0 calc(20px + env(safe-area-inset-bottom));">' +
+        '<div style="width:38px;height:5px;border-radius:3px;background:#c4c4c6;margin:0 auto 10px;"></div>' +
+        _mgItem('fa-user-shield', role === 'moderator' ? 'Remove as moderator' : 'Make moderator', '', '',
+                "mgSetRole('" + rowId + "','" + (role === 'moderator' ? 'member' : 'moderator') + "')") +
+        _mgItem('fa-user-minus', 'Remove from group', '', '', "mgRemoveMember('" + rowId + "')") +
+        _mgItem('fa-xmark', 'Cancel', '', '', "document.getElementById('mgMemberSheet').remove()") +
+        '</div>';
+    sheet.addEventListener('click', function (e) { if (e.target === sheet) sheet.remove(); });
+    (document.getElementById('mgPeople') || document.body).appendChild(sheet);
+}
+
+async function mgSetRole(rowId, role) {
+    try {
+        await sb.from('group_members').update({ role: role }).eq('id', rowId);
+        await _mgLog('role_changed', role);
+        var s = document.getElementById('mgMemberSheet'); if (s) s.remove();
+        showToast('Role updated');
+        mgOpenPeople();
+    } catch (e) { showToast('Could not update the role'); }
+}
+
+async function mgRemoveMember(rowId) {
+    try {
+        await sb.from('group_members').delete().eq('id', rowId);
+        await _mgLog('member_removed', null);
+        var s = document.getElementById('mgMemberSheet'); if (s) s.remove();
+        showToast('Member removed');
+        mgOpenPeople();
+    } catch (e) { showToast('Could not remove the member'); }
+}
+
+async function mgOpenRoles() {
+    var members = [];
+    try { members = await _mgMembers(); } catch (e) {}
+    var staff = members.filter(function (m) { return m.role === 'admin' || m.role === 'moderator'; });
+    _mgPage('mgRoles', 'Community roles',
+        _mgCard(_mgSectionTitle('Admins and moderators') +
+            (staff.length ? staff.map(function (m) { return _mgPersonRow(m, ''); }).join('')
+                          : '<div style="padding:24px 16px;text-align:center;color:#8a8d91;">No moderators yet</div>')) +
+        _mgCard(_mgItem('fa-users', 'Manage people', 'Promote a member to moderator', '', 'mgOpenPeople()')),
+        "document.getElementById('mgRoles').remove()");
+}
+
+async function mgOpenActivity() {
+    var rows = [];
+    try {
+        rows = (await sb.from('group_activity_log').select('*').eq('group_id', _mg.groupId)
+            .order('created_at', { ascending: false }).limit(100)).data || [];
+    } catch (e) {}
+    _mgPage('mgActivity', 'Activity log',
+        _mgCard(rows.length ? rows.map(_mgLogRow).join('')
+            : '<div style="padding:34px 16px;text-align:center;color:#8a8d91;font-size:15px;">Nothing logged yet</div>'),
+        "document.getElementById('mgActivity').remove()");
+}
+
+async function mgOpenScheduled() {
+    var rows = [];
+    try {
+        rows = (await sb.from('posts').select('id,text_content,scheduled_at')
+            .eq('group_id', _mg.groupId).not('scheduled_at', 'is', null)
+            .gte('scheduled_at', new Date().toISOString())
+            .order('scheduled_at', { ascending: true }).limit(50)).data || [];
+    } catch (e) { /* the column may not exist on this schema */ }
+    _mgPage('mgSched', 'Scheduled posts',
+        _mgCard(rows.length ? rows.map(function (p) {
+            var when = '';
+            try { when = new Date(p.scheduled_at).toLocaleString(); } catch (e) {}
+            return '<div style="padding:13px 16px;border-bottom:0.5px solid var(--border-color,#eee);">' +
+                '<div style="font-size:15px;color:var(--text-primary,#000);">' + escapeHtml((p.text_content || '(no text)').slice(0, 140)) + '</div>' +
+                '<div style="font-size:13px;color:#8a8d91;margin-top:4px;">' + escapeHtml(when) + '</div></div>';
+        }).join('') : '<div style="padding:34px 16px;text-align:center;color:#8a8d91;font-size:15px;">Nothing scheduled</div>'),
+        "document.getElementById('mgSched').remove()");
+}
+
+function mgOpenStatus() {
+    var g = _mg.group, c = _mg.counts;
+    var healthy = (c.reported === 0 && c.spam === 0);
+    _mgPage('mgStatus', 'Group status',
+        _mgCard('<div style="padding:26px 18px;text-align:center;">' +
+            '<i class="fa-solid ' + (healthy ? 'fa-circle-check' : 'fa-triangle-exclamation') + '" style="font-size:44px;color:' + (healthy ? '#31A24C' : '#F7B928') + ';"></i>' +
+            '<div style="font-size:21px;font-weight:800;color:var(--text-primary,#000);margin-top:12px;">' +
+                (healthy ? 'In good standing' : 'Needs your attention') + '</div>' +
+            '<div style="font-size:15px;color:#65676b;line-height:1.4;margin-top:6px;">' +
+                (healthy ? 'No open reports and nothing flagged as spam.'
+                         : (c.reported + ' open report' + (c.reported === 1 ? '' : 's') + ' to review.')) +
+            '</div></div>') +
+        _mgCard(
+            _mgItem('fa-comment-slash', 'Open reports', '', _mgCountRight(c.reported), 'mgOpenReported()') +
+            _mgItem('fa-triangle-exclamation', 'Suspected spam', '', _mgCountRight(c.spam), 'mgOpenSpam()') +
+            _mgItem(g.is_paused ? 'fa-pause' : 'fa-play', g.is_paused ? 'Group is paused' : 'Group is active', '', '', '')),
+        "document.getElementById('mgStatus').remove()");
+}
+
+// ---- Settings ----
+function mgOpenSettings() {
+    var g = _mg.group;
+    _mgPage('mgSettings', 'Group settings',
+        _mgCard(
+            _mgSectionTitle('Details') +
+            _mgItem('fa-pen', 'Name', g.name, '', 'mgEditName()') +
+            _mgItem('fa-align-left', 'Description', g.description || 'Not set yet', '', "gsEditDescription('" + _mg.groupId + "')") +
+            _mgItem('fa-image', 'Cover photo', g.cover_url ? 'Set' : 'Not set yet', '', "gsOpenCoverFor('" + _mg.groupId + "')")) +
+        _mgCard(
+            _mgSectionTitle('Privacy') +
+            _mgItem((g.privacy === 'Private') ? 'fa-lock' : 'fa-earth-africa', 'Privacy', g.privacy || 'Public', '', 'mgEditPrivacy()') +
+            (g.privacy === 'Private'
+                ? _mgItem('fa-eye', 'Visibility', g.visibility || 'Visible', '', 'mgEditVisibility()')
+                : '')) +
+        _mgCard(
+            _mgSectionTitle('Discussions') +
+            _mgItem('fa-user-check', 'Approve new posts', g.require_approval ? 'On' : 'Off',
+                    _mgToggle('mgToggleApproval()', g.require_approval), '')),
+        "document.getElementById('mgSettings').remove()");
+}
+
+function _mgToggle(fn, on) {
+    return '<div onclick="' + fn + '" style="width:48px;height:28px;border-radius:15px;background:' +
+        (on ? '#0A84FF' : '#c7c7cc') + ';position:relative;cursor:pointer;flex-shrink:0;">' +
+        '<div style="position:absolute;top:2px;left:' + (on ? '22px' : '2px') + ';width:24px;height:24px;border-radius:50%;background:#fff;"></div></div>';
+}
+
+async function _mgUpdateGroup(patch, message) {
+    try {
+        await sb.from('groups').update(patch).eq('id', _mg.groupId);
+        Object.assign(_mg.group, patch);
+        await _mgLog('settings_changed', Object.keys(patch).join(', '));
+        if (message) showToast(message);
+        return true;
+    } catch (e) { showToast('Could not save that change'); return false; }
+}
+
+async function mgEditName() {
+    var name = prompt('Group name:', _mg.group.name || '');
+    if (name === null) return;
+    name = name.trim();
+    if (!name) { showToast('A group needs a name'); return; }
+    if (await _mgUpdateGroup({ name: name }, 'Name updated')) mgOpenSettings();
+}
+
+async function mgEditPrivacy() {
+    var next = (_mg.group.privacy === 'Private') ? 'Public' : 'Private';
+    if (!confirm('Change this group to ' + next + '?')) return;
+    var patch = { privacy: next };
+    // A public group is always findable, so visibility resets with it.
+    if (next === 'Public') patch.visibility = 'Visible';
+    if (await _mgUpdateGroup(patch, 'Privacy updated')) mgOpenSettings();
+}
+
+async function mgEditVisibility() {
+    var next = (_mg.group.visibility === 'Hidden') ? 'Visible' : 'Hidden';
+    if (await _mgUpdateGroup({ visibility: next }, 'Visibility updated')) mgOpenSettings();
+}
+
+async function mgToggleApproval() {
+    if (await _mgUpdateGroup({ require_approval: !_mg.group.require_approval }, 'Saved')) mgOpenSettings();
+}
+
+async function mgOpenPersonal() {
+    var pref = 'all';
+    try {
+        var r = (await sb.from('group_member_prefs').select('notifications')
+            .eq('group_id', _mg.groupId).eq('user_id', currentUser.id).maybeSingle()).data;
+        if (r) pref = r.notifications;
+    } catch (e) {}
+    function opt(value, label, desc) {
+        return _mgItem(value === 'all' ? 'fa-bell' : (value === 'highlights' ? 'fa-star' : 'fa-bell-slash'),
+            label, desc,
+            (pref === value ? '<i class="fa-solid fa-check" style="color:#0A84FF;font-size:17px;"></i>' : ''),
+            "mgSetNotifications('" + value + "')");
+    }
+    _mgPage('mgPersonal', 'Personal settings',
+        _mgCard(_mgSectionTitle('Notifications') +
+            opt('all', 'All posts', 'Tell me about everything in this group') +
+            opt('highlights', 'Highlights', 'Only posts that get a lot of activity') +
+            opt('off', 'Off', 'No notifications from this group')) +
+        _mgCard(_mgItem('fa-file-lines', 'Your content in this group', 'See what you have posted here', '',
+                        "showToast('Opening your posts in this group'); mgOpenYourContent()")),
+        "document.getElementById('mgPersonal').remove()");
+}
+
+async function mgSetNotifications(value) {
+    try {
+        await sb.from('group_member_prefs').upsert({
+            group_id: _mg.groupId, user_id: currentUser.id, notifications: value
+        }, { onConflict: 'group_id,user_id' });
+        showToast('Notification setting saved');
+        mgOpenPersonal();
+    } catch (e) { showToast('Could not save that setting'); }
+}
+
+async function mgOpenYourContent() {
+    var rows = [];
+    try {
+        rows = (await sb.from('posts').select('id,text_content,created_at')
+            .eq('group_id', _mg.groupId).eq('user_id', currentUser.id)
+            .order('created_at', { ascending: false }).limit(50)).data || [];
+    } catch (e) {}
+    _mgPage('mgYours', 'Your content',
+        _mgCard(rows.length ? rows.map(function (p) {
+            var when = '';
+            try { when = new Date(p.created_at).toLocaleDateString(); } catch (e) {}
+            return '<div style="padding:13px 16px;border-bottom:0.5px solid var(--border-color,#eee);">' +
+                '<div style="font-size:15px;color:var(--text-primary,#000);">' + escapeHtml((p.text_content || '(no text)').slice(0, 160)) + '</div>' +
+                '<div style="font-size:13px;color:#8a8d91;margin-top:4px;">' + escapeHtml(when) + '</div></div>';
+        }).join('') : '<div style="padding:34px 16px;text-align:center;color:#8a8d91;font-size:15px;">You have not posted here yet</div>'),
+        "document.getElementById('mgYours').remove()");
+}
+
+// ---- Support ----
+function mgOpenHelp() {
+    _mgPage('mgHelp', 'Help Centre',
+        _mgCard(
+            _mgItem('fa-lock', 'Privacy and visibility',
+                    'Public groups can be seen by anyone. Private groups keep posts and members to the group, and a private group can also be hidden so only members can find it.', '', '') +
+            _mgItem('fa-user-check', 'Approving posts',
+                    'Turn on Approve new posts in Group settings and every new post waits in Pending posts until you approve it.', '', '') +
+            _mgItem('fa-user-gear', 'Admin Assist',
+                    'Rules act on new posts automatically. Anything a rule touches shows under Moderation alerts.', '', '') +
+            _mgItem('fa-users', 'Roles',
+                    'Admins manage everything. Moderators can review reported content. Promote someone from People.', '', '')),
+        "document.getElementById('mgHelp').remove()");
+}
+
+function mgOpenHub() {
+    _mgPage('mgHub', 'Groups Hub',
+        _mgCard(_mgSectionTitle('Growing your group') +
+            _mgItem('fa-user-plus', 'Invite people', 'Groups get going once there are people in them.', '', "gsOpenInvite('" + _mg.groupId + "')") +
+            _mgItem('fa-image', 'Add a cover photo', 'A cover makes the group look finished.', '', "gsOpenCoverFor('" + _mg.groupId + "')") +
+            _mgItem('fa-pen-to-square', 'Post something first', 'Say why you made the group.', '', "postToGroup('" + _mg.groupId + "')")) +
+        _mgCard(_mgSectionTitle('Keeping it healthy') +
+            _mgItem('fa-shield-halved', 'Check group status', '', '', 'mgOpenStatus()') +
+            _mgItem('fa-chart-simple', 'Look at insights', '', '', 'mgOpenInsights()')),
+        "document.getElementById('mgHub').remove()");
+}
+
+// ---- Bottom actions ----
+function mgShare() {
+    var url = window.location.origin + '/?group=' + _mg.groupId;
+    if (navigator.share) navigator.share({ text: 'Join ' + (_mg.group.name || 'my group') + ' on TrustFirst', url: url }).catch(function () {});
+    else navigator.clipboard.writeText(url).then(function () { showToast('Group link copied'); });
+}
+
+async function mgTogglePause() {
+    var next = !_mg.group.is_paused;
+    if (next && !confirm('Pause this group? Members will not be able to post until you resume it.')) return;
+    if (await _mgUpdateGroup({ is_paused: next }, next ? 'Group paused' : 'Group resumed')) {
+        await _mgLog(next ? 'group_paused' : 'group_resumed', null);
+        openManageGroup(_mg.groupId);
+    }
+}
+
+async function mgDelete() {
+    var name = _mg.group.name || '';
+    var typed = prompt('This deletes the group and everything in it, permanently.\n\nType the group name to confirm:\n' + name);
+    if (typed === null) return;
+    if ((typed || '').trim() !== name) { showToast('That did not match the group name'); return; }
+    try {
+        await sb.from('groups').delete().eq('id', _mg.groupId);
+        var p = document.getElementById('mgPage'); if (p) p.remove();
+        closePage('group-page-overlay');
+        showNavBar && showNavBar();
+        showToast('Group deleted');
+        if (typeof loadGroups === 'function') loadGroups();
+    } catch (e) { showToast('Could not delete the group'); }
+}
