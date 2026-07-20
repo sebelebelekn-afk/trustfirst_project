@@ -5,13 +5,19 @@ from . import views
 from . import api_views
 from . import eddie_views
 from . import eddie_image
+from . import eddie_voice
 
 urlpatterns = [
     path('', views.feed, name='feed'),
     path('api/config/', api_views.get_config, name='api_config'),
     path('api/eddie/chat/', eddie_views.eddie_chat, name='api_eddie_chat'),
     path('api/eddie/usage/', eddie_views.eddie_usage, name='api_eddie_usage'),
+    path('api/eddie/history/', eddie_views.eddie_history, name='api_eddie_history'),
+    path('api/eddie/conversation/', eddie_views.eddie_conversation, name='api_eddie_convo'),
+    path('api/eddie/delete/', eddie_views.eddie_delete_conversation, name='api_eddie_delete'),
     path('api/eddie/image/', eddie_image.eddie_image, name='api_eddie_image'),
+    path('api/eddie/mention/', eddie_views.eddie_mention, name='api_eddie_mention'),
+    path('api/eddie/speak/', eddie_voice.eddie_speak, name='api_eddie_speak'),
     path('api/stripe/create-verification/', api_views.create_stripe_verification, name='api_stripe_verification'),
     path('api/stripe/webhook/', api_views.stripe_webhook, name='api_stripe_webhook'),
     path('api/email/send/', api_views.send_email, name='api_email_send'),

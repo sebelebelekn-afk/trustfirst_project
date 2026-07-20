@@ -138,14 +138,64 @@ GIPHY_API_KEY                = os.environ.get('GIPHY_API_KEY', '')
 RESEND_API_KEY               = os.environ.get('RESEND_API_KEY', '')
 GOOGLE_CLOUD_VISION_API_KEY  = os.environ.get('GOOGLE_CLOUD_VISION_API_KEY', '')
 
-# Eddie, the in-app assistant. The key is server-side only and must never be
-# returned by /api/config/ — the browser talks to /api/eddie/*, never to
-# api.anthropic.com directly.
+# Eddie, the in-app assistant. Every key here is server-side only and must
+# never be returned by /api/config/ — the browser talks to /api/eddie/*, never
+# to a model provider directly.
+#
+# Eddie runs on Gemini's free tier by default because TrustFirst has no budget
+# for inference. Set EDDIE_PROVIDER=anthropic to move chat onto Claude once
+# there is one; see core/eddie_providers.py.
+# Left unset, Eddie routes per message: Groq for ordinary chat because it
+# answers in well under a second, Gemini for anything with an attachment or a
+# question that earns the wait. Set to groq/gemini/anthropic to pin one.
+EDDIE_PROVIDER = os.environ.get('EDDIE_PROVIDER', '')
+
+# Groq speaks the OpenAI wire format, so it reuses the openai package.
+GROQ_API_KEY     = os.environ.get('GROQ_API_KEY', '')
+EDDIE_GROQ_MODEL = os.environ.get('EDDIE_GROQ_MODEL', 'llama-3.3-70b-versatile')
+
+# Read aloud. Most devices only ship old formant voices, so speech is
+# synthesised server-side and the browser is only the fallback. Clips are
+# cached by a hash of their text (see core/eddie_voice.py), because synthesis
+# quota is the scarcest thing Eddie consumes and replays are common.
+#
+# ElevenLabs is tried first for quality, Groq second because it is free. The
+# Groq model needs its terms accepted once at console.groq.com.
+EDDIE_TTS_VOICE    = os.environ.get('EDDIE_TTS_VOICE', 'George')   # name match
+EDDIE_TTS_VOICE_ID = os.environ.get('EDDIE_TTS_VOICE_ID', '')      # exact, wins
+EDDIE_TTS_EL_MODEL = os.environ.get('EDDIE_TTS_EL_MODEL', 'eleven_turbo_v2_5')
+EDDIE_TTS_MODEL      = os.environ.get('EDDIE_TTS_MODEL', 'canopylabs/orpheus-v1-english')
+EDDIE_TTS_GROQ_VOICE = os.environ.get('EDDIE_TTS_GROQ_VOICE', 'tara')
+
+# gemini-3.5-flash is verified working on a new free key, with thought
+# summaries. Do not "fix" this to gemini-2.5-flash: that model is closed to
+# new API keys and 404s. Web search is billed on every model a new free key
+# can reach, so Eddie detects the refusal and carries on without it.
+GEMINI_API_KEY     = os.environ.get('GEMINI_API_KEY', '')
+EDDIE_GEMINI_MODEL = os.environ.get('EDDIE_GEMINI_MODEL', 'gemini-3.5-flash')
+
+# Search grounding is billed. Asking for it on a free key wastes ~40s before
+# the refusal, so it is off unless turned on. Set to 'auto' (probe once per
+# process) or 'on' after adding billing to a Google Cloud project.
+EDDIE_WEB_SEARCH = os.environ.get('EDDIE_WEB_SEARCH', 'off')
+
+# minimal | low | medium | high. Higher means slower replies, and Eddie lives
+# in a chat bubble where waiting is the worst part.
+EDDIE_THINKING = os.environ.get('EDDIE_THINKING', 'low')
+
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 EDDIE_MODEL       = os.environ.get('EDDIE_MODEL', 'claude-opus-4-8')
 
-# Image generation runs on OpenAI (Claude reads images but does not create them).
-# Chat stays on Claude; the two are kept in separate modules.
+# Image generation is its own provider, in its own module. Left unset it uses
+# Pollinations, which needs no key at all, so images work on a fresh clone.
+# Cloudflare (10,000 neurons/day free) and OpenAI take over automatically once
+# their credentials exist.
+EDDIE_IMAGE_PROVIDER  = os.environ.get('EDDIE_IMAGE_PROVIDER', '')
+CLOUDFLARE_ACCOUNT_ID = os.environ.get('CLOUDFLARE_ACCOUNT_ID', '')
+CLOUDFLARE_API_TOKEN  = os.environ.get('CLOUDFLARE_API_TOKEN', '')
+EDDIE_CF_IMAGE_MODEL  = os.environ.get(
+    'EDDIE_CF_IMAGE_MODEL', '@cf/black-forest-labs/flux-1-schnell')
+
 OPENAI_API_KEY     = os.environ.get('OPENAI_API_KEY', '')
 EDDIE_IMAGE_MODEL  = os.environ.get('EDDIE_IMAGE_MODEL', 'gpt-image-1')
 
