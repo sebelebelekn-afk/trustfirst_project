@@ -106,7 +106,7 @@ function dismissSplash() {
     if (!splash) return;
     // Wait for draw animation to finish (1.6s total) before fading
     var elapsed = performance.now();
-    var minWait = 1800; // ms — let the full draw + text play
+    var minWait = 1800; // ms, let the full draw + text play
     var remaining = Math.max(0, minWait - elapsed);
     setTimeout(function() {
         splash.style.opacity = '0';
@@ -321,7 +321,7 @@ async function toggleFeedFollow(btn) {
 }
 
 const APP_CONFIG = {
-    admin: "", // Admin check must be done server-side only — never store admin usernames in client JS
+    admin: "", // Admin check must be done server-side only, never store admin usernames in client JS
     hapticsEnabled: true,
     bannedKeywords: ["scam", "illegal", "bot", "hate", "fake"],
     adultContentTags: ["nsfw", "18+", "adult", "violence", "drugs", "alcohol", "gambling"],
@@ -1032,7 +1032,7 @@ async function restoreSession() {
                 currentUser = cachedU;
                 isAdmin = cachedU.is_admin === true;
                 try { await E2E.init(); } catch(e) {}
-                console.warn('[Session] Offline — restored from cached profile');
+                console.warn('[Session] Offline, restored from cached profile');
                 return true;
             }
             return false;
@@ -1154,7 +1154,7 @@ function openGoDarkModal() {
             '<i class="fa-solid fa-moon" style="font-size:28px;color:#5856D6;"></i></div>' +
             '<h3 style="font-size:20px;font-weight:800;color:var(--text-primary,#000);margin-bottom:8px;">Go Dark</h3>' +
             '<p style="color:#888;font-size:13px;margin-bottom:20px;line-height:1.6;padding:0 10px;">' +
-            'Your circle gets a warm note: <i>"[Your name] is taking some time away — they\'ll be back."</i><br>No guilt. No anxiety. Just space.</p></div>' +
+            'Your circle gets a warm note: <i>"[Your name] is taking some time away, they\'ll be back."</i><br>No guilt. No anxiety. Just space.</p></div>' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">' +
             durations.map(function(d) {
                 return '<button onclick="activateGoDark(' + d.value + ')" style="padding:16px;border-radius:16px;border:1.5px solid rgba(88,86,214,0.25);background:rgba(88,86,214,0.06);color:var(--text-primary,#000);font-size:15px;font-weight:700;cursor:pointer;transition:0.2s;" onmouseover="this.style.background=\'rgba(88,86,214,0.15)\'" onmouseout="this.style.background=\'rgba(88,86,214,0.06)\'">' + d.label + '</button>';
@@ -1228,7 +1228,7 @@ function openRealOneModal() {
             '<div style="text-align:center;margin-bottom:18px;flex-shrink:0;">' +
                 '<div style="width:56px;height:56px;border-radius:50%;background:rgba(255,45,85,0.1);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;"><i class="fa-solid fa-heart" style="font-size:24px;color:#FF2D55;"></i></div>' +
                 '<h3 style="font-size:19px;font-weight:800;color:var(--text-primary,#000);margin-bottom:8px;">Real One Check-In</h3>' +
-                '<p style="color:#888;font-size:13px;line-height:1.55;padding:0 4px;">Add the people who matter most to you. When you haven’t talked in a while, we’ll remind you to reach out — and they get a private notification that you’re thinking of them. It never shows up on any feed.</p>' +
+                '<p style="color:#888;font-size:13px;line-height:1.55;padding:0 4px;">Add the people who matter most to you. When you haven’t talked in a while, we’ll remind you to reach out, and they get a private notification that you’re thinking of them. It never shows up on any feed.</p>' +
             '</div>' +
             '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-shrink:0;">' +
                 '<b style="font-size:14px;color:var(--text-primary,#000);">Your Real Ones</b>' +
@@ -1467,7 +1467,7 @@ function launchApp() {
         const banner = document.createElement('div');
         banner.className = 'child-safe-banner';
         banner.style.display = 'block';
-        banner.innerHTML = '<i class="fa-solid fa-shield-halved"></i> TrustFirst Kids — Safe Mode Active';
+        banner.innerHTML = '<i class="fa-solid fa-shield-halved"></i> TrustFirst Kids: Safe Mode Active';
         app.insertBefore(banner, app.querySelector('.header-container'));
     }
 
@@ -1604,7 +1604,7 @@ async function startCamera() {
         video.srcObject = mediaStream;
         document.getElementById('camera-overlay').style.display = 'block';
     } catch (err) {
-        showToast('Camera access denied — check your browser permissions');
+        showToast('Camera access denied. Check your browser permissions');
     }
 }
 
@@ -1888,7 +1888,7 @@ function _sendLiveLocation(duration, caption) {
     }, function(err) {
         console.warn('[Location] geolocation error:', err && err.code, err && err.message);
         if (err && err.code === 1) { showToast('Allow location access to share it'); showLocationPermissionAlert(); }
-        else if (err && err.code === 3) { showToast('Location timed out — try again'); }
+        else if (err && err.code === 3) { showToast('Location timed out. Try again'); }
         else { showToast('Couldn\'t get your location'); }
     });
 }
@@ -2092,6 +2092,67 @@ document.addEventListener('DOMContentLoaded', function() {
 
 
 // --- INTERACTIONS ---
+// ==========================================================================
+// Social notifications — like, follow, mention, reply.
+// One place so every trigger notifies the same way, nobody is notified about
+// their own action, and Eddie (a bot) is never pinged. The notifications table
+// only has user_id, actor_id, type, post_id, message, read; anything else the
+// insert would reject, so these stick to those columns.
+// ==========================================================================
+var _TF_EDDIE_ID = 'edd1e000-0000-4000-8000-000000000001';
+
+function _tfActorName() {
+    return (currentUser && (currentUser.username || currentUser.name)) || 'Someone';
+}
+
+function _tfNotify(userId, row) {
+    if (!window.sb || !currentUser || !userId) return;
+    if (userId === currentUser.id || userId === _TF_EDDIE_ID) return;   // no self / bot pings
+    sb.from('notifications').insert(Object.assign({
+        user_id: userId, actor_id: currentUser.id, read: false
+    }, row)).then(function () {}).catch(function () {});
+}
+
+// "X liked your post" — looked up so it fires once, to the owner only.
+function tfNotifyLike(postId) {
+    if (!postId || !window.sb || !currentUser) return;
+    sb.from('posts').select('user_id').eq('id', postId).single().then(function (res) {
+        var owner = res && res.data && res.data.user_id;
+        if (owner) _tfNotify(owner, { type: 'like', post_id: postId,
+            message: _tfActorName() + ' liked your post' });
+    }).catch(function () {});
+}
+
+function tfNotifyFollow(targetUserId) {
+    _tfNotify(targetUserId, { type: 'follow',
+        message: _tfActorName() + ' started following you' });
+}
+
+// One "X mentioned you" per real @username in the text. Usernames are matched
+// case-insensitively by trying both the written and lowercased form; a handle
+// that resolves to nobody is simply skipped, and @eddie is left to its own
+// reply flow rather than a mention ping.
+function tfNotifyMentions(text, extra) {
+    if (!text || !window.sb || !currentUser) return;
+    var raw = (text.match(/@([a-zA-Z0-9_]{2,30})/g) || []).map(function (m) { return m.slice(1); });
+    var variants = [];
+    raw.forEach(function (n) {
+        if (n.toLowerCase() === 'eddie') return;
+        if (variants.indexOf(n) < 0) variants.push(n);
+        if (variants.indexOf(n.toLowerCase()) < 0) variants.push(n.toLowerCase());
+    });
+    if (!variants.length) return;
+    sb.from('users').select('id,username').in('username', variants).then(function (res) {
+        var seen = {};
+        (res.data || []).forEach(function (u) {
+            if (seen[u.id]) return;
+            seen[u.id] = true;
+            _tfNotify(u.id, Object.assign({ type: 'mention',
+                message: _tfActorName() + ' mentioned you' }, extra || {}));
+        });
+    }).catch(function () {});
+}
+
 function toggleLike(el) {
     if (typeof el === 'string') {
         el = document.querySelector('[data-post-id="' + el + '"] .post-icons div:first-child') || document.querySelector('[data-post-id="' + el + '"] .like-btn');
@@ -4113,7 +4174,7 @@ var _voiceHoldTimer = null;
 var _voiceHoldStartY = 0;
 var _voiceHoldStartX = 0;
 var _voiceLocked = false;
-var _vnListenOnce = false; // "1" — recipient can play once, then it self-deletes
+var _vnListenOnce = false; // "1", recipient can play once, then it self-deletes
 
 function _vnToggleListenOnce() {
     _vnListenOnce = !_vnListenOnce;
@@ -5059,7 +5120,7 @@ async function saveEditProfile() {
         // resets it + notifies admins). Reflect that locally.
         if (_unameChanged && currentUser.badge_tier === 'golden') {
             currentUser.badge_tier = 'verify-blue';
-            showToast('Username changed — your golden badge is pending admin re-verification');
+            showToast('Username changed. Your golden badge is pending admin re-verification');
         }
         try { secureSave('current_user', currentUser); } catch (e) {}
         if (typeof renderProfileMeta === 'function') renderProfileMeta();
@@ -5823,11 +5884,21 @@ function closePage(id) {
             return e && e.style.display && e.style.display !== 'none';
         });
         if (!anyMainOpen) {
-            document.querySelectorAll('.liquid-pill .nav-icon').forEach(function(i) { i.classList.remove('nav-active'); });
-            var home = document.getElementById('nav-home');
-            if (home) home.classList.add('nav-active');
+            // Back on the feed: fully collapse the pill and slide the droplet
+            // home. The old code only re-flagged the home icon, so the pill
+            // stayed expanded (is-others) and the droplet sat on the closed
+            // page's icon. navSetState('collapsed') removes is-others and
+            // re-syncs the droplet in one place.
+            if (typeof navSetState === 'function') {
+                navSetState('collapsed');
+            } else {
+                document.querySelectorAll('.liquid-pill .nav-icon').forEach(function(i) { i.classList.remove('nav-active'); });
+                var home = document.getElementById('nav-home');
+                if (home) home.classList.add('nav-active');
+            }
         } else {
-            // Sync to whichever main overlay IS open
+            // Another main section is still open: activate its icon and move
+            // the droplet onto it rather than leaving it where it was.
             Object.keys(navMap).forEach(function(k) {
                 var e = document.getElementById(k);
                 if (e && e.style.display !== 'none') {
@@ -5836,6 +5907,7 @@ function closePage(id) {
                     if (icon) icon.classList.add('nav-active');
                 }
             });
+            if (typeof navSyncDroplet === 'function') navSyncDroplet(true);
         }
     }, 60);
 }
@@ -5844,7 +5916,7 @@ function triggerThought() {
     if (!canPerformAction('post a thought')) return;
     var existing = document.getElementById('thoughtsOverlay');
     if (existing) existing.remove();
-    window._thoughtGifUrl = null; // fresh composer — drop any previously picked GIF
+    window._thoughtGifUrl = null; // fresh composer, drop any previously picked GIF
     try { window._thoughtAudience = localStorage.getItem('tf_thought_audience') || 'everyone'; } catch (e) { window._thoughtAudience = 'everyone'; }
 
     var avatarUrl = currentUser?.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(currentUser?.name || 'U') + '&background=007AFF&color=fff&bold=true&size=200';
@@ -6925,7 +6997,7 @@ function openThoughtAudience(btn) {
         { key: 'everyone', icon: 'fa-globe', label: 'Everyone', desc: 'Visible to all', color: '#007AFF' },
         { key: 'followers', icon: 'fa-user-check', label: 'Followers only', desc: 'Only your followers', color: '#34C759' },
         { key: 'trustcircle', icon: 'fa-star', label: 'TrustCircle', desc: 'Your trusted circle', color: '#FF9500' },
-        { key: 'none', icon: 'fa-lock', label: 'Only Me', desc: 'Private — just you', color: '#888' }
+        { key: 'none', icon: 'fa-lock', label: 'Only Me', desc: 'Private, just you', color: '#888' }
     ];
 
     menu.innerHTML = options.map(function(opt, i) {
@@ -8916,7 +8988,7 @@ function postComment() {
     if (!text) return;
 
     var modResult = moderateContent(text);
-    if (modResult.blocked) { showToast('Comment blocked — ' + modResult.reason); return; }
+    if (modResult.blocked) { showToast('Comment blocked: ' + modResult.reason); return; }
 
     var list = document.getElementById('comment-list');
     var name = currentUser ? currentUser.name : 'You';
@@ -9469,43 +9541,50 @@ async function _commentStoryPost(audience) {
 
 function toggleCommentGifs() {
     const panel = document.getElementById('gif-panel');
+    if (!panel) return;
     if (panel.style.display === 'block') {
         panel.style.display = 'none';
         return;
     }
     panel.style.display = 'block';
-    const grid = document.getElementById('gif-grid');
-    grid.innerHTML = '<div style="text-align:center;padding:20px;color:#aaa;"><i class="fa-solid fa-spinner fa-spin"></i></div>';
-
-    async function loadGifSearch(query) {
-        try {
-            const res = await fetch(`/api/giphy/search/?q=${encodeURIComponent(query)}`);
-            const json = await res.json();
-            // Remove only images, keep the search input
-            Array.from(grid.children).forEach(function(child) {
-                if (child.tagName !== 'INPUT') child.remove();
-            });
-            if (!json.data || !json.data.length) {
-                grid.innerHTML = '<div style="text-align:center;padding:20px;color:#aaa;font-size:13px;">No results</div>';
-                return;
-            }
-            json.data.forEach(function(gif) {
-                const img = document.createElement('img');
-                img.src = gif.images.fixed_height_small.url;
-                img.style.cssText = 'width:100%;border-radius:8px;cursor:pointer;';
-                img.onclick = function() { postGifComment(gif.images.original.url); };
-                grid.appendChild(img);
-            });
-        } catch(e) {
-            grid.innerHTML = '<div style="text-align:center;padding:20px;color:#aaa;font-size:13px;">Could not load stickers</div>';
-        }
-    }
-
-    // Add search box
-    grid.innerHTML = '<input id="gif-search-input" placeholder="Search stickers..." style="width:100%;padding:8px 12px;border-radius:20px;border:1px solid var(--border-color,#eee);font-size:13px;margin-bottom:8px;box-sizing:border-box;" oninput="clearTimeout(window._gifTimer);window._gifTimer=setTimeout(function(){loadGifSearch(document.getElementById(\'gif-search-input\').value||\'happy\')},400)">';
-    window.loadGifSearch = loadGifSearch;
-    loadGifSearch('happy'); // default stickers on open
+    var input = document.getElementById('gif-search-input');
+    if (input) input.value = '';
+    loadGifSearch('trending');
 }
+
+// Fills ONLY the grid. The search bar is a static sibling above it now, so the
+// grid's two-column layout can never squeeze the input into one cell again
+// (which was the bug: the search box rendered half-width beside the GIFs).
+async function loadGifSearch(query) {
+    var grid = document.getElementById('gif-grid');
+    if (!grid) return;
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:26px;color:#aaa;"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+    try {
+        const res = await fetch('/api/giphy/search/?q=' + encodeURIComponent(query || 'trending'));
+        const json = await res.json();
+        if (!json.data || !json.data.length) {
+            grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:26px;color:#aaa;font-size:13px;">No results</div>';
+            return;
+        }
+        grid.innerHTML = '';
+        json.data.forEach(function(gif) {
+            const img = document.createElement('img');
+            img.src = gif.images.fixed_height_small.url;
+            img.loading = 'lazy';
+            img.onclick = function() { postGifComment(gif.images.original.url); };
+            grid.appendChild(img);
+        });
+    } catch(e) {
+        grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:26px;color:#aaa;font-size:13px;">Could not load GIFs</div>';
+    }
+}
+window.loadGifSearch = loadGifSearch;
+
+function _gifSearchDebounced(q) {
+    clearTimeout(window._gifTimer);
+    window._gifTimer = setTimeout(function () { loadGifSearch(q || 'trending'); }, 380);
+}
+window._gifSearchDebounced = _gifSearchDebounced;
 
 
 async function postGifComment(src) {
@@ -9584,8 +9663,8 @@ let storyTimer = null;
 let currentStoryUser = null;
 let currentStoryIndex = 0;
 const STORY_DURATION = 5000;       // plain image/picture story
-const STORY_MUSIC_MAX = 45;        // seconds — story music cap
-const STORY_VIDEO_MAX = 120;       // seconds — video story cap (2 minutes)
+const STORY_MUSIC_MAX = 45;        // seconds, story music cap
+const STORY_VIDEO_MAX = 120;       // seconds, video story cap (2 minutes)
 function _getStoryDuration(story) {
     // Music story: run for the chosen clip length (sound_duration secs), up to
     // the 45s cap. Falls back to 15s only if the clip length is unknown.
@@ -11889,7 +11968,7 @@ function reelHeartTap(el, postId) {
     } else {
         icon.classList.replace('fa-regular', 'fa-solid'); icon.style.color = '#FF3B30';
         if (span) span.textContent = n + 1;
-        if (postId && window.sb && currentUser) sb.from('likes').insert({ user_id: currentUser.id, post_id: postId }).then(function(){}).catch(function(){});
+        if (postId && window.sb && currentUser) { sb.from('likes').insert({ user_id: currentUser.id, post_id: postId }).then(function(){}).catch(function(){}); tfNotifyLike(postId); }
     }
     if (typeof triggerHaptic === 'function') triggerHaptic(20);
 }
@@ -12176,6 +12255,7 @@ setTimeout(function() {
                         if (span) { var n = parseInt((span.textContent || '0').replace(/[^\d]/g,'')) || 0; span.textContent = (n + 1); }
                         if (pid && window.sb && currentUser) {
                             sb.from('likes').insert({ user_id: currentUser.id, post_id: pid }).then(function(){}).catch(function(){});
+                            tfNotifyLike(pid);
                         }
                     }
                 }
@@ -12599,7 +12679,7 @@ let SUPABASE_URL = '';
 let SUPABASE_ANON_KEY = '';
 let STRIPE_PUBLISHABLE_KEY = '';
 let GIPHY_KEY_FROM_SERVER = '';
-var sb = null; // alias for window._sb — assigned in initSupabase()
+var sb = null; // alias for window._sb, assigned in initSupabase()
 
 (async function loadConfig() {
     try {
@@ -12637,7 +12717,7 @@ function initSupabase() {
     // Supabase JS is loaded via CDN in the <head>; keys come from /api/config/
     // This function is called after loadConfig() resolves
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-        console.error('[TrustFirst] Supabase keys missing — check /api/config/');
+        console.error('[TrustFirst] Supabase keys missing, check /api/config/');
         showToast('Connection error. Please refresh.');
         return;
     }
@@ -13036,7 +13116,7 @@ function handleNewMessage(message) {
 
     // If no nonce, message is plain text — skip E2E
     if (!message.nonce) {
-        console.debug('[handleNewMessage] No nonce — treating as plain text');
+        console.debug('[handleNewMessage] No nonce, treating as plain text');
         _appendToChat(message.ciphertext || '');
         return;
     }
@@ -13425,7 +13505,7 @@ async function detectAIContent(file) {
         if (sizeKB > 100 && sizeKB % 100 < 0.1) return false; // Not conclusive alone
         return false; // Pass through if no red flags
     } catch(e) {
-        return false; // Fail open — don't block if check fails
+        return false; // Fail open, don't block if check fails
     }
 }
 
@@ -14666,7 +14746,7 @@ function openTrustClipsSettings() {
     function showRealOneReminder() {
         if (!currentUser) return;
         var person = eligibleRealOne();
-        if (!person) return; // nothing real to remind about — stay silent
+        if (!person) return; // nothing real to remind about, stay silent
         var ex = document.getElementById('realOneNudgeBanner'); if (ex) ex.remove();
         var nudge = document.createElement('div');
         nudge.id = 'realOneNudgeBanner';
@@ -15178,7 +15258,7 @@ function checkPasswordStrength(password) {
     // Show which rules failed
     const failedRules = result.results.filter(r => !r.passed);
     if (failedRules.length > 0 && password.length > 0) {
-        text.textContent += ' — Need: ' + failedRules[0].label;
+        text.textContent += ' · Need: ' + failedRules[0].label;
     }
 }
 
@@ -16602,10 +16682,10 @@ function reelFeedback(type, index) {
         _recordInterest(type, (_rc && _rc.textContent.trim().slice(0, 60)) || 'A TrustClip', (_ru && _ru.textContent.trim()) || '');
     } catch (e) {}
     if (type === 'not_interested') {
-        showToast('Got it — fewer clips like this');
+        showToast('Got it, fewer clips like this');
         setTimeout(function(){ renderReel(currentReelIndex + 1); }, 300);
     } else {
-        showToast('Great — more like this coming');
+        showToast('Great, more like this coming');
     }
 }
 function setupReelGestures() {
@@ -16817,7 +16897,7 @@ function reelMenuAction(action, pid) {
     triggerHaptic && triggerHaptic(15);
     if (action === 'report') {
         if (typeof openReportMenu === 'function') openReportMenu(pid || '', 'post');
-        else showToast('Reported — our team will review');
+        else showToast('Reported. Our team will review');
     } else if (action === 'save') {
         showToast('Saved ✓');
     } else if (action === 'share') {
@@ -16969,6 +17049,7 @@ async function toggleReelLike(reelId) {
     if (window.sb && currentUser && reelId && !String(reelId).startsWith('single_') && !String(reelId).startsWith('tmp_')) {
         if (reel.liked) {
             try { await sb.from('likes').insert({ user_id: currentUser.id, post_id: reelId }); } catch(e) {}
+            tfNotifyLike(reelId);
         } else {
             try { await sb.from('likes').delete().eq('user_id', currentUser.id).eq('post_id', reelId); } catch(e) {}
         }
@@ -19430,7 +19511,7 @@ async function startPasskey() {
     if (!window.PublicKeyCredential) { showToast('Passkeys aren\'t supported on this device'); return; }
     var passkeys = _tfPasskeys();
     var ids = Object.keys(passkeys).filter(function(uid) { return passkeys[uid].enabled && passkeys[uid].credId; });
-    if (!ids.length) { showToast('No passkey yet — log in, then turn it on in Settings'); return; }
+    if (!ids.length) { showToast('No passkey yet. Log in, then turn it on in Settings'); return; }
     try {
         triggerHaptic(15);
         var challenge = crypto.getRandomValues(new Uint8Array(32));
@@ -19841,7 +19922,7 @@ function _signupSendCode(isResend) {
         sb.rpc('tf_email_taken', { e: email }).then(function(r) {
             if (r.data) {
                 var hidden = document.getElementById('login-user'); if (hidden) hidden.value = email;
-                showToast('You already have an account — log in');
+                showToast('You already have an account. Log in');
                 nextAuthStep('step-login-password');
                 setTimeout(function() { var p = document.getElementById('login-pass'); if (p) { try { p.focus(); } catch (e) {} } }, 250);
                 return;
@@ -20035,7 +20116,7 @@ async function _signupFinish(skip) {
     try {
         var sess = await sb.auth.getUser();
         var uid = sess && sess.data && sess.data.user && sess.data.user.id;
-        if (!uid) { hideAuthLoader(); showToast('Session expired — please start again'); nextAuthStep('step-signup-email'); return; }
+        if (!uid) { hideAuthLoader(); showToast('Session expired. Please start again'); nextAuthStep('step-signup-email'); return; }
         var s = window._signup || {};
         var fullName = ((s.firstName || '') + ' ' + (s.lastName || '')).trim();
         var bio = skip ? '' : (((document.getElementById('signup-bio-in') || {}).value) || '').trim();
@@ -20495,11 +20576,11 @@ function openBadgeExplainer() {
         '</div>' +
         '<div style="flex:1;padding:30px 24px 20px;">' +
             '<h2 style="font-size:22px;font-weight:800;color:var(--text-primary,#000);margin:0 0 10px;">What is it?</h2>' +
-            '<p style="font-size:15px;color:var(--text-secondary,#555);line-height:1.6;margin:0 0 26px;">The badge shows an account is who it says it is. It tells everyone on TrustFirst that this person, business or organisation has been verified — so what you see is real.</p>' +
+            '<p style="font-size:15px;color:var(--text-secondary,#555);line-height:1.6;margin:0 0 26px;">The badge shows an account is who it says it is. It tells everyone on TrustFirst that this person, business or organisation has been verified, so what you see is real.</p>' +
             '<h2 style="font-size:22px;font-weight:800;color:var(--text-primary,#000);margin:0 0 10px;">Do I need it?</h2>' +
             '<p style="font-size:15px;color:var(--text-secondary,#555);line-height:1.6;margin:0 0 26px;">Verified accounts get full reach, direct messages and every feature. Unverified accounts can browse and reply to a verified person who messages them first, but can\'t post, comment or start chats. Verifying is how people learn to trust you.</p>' +
             '<h2 style="font-size:22px;font-weight:800;color:var(--text-primary,#000);margin:0 0 10px;">How do I get it?</h2>' +
-            '<p style="font-size:15px;color:var(--text-secondary,#555);line-height:1.6;margin:0 0 4px;">Tap "Got it" and choose your account type — we\'ll show you exactly what each one needs.</p>' +
+            '<p style="font-size:15px;color:var(--text-secondary,#555);line-height:1.6;margin:0 0 4px;">Tap "Got it" and choose your account type, we\'ll show you exactly what each one needs.</p>' +
         '</div>' +
         '<div style="padding:16px 24px calc(env(safe-area-inset-bottom,0px) + 20px);flex-shrink:0;">' +
             '<button onclick="document.getElementById(\'badgeExplainerOverlay\').remove();openAccountTypeChooser();" style="width:100%;padding:17px;border-radius:30px;border:none;background:#007AFF;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Got it</button>' +
@@ -20517,7 +20598,7 @@ function openAccountTypeChooser() {
         { id: 'government',   title: 'Government',    color: '#FF3B30', icon: 'fa-landmark',     desc: 'For officials & agencies. Needs an official gov email, department and stamped letterhead.' }
     ];
     // Gold appears ONLY once the account reaches 500k followers (kept the gate).
-    if (goldOk) types.push({ id: 'gold', title: 'Gold (Creator)', color: '#FFB800', icon: 'fa-star', desc: 'Public-figure verification — you qualify. Apply now.' });
+    if (goldOk) types.push({ id: 'gold', title: 'Gold (Creator)', color: '#FFB800', icon: 'fa-star', desc: 'Public-figure verification, you qualify. Apply now.' });
     var ov = document.createElement('div');
     ov.id = 'accountTypeChooserOverlay';
     ov.className = 'white-overlay';
@@ -20562,7 +20643,7 @@ function openIdentityVerification() {
             '<p style="color:#888;font-size:14px;margin:0 0 20px;line-height:1.5;">Prove you\'re a real person to get your blue badge. Choose a method:</p>' +
             '<div onclick="document.getElementById(\'identityVerifyOverlay\').remove();startFaceVerification();" style="background:var(--card-bg,#fff);border:1.5px solid var(--border-color,#eee);border-radius:18px;padding:18px;margin-bottom:14px;cursor:pointer;display:flex;align-items:center;gap:14px;">' +
                 '<div style="width:50px;height:50px;border-radius:50%;background:rgba(0,122,255,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-face-smile" style="color:#007AFF;font-size:22px;"></i></div>' +
-                '<div style="flex:1;min-width:0;"><b style="font-size:15px;color:var(--text-primary,#000);">Face Verification</b><p style="color:#888;font-size:13px;margin:3px 0 0;line-height:1.4;">Use your camera — look left, right, smile. No ID needed.</p></div>' +
+                '<div style="flex:1;min-width:0;"><b style="font-size:15px;color:var(--text-primary,#000);">Face Verification</b><p style="color:#888;font-size:13px;margin:3px 0 0;line-height:1.4;">Use your camera, look left, right, smile. No ID needed.</p></div>' +
                 '<i class="fa-solid fa-chevron-right" style="color:#ccc;flex-shrink:0;"></i>' +
             '</div>' +
             '<div onclick="document.getElementById(\'identityVerifyOverlay\').remove();if(typeof startIdVerification===\'function\')startIdVerification();" style="background:var(--card-bg,#fff);border:1.5px solid var(--border-color,#eee);border-radius:18px;padding:18px;cursor:pointer;display:flex;align-items:center;gap:14px;">' +
@@ -20587,9 +20668,9 @@ function _signupCheckApproval() {
         } else if (st === 'declined') {
             showToast('Your parent declined the request.');
         } else {
-            showToast('Not approved yet — please wait for your parent.');
+            showToast('Not approved yet, please wait for your parent.');
         }
-    }, function() { showToast('Could not check — try again'); });
+    }, function() { showToast('Could not check, try again'); });
 }
 
 // ---- Auth: legal viewer — renders ABOVE the splash (openInAppBrowser mounts in
@@ -20660,7 +20741,7 @@ async function switchToSavedAccount(id) {
         if (r.error || !r.data || !r.data.session) {
             hideAuthLoader(); triggerHaptic(10);
             var h2 = document.getElementById('login-user'); if (h2) h2.value = acc.username || '';
-            showToast('Session expired — enter your password');
+            showToast('Session expired, enter your password');
             nextAuthStep('step-login-password');
             return;
         }
@@ -20846,11 +20927,11 @@ async function confirmLivenessStep() {
         guide.style.borderColor = '#FF3B30';
         guide.style.boxShadow = '0 0 30px rgba(255,59,48,0.4)';
         var msgs = {
-            no_face: 'No face detected — center your face in the oval',
+            no_face: 'No face detected, center your face in the oval',
             spoof: 'Use a live camera, not a photo of a photo',
             low_confidence: 'Move into better light and try again'
         };
-        showToast(msgs[data.reason] || 'Couldn\'t verify that move — try again');
+        showToast(msgs[data.reason] || 'Couldn\'t verify that move, try again');
         setTimeout(function() {
             guide.style.borderColor = 'rgba(255,255,255,0.4)';
             guide.style.boxShadow = 'none';
@@ -21717,7 +21798,7 @@ function buildLiveTab() {
             '<i class="fa-solid fa-tower-broadcast" style="font-size:44px;color:#FF3B30;"></i>' +
         '</div>' +
         '<h2 style="font-size:22px;font-weight:800;color:var(--text-primary,#000);margin-bottom:8px;">LIVE Center</h2>' +
-        '<p style="font-size:14px;color:#888;line-height:1.6;margin-bottom:28px;max-width:260px;margin-left:auto;margin-right:auto;">Deep metrics for your live broadcasts — peak viewers, chat engagement, replays, and revenue.</p>' +
+        '<p style="font-size:14px;color:#888;line-height:1.6;margin-bottom:28px;max-width:260px;margin-left:auto;margin-right:auto;">Deep metrics for your live broadcasts, peak viewers, chat engagement, replays, and revenue.</p>' +
         '<button onclick="showLiveSettings()" style="padding:14px 36px;border-radius:25px;border:none;background:linear-gradient(135deg,#FF3B30,#FF6B6B);color:white;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 6px 20px rgba(255,59,48,0.35);">Go to LIVE Center</button>' +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:24px;">' +
             metricCard('users','#007AFF','Peak Viewers',0,0) +
@@ -21787,7 +21868,7 @@ function buildInspirationTab() {
     if (pending.length === 0) {
         html += '<div style="text-align:center; padding:60px 20px; color:var(--text-tertiary,#999);">' +
             '<i class="fa-solid fa-check-circle" style="font-size:40px; color:#34C759; display:block; margin-bottom:15px;"></i>' +
-            'No pending flags — all clear!</div>';
+            'No pending flags, all clear!</div>';
     } else {
         pending.forEach(function(report, i) {
             var reason = FLAG_REASONS.find(function(r) { return r.id === report.reason; }) || { label: report.reason, icon: 'fa-flag' };
@@ -21876,7 +21957,7 @@ function checkUsernameAvailability(raw) {
                     .maybeSingle();
 
                 if (result.data) {
-                    statusEl.innerHTML = '<span style="color:#FF3B30;"><i class="fa-solid fa-xmark"></i> @' + cleaned + ' is taken — try @' + cleaned + '_' + Math.floor(Math.random()*99) + '</span>';
+                    statusEl.innerHTML = '<span style="color:#FF3B30;"><i class="fa-solid fa-xmark"></i> @' + cleaned + ' is taken, try @' + cleaned + '_' + Math.floor(Math.random()*99) + '</span>';
                 } else {
                     statusEl.innerHTML = '<span style="color:#34C759;"><i class="fa-solid fa-check"></i> @' + cleaned + ' is available!</span>';
                 }
@@ -22071,7 +22152,7 @@ function selectBizMethod(method) {
             '<i class="fa-solid fa-cloud-arrow-up" style="font-size:30px; color:#C0C0C0;' +
             'display:block; margin-bottom:10px;"></i>' +
             '<span style="color:#888; font-size:13px;">Tap to upload registration document</span>' +
-            '<small style="color:#555; display:block; margin-top:5px;">PDF, JPG, PNG — Max 10MB</small>' +
+            '<small style="color:#555; display:block; margin-top:5px;">PDF, JPG, PNG, Max 10MB</small>' +
             '<div id="bizDocStatus" style="margin-top:10px;"></div></div>' +
             '<input type="file" id="bizDocUpload" hidden accept=".pdf,.jpg,.jpeg,.png" ' +
             'onchange="handleBizDocUpload(this)">' +
@@ -22275,7 +22356,7 @@ function selectGovMethod(method) {
             '<span style="color:#888; font-size:13px;">Upload signed employment letter</span>' +
             '<small style="color:#555; display:block; margin-top:5px;">' +
             'Must be on official letterhead, signed by HR or department head</small>' +
-            '<small style="color:#555; display:block;">PDF, JPG, PNG — Max 10MB</small>' +
+            '<small style="color:#555; display:block;">PDF, JPG, PNG, Max 10MB</small>' +
             '<div id="govDocStatus" style="margin-top:10px;"></div></div>' +
             '<input type="file" id="govLetterUpload" hidden accept=".pdf,.jpg,.jpeg,.png" ' +
             'onchange="handleGovDocUpload(this)">' +
@@ -22681,7 +22762,7 @@ function calcSecurityScore(data) {
         suggestions.push('Use a stronger password with symbols and numbers');
     } else {
         details.push({ text: 'Weak password', pts: '0', positive: false });
-        suggestions.push('Your password is weak — update it in Security settings');
+        suggestions.push('Your password is weak, update it in Security settings');
     }
 
     // Failed logins penalty
@@ -22759,7 +22840,7 @@ function calcCommunityScore(data) {
         details.push({ text: data.reports_received + ' reports received', pts: '-6', positive: false });
     } else {
         score -= 50;
-        details.push({ text: data.reports_received + ' reports — high risk', pts: '-10', positive: false });
+        details.push({ text: data.reports_received + ' reports, high risk', pts: '-10', positive: false });
     }
 
     // Confirmed violations — severe penalty
@@ -22805,8 +22886,8 @@ function calcIdentityScore(data) {
         details.push({ text: data.name_changes + ' name change(s)', pts: '-0.5', positive: false });
     } else {
         score -= (data.name_changes * 8);
-        details.push({ text: data.name_changes + ' name changes — inconsistent', pts: '-' + Math.min(5, data.name_changes), positive: false });
-        suggestions.push('Frequent name changes reduce trust — keep your identity consistent');
+        details.push({ text: data.name_changes + ' name changes, inconsistent', pts: '-' + Math.min(5, data.name_changes), positive: false });
+        suggestions.push('Frequent name changes reduce trust, keep your identity consistent');
     }
 
     // Profile changes
@@ -22837,18 +22918,18 @@ function calcActivityScore(data) {
         score += 10;
         details.push({ text: 'Decent post quality', pts: '+1', positive: true });
     } else if (data.total_posts > 0) {
-        details.push({ text: 'Short posts — try adding more detail', pts: '0', positive: false });
+        details.push({ text: 'Short posts, try adding more detail', pts: '0', positive: false });
         suggestions.push('Longer, more thoughtful posts increase your score');
     }
 
     // Spam detection — too many posts today
     if (data.posts_today > 20) {
         score -= 30;
-        details.push({ text: data.posts_today + ' posts today — possible spam', pts: '-3', positive: false });
-        suggestions.push('Quality over quantity — space out your posts');
+        details.push({ text: data.posts_today + ' posts today, possible spam', pts: '-3', positive: false });
+        suggestions.push('Quality over quantity, space out your posts');
     } else if (data.posts_today > 10) {
         score -= 10;
-        details.push({ text: data.posts_today + ' posts today — a lot', pts: '-1', positive: false });
+        details.push({ text: data.posts_today + ' posts today, a lot', pts: '-1', positive: false });
     } else if (data.posts_today > 0) {
         score += 10;
         details.push({ text: 'Healthy posting frequency', pts: '+1', positive: true });
@@ -23236,6 +23317,7 @@ var userId = session.user.id;
             await sb.from('likes').insert({ user_id: userId, post_id: postId });
             var cur = await sb.from('posts').select('like_count').eq('id', postId).single();
             await sb.from('posts').update({ like_count: (cur.data?.like_count || 0) + 1 }).eq('id', postId);
+            tfNotifyLike(postId);
             return true;
         }
     },
@@ -23265,6 +23347,7 @@ var userId = session.user.id;
             return false;
         } else {
             await sb.from('follows').insert({ follower_id: userId, following_id: targetUserId });
+            tfNotifyFollow(targetUserId);
             return true;
         }
     },
@@ -23419,7 +23502,7 @@ function renderRealPostCard(post) {
     var _sensitiveKeywords = ['nudity','explicit','adult','nsfw','18+','sexual','gore','violence'];
     if (_algoPrefs.politicalContent === 'hide' && _politicalKeywords.some(function(k){ return _postText.includes(k); })) return document.createElement('div');
     if (_algoPrefs.sensitiveContent === 'strict' && _sensitiveKeywords.some(function(k){ return _postText.includes(k); })) return document.createElement('div');
-    if (_algoPrefs.politicalContent === 'show') { /* boost — no filter */ }
+    if (_algoPrefs.politicalContent === 'show') { /* boost, no filter */ }
 
     // Check follow state
     var followedUsers = JSON.parse(localStorage.getItem('tf-followed-users') || '[]');
@@ -23609,7 +23692,7 @@ function openPostThoughtViewer(el, postId) {
     var card = el.closest('[data-post-id]');
     var textEl = card ? card.querySelector('.post-content') : null;
     var thoughtText = textEl ? textEl.textContent.trim() : '';
-    openThoughtViewer(thoughtText || '🎵', mName + ' — ' + mArtist, { name: mName, artist: mArtist, artUrl: null, previewUrl: null });
+    openThoughtViewer(thoughtText || '🎵', mName + ', ' + mArtist, { name: mName, artist: mArtist, artUrl: null, previewUrl: null });
 }
 
 // Format post text — linkify hashtags and mentions
@@ -24040,19 +24123,35 @@ postComment = async function() {
                 }
             });
         }
-        // Send notification to post owner
+        // Notify the post owner (about a comment), and separately the parent
+        // comment's author when this is a reply to their comment, and anyone
+        // named with @username. A reply to your own comment on your own post
+        // must not fire three times, so each target is de-duplicated and
+        // self-notification is filtered by _tfNotify.
         if (window.sb && currentUser) {
             try {
                 var postData = await sb.from('posts').select('user_id').eq('id', currentCommentPostId).single();
-                if (postData.data && postData.data.user_id !== currentUser.id) {
-                    await sb.from('notifications').insert({
-                        user_id: postData.data.user_id,
-                        actor_id: currentUser.id,
-                        type: 'comment',
-                        post_id: currentCommentPostId,
-                        message: (currentUser.username || currentUser.name || 'Someone') + ' replied to your post'
+                var ownerId = postData.data && postData.data.user_id;
+                var parentAuthorId = null;
+                if (replyCtx && replyCtx.id) {
+                    var pc = await sb.from('comments').select('user_id').eq('id', replyCtx.id).single();
+                    parentAuthorId = pc.data && pc.data.user_id;
+                }
+                if (parentAuthorId) {
+                    _tfNotify(parentAuthorId, {
+                        type: 'comment_reply', post_id: currentCommentPostId,
+                        message: _tfActorName() + ' replied to your comment'
                     });
                 }
+                // The post-owner ping is skipped when they were already told as
+                // the parent-comment author, to avoid a double buzz.
+                if (ownerId && ownerId !== parentAuthorId) {
+                    _tfNotify(ownerId, {
+                        type: 'comment', post_id: currentCommentPostId,
+                        message: _tfActorName() + ' commented on your post'
+                    });
+                }
+                tfNotifyMentions(text, { post_id: currentCommentPostId });
             } catch(e) { /* notification failure is non-critical */ }
         }
         // Eddie answers when tagged, and also when this is a reply to something
@@ -24702,7 +24801,7 @@ if (followerCountEl) {
             } else {
                 mutedUsers.push(userId);
                 localStorage.setItem('tf-muted-users', JSON.stringify(mutedUsers));
-                showToast('Muted — you won\'t see their posts');
+                showToast('Muted, you won\'t see their posts');
             }
             break;
         case 'block':
@@ -24847,7 +24946,7 @@ function paSwitchTab(tab) {
 }
 
 function _paEmpty() {
-    return '<div style="padding:36px 24px 0;"><b style="font-size:30px;font-weight:900;color:var(--text-primary,#000);line-height:1.2;display:block;">Nothing to see here — yet.</b></div>';
+    return '<div style="padding:36px 24px 0;"><b style="font-size:30px;font-weight:900;color:var(--text-primary,#000);line-height:1.2;display:block;">Nothing to see here, yet.</b></div>';
 }
 
 function _paUserRow(u, sub) {
@@ -24930,7 +25029,7 @@ async function realDeletePost(postId) {
         // Try removing locally anyway so UI doesn't feel broken
         var card = document.querySelector('[data-post-id="' + postId + '"]');
         if (card) { card.style.opacity = '0.4'; }
-        showToast('Delete failed — check your connection');
+        showToast('Delete failed, check your connection');
     }
 }
 
@@ -25452,7 +25551,7 @@ function renderPollQuizBlock(post) {
 function _pollRetryHTML(postId, optionIndex) {
     return '<div style="padding:14px;background:var(--bg-secondary,#f9f9f9);border-radius:16px;margin-bottom:12px;text-align:center;">' +
         '<i class="fa-solid fa-chart-column" style="color:#FF9500;font-size:22px;display:block;margin-bottom:8px;opacity:0.6;"></i>' +
-        '<p style="font-size:13px;color:#888;margin:0 0 12px;">You\'re offline — your vote didn\'t go through.</p>' +
+        '<p style="font-size:13px;color:#888;margin:0 0 12px;">You\'re offline, your vote didn\'t go through.</p>' +
         '<button onclick="votePoll(\'' + postId + '\',' + optionIndex + ')" style="display:inline-flex;align-items:center;gap:8px;padding:11px 22px;border-radius:22px;border:1.5px solid #007AFF;background:rgba(0,122,255,0.08);color:#007AFF;font-size:14px;font-weight:700;cursor:pointer;"><i class="fa-solid fa-chart-column"></i> Retry vote</button>' +
     '</div>';
 }
@@ -25769,7 +25868,7 @@ async function schedulePost() {
             showToast('Scheduled! 📅');
             triggerHaptic(20);
         } else {
-            showToast('Scheduling failed — try again');
+            showToast('Scheduling failed, try again');
         }
     } else {
         const scheduled = JSON.parse(localStorage.getItem('tf_scheduled') || '[]');
@@ -26976,11 +27075,13 @@ async function loadRealNotifications() {
 
     allNotifications = notifs || [];
 
-    // Mark all as read
+    // Mark all as read, then re-derive the badges from the DB so the notif
+    // count actually drops to zero and the message count stays accurate.
     await sb.from('notifications').update({ read: true }).eq('user_id', currentUser.id).eq('read', false);
     navNotifications.likes = 0;
     navNotifications.alerts = 0;
     navUpdateBadges();
+    if (typeof navRefreshBadges === 'function') navRefreshBadges();
 
     renderNotifList(currentNotifFilter);
 }
@@ -27584,6 +27685,53 @@ function navUpdateBadges() {
         }
     }
 }
+
+// Pull the real unread counts and drive the badges from them. navNotifications
+// was only ever fed by the test simulator below, so the badges never reflected
+// reality; this makes them mean something.
+async function navRefreshBadges() {
+    if (!window.sb || !currentUser) return;
+    var me = currentUser.id;
+    try {
+        var nRes = await sb.from('notifications')
+            .select('id', { count: 'exact', head: true })
+            .eq('user_id', me).eq('read', false);
+        var unreadNotifs = nRes.count || 0;
+
+        // Unread messages: those in my conversations, from someone else, not yet
+        // read. There's no recipient column, so it's my conversations first,
+        // then a count of others' unread messages within them.
+        var unreadMsgs = 0;
+        var parts = await sb.from('conversation_participants')
+            .select('conversation_id').eq('user_id', me).limit(200);
+        var convIds = (parts.data || []).map(function (p) { return p.conversation_id; });
+        if (convIds.length) {
+            var mRes = await sb.from('messages')
+                .select('id', { count: 'exact', head: true })
+                .in('conversation_id', convIds)
+                .neq('sender_id', me)
+                .is('read_at', null);
+            unreadMsgs = mRes.count || 0;
+        }
+
+        navNotifications.likes = 0;
+        navNotifications.reposts = 0;
+        navNotifications.alerts = unreadNotifs;   // notif bucket = unread notifications
+        navNotifications.messages = unreadMsgs;
+        navUpdateBadges();
+    } catch (e) { /* best-effort; leave the last known counts on failure */ }
+}
+window.navRefreshBadges = navRefreshBadges;
+
+// Keep the badges honest: once shortly after load (auth needs a beat), whenever
+// the app returns to the foreground, and on a slow poll for anything that
+// arrived while it was open.
+(function () {
+    function tick() { if (window.sb && currentUser) navRefreshBadges(); }
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(tick, 2500); });
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) tick(); });
+    setInterval(tick, 45000);
+})();
 
 // --- Simulate incoming notifications (for testing) ---
 function navAddNotification(type, count) {
@@ -28217,7 +28365,7 @@ async function submitChannelPost(channelId) {
                 content: text,
                 reactions: {}
             }).select().single();
-            if (chErr) { console.error('[channel post]', chErr.message); showToast('Could not post — ' + chErr.message); field.value = text; return; }
+            if (chErr) { console.error('[channel post]', chErr.message); showToast('Could not post, ' + chErr.message); field.value = text; return; }
 
             // Append in place instead of reloading the whole channel (the
             // full reload on every send was the "keeps reloading" problem).
@@ -28230,7 +28378,7 @@ async function submitChannelPost(channelId) {
             }
             if (newPost && newPost.id) setTimeout(function(){ chTrackView(newPost.id, channelId); }, 800);
         } catch(e) {
-            showToast('Could not post — check connection');
+            showToast('Could not post, check connection');
         }
     }
 }
@@ -28336,7 +28484,7 @@ function chCustomEmoji(postId, channelId) {
     inp.addEventListener('blur', function(){ setTimeout(function(){ if (inp.parentNode) inp.remove(); }, 200); });
     showToast('Pick an emoji');
 }
-function chTrackView(postId, channelId) { /* channel_posts has no view column yet — no-op guard */ }
+function chTrackView(postId, channelId) { /* channel_posts has no view column yet, no-op guard */ }
 
 // Twitter-style reply thread on a channel post.
 async function openChannelReplies(postId, channelId) {
@@ -28480,7 +28628,7 @@ async function _doRenameChannel(channelId) {
     document.getElementById('chRenameModal')?.remove();
     if (window.sb) {
         var res = await sb.from('channels').update({ name: newName }).eq('id', channelId);
-        if (res && res.error) { showToast('Could not rename — ' + res.error.message); return; }
+        if (res && res.error) { showToast('Could not rename, ' + res.error.message); return; }
         showToast('Channel renamed ✓');
         var titleEl = document.querySelector('#ch-broadcast b');
         if (titleEl) titleEl.textContent = newName;
@@ -28942,7 +29090,7 @@ async function startRealCall(targetUserId, targetUserName, isVideo) {
     }, 2500);
 
     // Listen for answer + ICE from callee
-    if (!rtcCallId) { console.error('[Call] No rtcCallId — cannot subscribe to signal channel'); endRealCall(); return; }
+    if (!rtcCallId) { console.error('[Call] No rtcCallId, cannot subscribe to signal channel'); endRealCall(); return; }
     rtcSignalChannel = window.sb
         .channel('call_' + rtcCallId)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_signals', filter: 'call_id=eq.' + rtcCallId },
@@ -30445,6 +30593,7 @@ requires_approval: (document.getElementById('groupApprovalToggle')?.classList.co
                         loadProfilePosts(profileGrid);
                     }
                     _eddieAnswerMention('post', result.data.id, postText, result.data.id);
+                    tfNotifyMentions(postText, { post_id: result.data.id });
                     return;
                 }
             } catch(dbErr) { console.warn('[Post DB]', dbErr); }
@@ -34256,7 +34405,7 @@ function edOpenAdjustMusicPanel(trackId) {
     var p = document.createElement('div'); p.id='edMusicAdjPanel';
     p.style.cssText='position:absolute;left:0;right:0;bottom:0;z-index:510;background:rgba(10,10,10,0.97);backdrop-filter:blur(30px);border-radius:24px 24px 0 0;padding:20px 16px max(32px,env(safe-area-inset-bottom,32px));animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
     var startPct = a.startPct||0;
-    p.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;"><span style="color:white;font-size:17px;font-weight:700;">Adjust — Pick Part of Song</span><button onclick="document.getElementById(\'edMusicAdjPanel\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button></div>'+
+    p.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;"><span style="color:white;font-size:17px;font-weight:700;">Adjust, Pick Part of Song</span><button onclick="document.getElementById(\'edMusicAdjPanel\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button></div>'+
         '<p style="color:rgba(255,255,255,0.4);font-size:12px;margin:0 0 16px;">Drag the scrubber to choose which part of the song plays with your video.</p>'+
         '<div style="height:48px;border-radius:12px;background:rgba(52,199,89,0.25);position:relative;overflow:hidden;margin-bottom:16px;">'+
             '<div style="position:absolute;inset:0;display:flex;align-items:center;gap:1px;padding:0 4px;">'+
@@ -34562,7 +34711,7 @@ function edOpenPanel(type) {
     if (type === 'trim') {
         var clip = edState.clips.find(function(c){return c.id===edState.selectedClipId;});
         body.innerHTML = clip
-            ? '<p style="color:rgba(255,255,255,0.6);font-size:13px;margin-bottom:12px;">Selected: '+clip.id+' — '+(clip.durationMs/1000).toFixed(1)+'s</p>'+
+            ? '<p style="color:rgba(255,255,255,0.6);font-size:13px;margin-bottom:12px;">Selected: '+clip.id+', '+(clip.durationMs/1000).toFixed(1)+'s</p>'+
               '<p style="color:rgba(255,255,255,0.5);font-size:13px;">Drag the yellow handles on the timeline to trim.</p>'
             : '<p style="color:rgba(255,255,255,0.5);font-size:13px;">Tap a clip on the timeline first.</p>';
     }
@@ -35037,7 +35186,7 @@ function edPickerFileChosen(inp) {
         _tfUploadStickerMedia(file).then(function (publicUrl) {
             desc.data.uploading = false;
             if (publicUrl) desc.data.url = publicUrl;
-            else showToast('Could not upload — this overlay will not show after posting');
+            else showToast('Could not upload, this overlay will not show after posting');
             if (wrap && wrap._ovBody) {
                 var nb = TFStickers.render(desc, { mode: 'editor' });
                 nb.style.pointerEvents = 'none';
@@ -35322,7 +35471,7 @@ function edAddMusicTrackReal(title, artist, previewUrl, artUrl) {
         spApplyMusic({ name: title, artist: artist, previewUrl: previewUrl, artUrl: artUrl });
         return;
     }
-    edState.audioTracks.push({id:'music_'+Date.now(), label:title+' — '+artist, url:previewUrl, artUrl:artUrl, startMs:0, durationMs:180000});
+    edState.audioTracks.push({id:'music_'+Date.now(), label:title+', '+artist, url:previewUrl, artUrl:artUrl, startMs:0, durationMs:180000});
     edState.isDirty = true; edRenderTimeline(); edSaveHistory(); editorSaveDraft(false);
     var m = document.getElementById('edMusicModal');
     if (m) m.remove();
@@ -35341,7 +35490,7 @@ function edRenderMusicList(songs) {
     }).join('');
 }
 function edAddMusicTrack(title, artist) {
-    edState.audioTracks.push({id:'music_'+Date.now(), label:title+' — '+artist, startMs:0, durationMs:180000});
+    edState.audioTracks.push({id:'music_'+Date.now(), label:title+', '+artist, startMs:0, durationMs:180000});
     edState.isDirty = true; edRenderTimeline(); edSaveHistory(); editorSaveDraft(false);
     var m = document.getElementById('edMusicModal');
     if (m) m.remove();
@@ -37879,7 +38028,7 @@ function draftContinue() {
         edState.playheadMs = draft.playheadMs || 0;
         edState.isDirty = false;
         if (typeof edRenderTextOverlays === 'function') edRenderTextOverlays();
-    } catch(e) { showToast('Could not load draft — starting fresh'); }
+    } catch(e) { showToast('Could not load draft, starting fresh'); }
     var modal = document.getElementById('draftRecoveryModal');
     if (modal) modal.classList.remove('active');
     var overlay = document.getElementById('preview-edit-overlay');
@@ -38052,7 +38201,7 @@ async function submitTrustClip() {
         }
 
         if (!blob) {
-            console.warn('[TrustClip] No video blob captured — _lastRecordedBlob/_lastPickedVideoSrc empty');
+            console.warn('[TrustClip] No video blob captured, _lastRecordedBlob/_lastPickedVideoSrc empty');
         }
 
         if (blob && window.sb && currentUser) {
@@ -38140,7 +38289,7 @@ is_demo: window._tcIsDemoClip || false,
 
     } catch(e) {
         console.error('[TrustClip] Upload error:', e);
-        showToast('Posted locally — will sync when online');
+        showToast('Posted locally, will sync when online');
     }
 
     // Cleanup
@@ -38349,7 +38498,7 @@ async function continueTrustclipDraft(draftId) {
         var cap = document.getElementById('tcCaption');
         if (cap && draft.caption) cap.value = draft.caption;
     }, 200);
-    if (draft.hasVideo && !blob) showToast('Draft video could not be restored — please re-add it');
+    if (draft.hasVideo && !blob) showToast('Draft video could not be restored, please re-add it');
 }
 
 function openTrustclipDraftSelect() {
@@ -40144,7 +40293,7 @@ function renderCheckInList(places) {
     if (!listEl) return;
     window._checkinPlaces = places;
     if (!places.length) {
-        listEl.innerHTML = '<p style="text-align:center;padding:28px;color:#aaa;font-size:14px;">No places found — try searching</p>';
+        listEl.innerHTML = '<p style="text-align:center;padding:28px;color:#aaa;font-size:14px;">No places found, try searching</p>';
         return;
     }
     listEl.innerHTML = places.map(function(p, i) {
@@ -41132,7 +41281,7 @@ window.renderCollabSearchResults = function(q) {
     }).join('') || '<div style="padding:30px;text-align:center;color:#888;font-size:14px;">No users found</div>';
 };
 window.sendCollabInvite = function(name) {
-    showToast('@'+name.toLowerCase().replace(/[. ]/g,'_')+' invited — they will accept or decline');
+    showToast('@'+name.toLowerCase().replace(/[. ]/g,'_')+' invited, they will accept or decline');
     triggerHaptic(15);
     document.getElementById('inviteCollabPage').remove();
 };
@@ -41560,15 +41709,15 @@ function openFreeUpSpaceScreen() {
             '<p style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.06em;padding:14px 0 6px;">Actions</p>' +
             '<div style="background:var(--card-bg,#fff);border-radius:18px;overflow:hidden;">' +
                 '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:0.5px solid var(--border-color,#f0f0f0);">' +
-                    (function(){ var kb = 0; try { for(var k in localStorage){ if(k.startsWith('tf_cache_')||k.startsWith('tf_img_')) kb += (localStorage[k]||'').length; } } catch(e){} return '<div><b style="font-size:15px;color:var(--text-primary,#000);">Cache</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Temporary files — '+(kb?Math.max(1,Math.round(kb/1024))+'KB':'empty')+'</p></div>'; })() +
+                    (function(){ var kb = 0; try { for(var k in localStorage){ if(k.startsWith('tf_cache_')||k.startsWith('tf_img_')) kb += (localStorage[k]||'').length; } } catch(e){} return '<div><b style="font-size:15px;color:var(--text-primary,#000);">Cache</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Temporary files, '+(kb?Math.max(1,Math.round(kb/1024))+'KB':'empty')+'</p></div>'; })() +
                     '<button onclick="clearTrustFirstCache(this)" style="padding:8px 18px;border-radius:10px;background:rgba(255,149,0,0.1);color:#FF9500;border:none;font-size:13px;font-weight:700;cursor:pointer;">Clear</button>' +
                 '</div>' +
                 '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:0.5px solid var(--border-color,#f0f0f0);">' +
-                    '<div><b style="font-size:15px;color:var(--text-primary,#000);">Downloads</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Offline videos, effects, filters — 340MB</p></div>' +
+                    '<div><b style="font-size:15px;color:var(--text-primary,#000);">Downloads</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Offline videos, effects, filters, 340MB</p></div>' +
                     '<button onclick="clearTrustFirstDownloads(this)" style="padding:8px 18px;border-radius:10px;background:rgba(255,59,48,0.1);color:#FF3B30;border:none;font-size:13px;font-weight:700;cursor:pointer;">Clear</button>' +
                 '</div>' +
                 '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px;">' +
-                    '<div><b style="font-size:15px;color:var(--text-primary,#000);">Drafts</b><p style="font-size:12px;color:#888;margin:2px 0 0;">' + tcDrafts.length + ' trustclip draft' + (tcDrafts.length!==1?'s':'') + ' — ' + draftSizeMB + 'MB</p></div>' +
+                    '<div><b style="font-size:15px;color:var(--text-primary,#000);">Drafts</b><p style="font-size:12px;color:#888;margin:2px 0 0;">' + tcDrafts.length + ' trustclip draft' + (tcDrafts.length!==1?'s':'') + ', ' + draftSizeMB + 'MB</p></div>' +
                     '<button onclick="document.getElementById(\'freeUpSpaceScreen\').remove();openTrustclipDraftsScreen();" style="padding:8px 18px;border-radius:10px;background:rgba(0,122,255,0.1);color:#007AFF;border:none;font-size:13px;font-weight:700;cursor:pointer;">Manage</button>' +
                 '</div>' +
             '</div>' +
@@ -41582,7 +41731,7 @@ function clearTrustFirstCache(btn) {
     btn.style.background = 'rgba(52,199,89,0.1)';
     btn.style.color = '#34C759';
     btn.disabled = true;
-    showToast('Cache cleared — 128MB freed');
+    showToast('Cache cleared, 128MB freed');
     triggerHaptic(20);
 }
 
@@ -41593,7 +41742,7 @@ function clearTrustFirstDownloads(btn) {
     btn.style.color = '#34C759';
     btn.disabled = true;
     try { localStorage.removeItem('tf_offline_videos'); } catch(e) {}
-    showToast('Downloads cleared — 340MB freed');
+    showToast('Downloads cleared, 340MB freed');
     triggerHaptic(20);
 }
 
@@ -41902,7 +42051,7 @@ function removeCF(userId) {
     // Persist to Supabase:
     if (window.sb) {
         window.sb.from('close_friends').delete().eq('friend_id', userId).then(function(res){
-            if (res.error) showToast('Could not remove — try again');
+            if (res.error) showToast('Could not remove, try again');
         });
     }
     // Update the count in audience screen
@@ -41962,7 +42111,7 @@ function toggleProfileDisplay(key, el) {
 }
 
     /* ====================================================================
-   POLL CREATION — openPollCreator()
+   POLL CREATION, openPollCreator()
    Called when user taps "Add Poll" button in the TrustClip new post screen.
    State is stored on window._clipPoll and read by your post-submission logic.
    ==================================================================== */
@@ -42119,9 +42268,9 @@ function deletePoll() {
 }
 
     /* ====================================================================
-   OFFLINE VIDEO CACHE — uses Cache API to store HLS/MP4 segments.
+   OFFLINE VIDEO CACHE, uses Cache API to store HLS/MP4 segments.
    Call cacheVideoForOffline(videoUrl) when a user saves or bookmarks a clip.
-   Call getOfflineCachedVideo(videoUrl) before loading a player — returns
+   Call getOfflineCachedVideo(videoUrl) before loading a player, returns
    a blob URL if cached, or null if not (fall back to network).
    ==================================================================== */
 
@@ -42534,7 +42683,7 @@ async function savePronoun(val, modal) {
             '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">' +
             '<h3 style="font-size:18px;font-weight:800;color:var(--text-primary,#000);">Links in Bio</h3>' +
             '<span style="font-size:13px;color:#007AFF;font-weight:600;">' + links.length + '/5</span></div>' +
-            '<p style="color:#888;font-size:13px;margin-bottom:16px;">Add links to your profile — people tap them to visit.</p>' +
+            '<p style="color:#888;font-size:13px;margin-bottom:16px;">Add links to your profile, people tap them to visit.</p>' +
             (listHtml ? '<div style="margin-bottom:16px;">' + listHtml + '</div>' : '') +
             (links.length < 5 ? '<div style="margin-bottom:12px;">' +
             '<input id="lmLabelInput" placeholder="Label (e.g. My YouTube)" style="width:100%;padding:14px;border-radius:14px;border:1.5px solid var(--border-color,#eee);font-size:15px;outline:none;box-sizing:border-box;color:var(--text-primary,#000);background:var(--card-bg,#fff);margin-bottom:8px;-webkit-user-select:text;user-select:text;" onfocus="this.style.borderColor=\'#007AFF\'" onblur="this.style.borderColor=\'var(--border-color,#eee)\'">' +
@@ -42715,7 +42864,7 @@ async function fcSendLinkRequest(childId, childUsername, childName) {
             '<div style="background:rgba(52,199,89,0.1);border-radius:14px;padding:14px 16px;display:flex;align-items:center;gap:10px;"><i class="fa-solid fa-circle-check" style="color:#34C759;font-size:18px;"></i><span style="font-size:14px;color:var(--text-primary,#000);">Link request sent to <b>' + escapeHtml(childName) + '</b></span></div>';
         document.getElementById('fc-username-input').value = '';
         var statusEl = document.getElementById('fc-linked-status');
-        if (statusEl) statusEl.innerHTML = 'Request sent to <b>' + escapeHtml(childName) + '</b> — awaiting approval';
+        if (statusEl) statusEl.innerHTML = 'Request sent to <b>' + escapeHtml(childName) + '</b>, awaiting approval';
     } catch(e) {
         showToast('Could not send link request: ' + (e.message || 'Try again'));
     }
@@ -42730,7 +42879,7 @@ function setAppLanguage(lang) {
 }
 
 function renderNotif(n) {
-    if (isSleepModeActive()) return; // Sleep mode — silence all notifications
+    if (isSleepModeActive()) return; // Sleep mode, silence all notifications
 }
 
 function formatCount(n) {
@@ -43493,7 +43642,7 @@ function toggleSpMusicOnly(toggle) {
     if (thumb) thumb.style.transform = on ? 'translateX(0)' : 'translateX(22px)';
     window._spMusicOnly = !on;
     if (!on) {
-        showToast('Music only — album art as background');
+        showToast('Music only, album art as background');
         // Replace story bg with album art
         var storyScreen = document.getElementById('storyPostScreen');
         if (storyScreen && window._spStoryMusicInfo) {
@@ -45092,10 +45241,10 @@ function eddieShare(i) {
 
 // Ranked best first. Matched against the voice name, case-insensitively.
 var _EDDIE_VOICE_RANK = [
-    'natural',      // Microsoft Aria/Jenny Online (Natural) — best on Windows
+    'natural',      // Microsoft Aria/Jenny Online (Natural), best on Windows
     'neural',
     'online',
-    'google',       // Google UK/US English — best on Chrome and Android
+    'google',       // Google UK/US English, best on Chrome and Android
     'premium',
     'enhanced',     // Apple's better-than-default tier
     'siri',

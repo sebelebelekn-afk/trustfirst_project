@@ -22,7 +22,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=66">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=68">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -942,7 +942,7 @@ function authenticateUser() {
             <span class="nav-badge" id="notif-badge"></span>
         </i>
 
-        <i class="fa-solid fa-envelope nav-icon others-only" id="nav-msgs"
+        <i class="fa-solid fa-paper-plane nav-icon others-only" id="nav-msgs"
            onclick="navGoTo('messages')">
             <span class="nav-badge" id="msgs-badge"></span>
         </i>
@@ -2347,6 +2347,11 @@ function authenticateUser() {
     </div>
     <div class="comment-list" id="comment-list"></div>
     <div id="gif-panel" style="display:none;">
+        <div class="gif-grab"></div>
+        <div class="gif-search-wrap">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input id="gif-search-input" type="text" placeholder="Search GIPHY" autocomplete="off" oninput="_gifSearchDebounced(this.value)">
+        </div>
         <div class="gif-grid" id="gif-grid"></div>
     </div>
     <div class="comment-input-bar">
@@ -2355,7 +2360,7 @@ function authenticateUser() {
         <div class="comment-tools">
             <i class="fa-regular fa-image" onclick="openMedia()"></i>
             <i class="fa-regular fa-face-smile" onclick="toggleCommentGifs()"></i>
-            <i class="fa-solid fa-arrow-up" style="background:#007AFF; color:white; padding:8px; border-radius:50%; font-size:12px;" onclick="postComment()"></i>
+            <i class="fa-solid fa-arrow-up" style="background:#007AFF; color:white; width:30px; height:30px; border-radius:50%; font-size:13px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0;" onclick="postComment()"></i>
         </div>
     </div>
 </div>
@@ -4114,7 +4119,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=128"></script>
+<script src="{% static 'core/js/feed.js' %}?v=131"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=74"></script>
 <script src="{% static 'core/js/verify.js' %}?v=73"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=73"></script>
