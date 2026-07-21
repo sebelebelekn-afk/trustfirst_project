@@ -7,7 +7,21 @@
         box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         -webkit-tap-highlight-color: transparent;
+        /* Safari needs the prefixed property; the unprefixed one alone did
+           nothing on iOS, which is why long-pressing anywhere still brought up
+           selection handles, the magnifier and the Look Up / Translate menu.
+           touch-callout is what suppresses that menu and the image save sheet.
+           Real prose opts back in further down. */
+        -webkit-user-select: none;
         user-select: none;
+        -webkit-touch-callout: none;
+    }
+
+    html, body {
+        /* Stops the rubber-band bounce and the horizontal drag that peels the
+           page back, which is what produced those half-and-half screenshots
+           mid-swipe. */
+        overscroll-behavior: none;
     }
 
     body {
@@ -16,6 +30,9 @@
         justify-content: center;
         align-items: center;
         min-height: 100vh; min-height: 100dvh;
+        /* 100dvh alone still left a gap on iOS when the toolbars animate. */
+        height: 100dvh;
+        overflow: hidden;
     }
 
     /* Device Shell - Responsive to 100% of Viewport */
@@ -40,9 +57,16 @@
         box-shadow: 0 0 120px rgba(0,122,255,0.15);
     }
 }
-/* Prevent text selection on tap — mobile production fix */
-
-input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-select: text !important; user-select: text !important; }
+/* The only things people may select: what they are typing, and post captions,
+   which get quoted and shared. touch-callout goes back to default on these so
+   the copy menu still appears where it is wanted. Everything else stays
+   unselectable, so long-pressing a card or a button behaves like a native app
+   instead of raising handles and a Look Up menu. */
+input, textarea, [contenteditable="true"], .post-content {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+    -webkit-touch-callout: default !important;
+}
 /* Safe area for notch/Dynamic Island */
 .nav-container { bottom: max(28px, env(safe-area-inset-bottom)); }
 #chat-bottom-bar { padding-bottom: max(28px, env(safe-area-inset-bottom)) !important; }
