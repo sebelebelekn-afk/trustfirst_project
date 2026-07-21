@@ -8370,6 +8370,9 @@ const languages = [
 let currentLanguage = secureLoad('language') || 'en';
 
 function renderLanguages() {
+    // Whenever this page is drawn, the auto-translate switch has to reflect
+    // what is actually saved rather than the markup's default.
+    _tfSyncTranslateToggle();
     const list = document.getElementById('language-list');
     if (!list) return;
     list.innerHTML = '';
@@ -8460,12 +8463,39 @@ function setLanguage(code) {
     if (code === 'en') { restoreDOMEnglish(); _tfSetTranslateObserver(false); }
     else { translateDOM(code); if ((localStorage.getItem('tf_auto_translate') || '1') !== '0') _tfSetTranslateObserver(true); }
 }
+// The toggle is hardcoded as "active" in the markup, so it always drew itself
+// on no matter what was saved. Turning auto-translate off and coming back
+// showed it on again, and the next tap just saved "off" a second time, which
+// made the setting look broken. Draw it from the stored value instead.
+function _tfAutoTranslateOn() {
+    try { return (localStorage.getItem('tf_auto_translate') || '1') !== '0'; }
+    catch (e) { return true; }
+}
+function _tfSyncTranslateToggle() {
+    var el = document.getElementById('translate-toggle');
+    if (el) el.classList.toggle('active', _tfAutoTranslateOn());
+}
+
 function toggleAutoTranslate(el) {
     el.classList.toggle('active');
     var on = el.classList.contains('active');
     try { localStorage.setItem('tf_auto_translate', on ? '1' : '0'); } catch (e) {}
-    if (on && currentLanguage && currentLanguage !== 'en') { _tfSetTranslateObserver(true); translateDOM(currentLanguage); showToast('Auto-translate on'); }
-    else { _tfSetTranslateObserver(false); showToast('Auto-translate off'); }
+    // Being switched on is not the same as having something to translate. With
+    // the app in English this used to report "off" and drop the observer even
+    // though the setting had just been saved as on, which read as the toggle
+    // not working at all.
+    if (on) {
+        if (currentLanguage && currentLanguage !== 'en') {
+            _tfSetTranslateObserver(true);
+            translateDOM(currentLanguage);
+            showToast('Auto-translate on');
+        } else {
+            showToast('Auto-translate on. Pick a language below to see it.');
+        }
+    } else {
+        _tfSetTranslateObserver(false);
+        showToast('Auto-translate off');
+    }
     triggerHaptic(10);
 }
 
@@ -8549,9 +8579,17 @@ function _tfSetTranslateObserver(on) {
     }
 }
 // Re-apply a previously chosen language on load (was never applied on reload).
+// The observer only comes back if auto-translate was actually left on: it used
+// to be switched on unconditionally, quietly undoing the setting every reload.
 (function _tfInitLanguage() {
-    if (!currentLanguage || currentLanguage === 'en') return;
-    function go() { try { translateDOM(currentLanguage); _tfSetTranslateObserver(true); } catch (e) {} }
+    function go() {
+        _tfSyncTranslateToggle();
+        if (!currentLanguage || currentLanguage === 'en') return;
+        try {
+            translateDOM(currentLanguage);
+            if (_tfAutoTranslateOn()) _tfSetTranslateObserver(true);
+        } catch (e) {}
+    }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function(){ setTimeout(go, 900); });
     else setTimeout(go, 900);
 })();
@@ -44798,7 +44836,7 @@ function openEddieChat() {
                 '<button onclick="eddieToggleAttachMenu(event)" title="Attach" style="background:none;border:none;color:rgba(255,255,255,0.6);font-size:17px;cursor:pointer;padding:8px;flex-shrink:0;"><i class="fa-solid fa-paperclip"></i></button>' +
                 '<textarea id="eddieInput" rows="1" placeholder="Ask anything" ' +
                     'style="flex:1;background:transparent;border:none;outline:none;color:#fff;font-size:15px;resize:none;max-height:120px;padding:8px 0;font-family:inherit;"></textarea>' +
-                '<button id="eddieSend" onclick="eddieSend()" style="background:#fff;border:none;color:#000;width:36px;height:36px;border-radius:50%;cursor:pointer;flex-shrink:0;"><i class="fa-solid fa-arrow-up"></i></button>' +
+                '<button id="eddieSend" onclick="eddieSendOrStop()" title="Send" aria-label="Send" style="background:#fff;border:none;color:#000;width:36px;height:36px;border-radius:50%;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-arrow-up"></i></button>' +
             '</div>' +
             '<div id="eddieHint" style="color:rgba(255,255,255,0.3);font-size:11px;text-align:center;margin-top:7px;">Eddie is an AI and can make mistakes, please check responses.</div>' +
         '</div>' +
@@ -44812,7 +44850,9 @@ function openEddieChat() {
         ta.style.height = Math.min(120, ta.scrollHeight) + 'px';
     });
     ta.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); eddieSend(); }
+        // Enter mirrors the button: it stops a reply in progress rather than
+        // silently doing nothing.
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); eddieSendOrStop(); }
     });
 
     hideNavBar && hideNavBar();
@@ -45045,6 +45085,7 @@ function _eddieRender() {
     if (mark) mark.style.opacity = _eddie.turns.length ? '0.35' : '1';
 
     list.innerHTML = _eddie.turns.map(function (t, i) { return _eddieTurnHTML(t, i); }).join('');
+    _eddieSyncSendBtn();
     _eddieScrollDown();
 }
 
@@ -45323,12 +45364,47 @@ function eddieDropAttachment(i) {
 }
 
 // ---- send / stream ----
+// The send button doubles as a stop button while Eddie is replying. You cannot
+// send a second message mid-reply anyway, so the control does the thing that
+// is actually available at that moment.
+function eddieSendOrStop() {
+    if (_eddie.busy) { eddieStop(); return; }
+    eddieSend();
+}
+
+// Stop a reply in flight. Whatever Eddie already wrote is kept: a partial
+// answer is still an answer, and throwing it away would be worse than useless.
+function eddieStop() {
+    if (!_eddie.busy) return;
+    try { if (_eddie.abort) _eddie.abort.abort(); } catch (e) {}
+    _eddie.abort = null;
+    var last = _eddie.turns[_eddie.turns.length - 1];
+    if (last && last.role === 'assistant' && last.status !== 'done') {
+        last.status = 'done';
+        last.stopped = true;
+        last.showThinking = false;
+        if (!last.content) last.content = 'Stopped.';
+    }
+    _eddie.busy = false;
+    _eddieRender();
+    if (typeof triggerHaptic === 'function') triggerHaptic(12);
+}
+
+function _eddieSyncSendBtn() {
+    var btn = document.getElementById('eddieSend');
+    if (!btn) return;
+    var busy = !!_eddie.busy;
+    btn.innerHTML = '<i class="fa-solid ' + (busy ? 'fa-stop' : 'fa-arrow-up') + '"></i>';
+    btn.title = busy ? 'Stop' : 'Send';
+    btn.setAttribute('aria-label', busy ? 'Stop generating' : 'Send');
+}
+
 function eddieSend() {
     var ta = document.getElementById('eddieInput');
     if (!ta) return;
     var text = (ta.value || '').trim();
     if (!text) return;
-    if (_eddie.busy) { showToast('Eddie is still replying'); return; }
+    if (_eddie.busy) { eddieStop(); return; }
     ta.value = '';
     ta.style.height = 'auto';
     _eddieAsk(text, _eddie.attachments.slice());
@@ -45423,10 +45499,14 @@ async function _eddieMakeImage(prompt, turn) {
     _eddieRender();
     try {
         var token = await _eddieToken();
+        // Same abort handle as chat, so the stop button works here too rather
+        // than leaving someone stuck watching an image they no longer want.
+        _eddie.abort = new AbortController();
         var r = await fetch('/api/eddie/image/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-            body: JSON.stringify({ prompt: prompt })
+            body: JSON.stringify({ prompt: prompt }),
+            signal: _eddie.abort.signal
         });
         var j = await r.json();
         if (!r.ok) {
@@ -45441,10 +45521,13 @@ async function _eddieMakeImage(prompt, turn) {
             turn.content = 'Could not make that image.';
         }
     } catch (e) {
+        // A stop is not a failure; eddieStop has already written the turn.
+        if (e && e.name === 'AbortError') return;
         turn.content = 'Could not reach the image service.';
     }
     turn.status = 'done';
     _eddie.busy = false;
+    _eddie.abort = null;
     _eddieRender();
     eddieRefreshUsage();
 }

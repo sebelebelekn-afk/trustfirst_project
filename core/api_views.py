@@ -6,6 +6,7 @@ import json
 import os
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import stripe
@@ -685,6 +686,92 @@ def elevenlabs_transcribe(request):
 # ---------------------------------------------------------------------------
 # 9c. TEXT TRANSLATION (translate the UI/content to any language, server-side)
 # ---------------------------------------------------------------------------
+
+def _gtx(params, timeout=15):
+    try:
+        r = requests.get('https://translate.googleapis.com/translate_a/single',
+                         params=params, timeout=timeout)
+        if r.status_code != 200:
+            return None
+        return r.json()
+    except Exception:
+        return None
+
+
+def _gtx_lines(texts, target):
+    """Translate several strings in ONE request by joining them with newlines.
+
+    Sending one request per string got the whole batch rate-limited, which is
+    why most of the interface stayed in English: failed strings silently fell
+    back to the original. Google keeps the line structure, so a single call
+    returns them all in order.
+
+    Returns None when the line count does not come back exactly as sent, so a
+    misaligned response can never scramble one label onto another.
+    """
+    flat = [t.replace('\n', ' ').replace('\r', ' ').strip() for t in texts]
+    data = _gtx({'client': 'gtx', 'sl': 'auto', 'tl': target, 'dt': 't',
+                 'q': '\n'.join(flat)})
+    if not data or not data[0]:
+        return None
+    joined = ''.join(seg[0] for seg in data[0] if seg and seg[0])
+    lines = joined.split('\n')
+    if len(lines) != len(flat):
+        return None
+    return [ln.strip() or orig for ln, orig in zip(lines, texts)]
+
+
+def _translate_chunk(chunk, target):
+    """One chunk of (index, text) pairs. Returns (index, translated) pairs."""
+    texts = [s for _, s in chunk]
+    done = _gtx_lines(texts, target)
+    if done is None:
+        # Rare: the line count came back wrong, so resolve them one at a time
+        # rather than risk pinning the wrong translation to the wrong label.
+        done = []
+        for s in texts:
+            d = _gtx({'client': 'gtx', 'sl': 'auto', 'tl': target,
+                      'dt': 't', 'q': s}, timeout=8)
+            t = ''.join(seg[0] for seg in (d[0] or []) if seg and seg[0]) if d and d[0] else ''
+            done.append(t or s)
+    return [(idx, val) for (idx, _), val in zip(chunk, done)]
+
+
+def _translate_batch(items, target):
+    """Translate a list, preserving order and length exactly.
+
+    Chunks are built first and then translated in parallel. Done one after the
+    other, switching language on a full page meant waiting through several
+    round trips in series, which is what made it feel like nothing happened.
+    Results are written back by index, so order survives regardless of which
+    chunk finishes first, and anything that fails keeps its English original.
+    """
+    chunks, cur, budget = [], [], 0
+    for idx, s in enumerate(items):
+        if not s.strip():
+            continue                      # blanks keep their place via `out`
+        if budget + len(s) > 1400 or len(cur) >= 40:
+            chunks.append(cur); cur = []; budget = 0
+        cur.append((idx, s)); budget += len(s) + 1
+    if cur:
+        chunks.append(cur)
+
+    out = list(items)
+    if not chunks:
+        return out
+
+    if len(chunks) == 1:
+        results = [_translate_chunk(chunks[0], target)]
+    else:
+        with ThreadPoolExecutor(max_workers=min(6, len(chunks))) as pool:
+            results = list(pool.map(lambda c: _translate_chunk(c, target), chunks))
+
+    for res in results:
+        for idx, val in res:
+            out[idx] = val
+    return out
+
+
 @ratelimit(key='ip', rate='60/m', method='POST', block=True)
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -698,25 +785,8 @@ def translate_text(request):
         target = (body.get('target') or 'en')[:6]
         if not isinstance(texts, list) or not texts:
             return JsonResponse({'error': 'No text'}, status=400)
-        out = []
-        for t in texts[:60]:
-            s = str(t)[:900]
-            if not s.strip():
-                out.append(s); continue
-            try:
-                r = requests.get(
-                    'https://translate.googleapis.com/translate_a/single',
-                    params={'client': 'gtx', 'sl': 'auto', 'tl': target, 'dt': 't', 'q': s},
-                    timeout=8,
-                )
-                if r.status_code == 200:
-                    data = r.json()
-                    translated = ''.join(seg[0] for seg in (data[0] or []) if seg and seg[0])
-                    out.append(translated or s)
-                else:
-                    out.append(s)
-            except Exception:
-                out.append(s)
+        items = [str(t)[:900] for t in texts[:60]]
+        out = _translate_batch(items, target)
         return JsonResponse({'t': out})
     except Exception:
         return JsonResponse({'error': 'Server error'}, status=500)
