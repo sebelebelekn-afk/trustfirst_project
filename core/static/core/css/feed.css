@@ -3201,8 +3201,11 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     padding: 8px 12px;
     box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.07) inset;
 }
+/* Emoji glyphs sit taller than their font size, so with no line-height the
+   tops and tails were being clipped. Give them room and an even box. */
 .msg-react-emoji {
-    font-size: 24px; cursor: pointer; padding: 4px 6px;
+    font-size: 24px; line-height: 1.4; cursor: pointer;
+    padding: 5px 7px; min-width: 38px; text-align: center;
     border-radius: 50%; transition: transform 0.15s;
     -webkit-tap-highlight-color: transparent;
 }

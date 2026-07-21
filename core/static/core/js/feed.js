@@ -7613,7 +7613,7 @@ document.getElementById('feed-panels').addEventListener('dblclick', function (e)
             setTimeout(function() { el.style.transition = ''; }, 300);
 
             if (match && parseFloat(match[1]) > 30) {
-                showToast('Refreshing...');
+                // No toast: the spinner already says it is refreshing.
                 onRefresh();
             }
         });
@@ -8457,7 +8457,7 @@ function setLanguage(code) {
 
     renderLanguages();
     triggerHaptic(15);
-    showToast((map['language'] || 'Language') + ': ' + getLanguageName(code));
+    // No toast: the whole interface changing language is its own confirmation.
     // Full-UI machine translation (the ~30-key dictionary above only covers a
     // few labels; this translates everything else via the server endpoint).
     if (code === 'en') { restoreDOMEnglish(); _tfSetTranslateObserver(false); }
@@ -19658,8 +19658,10 @@ async function submitReportProblem() {
     var shakeHits = 0, lastHit = 0;
     // Use gravity-free acceleration so tilting doesn't trigger it, and require
     // several strong jolts in quick succession — a deliberate shake, not a nudge.
-    var JOLT = 16;        // per-axis-sum jolt strength
-    var HITS_NEEDED = 3;  // consecutive jolts within the window
+    // Raised after it kept firing on ordinary handling: a report should take a
+    // deliberate shake, not a brisk walk or dropping the phone on a cushion.
+    var JOLT = 24;        // per-axis-sum jolt strength
+    var HITS_NEEDED = 4;  // consecutive jolts within the window
     function _attachShake() {
         window.addEventListener('devicemotion', function(e) {
         var shakeEnabled = localStorage.getItem('tf-shake-report') !== '0';
@@ -25989,7 +25991,7 @@ async function openPostDetail(postId) {
         '<div id="_pdBody" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;"><div style="padding:40px;text-align:center;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:22px;"></i></div></div>' +
         '<div onclick="realOpenComments(\'' + escapeHtml(String(postId)) + '\')" style="flex-shrink:0;display:flex;align-items:center;gap:10px;padding:10px 14px calc(env(safe-area-inset-bottom,0px) + 12px);border-top:0.5px solid var(--border-color,#eee);cursor:text;">' +
             ((currentUser && currentUser.avatar_url) ? '<img src="' + escapeHtml(currentUser.avatar_url) + '" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0;">' : '<div style="width:32px;height:32px;border-radius:50%;background:#ccc;flex-shrink:0;"></div>') +
-            '<div style="flex:1;background:var(--bg-secondary,#f2f2f2);border-radius:20px;padding:10px 16px;color:#888;font-size:15px;">Post your reply</div>' +
+            '<div style="flex:1;background:var(--bg-secondary,#f2f2f2);border-radius:20px;padding:10px 16px;color:#888;font-size:15px;">Post your comment</div>' +
         '</div>';
     (document.getElementById('app') || document.body).appendChild(ov);
     var body = ov.querySelector('#_pdBody');
@@ -27710,12 +27712,20 @@ function ensureNavDroplet() {
 function navActiveIcon() {
     return document.querySelector('.liquid-pill .nav-icon.nav-active') || document.getElementById('nav-home');
 }
-function navSyncDroplet(animate) {
+function navSyncDroplet(animate, _tries) {
     var pill = document.getElementById('liquidPill');
     var drop = ensureNavDroplet();
     if (!pill || !drop || drop.classList.contains('dragging')) return;
     var icon = navActiveIcon();
-    if (!icon || icon.getBoundingClientRect().width === 0) return;
+    // The destination icon is still zero-width while the pill is expanding, and
+    // on pages that hide the bar entirely (TrustClips). Giving up there is why
+    // the droplet stayed behind on the previous page's icon after opening a
+    // profile. Wait for the icon to have a box instead of abandoning the move.
+    if (!icon || icon.getBoundingClientRect().width === 0) {
+        var n = _tries || 0;
+        if (n < 12) setTimeout(function () { navSyncDroplet(animate, n + 1); }, 80);
+        return;
+    }
     var pr = pill.getBoundingClientRect(), ir = icon.getBoundingClientRect();
     var w = Math.max(42, Math.round(ir.width) + 8);
     var left = Math.round((ir.left - pr.left) + (ir.width - w) / 2);
