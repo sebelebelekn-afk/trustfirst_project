@@ -35703,7 +35703,7 @@ function edAddMusicTrackReal(title, artist, previewUrl, artUrl) {
     edState.isDirty = true; edRenderTimeline(); edSaveHistory(); editorSaveDraft(false);
     var m = document.getElementById('edMusicModal');
     if (m) m.remove();
-    showToast(title + ' added 🎵'); triggerHaptic(15);
+    showToast(title + ' added'); triggerHaptic(15);
 }
 function edRenderMusicList(songs) {
     var list = document.getElementById('edMusicList');
@@ -35722,7 +35722,7 @@ function edAddMusicTrack(title, artist) {
     edState.isDirty = true; edRenderTimeline(); edSaveHistory(); editorSaveDraft(false);
     var m = document.getElementById('edMusicModal');
     if (m) m.remove();
-    showToast(title + ' added 🎵'); triggerHaptic(15);
+    showToast(title + ' added'); triggerHaptic(15);
 }
 function edImportAudio() {
     var inp = document.createElement('input');
@@ -35735,7 +35735,7 @@ function edImportAudio() {
         edState.isDirty = true; edRenderTimeline();
         var m = document.getElementById('edMusicModal');
         if (m) m.remove();
-        showToast(file.name.split('.')[0]+' imported 🎵'); triggerHaptic(15);
+        showToast(file.name.split('.')[0]+' imported'); triggerHaptic(15);
     };
     inp.click();
 }
@@ -37948,10 +37948,19 @@ function edOpenStickerTray() {
     var t = document.createElement('div');
     t.id = 'edStickerTray';
     t.style.cssText = 'position:absolute;inset:0;z-index:500;background:rgba(0,0,0,0.9);backdrop-filter:blur(20px);display:flex;flex-direction:column;animation:slideUpOverlay 0.3s ease;';
+    // Proper icons rather than emoji: emoji render differently on every
+    // platform and read as content, while these are controls. Each gets the
+    // colour it already uses elsewhere in the app.
     var STICKERS_FUNCTIONAL = [
-        {emoji:'📍',label:'Location'},{emoji:'🌡️',label:'Weather'},{emoji:'❓',label:'Quiz'},
-        {emoji:'📊',label:'Poll'},{emoji:'🎞',label:'GIF'},{emoji:'🎵',label:'Music'},
-        {emoji:'❤️',label:'Emoji Slider'},{emoji:'🕐',label:'Clock'},{emoji:'🖼',label:'Gallery'}
+        {icon:'fa-location-dot',        color:'#FF3B30', label:'Location'},
+        {icon:'fa-cloud-sun',           color:'#FF9500', label:'Weather'},
+        {icon:'fa-circle-question',     color:'#5856D6', label:'Quiz'},
+        {icon:'fa-square-poll-vertical',color:'#007AFF', label:'Poll'},
+        {icon:'fa-film',                color:'#34C759', label:'GIF'},
+        {icon:'fa-music',               color:'#FF2D55', label:'Music'},
+        {icon:'fa-sliders',             color:'#AF52DE', label:'Emoji Slider'},
+        {icon:'fa-clock',               color:'#64D2FF', label:'Clock'},
+        {icon:'fa-images',              color:'#FFD60A', label:'Gallery'}
     ];
     var STICKERS_TEXT = ['#TBT','IYKYK','Happy Birthday','No Filter','Vibe Check','POV','Story Time','Real Talk','Let\'s Go','W','L','Facts'];
     var STICKERS_EMOJI = ['😍','🔥','💯','🙌','👀','✨','🥳','💪','🎉','🤯','💅','🏆'];
@@ -37978,8 +37987,8 @@ function edOpenStickerTray() {
             '<p style="color:rgba(255,255,255,0.35);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">All Stickers</p>'+
             '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px;">'+
             STICKERS_FUNCTIONAL.map(function(s){
-                return '<div onclick="edStickerTile(\''+s.label+'\')" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;border:0.5px solid rgba(255,255,255,0.08);">'+
-                    '<span style="font-size:26px;">'+s.emoji+'</span>'+
+                return '<div onclick="edStickerTile(\''+s.label+'\')" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;border:0.5px solid rgba(255,255,255,0.08);">'+
+                    '<i class="fa-solid '+s.icon+'" style="font-size:22px;color:'+s.color+';"></i>'+
                     '<span style="color:rgba(255,255,255,0.7);font-size:12px;font-weight:600;">'+s.label+'</span>'+
                 '</div>';
             }).join('')+
@@ -40788,7 +40797,7 @@ function tfMusicStickerHTML(m, opts) {
                 '<div class="tf-ms2-info" onclick="' + titleTap + '" style="flex:1;min-width:0;"><b class="tf-ms-name">' + name + '</b><small>' + artist + '</small></div>' +
                 playBtn + removeBtn +
             '</div>' +
-            '<div class="tf-ms3-lyrics" id="' + id + '_lyrics"><div class="tf-ms3-note">🎵</div><p style="color:#999;font-size:13px;margin:0;">Tap play to load synced lyrics…</p></div>' +
+            '<div class="tf-ms3-lyrics" id="' + id + '_lyrics"><div class="tf-ms3-note"><i class="fa-solid fa-music"></i></div><p style="color:#999;font-size:13px;margin:0;">Tap play to load synced lyrics…</p></div>' +
         '</div>' + hint;
     }
     // Style 1 — compact bar
@@ -40858,7 +40867,7 @@ function tfLoadStickerLyrics(id, audioEl) {
     if (m._lyrics) { tfRenderLyrics(id, audioEl); return; }
     if (m._lyricsFetching) return;
     m._lyricsFetching = true;
-    box.innerHTML = '<div class="tf-ms3-note">🎵</div><p style="color:#999;font-size:13px;margin:0;">Loading lyrics…</p>';
+    box.innerHTML = '<div class="tf-ms3-note"><i class="fa-solid fa-music"></i></div><p style="color:#999;font-size:13px;margin:0;">Loading lyrics…</p>';
     var url = 'https://lrclib.net/api/get?artist_name=' + encodeURIComponent(m.artist || '') + '&track_name=' + encodeURIComponent(m.name || '');
     fetch(url).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
         m._lyricsFetching = false;
@@ -40874,7 +40883,7 @@ function tfRenderLyrics(id, audioEl) {
     var box = document.getElementById(id + '_lyrics');
     if (!m || !box) return;
     if (!m._lyrics || !m._lyrics.length) {
-        box.innerHTML = '<div class="tf-ms3-note">🎵</div><p style="color:#999;font-size:13px;margin:0;">Lyrics aren\'t available for this track.</p>';
+        box.innerHTML = '<div class="tf-ms3-note"><i class="fa-solid fa-music"></i></div><p style="color:#999;font-size:13px;margin:0;">Lyrics aren\'t available for this track.</p>';
         return;
     }
     box.innerHTML = m._lyrics.map(function (ln, i) {

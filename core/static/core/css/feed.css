@@ -3733,7 +3733,9 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
 .tf-ms3-head { display:flex; align-items:center; gap:10px; }
 .tf-ms3-thumb { width:40px; height:40px; border-radius:8px; object-fit:cover; flex-shrink:0; }
 .tf-ms3-lyrics { margin-top:11px; max-height:132px; overflow-y:auto; -webkit-overflow-scrolling:touch; font-size:14px; line-height:1.7; }
-.tf-ms3-note { font-size:18px; margin-bottom:4px; }
+/* Icon, not an emoji: it is a placeholder mark for the lyrics panel, and the
+   muted colour keeps it from competing with the lyrics themselves. */
+.tf-ms3-note { font-size:18px; margin-bottom:6px; color:#8a8a8e; }
 .tf-ms3-line { color:var(--text-secondary,#9a9a9a); transition:color 0.2s ease, font-weight 0.2s ease; }
 .tf-ms3-line.active { color:#007AFF; font-weight:700; }
 
