@@ -2506,6 +2506,21 @@ function _isSafeUrl(url) {
         return (u.protocol === 'http:' || u.protocol === 'https:') && !!u.hostname && u.hostname.indexOf('.') > 0;
     } catch (e) { return false; }
 }
+// Readable text for a message row, or null when it is encrypted and this
+// device holds no key for it.
+//
+// E2E keys are generated per device and never leave it, so signing in
+// somewhere new produces a keypair that cannot open anything sent before.
+// Every render path used to fall back to `m.ciphertext`, which is why those
+// chats filled up with base64 instead of words. Ciphertext is only ever shown
+// when there is no nonce, meaning the row was never encrypted (group chats and
+// older plaintext messages).
+function _msgPlainText(m) {
+    if (m.content) return m.content;
+    if (!m.nonce) return m.ciphertext || '';
+    return null;
+}
+
 function _firstUrl(text) {
     var m = (text || '').match(/https?:\/\/[^\s]+/);
     if (!m) return null;
@@ -2707,7 +2722,19 @@ function renderMessageBubble(m, replyMap) {
 
     // ── TEXT ──────────────────────────────────────────────────────────────
     if (msgType === 'text') {
-        var text = m.content || m.ciphertext || '';
+        // A nonce means the row is encrypted. If we have no plaintext by now,
+        // this device cannot read it, and dumping the base64 into the bubble
+        // (which is what used to happen) is worse than saying so.
+        var text = _msgPlainText(m);
+        if (text === null) {
+            return '<div style="' + wrapStyle + '">' +
+                '<div style="background:rgba(120,120,128,0.12);color:var(--text-secondary,#666);' +
+                'padding:11px 15px;border-radius:16px;max-width:78%;font-size:13.5px;line-height:1.4;' +
+                'border:1px dashed rgba(120,120,128,0.35);' + align + '">' +
+                    '<i class="fa-solid fa-lock" style="font-size:11px;margin-right:6px;opacity:0.7;"></i>' +
+                    'This message was encrypted for another device, so it cannot be opened here.' +
+                '</div>' + timeHtml + '</div>';
+        }
         return '<div style="' + wrapStyle + '">' +
             '<div' + bubbleAttr + ' style="background:' + (isSent ? '#007AFF' : 'rgba(0,0,0,0.07)') + ';color:' + (isSent ? 'white' : 'var(--text-primary,#000)') + ';padding:11px 15px;border-radius:' + (isSent ? '20px 20px 4px 20px' : '20px 20px 20px 4px') + ';max-width:78%;font-size:15px;line-height:1.4;word-wrap:break-word;' + align + 'position:relative;">' +
                 replyQuote + _linkifyMessage(text, isSent) + failedBadge +
@@ -11681,7 +11708,9 @@ function _previewForMessage(m, meId) {
         case 'deleted':  return 'This message was deleted';
         default:
             // Never leak raw ciphertext for unknown/non-text types.
-            return (m.message_type && m.message_type !== 'text' && !m.content) ? 'New message' : (m.content || m.ciphertext || '');
+            if (m.message_type && m.message_type !== 'text' && !m.content) return 'New message';
+            var _pt = _msgPlainText(m);
+            return _pt === null ? 'Encrypted message' : _pt;
     }
 }
 
@@ -12971,8 +13000,11 @@ DB.getMessages = async function(conversationId, limit, before) {
                 if ((m.message_type || 'text') !== 'text') return; // media/location/etc store plaintext
                 if (m.content) return;                              // already have plaintext
                 if (!m.nonce) { m.content = m.ciphertext; return; } // plain (group/legacy)
+                // On failure leave content empty and keep the nonce, so the
+                // renderer shows "encrypted for another device" rather than
+                // pasting the base64 into the bubble.
                 try { m.content = await E2E.decryptMessage(m.ciphertext, m.nonce, _partnerId); }
-                catch(e) { m.content = m.ciphertext || ''; }        // fall back to raw on failure
+                catch(e) { m.content = ''; }
             }));
         }
         // Apply per-device "delete for me" + "clear chat" hides.
