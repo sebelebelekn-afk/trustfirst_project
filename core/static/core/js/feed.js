@@ -14873,22 +14873,187 @@ EmailService.init();
 // Uses Web Crypto API - no plaintext ever touches the server
 // ==========================================================================
 
+// ==========================================================================
+// Encrypted key backup.
+//
+// The identity key is what makes past messages readable. Kept only in browser
+// storage it dies with a reinstall, a cleared cache or a new phone, taking
+// every conversation with it. That is fine for a burner app and unacceptable
+// for one competing on people not losing things.
+//
+// So the key is wrapped on the device with AES-GCM, using a key stretched from
+// a recovery PIN with PBKDF2, and only the wrapped bytes go to the server. The
+// server never sees the PIN and never sees the key, so it still cannot read a
+// single message: without the PIN the stored row is noise. Same shape as
+// WhatsApp's encrypted backups.
+// ==========================================================================
+function openMessageBackupSetup() {
+    var existing = document.getElementById('e2eBackupSheet');
+    if (existing) existing.remove();
+    var restoring = !!(typeof E2E !== 'undefined' && E2E._needsRestore);
+    var el = document.createElement('div');
+    el.id = 'e2eBackupSheet';
+    el.style.cssText = 'position:absolute;inset:0;z-index:9000;background:rgba(0,0,0,0.55);display:flex;align-items:flex-end;';
+    el.innerHTML =
+        '<div style="width:100%;background:var(--bg-primary,#fff);border-radius:22px 22px 0 0;padding:24px 22px calc(env(safe-area-inset-bottom,0px) + 28px);">' +
+            '<div style="width:38px;height:4px;border-radius:3px;background:rgba(127,127,127,0.35);margin:0 auto 18px;"></div>' +
+            '<h2 style="margin:0 0 8px;font-size:21px;font-weight:800;color:var(--text-primary,#000);">' +
+                (restoring ? 'Unlock your messages' : 'Back up your messages') + '</h2>' +
+            '<p style="margin:0 0 18px;font-size:14px;line-height:1.55;color:var(--text-secondary,#666);">' +
+                (restoring
+                    ? 'This device has no key yet. Enter your recovery PIN to unlock the messages already on your account.'
+                    : 'Your messages are encrypted, so only your devices can read them. Set a recovery PIN and they will still be here on a new phone. Without one, reinstalling loses them for good.') +
+            '</p>' +
+            '<input id="e2ePin" type="password" inputmode="numeric" autocomplete="off" placeholder="Recovery PIN" ' +
+                'style="width:100%;box-sizing:border-box;padding:14px 16px;border-radius:12px;border:1px solid var(--border-color,#ddd);background:var(--input-bg,#f5f5f7);font-size:16px;color:var(--text-primary,#000);outline:none;margin-bottom:10px;">' +
+            (restoring ? '' :
+            '<input id="e2ePin2" type="password" autocomplete="off" placeholder="Confirm PIN" ' +
+                'style="width:100%;box-sizing:border-box;padding:14px 16px;border-radius:12px;border:1px solid var(--border-color,#ddd);background:var(--input-bg,#f5f5f7);font-size:16px;color:var(--text-primary,#000);outline:none;margin-bottom:10px;">') +
+            '<p id="e2eErr" style="display:none;color:#FF3B30;font-size:13px;margin:0 0 10px;"></p>' +
+            '<p style="font-size:12px;color:var(--text-tertiary,#999);margin:0 0 18px;line-height:1.5;">' +
+                'We never see this PIN, so we cannot reset it for you. Write it down somewhere safe.</p>' +
+            '<button id="e2eGo" style="width:100%;padding:15px;border-radius:12px;border:none;background:#0A84FF;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">' +
+                (restoring ? 'Unlock' : 'Turn on backup') + '</button>' +
+            '<button onclick="document.getElementById(\'e2eBackupSheet\').remove()" style="width:100%;padding:13px;margin-top:8px;border:none;background:none;color:var(--text-secondary,#666);font-size:15px;cursor:pointer;">Not now</button>' +
+        '</div>';
+    (document.getElementById('app') || document.body).appendChild(el);
+
+    document.getElementById('e2eGo').onclick = async function () {
+        var err = document.getElementById('e2eErr');
+        var pin = (document.getElementById('e2ePin') || {}).value || '';
+        function fail(msg) { err.textContent = msg; err.style.display = 'block'; }
+        err.style.display = 'none';
+        if (pin.length < 4) return fail('Use at least 4 characters.');
+        if (!restoring) {
+            var pin2 = (document.getElementById('e2ePin2') || {}).value || '';
+            if (pin !== pin2) return fail('Those PINs do not match.');
+        }
+        this.disabled = true; this.textContent = restoring ? 'Unlocking…' : 'Saving…';
+        try {
+            if (restoring) {
+                await E2EBackup.restore(pin);
+                showToast('Messages unlocked on this device');
+            } else {
+                await E2EBackup.create(pin);
+                showToast('Message backup is on');
+            }
+            el.remove();
+            if (restoring && typeof loadConversations === 'function') loadConversations();
+        } catch (e) {
+            this.disabled = false;
+            this.textContent = restoring ? 'Unlock' : 'Turn on backup';
+            fail(e.message || 'That did not work.');
+        }
+    };
+}
+
+const E2EBackup = {
+    ITERATIONS: 250000,
+
+    _b64(buf) { return btoa(String.fromCharCode.apply(null, new Uint8Array(buf))); },
+    _bin(b64) { return Uint8Array.from(atob(b64), function (c) { return c.charCodeAt(0); }); },
+
+    async _wrapKey(pin, salt) {
+        var base = await crypto.subtle.importKey(
+            'raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveKey']);
+        return crypto.subtle.deriveKey(
+            { name: 'PBKDF2', salt: salt, iterations: this.ITERATIONS, hash: 'SHA-256' },
+            base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    },
+
+    async exists() {
+        if (!window.sb || !currentUser) return false;
+        var r = await sb.from('e2e_key_backups').select('user_id')
+            .eq('user_id', currentUser.id).maybeSingle();
+        return !!(r && r.data);
+    },
+
+    // Wrap this device's identity key under `pin` and store it.
+    async create(pin, hint) {
+        if (!pin || String(pin).length < 4) throw new Error('PIN must be at least 4 characters');
+        if (!E2E._keys) throw new Error('No keys on this device yet');
+        var salt = crypto.getRandomValues(new Uint8Array(16));
+        var iv = crypto.getRandomValues(new Uint8Array(12));
+        var key = await this._wrapKey(String(pin), salt);
+        var payload = new TextEncoder().encode(JSON.stringify(E2E._keys));
+        var wrapped = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, payload);
+
+        var row = {
+            user_id: currentUser.id,
+            wrapped_key: this._b64(wrapped),
+            salt: this._b64(salt),
+            iv: this._b64(iv),
+            hint: hint || null,
+            updated_at: new Date().toISOString()
+        };
+        var res = await sb.from('e2e_key_backups').upsert(row, { onConflict: 'user_id' });
+        if (res.error) throw new Error(res.error.message);
+        return true;
+    },
+
+    // Pull the backup down and unlock it onto this device.
+    async restore(pin) {
+        if (!window.sb || !currentUser) throw new Error('Sign in first');
+        var r = await sb.from('e2e_key_backups')
+            .select('wrapped_key,salt,iv').eq('user_id', currentUser.id).maybeSingle();
+        if (!r.data) throw new Error('No backup found for this account');
+
+        var key = await this._wrapKey(String(pin), this._bin(r.data.salt));
+        var plain;
+        try {
+            plain = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: this._bin(r.data.iv) }, key, this._bin(r.data.wrapped_key));
+        } catch (e) {
+            // AES-GCM fails authentication on a wrong PIN, which is the only
+            // signal there is: the server cannot tell us if the PIN was right.
+            throw new Error('That PIN did not work');
+        }
+        var keys = JSON.parse(new TextDecoder().decode(plain));
+        E2E._keys = keys;
+        E2E._needsRestore = false;
+        // Same shape generateKeyPair writes, so a restored key is picked up by
+        // init() on the next load exactly like a locally generated one.
+        var rec = { id: 'e2e_keys', type: 'e2e', blob: JSON.stringify(keys), createdAt: Date.now() };
+        try { await DB.update('mediaCache', rec); }
+        catch (e) { try { await DB.add('mediaCache', rec); } catch (e2) {} }
+        // Derived-key cache belongs to the old identity; drop it.
+        try { E2E._sessionKeys.clear(); } catch (e) {}
+        return true;
+    }
+};
+
 const E2E = {
     // Key storage (keys stay on device only)
     _keys: null,
+    _needsRestore: false,
 
-    // Initialize: generate or load key pair
+    // Initialize: load this device's keys, otherwise restore the encrypted
+    // backup, and only generate a brand new pair as a last resort.
+    //
+    // Generating straight away is what silently orphaned second devices: the
+    // new key could not open a single earlier message, and the chat filled up
+    // with unreadable rows. Now a device with no local key first checks
+    // whether a backup exists, and says so instead of quietly starting over.
     async init() {
         try {
-    var stored = await DB.get('mediaCache', 'e2e_keys');
-    if (stored && stored.blob) {
-        this._keys = JSON.parse(stored.blob);
-        console.debug('[E2E] Keys loaded from IndexedDB');
-        return;
-    }
-} catch(e) {
-    console.warn('[E2E] No stored keys, generating new ones');
-}
+            var stored = await DB.get('mediaCache', 'e2e_keys');
+            if (stored && stored.blob) {
+                this._keys = JSON.parse(stored.blob);
+                console.debug('[E2E] Keys loaded from IndexedDB');
+                return;
+            }
+        } catch (e) {
+            console.warn('[E2E] No stored keys on this device');
+        }
+        // A backup means real history exists that this device cannot read
+        // until it is unlocked, so do not clobber it with fresh keys.
+        try {
+            if (await E2EBackup.exists()) {
+                this._needsRestore = true;
+                console.warn('[E2E] Encrypted key backup found: awaiting recovery PIN');
+                return;
+            }
+        } catch (e) {}
         await this.generateKeyPair();
     },
 
