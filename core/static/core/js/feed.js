@@ -17563,6 +17563,85 @@ let algorithmPrefs = JSON.parse(localStorage.getItem('trustfirst-algo') || JSON.
     sensitiveContent: 'standard'
 }));
 
+// ==========================================================================
+// View tracking. "Your Algorithm" can only describe what you have been into if
+// something records what you actually looked at, and post_views was empty
+// because RLS had no insert policy. A post counts as seen once it has been at
+// least half on screen for a full second, so a fast scroll past does not count
+// as interest. One row per person per post: this is "have they seen it", not a
+// hit counter, and a unique index enforces that server-side too.
+// ==========================================================================
+var _tfSeenPosts = null;          // ids already recorded this session
+var _tfViewTimers = {};
+var _tfViewObserver = null;
+
+function _tfIsUuid(v) {
+    return typeof v === 'string' &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+}
+
+function _tfRecordView(postId) {
+    if (!window.sb || !currentUser || !_tfIsUuid(postId)) return;
+    if (_tfSeenPosts.has(postId)) return;
+    _tfSeenPosts.add(postId);       // optimistic: never queue the same post twice
+    sb.from('post_views')
+        .insert({ post_id: postId, viewer_id: currentUser.id })
+        .then(function () {}, function () {});   // duplicate rows are fine to lose
+}
+
+function initViewTracking() {
+    if (_tfViewObserver || typeof IntersectionObserver === 'undefined') return;
+    _tfSeenPosts = _tfSeenPosts || new Set();
+
+    _tfViewObserver = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+            var id = entry.target.getAttribute('data-post-id');
+            if (!id) return;
+            if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+                if (_tfViewTimers[id]) return;
+                _tfViewTimers[id] = setTimeout(function () {
+                    delete _tfViewTimers[id];
+                    _tfRecordView(id);
+                    _tfViewObserver.unobserve(entry.target);
+                }, 1000);
+            } else if (_tfViewTimers[id]) {
+                // Scrolled away before the second was up: not a real view.
+                clearTimeout(_tfViewTimers[id]);
+                delete _tfViewTimers[id];
+            }
+        });
+    }, { threshold: [0, 0.5, 1] });
+
+    _tfObserveNewPosts();
+    // Cards arrive as the feed loads and paginates, so keep picking up new ones.
+    var feed = document.getElementById('feed-posts') || document.getElementById('feed-panels');
+    if (feed && window.MutationObserver) {
+        new MutationObserver(function () { _tfObserveNewPosts(); })
+            .observe(feed, { childList: true, subtree: true });
+    }
+}
+
+function _tfObserveNewPosts() {
+    if (!_tfViewObserver) return;
+    document.querySelectorAll('[data-post-id]').forEach(function (el) {
+        if (el._tfWatched) return;
+        el._tfWatched = true;
+        _tfViewObserver.observe(el);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    setTimeout(initViewTracking, 3000);   // let auth and the first posts land
+});
+
+// Pill-shaped placeholders, one per given width, for the tag rows while the
+// real interests are still being worked out.
+function _algoSkChips(widths) {
+    return widths.map(function (w) {
+        return '<div class="algo-sk" style="width:' + w + 'px; height:35px; border-radius:30px;"></div>';
+    }).join('');
+}
+
 function showAlgorithmScreen() {
     const navBar = document.querySelector('.bottom-nav, .nav-bar, #bottomNav');
     if (navBar) navBar.style.display = 'none';
@@ -17631,16 +17710,20 @@ function showAlgorithmScreen() {
 
             <!-- Content -->
             <div style="padding:20px 16px;">
-                <!-- Summary -->
-                <div style="
-                    background:linear-gradient(135deg, rgba(0,122,255,0.08), rgba(0,199,255,0.05));
-                    border-radius:16px; padding:20px; margin-bottom:28px;
-                ">
-                    <p style="font-size:14px; color:var(--text-secondary); line-height:1.6;">
-                        Lately you've been into
-                        <strong style="color:#007AFF;">${algorithmPrefs.seeMore.slice(0,3).join(', ') || 'a mix of topics'}</strong>.
-                        Adjust the tags below to shape what you see more and less of.
-                    </p>
+                <!-- Summary: written from real viewing history, animated in -->
+                <div id="algoSummaryWrap" style="margin:4px 0 30px; min-height:96px;">
+                    <div id="algoSummarySkeleton">
+                        <div class="algo-sk" style="height:26px; width:92%; margin-bottom:11px;"></div>
+                        <div class="algo-sk" style="height:26px; width:78%; margin-bottom:11px;"></div>
+                        <div class="algo-sk" style="height:26px; width:45%;"></div>
+                    </div>
+                    <h2 id="algoSummary" style="
+                        font-size:26px; font-weight:800; line-height:1.28;
+                        letter-spacing:-0.4px; margin:0;
+                    "></h2>
+                    <p id="algoSummarySub" style="
+                        font-size:13px; color:var(--text-secondary); margin:10px 0 0; display:none;
+                    ">Based on your activity, summarised by Eddie</p>
                 </div>
 
                 <!-- See More -->
@@ -17649,7 +17732,8 @@ function showAlgorithmScreen() {
                         What you want to see more of
                     </h3>
                     <div style="display:flex; flex-wrap:wrap; gap:8px;" id="seeMoreTags">
-                        ${algorithmPrefs.seeMore.map(tag => `
+                        ${!algorithmPrefs._seeded ? _algoSkChips([84, 62, 108, 74]) : ''}
+                        ${!algorithmPrefs._seeded ? '' : algorithmPrefs.seeMore.map(tag => `
                             <div style="
                                 display:flex; align-items:center; gap:6px;
                                 background:rgba(0,122,255,0.12); border:1px solid rgba(0,122,255,0.25);
@@ -17662,12 +17746,12 @@ function showAlgorithmScreen() {
                                 ">×</button>
                             </div>
                         `).join('')}
-                        <button onclick="showAddTagModal('seeMore')" style="
+                        ${!algorithmPrefs._seeded ? '' : `<button onclick="showAddTagModal('seeMore')" style="
                             display:flex; align-items:center; gap:4px;
                             background:rgba(0,122,255,0.06); border:1px dashed rgba(0,122,255,0.3);
                             border-radius:30px; padding:8px 16px; cursor:pointer;
                             color:#007AFF; font-size:14px; font-weight:600;
-                        ">+ Add</button>
+                        ">+ Add</button>`}
                     </div>
                 </div>
 
@@ -17677,7 +17761,8 @@ function showAlgorithmScreen() {
                         What you want to see less of
                     </h3>
                     <div style="display:flex; flex-wrap:wrap; gap:8px;" id="seeLessTags">
-                        ${algorithmPrefs.seeLess.map(tag => `
+                        ${!algorithmPrefs._seeded ? _algoSkChips([70, 92]) : ''}
+                        ${!algorithmPrefs._seeded ? '' : algorithmPrefs.seeLess.map(tag => `
                             <div style="
                                 display:flex; align-items:center; gap:6px;
                                 background:rgba(255,59,48,0.1); border:1px solid rgba(255,59,48,0.25);
@@ -17690,12 +17775,12 @@ function showAlgorithmScreen() {
                                 ">×</button>
                             </div>
                         `).join('')}
-                        <button onclick="showAddTagModal('seeLess')" style="
+                        ${!algorithmPrefs._seeded ? '' : `<button onclick="showAddTagModal('seeLess')" style="
                             display:flex; align-items:center; gap:4px;
                             background:rgba(255,59,48,0.06); border:1px dashed rgba(255,59,48,0.3);
                             border-radius:30px; padding:8px 16px; cursor:pointer;
                             color:#FF3B30; font-size:14px; font-weight:600;
-                        ">+ Add</button>
+                        ">+ Add</button>`}
                     </div>
                 </div>
 
@@ -17704,8 +17789,9 @@ function showAlgorithmScreen() {
                     <h3 style="font-size:16px; font-weight:700; color:var(--text-primary); margin-bottom:14px;">
                         Suggested Topics
                     </h3>
-                    <div style="display:flex; flex-wrap:wrap; gap:8px;">
-                        ${suggestedTopics.filter(t =>
+                    <div id="suggestedTopicsWrap" style="display:flex; flex-wrap:wrap; gap:8px;">
+                        ${!algorithmPrefs._seeded ? _algoSkChips([96, 68, 80, 110, 72]) : ''}
+                        ${!algorithmPrefs._seeded ? '' : suggestedTopics.filter(t =>
                             !algorithmPrefs.seeMore.includes(t) && !algorithmPrefs.seeLess.includes(t)
                         ).map(topic => `
                             <button onclick="addAlgoTag('seeMore','${topic}')" style="
@@ -17722,6 +17808,148 @@ function showAlgorithmScreen() {
     // The page was built but never mounted — that's why it "didn't open".
     screen.appendChild(_algoMount);
     triggerHaptic(10);
+    _algoLoadSummary();
+}
+
+// Pull the real summary of what this person has been watching and write it out
+// a word at a time. The old copy was a hardcoded list of interests nobody
+// chose, which made the whole page look invented.
+async function _algoLoadSummary() {
+    var el = document.getElementById('algoSummary');
+    if (!el) return;
+    function dropSkeleton() {
+        var sk = document.getElementById('algoSummarySkeleton');
+        if (sk) sk.remove();
+        // Any tag row still showing placeholders has nothing real coming.
+        ['seeMoreTags', 'seeLessTags', 'suggestedTopicsWrap'].forEach(function (id) {
+            var w = document.getElementById(id);
+            if (w && w.querySelector('.algo-sk')) _algoRenderTags(
+                id === 'seeLessTags' ? 'seeLess' : 'seeMore',
+                id === 'seeLessTags' ? '#FF3B30' : '#007AFF');
+        });
+    }
+    try {
+        var token = (typeof _eddieToken === 'function') ? await _eddieToken() : '';
+        var r = await fetch('/api/eddie/algorithm/', {
+            headers: token ? { 'Authorization': 'Bearer ' + token } : {}
+        });
+        var j = await r.json().catch(function () { return {}; });
+        dropSkeleton();
+        if (j && j.summary) {
+            _algoTypeWords(el, j.summary);
+            var sub = document.getElementById('algoSummarySub');
+            if (sub) setTimeout(function () { sub.style.display = 'block'; }, 400);
+            if (j.topics && j.topics.length) {
+                _algoSeedInterests(j.topics);
+                _algoSeedSuggested(j.topics);
+            }
+        } else {
+            // Nothing watched yet: say so rather than inventing interests.
+            el.style.color = 'var(--text-secondary)';
+            el.style.fontSize = '17px';
+            el.style.fontWeight = '600';
+            el.textContent = "Once you start watching and liking posts, this is "
+                           + "where you'll see what you've been into.";
+        }
+    } catch (e) {
+        dropSkeleton();
+        el.style.color = 'var(--text-secondary)';
+        el.style.fontSize = '17px';
+        el.textContent = "Couldn't load your summary right now.";
+    }
+}
+
+// Word-by-word reveal. Each word lands with its own haptic tick so the buzz
+// tracks the writing instead of running ahead of it.
+function _algoTypeWords(el, text) {
+    var words = String(text).split(/\s+/).filter(Boolean);
+    el.innerHTML = '';
+    el.style.color = '';
+
+    var spans = words.map(function (w, i) {
+        var s = document.createElement('span');
+        s.className = 'algo-word';
+        s.textContent = w + (i < words.length - 1 ? ' ' : '');
+        el.appendChild(s);
+        return s;
+    });
+
+    var i = 0;
+    (function step() {
+        if (i >= spans.length) {
+            // Settle: gradient gives way to normal text once it is written.
+            setTimeout(function () { el.classList.add('algo-done'); }, 260);
+            return;
+        }
+        spans[i].classList.add('in');
+        // A light tick per word, in step with the animation.
+        if (typeof triggerHaptic === 'function') triggerHaptic(7);
+        i++;
+        setTimeout(step, 95);
+    })();
+}
+
+// The "see more" list shipped with invented defaults (Technology, Gaming,
+// Music...) that nobody picked, and "see less" pre-blamed Politics and
+// Clickbait. Until someone edits their own lists, fill them from what they
+// genuinely watch and leave "see less" empty, because they have not asked to
+// see less of anything yet.
+function _algoSeedInterests(topics) {
+    if (algorithmPrefs._seeded) return;
+    algorithmPrefs.seeMore = topics.slice(0, 8);
+    algorithmPrefs.seeLess = [];
+    algorithmPrefs._seeded = true;
+    try { localStorage.setItem('algorithmPrefs', JSON.stringify(algorithmPrefs)); } catch (e) {}
+    _algoRenderTags('seeMore', '#007AFF');
+    _algoRenderTags('seeLess', '#FF3B30');
+}
+
+// Rebuild one tag row in place, so seeding does not restart the animation.
+function _algoRenderTags(list, color) {
+    var wrap = document.getElementById(list + 'Tags');
+    if (!wrap) return;
+    var rgb = color === '#007AFF' ? '0,122,255' : '255,59,48';
+    var tags = (algorithmPrefs[list] || []).map(function (tag) {
+        var safe = String(tag).replace(/'/g, "\\'");
+        return '<div style="display:flex; align-items:center; gap:6px;' +
+            'background:rgba(' + rgb + ',0.12); border:1px solid rgba(' + rgb + ',0.25);' +
+            'border-radius:30px; padding:8px 14px;">' +
+            '<span style="font-size:14px; color:' + color + '; font-weight:500;">' + escapeHtml(tag) + '</span>' +
+            '<button onclick="removeAlgoTag(\'' + list + '\',\'' + safe + '\')" style="' +
+            'background:none; border:none; cursor:pointer; padding:0; line-height:1;' +
+            'color:rgba(' + rgb + ',0.5); font-size:16px;">&times;</button></div>';
+    }).join('');
+    wrap.innerHTML = tags +
+        '<button onclick="showAddTagModal(\'' + list + '\')" style="' +
+        'display:flex; align-items:center; gap:4px;' +
+        'background:rgba(' + rgb + ',0.06); border:1px dashed rgba(' + rgb + ',0.3);' +
+        'border-radius:30px; padding:8px 16px; cursor:pointer;' +
+        'color:' + color + '; font-size:14px; font-weight:600;">+ Add</button>';
+}
+
+// Offer what they actually watch as suggested topics, instead of a fixed list.
+function _algoSeedSuggested(topics) {
+    var wrap = document.getElementById('suggestedTopicsWrap');
+    if (!wrap) return;
+    var known = (algorithmPrefs.seeMore || []).concat(algorithmPrefs.seeLess || []);
+    var fresh = (topics || []).filter(function (t) { return known.indexOf(t) < 0; }).slice(0, 10);
+    // Everything they watch may already be in their lists, which leaves nothing
+    // fresh to suggest. Fall back to the general list rather than leaving the
+    // placeholders sitting there forever.
+    if (!fresh.length) {
+        fresh = ['Luxury Cars', 'Gaming', 'Music', 'Photography', 'Travel', 'Food',
+                 'Fitness', 'Fashion', 'Technology', 'Art', 'Comedy', 'Sports']
+            .filter(function (t) { return known.indexOf(t) < 0; }).slice(0, 8);
+    }
+    if (!fresh.length) { wrap.innerHTML = ''; return; }
+    wrap.innerHTML = fresh.map(function (t) {
+        var safe = String(t).replace(/'/g, "\\'");
+        return '<button onclick="addAlgoTag(\'seeMore\',\'' + safe + '\')" style="' +
+            'background:var(--card-bg); border:1px solid var(--border-color);' +
+            'border-radius:30px; padding:9px 16px; cursor:pointer;' +
+            'color:var(--text-primary); font-size:14px; font-weight:500;">' +
+            escapeHtml(t) + '</button>';
+    }).join('');
 }
 
 function toggleAlgoOptions() {
@@ -45328,8 +45556,18 @@ function _eddieSpeakIcon(on) {
 // Server-side neural voice. Returns true if it played, false to fall back.
 // One failure disables it for the session: if the model's terms are not
 // accepted, every later attempt would fail the same way after the same wait.
-async function _eddieSpeakServer(text) {
-    if (window._eddieServerVoiceOff) return false;
+// Back off briefly rather than for the whole session. One blip used to condemn
+// every later message to the browser's robot voice until a reload, which is
+// exactly what people noticed: the good voice once, then never again.
+function _eddieVoiceCooldown() {
+    window._eddieVoiceColdUntil = Date.now() + 3 * 60 * 1000;
+}
+
+// `audio` is created by the caller inside the tap handler. Playback permission
+// is tied to that gesture, and awaiting the fetch first can lose it, so the
+// element has to exist before any await.
+async function _eddieSpeakServer(text, audio) {
+    if (Date.now() < (window._eddieVoiceColdUntil || 0)) return false;
     try {
         var token = await _eddieToken();
         var r = await fetch('/api/eddie/speak/', {
@@ -45338,21 +45576,28 @@ async function _eddieSpeakServer(text) {
                        'Authorization': 'Bearer ' + token },
             body: JSON.stringify({ text: text.slice(0, 1200) })
         });
-        if (!r.ok) { window._eddieServerVoiceOff = true; return false; }
+        if (!r.ok) { _eddieVoiceCooldown(); return false; }
 
         // The server returns a URL, not bytes, so a replay is a CDN hit that
         // costs no synthesis quota. The browser caches it too.
         var j = await r.json().catch(function () { return {}; });
-        if (!j.url) { window._eddieServerVoiceOff = true; return false; }
+        if (!j.url) { _eddieVoiceCooldown(); return false; }
 
-        var audio = new Audio(j.url);
+        audio.src = j.url;
         window._eddieAudio = audio;
         audio.onended = function () { _eddieSpeakIcon(false); };
         audio.onerror = function () { _eddieSpeakIcon(false); };
-        await audio.play();
-        return true;
+        try {
+            await audio.play();
+            return true;
+        } catch (playErr) {
+            // The audio is fine, the browser just refused to start it (autoplay
+            // policy). That says nothing about the voice service, so fall back
+            // for this one message without putting the good voice on cooldown.
+            return false;
+        }
     } catch (e) {
-        window._eddieServerVoiceOff = true;
+        _eddieVoiceCooldown();
         return false;
     }
 }
@@ -45377,8 +45622,12 @@ async function eddiePlay(i) {
 
     _eddieSpeakIcon(true);
 
+    // Created here, inside the tap, so the browser keeps playback permission
+    // for it; the src arrives once the server answers.
+    var audio = new Audio();
+
     // Natural voice first; the browser's own synth is the safety net.
-    if (await _eddieSpeakServer(text)) return;
+    if (await _eddieSpeakServer(text, audio)) return;
 
     if (!('speechSynthesis' in window)) {
         _eddieSpeakIcon(false);

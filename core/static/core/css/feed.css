@@ -2120,6 +2120,45 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
 }
 
 /* GIF picker */
+/* ==========================================================================
+   "Your Algorithm" summary: each word arrives blurred and out of focus, then
+   snaps in. Ours is blue rather than the purple other apps use. Once the whole
+   line is written the gradient hands over to normal text, so the sentence stays
+   readable instead of sitting there as decoration.
+   ========================================================================== */
+#algoSummary .algo-word {
+    opacity: 0;
+    filter: blur(7px);
+    background: linear-gradient(92deg, #0A84FF 0%, #4DA6FF 45%, #5AC8FA 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    transition: opacity 0.34s ease, filter 0.34s ease;
+    will-change: opacity, filter;
+}
+#algoSummary .algo-word.in { opacity: 1; filter: blur(0); }
+
+/* Settled state: drop the gradient, become plain readable text. */
+#algoSummary.algo-done .algo-word {
+    background: none;
+    -webkit-background-clip: initial;
+    background-clip: initial;
+    color: var(--text-primary, #000);
+    transition: color 0.5s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #algoSummary .algo-word { transition: none; opacity: 1; filter: none; }
+}
+
+/* Placeholders while the summary and interests are being worked out, so the
+   page never sits blank or flashes stale tags before the real ones arrive. */
+.algo-sk {
+    background: var(--skeleton-bg, #e8e8e8);
+    border-radius: 8px;
+    animation: skeletonPulse 1.4s ease-in-out infinite;
+}
+
 /* GIF picker: a small sheet with a grab handle, a search field, and a scrolling
    two-column grid. The search field is its own row above the grid — it used to
    be injected as the grid's first cell, so the two-column layout squeezed it to
@@ -2968,6 +3007,19 @@ input, textarea, .post-content, .comment-bubble p, .profile-bio { -webkit-user-s
     animation: slideUpOverlay 0.38s cubic-bezier(0.32,0.72,0,1);
 }
 [data-theme="dark"] .settings-sub-overlay { background: #0a0a0a !important; }
+
+/* 29 sub-page headers hardcode the same light bar inline, so dark mode left a
+   white strip on a black page: Preferred Content, Privacy, TrustCircle,
+   Blocked Accounts, Sync Contacts, Media Quality, Accessibility, Device
+   Permissions, Like & Share Counts and the rest. They sit under different
+   parents (.settings-sub-overlay and .white-overlay), so this matches the
+   hardcoded colour itself and catches every one. Inline styles beat
+   stylesheets, hence !important. */
+[data-theme="dark"] [style*="rgba(242,242,247,0.92)"],
+[data-theme="dark"] [style*="rgba(242, 242, 247, 0.92)"] {
+    background: rgba(20, 20, 22, 0.92) !important;
+    border-bottom-color: rgba(255, 255, 255, 0.08) !important;
+}
 
 .settings-sub-overlay .sub-scroll {
     flex: 1;

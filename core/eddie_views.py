@@ -55,6 +55,13 @@ WHAT YOU DO
   were given, weigh it, and answer honestly. Search the web when the claim is
   checkable and current. Say what is supported, what is not, and what you could
   not verify. Do not pretend to a certainty you do not have.
+- Help people grow. You can see a creator's real figures (followers, likes,
+  comments, views, how often they post, what they post about) and you can see
+  what is performing on TrustFirst. When someone asks for content ideas, how
+  their account is doing, what their niche is, or how to get more reach, dive
+  straight in. Never tell someone to go and check their own analytics: you have
+  them. Only ever use the figures you are given; if you were not given any, say
+  so rather than inventing them.
 
 HOW YOU TALK
 - Warm, direct, brief. Lead with the answer, then the reasoning.
@@ -478,6 +485,20 @@ def eddie_chat(request):
     spec = _build_spec(history, prompt, attachments)
     prior_convo = body.get('conversation_id')
 
+    # Growth questions get this person's real numbers attached to the system
+    # prompt, so Eddie coaches from their actual account instead of inventing
+    # plausible-sounding stats. Imported here rather than at module scope
+    # because eddie_insights borrows helpers from this module.
+    system = EDDIE_SYSTEM
+    try:
+        from . import eddie_insights
+        if eddie_insights.wants_growth_help(prompt):
+            brief = eddie_insights.build_creator_context(user_id)
+            if brief:
+                system = EDDIE_SYSTEM + '\n\n' + brief + '\n' + eddie_insights.GROWTH_BRIEF
+    except Exception:
+        pass        # a stats failure must never cost the user their answer
+
     def generate():
         queue = []
         collected = {'text': [], 'thinking': [], 'sources': []}
@@ -497,7 +518,7 @@ def eddie_chat(request):
             # stared at nothing for as long as the database took. The model is
             # the fast part now; the writes must not be what makes Eddie feel
             # slow. Nothing here needs an id, so nothing has to wait.
-            for chunk in eddie_providers.stream_turn(spec, EDDIE_SYSTEM, queue, emit):
+            for chunk in eddie_providers.stream_turn(spec, system, queue, emit):
                 yield chunk
 
             answer = ''.join(collected['text'])
@@ -531,6 +552,30 @@ def _sb_get(table, params):
         return r.json() if r.status_code == 200 else []
     except Exception:
         return []
+
+
+@require_http_methods(["GET"])
+def eddie_algorithm(request):
+    """What this person has actually been into lately, for the Algorithm page.
+
+    Powers the animated summary line. Everything comes from their own viewing,
+    liking and saving history, so an account with no activity gets an empty
+    summary rather than a flattering invention.
+    """
+    try:
+        payload = _verify_supabase_jwt(request)
+    except ValueError:
+        return JsonResponse({'error': 'Sign in first'}, status=401)
+    user_id = payload.get('sub')
+    if not _is_valid_uuid(user_id):
+        return JsonResponse({'error': 'Invalid session'}, status=401)
+
+    try:
+        from . import eddie_insights
+        data = eddie_insights.build_interest_summary(user_id)
+    except Exception:
+        data = {'summary': '', 'topics': [], 'sample': 0}
+    return JsonResponse(data)
 
 
 @require_http_methods(["GET"])

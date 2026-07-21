@@ -18,6 +18,7 @@ urlpatterns = [
     path('api/eddie/image/', eddie_image.eddie_image, name='api_eddie_image'),
     path('api/eddie/mention/', eddie_views.eddie_mention, name='api_eddie_mention'),
     path('api/eddie/speak/', eddie_voice.eddie_speak, name='api_eddie_speak'),
+    path('api/eddie/algorithm/', eddie_views.eddie_algorithm, name='api_eddie_algorithm'),
     path('api/stripe/create-verification/', api_views.create_stripe_verification, name='api_stripe_verification'),
     path('api/stripe/webhook/', api_views.stripe_webhook, name='api_stripe_webhook'),
     path('api/email/send/', api_views.send_email, name='api_email_send'),
