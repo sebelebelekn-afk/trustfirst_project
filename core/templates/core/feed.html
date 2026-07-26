@@ -9,7 +9,12 @@
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<!-- "default" (not black-translucent): iOS keeps the whole app below the status
+     bar and Dynamic Island instead of running underneath them, so content never
+     collides with the phone's own UI on any device. theme-color tints that
+     reserved strip per light/dark. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="TrustFirst">
 <!-- Adaptive browser favicon: light icon in light mode, dark icon in dark mode -->
 <link rel="icon" type="image/svg+xml" href="/static/core/icon-light.svg?v=39" media="(prefers-color-scheme: light)">
@@ -1353,8 +1358,8 @@ function authenticateUser() {
         <span style="color:white;font-size:11px;font-weight:700;">Edit</span>
     </div>
 </div>
-            <div class="liquid-glass-btn" style="position:absolute; top:20px; left:20px; z-index:10;" onclick="closePage('profile-overlay')"><i class="fa-solid fa-chevron-left"></i></div>
-            <div class="liquid-glass-btn" style="position:absolute; top:20px; right:20px; z-index:10;" onclick="openSettings()"><i class="fa-solid fa-gear"></i></div>
+            <div class="liquid-glass-btn" style="position:absolute; top:calc(env(safe-area-inset-top,0px) + 16px); left:20px; z-index:10;" onclick="closePage('profile-overlay')"><i class="fa-solid fa-chevron-left"></i></div>
+            <div class="liquid-glass-btn" style="position:absolute; top:calc(env(safe-area-inset-top,0px) + 16px); right:20px; z-index:10;" onclick="openSettings()"><i class="fa-solid fa-gear"></i></div>
             <div class="avatar-overlap" style="cursor:pointer;" onclick="showProfilePictureOptions(this.querySelector('img').src)"><img id="profile-avatar-img" src="" style="width:100%; height:100%; object-fit:cover; border-radius:50%; display:none;"><i id="profile-avatar-placeholder" class="fa-solid fa-circle-user" style="font-size:80px; color:#ccc; display:flex; align-items:center; justify-content:center; width:100%; height:100%;"></i></div>
             <div class="thought-cloud" id="profileThoughtCloud" onclick="handleThoughtCloudTap(this)">Thinking...</div>
         </div>
