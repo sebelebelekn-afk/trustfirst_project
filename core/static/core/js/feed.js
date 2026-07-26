@@ -34543,7 +34543,10 @@ function _renderClipGallery(files) {
         var url = URL.createObjectURL(file);
         var item = document.createElement('div');
         item.className = 'clip-thumb-item';
-        item.style.cssText = 'aspect-ratio:1;min-height:120px;border-radius:6px;overflow:hidden;cursor:pointer;position:relative;background:#111;border:3px solid transparent;transition:border-color 0.15s;';
+        // 9:16 to match the other render path and the vertical clip format.
+        // The old aspect-ratio:1 + min-height:120px fought each other, which is
+        // what made the tiles mismatched, overlapping and cut off.
+        item.style.cssText = 'aspect-ratio:9/16;border-radius:6px;overflow:hidden;cursor:pointer;position:relative;background:#111;border:3px solid transparent;transition:border-color 0.15s;';
         item.setAttribute('data-idx', idx);
         item.innerHTML =
             (isVid
@@ -34556,7 +34559,7 @@ function _renderClipGallery(files) {
     });
     // Add more button at end
     var addMore = document.createElement('div');
-    addMore.style.cssText = 'aspect-ratio:1;min-height:120px;border-radius:6px;background:rgba(0,122,255,0.08);border:2px dashed rgba(0,122,255,0.3);display:flex;align-items:center;justify-content:center;cursor:pointer;';
+    addMore.style.cssText = 'aspect-ratio:9/16;border-radius:6px;background:rgba(0,122,255,0.08);border:2px dashed rgba(0,122,255,0.3);display:flex;align-items:center;justify-content:center;cursor:pointer;';
     addMore.innerHTML = '<i class="fa-solid fa-plus" style="color:#007AFF;font-size:22px;"></i>';
     addMore.onclick = function(){ document.getElementById('_clipGalleryInput').click(); };
     grid.appendChild(addMore);
@@ -35626,7 +35629,7 @@ function edOpenOverlayPicker() {
     picker.id = 'edGalleryPicker';
     picker.style.cssText = 'position:absolute;inset:0;z-index:600;background:rgba(0,0,0,0.85);display:flex;flex-direction:column;animation:slideUpOverlay 0.3s ease;';
     picker.innerHTML =
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:52px 20px 16px;flex-shrink:0;">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top,0px) + 16px) 20px 16px;flex-shrink:0;">' +
             '<button onclick="document.getElementById(\'edGalleryPicker\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:15px;">✕</button>' +
             '<b style="color:white;font-size:16px;">Add as overlay</b>' +
             '<button onclick="document.getElementById(\'edOverlayFileInput\').click()" style="background:#007AFF;border:none;color:white;font-size:13px;font-weight:700;padding:8px 16px;border-radius:20px;cursor:pointer;">Browse Files</button>' +
@@ -45128,7 +45131,7 @@ async function openEddieHistory() {
     p.id = 'eddieHistoryPage';
     p.style.cssText = 'position:absolute;inset:0;z-index:7100;background:#000;display:flex;flex-direction:column;';
     p.innerHTML =
-        '<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;flex-shrink:0;">' +
+        '<div style="display:flex;align-items:center;gap:12px;padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 14px;flex-shrink:0;">' +
             '<button onclick="closeEddieHistory()" style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer;padding:4px 8px;"><i class="fa-solid fa-arrow-left"></i></button>' +
             '<b style="flex:1;text-align:center;color:#fff;font-size:19px;">Chat History</b>' +
             '<button onclick="eddieNewChat();closeEddieHistory();" title="New chat" style="background:none;border:none;color:#fff;font-size:19px;cursor:pointer;padding:4px 8px;"><i class="fa-solid fa-pen-to-square"></i></button>' +
@@ -46010,7 +46013,7 @@ function _mgPage(id, title, bodyHTML, onBack) {
     p.id = id;
     p.style.cssText = 'position:absolute;inset:0;z-index:8200;background:var(--bg-secondary,#f0f2f5);display:flex;flex-direction:column;';
     p.innerHTML =
-        '<div style="display:flex;align-items:center;padding:14px 16px;flex-shrink:0;background:var(--bg-primary,#fff);">' +
+        '<div style="display:flex;align-items:center;padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 14px;flex-shrink:0;background:var(--bg-primary,#fff);">' +
             '<button onclick="' + (onBack || ("document.getElementById('" + id + "').remove()")) + '" ' +
                 'style="background:none;border:none;font-size:20px;color:var(--text-primary,#000);cursor:pointer;padding:0;width:40px;text-align:left;"><i class="fa-solid fa-chevron-left"></i></button>' +
             '<b style="flex:1;text-align:center;font-size:19px;color:var(--text-primary,#000);">' + escapeHtml(title) + '</b>' +
