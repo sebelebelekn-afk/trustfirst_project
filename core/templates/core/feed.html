@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=73">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=74">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -1233,7 +1233,7 @@ function authenticateUser() {
 </div><!-- ✅ FIXED: #msg-overlay closes HERE -->
 
 <div id="chat-interface" class="white-overlay" style="z-index:5002;display:none;">
-<div class="header-container" style="display:flex;align-items:center;gap:10px;padding:0 12px;height:60px;flex-shrink:0;border-bottom:0.5px solid var(--border-color,rgba(0,0,0,0.08));background:var(--bg-primary,#fff);position:sticky;top:0;z-index:10;">
+<div class="header-container" style="display:flex;align-items:center;gap:10px;padding:env(safe-area-inset-top,0px) 12px 0;min-height:60px;flex-shrink:0;border-bottom:0.5px solid var(--border-color,rgba(0,0,0,0.08));background:var(--bg-primary,#fff);position:sticky;top:0;z-index:10;">
     <div class="liquid-glass-btn" onclick="closePage('chat-interface');if(typeof fillMsgContent==='function'){setTimeout(fillMsgContent,80);}" style="flex-shrink:0;">
         <i class="fa-solid fa-chevron-left"></i>
     </div>
@@ -4133,11 +4133,11 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=144"></script>
+<script src="{% static 'core/js/feed.js' %}?v=145"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=74"></script>
-<script src="{% static 'core/js/verify.js' %}?v=73"></script>
-<script src="{% static 'core/js/story-music.js' %}?v=73"></script>
-<script src="{% static 'core/js/admin.js' %}?v=73"></script>
+<script src="{% static 'core/js/verify.js' %}?v=74"></script>
+<script src="{% static 'core/js/story-music.js' %}?v=74"></script>
+<script src="{% static 'core/js/admin.js' %}?v=74"></script>
 <!-- ===== LIVE MINI-PLAYER ===== -->
 <div id="liveMiniPlayer" style="display:none;position:absolute;bottom:max(96px,calc(env(safe-area-inset-bottom)+96px));left:12px;right:12px;z-index:9500;border-radius:20px;overflow:hidden;cursor:pointer;" onclick="maximizeLive()">
     <div style="background:rgba(18,18,18,0.88);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);border:0.5px solid rgba(255,255,255,0.14);border-radius:20px;padding:10px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,0.45);">

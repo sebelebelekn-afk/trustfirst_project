@@ -35,4 +35,5 @@ urlpatterns = [
     path('sw.js', views.service_worker, name='sw'),
     path('manifest.json', views.manifest, name='manifest'),
 path('api/giphy/search/', api_views.giphy_search, name='api_giphy'),
+    path('api/music/search/', api_views.music_search, name='api_music'),
 ]

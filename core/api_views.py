@@ -389,6 +389,34 @@ def giphy_search(request):
 
 
 # ---------------------------------------------------------------------------
+# 6b. MUSIC SEARCH PROXY (iTunes)
+# ---------------------------------------------------------------------------
+# The browser was calling itunes.apple.com directly, but that endpoint does not
+# reliably send CORS headers, so the fetch was blocked and the music picker
+# showed "Connection error / check your internet" even when online. Proxying it
+# server-side removes CORS from the picture, the same way Giphy is handled.
+@ratelimit(key='ip', rate='30/m', method='GET', block=True)
+@require_http_methods(["GET"])
+def music_search(request):
+    q = request.GET.get('q', '')[:120]
+    if not q:
+        return JsonResponse({'results': []})
+    country = request.GET.get('country', 'ZA')[:2].upper() or 'ZA'
+    try:
+        resp = requests.get(
+            'https://itunes.apple.com/search',
+            params={'term': q, 'media': 'music', 'entity': 'song',
+                    'limit': 25, 'country': country},
+            timeout=8,
+        )
+        if resp.status_code == 200:
+            return JsonResponse(resp.json())
+        return JsonResponse({'results': [], 'error': 'upstream %d' % resp.status_code}, status=502)
+    except Exception:
+        return JsonResponse({'results': [], 'error': 'unreachable'}, status=502)
+
+
+# ---------------------------------------------------------------------------
 # 7. BREVO EMAIL (transactional email; key stays server-side)
 # ---------------------------------------------------------------------------
 @ratelimit(key='ip', rate='5/m', method='POST', block=True)

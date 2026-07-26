@@ -6237,10 +6237,9 @@ async function searchRealMusic(query, genrePillEl) {
     clearTimeout(_musicSearchTimer);
     _musicSearchTimer = setTimeout(async function() {
         try {
-            // iTunes Search API — completely free, no API key, real music
-            var term = encodeURIComponent(query);
-            var url = 'https://itunes.apple.com/search?term=' + term + '&media=music&entity=song&limit=25&country=ZA';
-            var res = await fetch(url);
+            // Proxied through our server: calling iTunes straight from the
+            // browser hit CORS and failed as a false "connection error".
+            var res = await fetch('/api/music/search/?q=' + encodeURIComponent(query) + '&country=ZA');
             var data = await res.json();
             var tracks = data.results || [];
 
@@ -35923,7 +35922,9 @@ async function edSearchMusicReal(query) {
     // Skeleton rows matching the track layout (art + title + subtitle).
     list.innerHTML = [0,1,2,3,4,5].map(function(){ return '<div style="display:flex;align-items:center;gap:12px;padding:12px;border-radius:14px;background:rgba(255,255,255,0.05);margin-bottom:8px;animation:skeletonPulse 1.4s ease-in-out infinite;"><div style="width:42px;height:42px;border-radius:10px;background:rgba(255,255,255,0.12);flex-shrink:0;"></div><div style="flex:1;"><div style="height:13px;width:60%;border-radius:6px;background:rgba(255,255,255,0.12);margin-bottom:7px;"></div><div style="height:11px;width:38%;border-radius:6px;background:rgba(255,255,255,0.1);"></div></div></div>'; }).join('');
     try {
-        var res = await fetch('https://itunes.apple.com/search?term='+encodeURIComponent(query)+'&media=music&entity=song&limit=20&country=ZA');
+        // Proxied server-side; a direct iTunes fetch was CORS-blocked and
+        // surfaced as the editor's "connection error".
+        var res = await fetch('/api/music/search/?q='+encodeURIComponent(query)+'&country=ZA');
         var data = await res.json();
         var tracks = (data.results || []).filter(function(t){ return t.previewUrl; });
         if (!tracks.length) { list.innerHTML = '<p style="text-align:center;color:rgba(255,255,255,0.4);padding:30px;font-size:13px;">No songs found</p>'; return; }
@@ -45044,7 +45045,7 @@ function openEddieChat() {
     ov.id = 'eddie-overlay';
     ov.style.cssText = 'position:absolute;inset:0;z-index:7000;background:#000;display:flex;flex-direction:column;';
     ov.innerHTML =
-        '<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;flex-shrink:0;">' +
+        '<div style="display:flex;align-items:center;gap:12px;padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 14px;flex-shrink:0;">' +
             '<button onclick="closeEddieChat()" style="background:rgba(255,255,255,0.1);border:none;color:#fff;width:34px;height:34px;border-radius:50%;cursor:pointer;"><i class="fa-solid fa-arrow-left"></i></button>' +
             '<b style="flex:1;color:#fff;font-size:17px;">Eddie</b>' +
             '<button onclick="openEddieHistory()" title="Chat history" style="background:rgba(255,255,255,0.1);border:none;color:#fff;width:34px;height:34px;border-radius:50%;cursor:pointer;"><i class="fa-solid fa-clock-rotate-left" style="font-size:14px;"></i></button>' +

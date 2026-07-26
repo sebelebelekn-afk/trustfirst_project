@@ -3045,6 +3045,15 @@ input, textarea, [contenteditable="true"], .post-content {
     border-bottom-color: rgba(255, 255, 255, 0.08) !important;
 }
 
+/* Those same 29 headers hardcode `padding:14px 20px`, so their content sat
+   under the status bar / Dynamic Island with viewport-fit=cover. This lifts
+   every one of them below the safe area in a single rule. !important because
+   the inline padding shorthand would otherwise win. */
+[style*="rgba(242,242,247,0.92)"],
+[style*="rgba(242, 242, 247, 0.92)"] {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 14px) !important;
+}
+
 .settings-sub-overlay .sub-scroll {
     flex: 1;
     overflow-y: auto;
