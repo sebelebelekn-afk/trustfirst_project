@@ -24277,7 +24277,14 @@ async function realOpenComments(postId) {
     currentCommentPostId = postId;
 
     var overlay = document.getElementById('comment-overlay');
-    if (overlay) overlay.style.display = 'flex';
+    if (overlay) {
+        overlay.style.display = 'flex';
+        // Opened from a quoted post, the detail sheet sits at 9900 and the
+        // comment sheet's own 6500 put it underneath, invisible: tapping
+        // "Post your comment" looked like it did nothing. Same post id either
+        // way, so the comments themselves are already the same thread.
+        overlay.style.zIndex = document.querySelector('.post-detail-overlay') ? '9950' : '';
+    }
     if (typeof syncCommentBarAvatar === 'function') syncCommentBarAvatar();
 
     var list = document.getElementById('comment-list');
@@ -24506,7 +24513,7 @@ function _buildCommentNode(c, depth) {
             '<img src="' + escapeHtml(avatar) + '" class="comment-avatar" style="align-self:flex-start;' + (depth ? 'width:28px;height:28px;' : '') + '">' +
             '<div class="comment-bubble" style="flex:1;">' +
                 '<div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;">' +
-                    '<b style="font-size:13px;color:var(--text-primary,#000);cursor:pointer;" onclick="viewUserProfile(\'' + escapeHtml(c.user_id || '') + '\')">' + escapeHtml(u.full_name || u.username || 'User') + '</b>' +
+                    '<b style="font-size:13px;color:var(--text-primary,#000);cursor:pointer;" onclick="closeComments();viewUserProfile(\'' + escapeHtml(c.user_id || '') + '\')">' + escapeHtml(u.full_name || u.username || 'User') + '</b>' +
                     (isBot
                         ? '<span style="font-size:9px;font-weight:700;letter-spacing:0.4px;background:#000;color:#fff;padding:1px 5px;border-radius:4px;">AI</span>'
                         : (u.verified ? '<i class="fa-solid fa-circle-check ' + (u.badge_tier || 'verify-blue') + '" style="font-size:9px;"></i>' : '')) +
@@ -32755,12 +32762,24 @@ async function sendMsgReaction(emoji) {
 function _renderMsgReactionChip(bubble, emoji) {
     if (!bubble) return;
     if (getComputedStyle(bubble).position === 'static') bubble.style.position = 'relative';
+    // The chip hangs below the bubble, so anything clipping its overflow cuts
+    // the emoji in half. The bubble and its row have to let it out.
+    bubble.style.overflow = 'visible';
+    var row = bubble.parentElement;
+    if (row) row.style.overflow = 'visible';
     var isMine = bubble.getAttribute('data-msg-mine') === '1';
     var chip = bubble.querySelector('[data-reaction-chip]');
     if (!chip) {
         chip = document.createElement('div');
         chip.setAttribute('data-reaction-chip', '1');
-        chip.style.cssText = 'position:absolute;bottom:-11px;' + (isMine ? 'left:8px;' : 'right:8px;') + 'background:var(--card-bg,#fff);border:1px solid rgba(128,128,128,0.18);border-radius:12px;padding:1px 6px;font-size:13px;line-height:1.4;box-shadow:0 2px 6px rgba(0,0,0,0.18);z-index:4;';
+        // Fixed box with the glyph centred in it: 1px of vertical padding was
+        // never enough room for an emoji, which sits taller than its font size.
+        chip.style.cssText = 'position:absolute;bottom:-12px;' + (isMine ? 'left:8px;' : 'right:8px;') +
+            'display:flex;align-items:center;justify-content:center;' +
+            'min-width:28px;height:23px;padding:0 6px;box-sizing:border-box;' +
+            'background:var(--card-bg,#fff);border:1px solid rgba(128,128,128,0.18);' +
+            'border-radius:12px;font-size:14px;line-height:1;overflow:visible;' +
+            'box-shadow:0 2px 6px rgba(0,0,0,0.18);z-index:4;';
         bubble.appendChild(chip);
     }
     chip.textContent = emoji;
@@ -44934,7 +44953,7 @@ function _qcShowPreview(url, isVideo) {
             '<div style="width:40px;"></div>' +
         '</div>' +
         '<div style="position:absolute;bottom:0;left:0;right:0;padding:0 20px max(34px,env(safe-area-inset-bottom,34px));z-index:5;">' +
-            '<button onclick="_qcSend()" style="width:100%;padding:16px;border-radius:50px;background:#FF2D55;border:none;color:#fff;font-size:16px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 8px 28px rgba(255,45,85,0.45);"><i class="fa-solid fa-paper-plane"></i> Send to ' + escapeHtml(uname) + '</button>' +
+            '<button onclick="_qcSend()" style="width:100%;padding:16px;border-radius:50px;background:#0A84FF;border:none;color:#fff;font-size:16px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 8px 28px rgba(10,132,255,0.45);"><i class="fa-solid fa-paper-plane"></i> Send to ' + escapeHtml(uname) + '</button>' +
         '</div>';
 }
 
