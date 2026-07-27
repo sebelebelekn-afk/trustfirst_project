@@ -4413,8 +4413,19 @@ stopMusicPreview();
         // Request microphone permission
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-        // Create MediaRecorder
-        voiceRecorder = new MediaRecorder(stream);
+        // Record in a format the browser actually supports and remember which
+        // one. iOS Safari cannot record webm, so the old hardcoded audio/webm
+        // meant the file was really mp4 but labelled webm -- which failed to
+        // upload and played back silent. Pick a supported type, then trust the
+        // recorder's real mimeType.
+        // Only types the voice_messages bucket accepts (webm, mp4, ogg).
+        var _vnPrefer = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
+        var _vnMime = '';
+        for (var _vi = 0; _vi < _vnPrefer.length; _vi++) {
+            if (window.MediaRecorder && MediaRecorder.isTypeSupported(_vnPrefer[_vi])) { _vnMime = _vnPrefer[_vi]; break; }
+        }
+        voiceRecorder = _vnMime ? new MediaRecorder(stream, { mimeType: _vnMime }) : new MediaRecorder(stream);
+        window._voiceMime = (voiceRecorder.mimeType || _vnMime || 'audio/mp4').split(';')[0];
         voiceRecording = true;
         voiceRecordingTime = 0;
         voiceChunks.length = 0; // Clear array
@@ -4459,7 +4470,7 @@ stopMusicPreview();
 
     } catch (error) {
         console.error('[VoiceRecord] Permission denied:', error);
-        ShowToast('Microphone permission required to send voice messages');
+        showToast('Microphone permission required to send voice messages');
         voiceRecording = false;
     }
 }
@@ -4494,9 +4505,10 @@ async function stopVoiceRecord() {
         voiceRecorder.onstop = resolve;
     });
 
-    // Create audio blob
-    const audioBlob = new Blob(voiceChunks, { type: 'audio/webm' });
-    console.debug('[VoiceRecord] Audio recorded:', audioBlob.size, 'bytes');
+    // Blob in the format actually recorded, not a hardcoded guess.
+    const audioBlob = new Blob(voiceChunks, { type: window._voiceMime || 'audio/mp4' });
+    console.debug('[VoiceRecord] Audio recorded:', audioBlob.size, 'bytes', audioBlob.type);
+    if (!audioBlob.size) { showToast('Nothing was recorded, try again'); return; }
 
     // Compress if needed (optional - WebM is already compressed)
     // For now, just send it
@@ -4520,12 +4532,17 @@ async function sendChatVoiceNote(audioBlob, duration, listenOnce) {
             const base64Audio = reader.result; // data:audio/webm;base64,...
 
             try {
-                // Store in Supabase Storage (the private voice_messages bucket; chat-media does not exist).
-                const fileName = `voice_${Date.now()}.webm`;
+                // Store in the private voice_messages bucket, using the file's
+                // real type. Hardcoding webm/.webm meant an iOS mp4 recording
+                // was uploaded mislabelled, which is what failed and played back
+                // silent. The bucket allows webm, mp4, m4a, ogg and aac.
+                var _ct = (audioBlob.type || 'audio/mp4').split(';')[0];
+                var _ext = ({ 'audio/webm':'webm', 'audio/mp4':'m4a', 'audio/aac':'aac', 'audio/ogg':'ogg', 'audio/mpeg':'mp3' })[_ct] || 'm4a';
+                const fileName = `voice_${Date.now()}.${_ext}`;
                 const vnPath = `${session.user.id}/${fileName}`;
                 const { data: uploadData, error: uploadError } = await sb.storage
                     .from('voice_messages')
-                    .upload(vnPath, audioBlob, { contentType: 'audio/webm', upsert: false });
+                    .upload(vnPath, audioBlob, { contentType: _ct, upsert: false });
 
                 if (uploadError) throw uploadError;
 
@@ -9144,18 +9161,43 @@ function postComment() {
 function setupCommentLongPress() {
     var list = document.getElementById('comment-list');
     if (!list || list._ctxHooked) return;
-    list._ctxHooked = true;
-    var timer = null;
-    list.addEventListener('touchstart', function(e) {
+    list._ctxHooked = true;   // delegation on the list survives re-renders
+    var timer = null, startX = 0, startY = 0, target = null;
+    var TOL = 12;             // px of movement allowed before it counts as a scroll
+
+    function begin(item, x, y) {
+        target = item; startX = x; startY = y;
+        clearTimeout(timer);
+        timer = setTimeout(function () {
+            timer = null;
+            if (!target) return;
+            triggerHaptic && triggerHaptic(30);
+            openCommentContextMenu(target);
+            target = null;
+        }, 480);
+    }
+    function cancel() { clearTimeout(timer); timer = null; target = null; }
+    function moved(x, y) { return Math.abs(x - startX) > TOL || Math.abs(y - startY) > TOL; }
+
+    list.addEventListener('touchstart', function (e) {
         var item = e.target.closest('.comment-item');
-        if (!item) return;
-        timer = setTimeout(function() {
-            triggerHaptic(30);
-            openCommentContextMenu(item);
-        }, 500);
+        if (item && e.touches[0]) begin(item, e.touches[0].clientX, e.touches[0].clientY);
     }, { passive: true });
-    list.addEventListener('touchmove',  function(){ clearTimeout(timer); }, { passive: true });
-    list.addEventListener('touchend',   function(){ clearTimeout(timer); }, { passive: true });
+    // Only a real drag cancels it, not the sub-pixel wobble of holding still,
+    // which is what made the menu open only some of the time.
+    list.addEventListener('touchmove', function (e) {
+        if (timer && e.touches[0] && moved(e.touches[0].clientX, e.touches[0].clientY)) cancel();
+    }, { passive: true });
+    list.addEventListener('touchend', cancel, { passive: true });
+    list.addEventListener('touchcancel', cancel, { passive: true });
+    // Desktop: press and hold with the mouse.
+    list.addEventListener('mousedown', function (e) {
+        var item = e.target.closest('.comment-item');
+        if (item) begin(item, e.clientX, e.clientY);
+    });
+    list.addEventListener('mousemove', function (e) { if (timer && moved(e.clientX, e.clientY)) cancel(); });
+    list.addEventListener('mouseup', cancel);
+    list.addEventListener('mouseleave', cancel);
 }
 
 function openCommentContextMenu(item) {
@@ -24460,6 +24502,10 @@ function _renderCommentList() {
             list.appendChild(_buildCommentNode(child, 1));
         });
     });
+    // Long-press was defined but never attached on this render path, which is
+    // why holding a comment did nothing. Delegation is on the list, so this
+    // no-ops after the first call.
+    if (typeof setupCommentLongPress === 'function') setupCommentLongPress();
 }
 
 // Drop one new comment into the open sheet without rebuilding it, so posting
@@ -28690,7 +28736,7 @@ async function openChannelBroadcast(channelId) {
 
     overlay.innerHTML =
         // ── Top nav bar ──────────────────────────────────
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 0;flex-shrink:0;">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 0;flex-shrink:0;">' +
             '<div class="liquid-glass-btn" onclick="closeChannelBroadcast()" style="cursor:pointer;"><i class="fa-solid fa-chevron-left"></i></div>' +
             (isOwner
                 ? '<div style="display:flex;gap:8px;">' +
