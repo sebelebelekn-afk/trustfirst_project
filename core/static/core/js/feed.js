@@ -24640,8 +24640,10 @@ async function realOpenComments(postId) {
     // all comments in two parallel queries (one network trip on this connection).
     var likeCountMap = {};
     var userLikedSet = new Set();
+    var creatorLikedSet = new Set();   // comments the post's own creator liked
     var reactionMap = {};    // commentId -> { emoji: count }
     var myReactionMap = {};  // commentId -> this user's chosen emoji (one each)
+    var _ownerId = results[1];
     if (window.sb && currentUser && comments.length) {
         try {
             var cIds = comments.map(function(c) { return c.id; });
@@ -24654,6 +24656,7 @@ async function realOpenComments(postId) {
                 allLikes.forEach(function(l) {
                     likeCountMap[l.comment_id] = (likeCountMap[l.comment_id] || 0) + 1;
                     if (l.user_id === currentUser.id) userLikedSet.add(l.comment_id);
+                    if (_ownerId && l.user_id === _ownerId) creatorLikedSet.add(l.comment_id);
                 });
             }
             if (allReacts) {
@@ -24667,8 +24670,9 @@ async function realOpenComments(postId) {
     }
 
     window._cmt = { postId: postId, comments: comments, likes: likeCountMap,
-                    liked: userLikedSet, ownerId: results[1],
-                    reactions: reactionMap, myReaction: myReactionMap };
+                    liked: userLikedSet, ownerId: results[1], creatorLiked: creatorLikedSet,
+                    reactions: reactionMap, myReaction: myReactionMap,
+                    expanded: (window._cmt && window._cmt.postId === postId && window._cmt.expanded) || new Set() };
     _renderSortChips();
     _renderCommentList();
 }
@@ -24770,21 +24774,30 @@ function _renderCommentList() {
         return;
     }
 
-    // Build the thread. Replies read oldest-first under their parent so a
-    // back-and-forth with Eddie reads top to bottom like a conversation. A
-    // reply whose parent got filtered out or deleted is promoted, not lost.
-    var repliesOf = {}, roots = [], idSet = {};
+    // Build the thread. childrenOf maps a comment to its DIRECT replies; roots
+    // are top-level comments. A reply whose parent got filtered/deleted is
+    // promoted to a root, not lost.
+    var childrenOf = {}, roots = [], idSet = {};
     comments.forEach(function (c) { idSet[c.id] = true; });
     comments.forEach(function (c) {
         if (c.parent_comment_id && idSet[c.parent_comment_id]) {
-            (repliesOf[c.parent_comment_id] = repliesOf[c.parent_comment_id] || []).push(c);
+            (childrenOf[c.parent_comment_id] = childrenOf[c.parent_comment_id] || []).push(c);
         } else {
             roots.push(c);
         }
     });
-    Object.keys(repliesOf).forEach(function (k) {
-        repliesOf[k].sort(function (a, b) { return new Date(a.created_at) - new Date(b.created_at); });
-    });
+    // Flatten EVERY descendant of a root (any depth) into one list, oldest-first,
+    // so a reply-to-a-reply (e.g. a back-and-forth with Eddie) renders instead of
+    // vanishing — the old code only rendered a root's direct children.
+    function descendantsOf(rootId) {
+        var out = [];
+        (function walk(pid) {
+            (childrenOf[pid] || [])
+                .slice().sort(function (a, b) { return new Date(a.created_at) - new Date(b.created_at); })
+                .forEach(function (k) { out.push(k); walk(k.id); });
+        })(rootId);
+        return out;
+    }
 
     if (mode === 'relevant') {
         roots.sort(function (a, b) {
@@ -24797,17 +24810,47 @@ function _renderCommentList() {
         roots.sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); });
     }
 
+    st.expanded = st.expanded || new Set();
     list.innerHTML = '';
     roots.forEach(function (c) {
         list.appendChild(_buildCommentNode(c, 0));
-        (repliesOf[c.id] || []).forEach(function (child) {
-            list.appendChild(_buildCommentNode(child, 1));
-        });
+        var kids = descendantsOf(c.id);
+        if (!kids.length) return;
+        // Replies collapse behind a "View N replies" toggle (Instagram-style);
+        // expansion is remembered in st.expanded so rebuilds keep it.
+        var open = st.expanded.has(c.id);
+        var wrap = document.createElement('div');
+        wrap.className = 'c-replies';
+        wrap.setAttribute('data-parent', c.id);
+        wrap.style.display = open ? 'block' : 'none';
+        kids.forEach(function (k) { wrap.appendChild(_buildCommentNode(k, 1)); });
+        var toggle = document.createElement('div');
+        toggle.className = 'c-replies-toggle';
+        toggle.style.cssText = 'margin:0 0 10px 52px;font-size:13px;color:var(--text-secondary,#888);font-weight:700;cursor:pointer;display:flex;align-items:center;gap:9px;';
+        var lbl = 'View ' + kids.length + ' repl' + (kids.length === 1 ? 'y' : 'ies');
+        toggle.innerHTML = '<span style="width:22px;height:1px;background:rgba(136,136,136,0.45);display:inline-block;flex-shrink:0;"></span><span class="c-rt-label">' + (open ? 'Hide replies' : lbl) + '</span>';
+        toggle.onclick = function () {
+            var nowOpen = wrap.style.display === 'none';
+            wrap.style.display = nowOpen ? 'block' : 'none';
+            toggle.querySelector('.c-rt-label').textContent = nowOpen ? 'Hide replies' : lbl;
+            if (nowOpen) st.expanded.add(c.id); else st.expanded.delete(c.id);
+            if (typeof triggerHaptic === 'function') triggerHaptic(6);
+        };
+        list.appendChild(toggle);
+        list.appendChild(wrap);
     });
-    // Long-press was defined but never attached on this render path, which is
-    // why holding a comment did nothing. Delegation is on the list, so this
-    // no-ops after the first call.
+    // Delegation is on the list, so this no-ops after the first call.
     if (typeof setupCommentLongPress === 'function') setupCommentLongPress();
+}
+
+// Walk parent links up to the top-level comment id (used to expand the right
+// thread when a nested reply is posted).
+function _rootAncestorId(cid) {
+    var st = window._cmt; if (!st) return cid;
+    var byId = {}; st.comments.forEach(function (c) { byId[c.id] = c; });
+    var cur = byId[cid], guard = 0;
+    while (cur && cur.parent_comment_id && byId[cur.parent_comment_id] && guard++ < 100) cur = byId[cur.parent_comment_id];
+    return cur ? cur.id : cid;
 }
 
 // Drop one new comment into the open sheet without rebuilding it, so posting
@@ -24822,19 +24865,20 @@ function _appendCommentInPlace(c) {
     // An empty state has no node to insert next to; rebuild cleanly.
     if (!list.querySelector('.comment-item')) { _renderCommentList(); return null; }
 
-    var node = _buildCommentNode(c, c.parent_comment_id ? 1 : 0);
     if (c.parent_comment_id) {
-        var parent = list.querySelector('[data-comment-id="' + c.parent_comment_id + '"]');
-        if (parent) {
-            // After the parent's last already-rendered reply, keeping the
-            // thread in conversation order.
-            var anchor = parent, sib = parent.nextElementSibling;
-            while (sib && sib.classList.contains('comment-reply')) { anchor = sib; sib = sib.nextElementSibling; }
-            anchor.insertAdjacentElement('afterend', node);
-        } else {
-            list.insertBefore(node, list.firstChild);
-        }
-    } else if ((window._commentSort || 'newest') === 'all') {
+        // A reply (at any depth): expand its thread and rebuild so nested replies
+        // always render in order — the flattened "View N replies" group can't be
+        // spliced into reliably by hand.
+        st.expanded = st.expanded || new Set();
+        st.expanded.add(_rootAncestorId(c.parent_comment_id));
+        _renderCommentList();
+        var rNode = list.querySelector('[data-comment-id="' + c.id + '"]');
+        if (rNode) { try { rNode.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {} }
+        return rNode;
+    }
+
+    var node = _buildCommentNode(c, 0);
+    if ((window._commentSort || 'newest') === 'all') {
         list.appendChild(node);
     } else {
         list.insertBefore(node, list.firstChild);
@@ -24846,9 +24890,13 @@ function _appendCommentInPlace(c) {
 function _buildCommentNode(c, depth) {
         var u = c.users || {};
         var avatar = u.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff';
-        var userLiked = window._cmt ? window._cmt.liked.has(c.id) : false;
-        var likeCount = (window._cmt && window._cmt.likes[c.id]) || 0;
+        var _st = window._cmt;
+        var userLiked = _st ? _st.liked.has(c.id) : false;
+        var likeCount = (_st && _st.likes[c.id]) || 0;
         var isBot = (c.user_id === _EDDIE_USER_ID);
+        // "Liked by creator": the post owner liked this comment (and it isn't the
+        // owner's own comment).
+        var creatorLiked = !!(_st && _st.creatorLiked && _st.creatorLiked.has(c.id) && c.user_id !== _st.ownerId);
         var item = document.createElement('div');
         item.className = 'comment-item' + (depth ? ' comment-reply' : '');
         if (depth) item.style.cssText = 'margin-left:38px;';
@@ -24865,6 +24913,7 @@ function _buildCommentNode(c, depth) {
                         ? '<span style="font-size:9px;font-weight:700;letter-spacing:0.4px;background:#000;color:#fff;padding:1px 5px;border-radius:4px;">AI</span>'
                         : (u.verified ? '<i class="fa-solid fa-circle-check ' + (u.badge_tier || 'verify-blue') + '" style="font-size:9px;"></i>' : '')) +
                     '<small style="color:#aaa;font-size:11px;margin-left:4px;">' + getTimeAgo(c.created_at) + '</small>' +
+                    (creatorLiked ? '<span style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;font-size:11px;color:var(--text-secondary,#888);white-space:nowrap;"><i class="fa-solid fa-heart" style="color:#FF3B30;font-size:9px;"></i>by creator</span>' : '') +
                 '</div>' +
                 (c.clip_id
                     ? '<div onclick="openClipFromComment(\'' + escapeHtml(c.clip_id) + '\')" style="display:inline-flex;align-items:center;gap:8px;background:rgba(255,149,0,0.12);border:1px solid rgba(255,149,0,0.3);border-radius:12px;padding:8px 12px;margin:2px 0 6px;cursor:pointer;"><i class="fa-solid fa-clapperboard" style="color:#FF9500;font-size:14px;"></i><span style="font-size:13px;font-weight:600;color:var(--text-primary,#000);">' + escapeHtml(c.text_content || 'Replied with a TrustClip') + '</span><i class="fa-solid fa-play" style="color:#FF9500;font-size:10px;"></i></div>'
