@@ -22,6 +22,15 @@
            page back, which is what produced those half-and-half screenshots
            mid-swipe. */
         overscroll-behavior: none;
+        /* Nothing may ever be wider than the screen. This kills the "app wants
+           a wider screen" bug where a single stray element (or an accidental
+           pinch leaving a panned viewport) let the page scroll sideways. */
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
+        /* manipulation keeps tap + pan + scroll but drops the browser's own
+           double-tap-to-zoom; real media zoom is our own JS pinch, unaffected. */
+        touch-action: manipulation;
     }
 
     body {

@@ -9218,11 +9218,20 @@ function openCommentContextMenu(item) {
     ];
     window._ctxComment = item;
 
+    // Delete shows only for the comment's own author or the post owner (creators
+    // moderate their own posts). RLS enforces the same rule on the server.
+    var _me = (currentUser && currentUser.id) || '';
+    var _cAuthor = (item && (item.getAttribute('data-user-id') || '')) || '';
+    var _postOwner = (window._cmt && window._cmt.ownerId) || '';
+    if (_me && (_cAuthor === _me || _postOwner === _me)) {
+        actions.push({ label:'Delete', icon:'fa-trash', color:'#FF3B30', red:true });
+    }
+
     var rowsHTML = actions.map(function(a) {
         var extra = a.hasSubRow ?
             '<div style="display:flex;gap:10px;margin-left:46px;padding:8px 0 14px;">' +
             ['❤️','👏','🔥','😂','🙌'].map(function(e){
-                return '<div onclick="sendMsgReaction(\'' + e + '\')" style="width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;">' + e + '</div>';
+                return '<div onclick="reactToComment(\'' + e + '\')" style="width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;">' + e + '</div>';
             }).join('') +
             '</div>' : '';
         return '<div class="comment-ctx-row" onclick="commentCtxAction(\'' + a.label + '\')">' +
@@ -9273,8 +9282,37 @@ function commentCtxAction(action) {
         case 'Translate':
             showToast('Translation coming soon');
             return;
+        case 'Delete':
+            _deleteComment(cid, item);
+            return;
         default:
             showToast(action);
+    }
+}
+
+// Remove a comment: drop it from the open sheet immediately, then delete on the
+// server. RLS only lets the author or the post owner through, matching the menu.
+async function _deleteComment(cid, item) {
+    if (!cid) { showToast('Could not delete'); return; }
+    var st = window._cmt;
+    // Optimistic: pull the node (and any of its rendered replies) out now.
+    if (item && item.parentNode) {
+        var sib = item.nextElementSibling;
+        while (sib && sib.classList.contains('comment-reply')) { var nx = sib.nextElementSibling; sib.parentNode.removeChild(sib); sib = nx; }
+        item.parentNode.removeChild(item);
+    }
+    if (st) {
+        st.comments = st.comments.filter(function (c) { return c.id !== cid && c.parent_comment_id !== cid; });
+        if (typeof _setCommentSheetCount === 'function') _setCommentSheetCount(st.comments.length);
+    }
+    if (window.sb && currentUser) {
+        try {
+            var r = await sb.from('comments').delete().eq('id', cid);
+            if (r && r.error) throw r.error;
+            showToast('Comment deleted');
+        } catch (e) {
+            showToast('Could not delete');
+        }
     }
 }
 
@@ -10380,6 +10418,18 @@ function toggleStoryCommenting() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ── Kill browser page-zoom app-wide ──────────────────────────────────────
+// An accidental two-finger pinch used to zoom the whole page on iOS, leaving
+// the app "wanting a wider screen" until you pinched back out. The viewport
+// meta (maximum-scale=1) handles Android; iOS ignores it, so we also cancel the
+// gesture events here. Real media zoom (stories, TrustClips) is our own JS
+// pinch running on touchmove, which these preventDefaults never interfere with.
+(function blockPageZoom() {
+    ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (evt) {
+        document.addEventListener(evt, function (e) { e.preventDefault(); }, { passive: false });
+    });
+})();
 
 // ── Story touch: hold=pause, swipe-up=overlay, pinch=zoom+fade ──
 (function() {
@@ -12083,6 +12133,7 @@ function reelHeartTap(el, postId) {
 
 // Speaker button: unmute/mute every reel and play the current one with sound.
 function toggleReelMute(btn) {
+    var wasMuted = (window._reelsMuted !== false);
     window._reelsMuted = !window._reelsMuted;
     var scroller = document.getElementById('reel-scroller');
     (scroller ? scroller.querySelectorAll('video.reel-video') : []).forEach(function(v) {
@@ -12092,6 +12143,38 @@ function toggleReelMute(btn) {
         i.className = window._reelsMuted ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high';
     });
     if (typeof triggerHaptic === 'function') triggerHaptic(15);
+    // Just unmuted? A browser can't read the phone's hardware volume slider (no
+    // web API exists, and iOS makes video.volume read-only), so we can't auto-
+    // detect a silent device. Instead we nudge: a pill slides out of the icon
+    // reminding them to turn their device volume up, then tucks back in.
+    if (wasMuted && window._reelsMuted === false) showReelVolumePill(btn);
+}
+
+// The nudge pill. Slides out from behind the reel speaker icon, holds a beat,
+// then retracts into it. Purely a hint — see the note in toggleReelMute for why
+// we can't gate this on the actual device volume.
+function showReelVolumePill(btn) {
+    if (!btn) return;
+    var host = btn.parentNode; if (!host) return;
+    var prev = host.querySelector('.reel-vol-pill'); if (prev) { clearTimeout(prev._t); prev.remove(); }
+    var pill = document.createElement('div');
+    pill.className = 'reel-vol-pill';
+    pill.style.cssText =
+        'position:absolute;top:max(54px,env(safe-area-inset-top,54px));right:14px;height:38px;' +
+        'display:flex;align-items:center;max-width:0;overflow:hidden;white-space:nowrap;' +
+        'background:rgba(0,0,0,0.6);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);' +
+        'color:#fff;border-radius:19px;z-index:29;pointer-events:none;' +
+        'transition:max-width 0.4s cubic-bezier(0.32,0.72,0,1);';
+    // Right padding clears the round button that sits on top of the pill's tail.
+    pill.innerHTML =
+        '<span style="padding:0 48px 0 16px;display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;">' +
+            '<i class="fa-solid fa-volume-high" style="font-size:12px;"></i>Turn up your device volume</span>';
+    host.appendChild(pill);
+    requestAnimationFrame(function () { pill.style.maxWidth = '280px'; });
+    pill._t = setTimeout(function () {
+        pill.style.maxWidth = '0';
+        setTimeout(function () { if (pill.parentNode) pill.remove(); }, 450);
+    }, 2000);
 }
 
 // Attach an invisible slide-to-scrub progress bar to a reel video. The bar
@@ -12138,8 +12221,48 @@ function wireReelScrub(video) {
     bar.addEventListener('pointercancel', function() { scrubbing = false; collapse(); });
 }
 
+// TrustClip pinch-to-zoom. Two fingers scale the video; every overlay fades so
+// the clip fills the frame cleanly, then springs back when you lift a finger.
+// Delegated on the scroller so it survives reel re-renders and binds only once.
+function setupReelPinchZoom() {
+    var scroller = document.getElementById('reel-scroller');
+    if (!scroller || scroller._pinchHooked) return;
+    scroller._pinchHooked = true;
+    var pinching = false, d0 = 0, vid = null, tools = [];
+    function dist(e) { var dx = e.touches[0].clientX - e.touches[1].clientX, dy = e.touches[0].clientY - e.touches[1].clientY; return Math.hypot(dx, dy); }
+    function fade(v) { tools.forEach(function (el) { el.style.transition = 'opacity 0.2s'; el.style.opacity = v; }); }
+    scroller.addEventListener('touchstart', function (e) {
+        if (e.touches.length !== 2) return;
+        var page = e.target.closest('.reel-page'); if (!page) return;
+        vid = page.querySelector('.reel-video'); if (!vid) return;
+        tools = [];
+        page.querySelectorAll('.reel-ui, .reel-mute-btn, .reel-scrub').forEach(function (el) { tools.push(el); });
+        pinching = true; d0 = dist(e) || 1;
+        vid.style.transition = 'none';
+        e.preventDefault();
+    }, { passive: false });
+    scroller.addEventListener('touchmove', function (e) {
+        if (!pinching || e.touches.length !== 2 || !vid) return;
+        var scale = Math.min(Math.max(dist(e) / d0, 1), 3);
+        vid.style.transformOrigin = 'center center';
+        vid.style.transform = 'scale(' + scale + ')';
+        fade(Math.max(0, 1 - (scale - 1) * 1.4));
+        e.preventDefault();
+    }, { passive: false });
+    function release() {
+        if (!pinching) return;
+        pinching = false;
+        if (vid) { vid.style.transition = 'transform 0.3s cubic-bezier(0.32,0.72,0,1)'; vid.style.transform = 'scale(1)'; }
+        fade(1);
+        vid = null; tools = [];
+    }
+    scroller.addEventListener('touchend', function (e) { if (e.touches.length < 2) release(); }, { passive: false });
+    scroller.addEventListener('touchcancel', release, { passive: false });
+}
+
 async function initReels() {
     const c = document.getElementById('reel-scroller');
+    setupReelPinchZoom();   // idempotent; binds pinch/zoom once per scroller
     if (c.children.length > 0) c.innerHTML = ''; // force refresh
     try {
         // Video posts store the file in media_url with media_type='video'
@@ -24349,24 +24472,39 @@ async function realOpenComments(postId) {
     if (currentCommentPostId !== postId) return;   // viewer moved on mid-fetch
     if (!list) return;
 
-    // Fetch like counts + current user's liked state for all comments in one query
+    // Fetch like counts, this user's liked state, and every emoji reaction for
+    // all comments in two parallel queries (one network trip on this connection).
     var likeCountMap = {};
     var userLikedSet = new Set();
+    var reactionMap = {};    // commentId -> { emoji: count }
+    var myReactionMap = {};  // commentId -> this user's chosen emoji (one each)
     if (window.sb && currentUser && comments.length) {
         try {
             var cIds = comments.map(function(c) { return c.id; });
-            var { data: allLikes } = await sb.from('comment_likes').select('comment_id, user_id').in('comment_id', cIds);
+            var _cr = await Promise.all([
+                sb.from('comment_likes').select('comment_id, user_id').in('comment_id', cIds),
+                sb.from('comment_reactions').select('comment_id, user_id, emoji').in('comment_id', cIds)
+            ]);
+            var allLikes = _cr[0].data, allReacts = _cr[1].data;
             if (allLikes) {
                 allLikes.forEach(function(l) {
                     likeCountMap[l.comment_id] = (likeCountMap[l.comment_id] || 0) + 1;
                     if (l.user_id === currentUser.id) userLikedSet.add(l.comment_id);
                 });
             }
+            if (allReacts) {
+                allReacts.forEach(function(r) {
+                    var m = reactionMap[r.comment_id] = reactionMap[r.comment_id] || {};
+                    m[r.emoji] = (m[r.emoji] || 0) + 1;
+                    if (r.user_id === currentUser.id) myReactionMap[r.comment_id] = r.emoji;
+                });
+            }
         } catch(e) { /* non-critical */ }
     }
 
     window._cmt = { postId: postId, comments: comments, likes: likeCountMap,
-                    liked: userLikedSet, ownerId: results[1] };
+                    liked: userLikedSet, ownerId: results[1],
+                    reactions: reactionMap, myReaction: myReactionMap };
     _renderSortChips();
     _renderCommentList();
 }
@@ -24569,15 +24707,83 @@ function _buildCommentNode(c, depth) {
                     : (c.gif_url
                         ? '<img src="' + escapeHtml(c.gif_url) + '" style="width:140px;max-width:60%;aspect-ratio:1;object-fit:cover;border-radius:12px;display:block;margin:2px 0 6px;">'
                         : '<p style="font-size:14px;line-height:1.4;margin:0 0 6px;">' + escapeHtml(c.text_content || '') + '</p>')) +
-                '<div style="display:flex;align-items:center;gap:14px;">' +
+                '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">' +
                     '<div onclick="toggleCommentLike(this,\'' + c.id + '\')" style="display:flex;align-items:center;gap:4px;cursor:pointer;">' +
                         '<i class="fa-' + (userLiked ? 'solid' : 'regular') + ' fa-heart" style="font-size:13px;color:' + (userLiked ? '#FF3B30' : '#888') + ';transition:0.2s;"></i>' +
                         '<span style="font-size:11px;color:#888;">' + likeCount + '</span>' +
                     '</div>' +
+                    '<span class="c-reacts" data-reacts="' + (c.id || '') + '" style="display:inline-flex;align-items:center;gap:6px;">' + _commentReactChipsHTML(c.id) + '</span>' +
                     '<span onclick="openCommentReply(\'' + escapeHtml(u.full_name || u.username || 'User') + '\',\'' + escapeHtml(c.id || '') + '\',' + (isBot ? 'true' : 'false') + ')" style="font-size:12px;color:#888;cursor:pointer;font-weight:600;">Reply</span>' +
                 '</div>' +
             '</div>';
         return item;
+}
+
+// Reaction chips shown next to a comment's like heart. The current user's own
+// pick is highlighted red. Returns '' when nobody has reacted yet.
+function _commentReactChipsHTML(cid) {
+    var st = window._cmt;
+    if (!st || !st.reactions) return '';
+    var map = st.reactions[cid] || {};
+    var mine = st.myReaction ? st.myReaction[cid] : null;
+    var order = ['❤️', '👏', '🔥', '😂', '🙌'];
+    var seen = {}, parts = [];
+    order.forEach(function (e) { seen[e] = true; if ((map[e] || 0) > 0) parts.push(_reactChip(e, map[e], mine === e)); });
+    Object.keys(map).forEach(function (e) { if (!seen[e] && map[e] > 0) parts.push(_reactChip(e, map[e], mine === e)); });
+    return parts.join('');
+}
+function _reactChip(emoji, n, isMine) {
+    return '<span style="display:inline-flex;align-items:center;gap:3px;font-size:12px;line-height:1;padding:2px 7px;border-radius:11px;background:' +
+        (isMine ? 'rgba(255,59,48,0.14)' : 'rgba(136,136,136,0.14)') + ';color:' + (isMine ? '#FF3B30' : '#888') +
+        ';font-weight:' + (isMine ? '700' : '500') + ';">' + emoji + ' ' + n + '</span>';
+}
+// Repaint just one comment's chip row after a reaction so the reader's scroll
+// position never jumps (rebuilding the whole thread would).
+function _updateCommentReactionRow(cid) {
+    var row = document.querySelector('.comment-item[data-comment-id="' + cid + '"] .c-reacts');
+    if (row) row.innerHTML = _commentReactChipsHTML(cid);
+}
+// Add / change / clear the current user's reaction on a comment. One reaction
+// per person: tapping the same emoji again removes it, a different one swaps it.
+async function reactToComment(emoji) {
+    var overlay = document.getElementById('commentCtxOverlay');
+    if (overlay) overlay.remove();
+    var item = window._ctxComment;
+    if (!item) return;
+    var cid = item.getAttribute('data-comment-id') || item.getAttribute('data-id');
+    if (!cid) return;
+    if (typeof triggerHaptic === 'function') triggerHaptic(20);
+
+    var st = window._cmt;
+    if (st) {
+        st.reactions = st.reactions || {};
+        st.myReaction = st.myReaction || {};
+        var map = st.reactions[cid] = st.reactions[cid] || {};
+        var mine = st.myReaction[cid] || null;
+        if (mine === emoji) {                                     // toggle off
+            map[emoji] = Math.max(0, (map[emoji] || 1) - 1);
+            st.myReaction[cid] = null;
+        } else {
+            if (mine) map[mine] = Math.max(0, (map[mine] || 1) - 1); // swap old out
+            map[emoji] = (map[emoji] || 0) + 1;
+            st.myReaction[cid] = emoji;
+        }
+        _updateCommentReactionRow(cid);
+    }
+
+    if (window.sb && currentUser) {
+        try {
+            var mineNow = st ? st.myReaction[cid] : emoji;
+            if (mineNow) {
+                await sb.from('comment_reactions').upsert(
+                    { user_id: currentUser.id, comment_id: cid, emoji: mineNow },
+                    { onConflict: 'comment_id,user_id' });
+            } else {
+                await sb.from('comment_reactions').delete()
+                    .eq('user_id', currentUser.id).eq('comment_id', cid);
+            }
+        } catch (e) { /* optimistic UI stays; reconciles on next open */ }
+    }
 }
 
 // Eddie's fixed bot account. Matches EDDIE_USER_ID in core/eddie_views.py.
