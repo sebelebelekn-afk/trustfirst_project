@@ -38877,9 +38877,19 @@ function editorStartAgain() {
     editorRealExit();
     showToast('Draft cleared'); triggerHaptic(20);
 }
-function editorRealExit() {
-    if (_edTickRAF) cancelAnimationFrame(_edTickRAF);
+// Stop the editor's video/audio wherever the editor is left. Hiding the overlay
+// only stops it being seen — a display:none <video> keeps playing its audio, so
+// you'd hear the clip over the feed (or the next screen) after leaving.
+function _edStopMedia() {
+    if (_edTickRAF) { cancelAnimationFrame(_edTickRAF); _edTickRAF = null; }
     edState.isPlaying = false;
+    var overlay = document.getElementById('preview-edit-overlay');
+    var vid = document.getElementById('edVideo');
+    if (vid) { try { vid.pause(); vid.currentTime = 0; } catch (e) {} }
+    if (overlay) overlay.querySelectorAll('video,audio').forEach(function (m) { try { m.pause(); m.currentTime = 0; } catch (e) {} });
+}
+function editorRealExit() {
+    _edStopMedia();
     if (edState.autoSaveTimer) clearInterval(edState.autoSaveTimer);
     localStorage.removeItem('tf_editor_draft');
     var overlay = document.getElementById('preview-edit-overlay');
@@ -39055,6 +39065,7 @@ function openNewTrustClipPost() {
     // Capture placed stickers before the editor DOM is torn down; they ride
     // along to the trustclips insert and render over the video in the feed.
     try { window._pendingClipStickers = _edCollectOverlays(); } catch (e) { window._pendingClipStickers = []; }
+    _edStopMedia();
     closePage('preview-edit-overlay');
     openPage('new-trust-clip-overlay');
     var tcVid = document.getElementById('tcThumbVid');
@@ -39112,6 +39123,7 @@ async function submitTrustClip() {
     }
 
     // Close screens immediately — post in background
+    _edStopMedia();
     closePage('new-trust-clip-overlay');
     closePage('preview-edit-overlay');
     closePage('clip-selector-overlay');
@@ -39317,6 +39329,7 @@ async function saveTrustclipAsDraft() {
         if (drafts.length > 50) drafts = drafts.slice(0, 50);
         localStorage.setItem('tf_tc_drafts', JSON.stringify(drafts));
     } catch(e) {}
+    _edStopMedia();
     closePage('new-trust-clip-overlay');
     closePage('preview-edit-overlay');
     closePage('clip-selector-overlay');

@@ -3528,7 +3528,7 @@ input, textarea, [contenteditable="true"], .post-content {
 
 /* ===== FOLLOWERS SCREEN ===== */
 #followers-screen { background:var(--bg-primary,#fff); z-index:6200; }
-.fs-header { display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:0.5px solid var(--border-color,rgba(0,0,0,0.08));flex-shrink:0; }
+.fs-header { display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 14px;border-bottom:0.5px solid var(--border-color,rgba(0,0,0,0.08));flex-shrink:0; }
 .fs-tabs { display:flex;padding:0 16px;border-bottom:0.5px solid var(--border-color,rgba(0,0,0,0.08));flex-shrink:0; }
 .fs-tab { flex:1;text-align:center;padding:12px 0;font-size:15px;font-weight:600;color:#888;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s; }
 .fs-tab.active { color:var(--text-primary,#000);border-bottom-color:#007AFF; }
