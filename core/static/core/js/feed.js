@@ -8950,6 +8950,8 @@ function openComments(postId) {
     currentCommentPostId = postId;
     const overlay = document.getElementById('comment-overlay');
     overlay.style.display = 'flex';
+    // Drag the header down to dismiss (the list itself stays scrollable).
+    attachSheetSwipeClose(overlay.querySelector('.comment-header'), overlay, closeComments);
     renderComments();
     setTimeout(setupCommentLongPress, 200);
 }
@@ -9248,7 +9250,13 @@ function openCommentContextMenu(item) {
         '</div>';
 
     overlay.addEventListener('click', function(e){ if(e.target===overlay) overlay.remove(); });
-    document.getElementById('comment-overlay').appendChild(overlay);
+    // Host on the full-screen app container, not the 65%-tall comment sheet, so
+    // the backdrop covers everything and a tap anywhere outside the sheet closes
+    // it. Before, there was almost no backdrop to hit.
+    (document.getElementById('app') || document.getElementById('comment-overlay') || document.body).appendChild(overlay);
+    // And let it be flicked down to dismiss.
+    var _sheet = overlay.querySelector('.comment-ctx-sheet');
+    attachSheetSwipeClose(_sheet, _sheet, function(){ overlay.remove(); });
 }
 
 function commentCtxAction(action) {
@@ -9691,6 +9699,8 @@ function toggleCommentGifs() {
         return;
     }
     panel.style.display = 'block';
+    // Drag the grab handle down to close the GIF panel.
+    attachSheetSwipeClose(panel.querySelector('.gif-grab'), panel, function () { panel.style.display = 'none'; });
     var input = document.getElementById('gif-search-input');
     if (input) input.value = '';
     loadGifSearch('trending');
@@ -13872,22 +13882,35 @@ async function clearLocalData() {
   }
 }
 
-(function patchAndroidKeyboard() {
+(function keyboardFit() {
+    // iOS shrinks the visual viewport for the keyboard and shoves the whole
+    // fixed app upward to reveal the focused input, taking the header off-screen.
+    // The chat is a flex column (header / scrolling body / input bar) pinned to
+    // 100dvh, so instead of letting the app scroll, we shrink the chat to the
+    // visible area: the body gets shorter and the input bar lands just above the
+    // keyboard, header still on top. (The old patch targeted #chat-bar, which
+    // never existed, so it did nothing — this replaces it.)
     if (!window.visualViewport) return;
-    var chatBar = null;
-    function onViewportResize() {
-        if (!chatBar) chatBar = document.getElementById('chat-bar');
-        if (!chatBar) return;
-        var gap = window.innerHeight - window.visualViewport.height;
-        if (gap > 100) {
-            chatBar.style.bottom = gap + 'px';
-            chatBar.style.transition = 'bottom 0.1s';
-        } else {
-            chatBar.style.bottom = '';
+    var vv = window.visualViewport, wasOpen = false;
+    function apply() {
+        var kb = window.innerHeight - vv.height;          // ~keyboard height
+        var chat = document.getElementById('chat-interface');
+        var chatVisible = chat && chat.offsetParent !== null;
+        var open = kb > 100 && chatVisible;
+        if (open) {
+            chat.style.height = vv.height + 'px';
+            if (window.pageYOffset !== 0) window.scrollTo(0, 0);   // undo any app-shift (chat only)
+            if (!wasOpen) {
+                var body = document.getElementById('chat-body');
+                if (body) setTimeout(function () { body.scrollTop = body.scrollHeight; }, 50);
+            }
+        } else if (chat) {
+            chat.style.height = '';                        // keyboard closed -> back to CSS 100%
         }
+        wasOpen = open;
     }
-    window.visualViewport.addEventListener('resize', onViewportResize, { passive: true });
-    window.visualViewport.addEventListener('scroll', onViewportResize, { passive: true });
+    vv.addEventListener('resize', apply, { passive: true });
+    vv.addEventListener('scroll', apply, { passive: true });
 })();
 
     // ==========================================================================
@@ -24743,6 +24766,51 @@ function _updateCommentReactionRow(cid) {
     var row = document.querySelector('.comment-item[data-comment-id="' + cid + '"] .c-reacts');
     if (row) row.innerHTML = _commentReactChipsHTML(cid);
 }
+// Sync a comment's like heart + count in the DOM. Used when a reaction clears an
+// existing like (a comment carries a like OR a reaction, never both).
+function _setCommentLikeUI(cid, liked, count) {
+    var item = document.querySelector('.comment-item[data-comment-id="' + cid + '"]');
+    if (!item) return;
+    var icon = item.querySelector('.fa-heart');
+    if (!icon) return;
+    icon.className = 'fa-' + (liked ? 'solid' : 'regular') + ' fa-heart';
+    icon.style.color = liked ? '#FF3B30' : '#888';
+    var span = icon.parentElement ? icon.parentElement.querySelector('span') : null;
+    if (span && typeof count === 'number') span.textContent = count;
+}
+
+// Slide-a-sheet-down-to-close. `handle` is where the drag must begin (so inner
+// scrolling and taps still work); `sheet` is what visually slides; `onClose`
+// fires once it's dragged far enough or flicked, after the slide-out finishes.
+// Idempotent per handle, so it's safe to call on every open.
+function attachSheetSwipeClose(handle, sheet, onClose) {
+    if (!handle || !sheet || handle._swipeClose) return;
+    handle._swipeClose = true;
+    var startY = 0, lastY = 0, startT = 0, dragging = false;
+    handle.addEventListener('touchstart', function (e) {
+        if (!e.touches[0]) return;
+        startY = lastY = e.touches[0].clientY; startT = Date.now(); dragging = true;
+        sheet.style.transition = 'none';
+    }, { passive: true });
+    handle.addEventListener('touchmove', function (e) {
+        if (!dragging || !e.touches[0]) return;
+        lastY = e.touches[0].clientY;
+        sheet.style.transform = 'translateY(' + Math.max(0, lastY - startY) + 'px)';
+    }, { passive: true });
+    handle.addEventListener('touchend', function () {
+        if (!dragging) return;
+        dragging = false;
+        var dy = lastY - startY;
+        var vy = dy / Math.max(1, Date.now() - startT);   // px per ms (flick speed)
+        sheet.style.transition = 'transform 0.28s cubic-bezier(0.32,0.72,0,1)';
+        if (dy > 90 || vy > 0.5) {                         // far enough, or a quick flick
+            sheet.style.transform = 'translateY(100%)';
+            setTimeout(function () { sheet.style.transform = ''; sheet.style.transition = ''; if (onClose) onClose(); }, 240);
+        } else {
+            sheet.style.transform = 'translateY(0)';       // snap back
+        }
+    }, { passive: true });
+}
 // Add / change / clear the current user's reaction on a comment. One reaction
 // per person: tapping the same emoji again removes it, a different one swaps it.
 async function reactToComment(emoji) {
@@ -24769,6 +24837,17 @@ async function reactToComment(emoji) {
             st.myReaction[cid] = emoji;
         }
         _updateCommentReactionRow(cid);
+    }
+
+    // One or the other: adding a reaction clears this user's like on the comment.
+    if (st && st.myReaction[cid] && st.liked && st.liked.has(cid)) {
+        st.liked.delete(cid);
+        st.likes = st.likes || {};
+        st.likes[cid] = Math.max(0, (st.likes[cid] || 1) - 1);
+        _setCommentLikeUI(cid, false, st.likes[cid]);
+        if (window.sb && currentUser) {
+            try { await sb.from('comment_likes').delete().eq('user_id', currentUser.id).eq('comment_id', cid); } catch (e) {}
+        }
     }
 
     if (window.sb && currentUser) {
@@ -31051,34 +31130,58 @@ function sendGifMessage(content) {
 async function toggleCommentLike(el, commentId) {
     var icon = el.querySelector('i');
     var count = el.querySelector('span');
-    var liked = icon.classList.contains('fa-solid');
+    var wasLiked = icon.classList.contains('fa-solid');
+    var nowLiked = !wasLiked;
     triggerHaptic(15);
 
-    // Optimistic
-    icon.classList.toggle('fa-regular');
-    icon.classList.toggle('fa-solid');
-    icon.style.color = !liked ? '#FF3B30' : '#888';
-    if (count) count.textContent = !liked
+    // Optimistic like toggle
+    icon.className = 'fa-' + (nowLiked ? 'solid' : 'regular') + ' fa-heart';
+    icon.style.color = nowLiked ? '#FF3B30' : '#888';
+    if (count) count.textContent = nowLiked
         ? (parseInt(count.textContent) || 0) + 1
         : Math.max(0, (parseInt(count.textContent) || 1) - 1);
 
+    // Keep sheet state in sync so mutual-exclusivity + reaction render agree.
+    var st = window._cmt;
+    if (st) {
+        st.liked = st.liked || new Set();
+        st.likes = st.likes || {};
+        if (nowLiked) { st.liked.add(commentId); st.likes[commentId] = (st.likes[commentId] || 0) + 1; }
+        else { st.liked.delete(commentId); st.likes[commentId] = Math.max(0, (st.likes[commentId] || 1) - 1); }
+    }
+
+    // One or the other: liking a comment clears this user's emoji reaction on it.
+    if (nowLiked && st && st.myReaction && st.myReaction[commentId]) {
+        var prevEmoji = st.myReaction[commentId];
+        if (st.reactions && st.reactions[commentId]) {
+            st.reactions[commentId][prevEmoji] = Math.max(0, (st.reactions[commentId][prevEmoji] || 1) - 1);
+        }
+        st.myReaction[commentId] = null;
+        _updateCommentReactionRow(commentId);
+        if (window.sb && currentUser) {
+            try { await sb.from('comment_reactions').delete().eq('user_id', currentUser.id).eq('comment_id', commentId); } catch (e) {}
+        }
+    }
+
     if (window.sb && currentUser && commentId) {
         try {
+            // Intent-based: make the server match nowLiked, using the existence
+            // check to avoid duplicate inserts / no-op deletes.
             var check = await sb.from('comment_likes')
                 .select('id').eq('user_id', currentUser.id).eq('comment_id', commentId).maybeSingle();
-            if (check.data) {
-                await sb.from('comment_likes').delete().eq('id', check.data.id);
-            } else {
+            if (nowLiked && !check.data) {
                 await sb.from('comment_likes').insert({ user_id: currentUser.id, comment_id: commentId });
+            } else if (!nowLiked && check.data) {
+                await sb.from('comment_likes').delete().eq('id', check.data.id);
             }
         } catch(e) {
-            // Rollback
-            icon.classList.toggle('fa-regular');
-            icon.classList.toggle('fa-solid');
-            icon.style.color = liked ? '#FF3B30' : '#888';
-            if (count) count.textContent = liked
+            // Rollback the like UI + state
+            icon.className = 'fa-' + (wasLiked ? 'solid' : 'regular') + ' fa-heart';
+            icon.style.color = wasLiked ? '#FF3B30' : '#888';
+            if (count) count.textContent = wasLiked
                 ? (parseInt(count.textContent) || 0) + 1
                 : Math.max(0, (parseInt(count.textContent) || 1) - 1);
+            if (st) { if (wasLiked) st.liked.add(commentId); else st.liked.delete(commentId); }
         }
     }
 }
@@ -32587,6 +32690,81 @@ function setupChatLongPress() {
     chatBody.addEventListener('mousemove', function(e) { if (lpTimer) maybeCancel(e.clientX, e.clientY); });
     chatBody.addEventListener('mouseup', end);
     chatBody.addEventListener('mouseleave', end);
+
+    setupChatSwipeReply();   // swipe a bubble sideways to reply (WhatsApp-style)
+}
+
+// Swipe a chat bubble sideways (either direction) to reply to it. Drags the
+// bubble, reveals a reply arrow, and on release past a threshold fires the
+// existing replyToMessage() — which shows the reply bar and focuses the input
+// (opening the keyboard). Delegated on chat-body, bound once.
+function setupChatSwipeReply() {
+    var chatBody = document.getElementById('chat-body');
+    if (!chatBody || chatBody._swipeReplyHooked) return;
+    chatBody._swipeReplyHooked = true;
+
+    var bubble = null, icon = null, sx = 0, sy = 0, decided = false, swiping = false, dir = 0;
+    var THRESH = 56;   // px to commit the reply
+
+    function bubbleFrom(node) { return node && node.closest ? node.closest('[data-msg-bubble],[data-msg-id]') : null; }
+
+    chatBody.addEventListener('touchstart', function (e) {
+        var t = e.touches && e.touches[0]; if (!t) return;
+        bubble = bubbleFrom(e.target);
+        sx = t.clientX; sy = t.clientY; decided = false; swiping = false; dir = 0; icon = null;
+    }, { passive: true });
+
+    chatBody.addEventListener('touchmove', function (e) {
+        var t = e.touches && e.touches[0]; if (!t || !bubble) return;
+        var dx = t.clientX - sx, dy = t.clientY - sy;
+        if (!decided) {
+            if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+            decided = true;
+            swiping = Math.abs(dx) > Math.abs(dy) * 1.3;   // horizontal intent, not a scroll
+            if (swiping) { bubble.style.transition = 'none'; icon = _ensureSwipeReplyIcon(bubble); }
+        }
+        if (!swiping) return;
+        e.preventDefault();                                 // hold the vertical scroll while swiping
+        dir = dx < 0 ? -1 : 1;
+        var mag = Math.min(Math.abs(dx), 90);
+        bubble.style.transform = 'translateX(' + (dir * mag) + 'px)';
+        if (icon) {
+            var p = Math.min(1, mag / THRESH);
+            icon.style.opacity = p;
+            icon.style.transform = 'translateY(-50%) scale(' + (0.6 + 0.4 * p) + ')';
+            icon.style[dir < 0 ? 'right' : 'left'] = '6px';
+            icon.style[dir < 0 ? 'left' : 'right'] = 'auto';
+        }
+    }, { passive: false });
+
+    function release() {
+        if (!bubble) return;
+        var b = bubble, ic = icon;
+        var m = b.style.transform.match(/translateX\(([-0-9.]+)px\)/);
+        var committed = swiping && m && Math.abs(parseFloat(m[1])) >= THRESH;
+        b.style.transition = 'transform 0.22s cubic-bezier(0.32,0.72,0,1)';
+        b.style.transform = 'translateX(0)';
+        if (ic) { ic.style.opacity = '0'; setTimeout(function () { if (ic && ic.parentNode) ic.remove(); }, 200); }
+        if (committed) replyToMessage(b.getAttribute('data-msg-id') || '');
+        bubble = null; icon = null; swiping = false; decided = false;
+    }
+    chatBody.addEventListener('touchend', release, { passive: true });
+    chatBody.addEventListener('touchcancel', release, { passive: true });
+}
+
+// A reply arrow that fades in beside a bubble as it's dragged. The bubble's wrap
+// is position:relative, so this absolute node sits behind it and is revealed.
+function _ensureSwipeReplyIcon(bubble) {
+    var wrap = bubble.parentElement;
+    if (!wrap) return null;
+    var existing = wrap.querySelector('._swipe-reply-ic');
+    if (existing) return existing;
+    var ic = document.createElement('div');
+    ic.className = '_swipe-reply-ic';
+    ic.style.cssText = 'position:absolute;top:50%;left:6px;transform:translateY(-50%) scale(0.6);opacity:0;width:30px;height:30px;border-radius:50%;background:rgba(255,149,0,0.18);display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:1;';
+    ic.innerHTML = '<i class="fa-solid fa-reply" style="color:#FF9500;font-size:13px;"></i>';
+    wrap.appendChild(ic);
+    return ic;
 }
 
 // ── Long-press on inbox conversation rows (message hub) ────────────────────
@@ -46288,7 +46466,7 @@ function _mgItem(icon, title, sub, right, onclick) {
         '<i class="fa-solid ' + icon + '" style="font-size:20px;width:26px;text-align:center;color:var(--text-primary,#000);"></i>' +
         '<div style="flex:1;min-width:0;">' +
             '<div style="font-size:17px;font-weight:600;color:var(--text-primary,#000);">' + escapeHtml(title) + '</div>' +
-            (sub ? '<div style="font-size:14px;color:#65676b;line-height:1.3;margin-top:1px;">' + escapeHtml(sub) + '</div>' : '') +
+            (sub ? '<div style="font-size:14px;color:var(--text-secondary,#666);line-height:1.3;margin-top:1px;">' + escapeHtml(sub) + '</div>' : '') +
         '</div>' +
         (right || '') +
     '</div>';
@@ -46348,7 +46526,7 @@ async function _mgLoadCounts(groupId) {
 }
 
 function _mgCountRight(n) {
-    return '<span style="font-size:17px;color:#65676b;flex-shrink:0;">' + n + '</span>';
+    return '<span style="font-size:17px;color:var(--text-secondary,#666);flex-shrink:0;">' + n + '</span>';
 }
 
 function _mgRender() {
@@ -46366,9 +46544,9 @@ function _mgRender() {
             '<img src="' + escapeHtml(cover) + '" style="width:52px;height:52px;border-radius:10px;object-fit:cover;flex-shrink:0;">' +
             '<div style="flex:1;min-width:0;">' +
                 '<div style="font-size:19px;font-weight:800;color:var(--text-primary,#000);">' + escapeHtml(g.name) + '</div>' +
-                '<div style="font-size:15px;color:#65676b;">' + escapeHtml(privacyLabel) + ' · ' + c.members + ' member' + (c.members !== 1 ? 's' : '') + '</div>' +
+                '<div style="font-size:15px;color:var(--text-secondary,#666);">' + escapeHtml(privacyLabel) + ' · ' + c.members + ' member' + (c.members !== 1 ? 's' : '') + '</div>' +
             '</div>' +
-            '<i class="fa-solid fa-chevron-right" style="color:#8a8d91;font-size:15px;"></i>' +
+            '<i class="fa-solid fa-chevron-right" style="color:var(--text-secondary,#666);font-size:15px;"></i>' +
         '</div>' +
 
         // Admin Assist suggestion (only while no rule exists)
@@ -46378,10 +46556,10 @@ function _mgRender() {
                 '<i class="fa-solid fa-user-gear" style="color:#0A84FF;font-size:22px;margin-top:2px;"></i>' +
                 '<div style="flex:1;min-width:0;">' +
                     '<div style="font-size:18px;font-weight:700;color:var(--text-primary,#000);">New Admin Assist criteria</div>' +
-                    '<div style="font-size:15px;color:#65676b;line-height:1.35;margin-top:3px;">Move posts and comments reported three times by members to the review queue.</div>' +
+                    '<div style="font-size:15px;color:var(--text-secondary,#666);line-height:1.35;margin-top:3px;">Move posts and comments reported three times by members to the review queue.</div>' +
                 '</div>' +
                 '<div onclick="event.stopPropagation();mgDismissAssist(this)" style="width:32px;height:32px;border-radius:50%;background:var(--input-bg,#e4e6eb);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;">' +
-                    '<i class="fa-solid fa-xmark" style="color:#050505;font-size:14px;"></i></div>' +
+                    '<i class="fa-solid fa-xmark" style="color:var(--text-primary,#000);font-size:14px;"></i></div>' +
             '</div>' +
             '<div style="padding:14px;">' +
                 '<button onclick="mgCreateDefaultRule()" style="width:100%;padding:12px;border-radius:8px;border:none;background:#0A84FF;color:#fff;font-size:17px;font-weight:700;cursor:pointer;">Set up</button>' +
@@ -46497,7 +46675,7 @@ async function mgOpenAdminAssist() {
     };
     _mgPage('mgAssist', 'Admin Assist',
         _mgCard(
-            '<div style="padding:14px 16px;font-size:15px;color:#65676b;line-height:1.4;">' +
+            '<div style="padding:14px 16px;font-size:15px;color:var(--text-secondary,#666);line-height:1.4;">' +
                 'Rules run automatically on new posts and comments. Anything a rule acts on shows up under Moderation alerts.' +
             '</div>') +
         _mgCard(rules.length
@@ -46507,15 +46685,15 @@ async function mgOpenAdminAssist() {
                     '<div style="flex:1;min-width:0;">' +
                         '<div style="font-size:16px;font-weight:600;color:var(--text-primary,#000);">' +
                             escapeHtml((CRITERIA[r.criterion] || r.criterion) + ' ' + r.threshold) + '</div>' +
-                        '<div style="font-size:14px;color:#65676b;">' + escapeHtml(ACTIONS[r.action] || r.action) + '</div>' +
+                        '<div style="font-size:14px;color:var(--text-secondary,#666);">' + escapeHtml(ACTIONS[r.action] || r.action) + '</div>' +
                     '</div>' +
                     '<div onclick="mgToggleRule(\'' + r.id + '\',' + (!r.enabled) + ')" style="width:48px;height:28px;border-radius:15px;background:' +
                         (r.enabled ? '#0A84FF' : '#c7c7cc') + ';position:relative;cursor:pointer;flex-shrink:0;">' +
                         '<div style="position:absolute;top:2px;left:' + (r.enabled ? '22px' : '2px') + ';width:24px;height:24px;border-radius:50%;background:#fff;"></div></div>' +
-                    '<i onclick="mgDeleteRule(\'' + r.id + '\')" class="fa-solid fa-trash-can" style="color:#8a8d91;font-size:15px;cursor:pointer;padding:6px;"></i>' +
+                    '<i onclick="mgDeleteRule(\'' + r.id + '\')" class="fa-solid fa-trash-can" style="color:var(--text-secondary,#666);font-size:15px;cursor:pointer;padding:6px;"></i>' +
                 '</div>';
             }).join('')
-            : '<div style="padding:26px 16px;text-align:center;color:#8a8d91;font-size:15px;">No rules yet</div>') +
+            : '<div style="padding:26px 16px;text-align:center;color:var(--text-secondary,#666);font-size:15px;">No rules yet</div>') +
         _mgCard(_mgItem('fa-plus', 'Add a rule', 'Reported 3+ times moves to review', '', 'mgCreateDefaultRule()')),
         "document.getElementById('mgAssist').remove()");
 }
@@ -46550,9 +46728,9 @@ async function _mgPostList(title, filterFn, emptyText) {
                     escapeHtml((p.text_content || '(no text)').slice(0, 160)) + '</div>' +
                 '<div style="display:flex;gap:10px;margin-top:10px;">' +
                     '<button onclick="mgApprovePost(\'' + p.id + '\')" style="flex:1;padding:9px;border-radius:8px;border:none;background:#0A84FF;color:#fff;font-size:15px;font-weight:600;cursor:pointer;">Approve</button>' +
-                    '<button onclick="mgRemovePost(\'' + p.id + '\')" style="flex:1;padding:9px;border-radius:8px;border:none;background:var(--input-bg,#e4e6eb);color:#050505;font-size:15px;font-weight:600;cursor:pointer;">Remove</button>' +
+                    '<button onclick="mgRemovePost(\'' + p.id + '\')" style="flex:1;padding:9px;border-radius:8px;border:none;background:var(--input-bg,#e4e6eb);color:var(--text-primary,#000);font-size:15px;font-weight:600;cursor:pointer;">Remove</button>' +
                 '</div></div>';
-        }).join('') : '<div style="padding:34px 16px;text-align:center;color:#8a8d91;font-size:15px;">' + escapeHtml(emptyText) + '</div>'),
+        }).join('') : '<div style="padding:34px 16px;text-align:center;color:var(--text-secondary,#666);font-size:15px;">' + escapeHtml(emptyText) + '</div>'),
         "document.getElementById('mgList').remove()");
 }
 
@@ -46616,7 +46794,7 @@ async function mgOpenAlerts() {
     } catch (e) {}
     _mgPage('mgList', 'Moderation alerts',
         _mgCard(rows.length ? rows.map(_mgLogRow).join('')
-            : '<div style="padding:34px 16px;text-align:center;color:#8a8d91;font-size:15px;">Nothing has been auto-moderated yet</div>'),
+            : '<div style="padding:34px 16px;text-align:center;color:var(--text-secondary,#666);font-size:15px;">Nothing has been auto-moderated yet</div>'),
         "document.getElementById('mgList').remove()");
 }
 
@@ -46625,8 +46803,8 @@ function _mgLogRow(r) {
     try { when = new Date(r.created_at).toLocaleString(); } catch (e) {}
     return '<div style="padding:12px 16px;border-bottom:0.5px solid var(--border-color,#eee);">' +
         '<div style="font-size:16px;color:var(--text-primary,#000);">' + escapeHtml((r.action || '').replace(/_/g, ' ')) + '</div>' +
-        (r.detail ? '<div style="font-size:14px;color:#65676b;margin-top:2px;">' + escapeHtml(r.detail) + '</div>' : '') +
-        '<div style="font-size:13px;color:#8a8d91;margin-top:3px;">' + escapeHtml(when) + '</div></div>';
+        (r.detail ? '<div style="font-size:14px;color:var(--text-secondary,#666);margin-top:2px;">' + escapeHtml(r.detail) + '</div>' : '') +
+        '<div style="font-size:13px;color:var(--text-secondary,#666);margin-top:3px;">' + escapeHtml(when) + '</div></div>';
 }
 
 // ---- Tools ----
@@ -46646,12 +46824,12 @@ async function mgOpenInsights() {
     function stat(label, value) {
         return '<div style="flex:1;text-align:center;padding:18px 6px;">' +
             '<div style="font-size:27px;font-weight:800;color:var(--text-primary,#000);">' + value + '</div>' +
-            '<div style="font-size:14px;color:#65676b;margin-top:3px;">' + escapeHtml(label) + '</div></div>';
+            '<div style="font-size:14px;color:var(--text-secondary,#666);margin-top:3px;">' + escapeHtml(label) + '</div></div>';
     }
     _mgPage('mgInsights', 'Insights',
         _mgCard('<div style="display:flex;">' + stat('Members', s.members) + stat('Posts', s.posts) + '</div>') +
         _mgCard('<div style="display:flex;">' + stat('Posts this week', s.week) + stat('New members', s.joinedWeek) + '</div>') +
-        _mgCard('<div style="padding:16px;font-size:15px;color:#65676b;line-height:1.4;">Counts come straight from the group. They update as people post and join.</div>'),
+        _mgCard('<div style="padding:16px;font-size:15px;color:var(--text-secondary,#666);line-height:1.4;">Counts come straight from the group. They update as people post and join.</div>'),
         "document.getElementById('mgInsights').remove()");
 }
 
@@ -46674,7 +46852,7 @@ function _mgPersonRow(m, actions) {
     return '<div style="display:flex;align-items:center;gap:13px;padding:11px 16px;">' + av +
         '<div style="flex:1;min-width:0;">' +
             '<div style="font-size:17px;color:var(--text-primary,#000);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(name) + '</div>' +
-            '<div style="font-size:14px;color:#65676b;text-transform:capitalize;">' + escapeHtml(m.role || 'member') + '</div>' +
+            '<div style="font-size:14px;color:var(--text-secondary,#666);text-transform:capitalize;">' + escapeHtml(m.role || 'member') + '</div>' +
         '</div>' + (actions || '') + '</div>';
 }
 
@@ -46685,9 +46863,9 @@ async function mgOpenPeople() {
         _mgCard(members.length ? members.map(function (m) {
             var isAdmin = m.role === 'admin';
             return _mgPersonRow(m,
-                isAdmin ? '<span style="font-size:14px;color:#8a8d91;">Admin</span>'
-                        : '<i onclick="mgMemberMenu(\'' + m.id + '\',\'' + m.user_id + '\',\'' + escapeHtml(m.role || 'member') + '\')" class="fa-solid fa-ellipsis" style="color:#65676b;font-size:18px;cursor:pointer;padding:8px;"></i>');
-        }).join('') : '<div style="padding:30px;text-align:center;color:#8a8d91;">No members yet</div>'),
+                isAdmin ? '<span style="font-size:14px;color:var(--text-secondary,#666);">Admin</span>'
+                        : '<i onclick="mgMemberMenu(\'' + m.id + '\',\'' + m.user_id + '\',\'' + escapeHtml(m.role || 'member') + '\')" class="fa-solid fa-ellipsis" style="color:var(--text-secondary,#666);font-size:18px;cursor:pointer;padding:8px;"></i>');
+        }).join('') : '<div style="padding:30px;text-align:center;color:var(--text-secondary,#666);">No members yet</div>'),
         "document.getElementById('mgPeople').remove()");
 }
 
@@ -46733,7 +46911,7 @@ async function mgOpenRoles() {
     _mgPage('mgRoles', 'Community roles',
         _mgCard(_mgSectionTitle('Admins and moderators') +
             (staff.length ? staff.map(function (m) { return _mgPersonRow(m, ''); }).join('')
-                          : '<div style="padding:24px 16px;text-align:center;color:#8a8d91;">No moderators yet</div>')) +
+                          : '<div style="padding:24px 16px;text-align:center;color:var(--text-secondary,#666);">No moderators yet</div>')) +
         _mgCard(_mgItem('fa-users', 'Manage people', 'Promote a member to moderator', '', 'mgOpenPeople()')),
         "document.getElementById('mgRoles').remove()");
 }
@@ -46746,7 +46924,7 @@ async function mgOpenActivity() {
     } catch (e) {}
     _mgPage('mgActivity', 'Activity log',
         _mgCard(rows.length ? rows.map(_mgLogRow).join('')
-            : '<div style="padding:34px 16px;text-align:center;color:#8a8d91;font-size:15px;">Nothing logged yet</div>'),
+            : '<div style="padding:34px 16px;text-align:center;color:var(--text-secondary,#666);font-size:15px;">Nothing logged yet</div>'),
         "document.getElementById('mgActivity').remove()");
 }
 
@@ -46764,8 +46942,8 @@ async function mgOpenScheduled() {
             try { when = new Date(p.scheduled_at).toLocaleString(); } catch (e) {}
             return '<div style="padding:13px 16px;border-bottom:0.5px solid var(--border-color,#eee);">' +
                 '<div style="font-size:15px;color:var(--text-primary,#000);">' + escapeHtml((p.text_content || '(no text)').slice(0, 140)) + '</div>' +
-                '<div style="font-size:13px;color:#8a8d91;margin-top:4px;">' + escapeHtml(when) + '</div></div>';
-        }).join('') : '<div style="padding:34px 16px;text-align:center;color:#8a8d91;font-size:15px;">Nothing scheduled</div>'),
+                '<div style="font-size:13px;color:var(--text-secondary,#666);margin-top:4px;">' + escapeHtml(when) + '</div></div>';
+        }).join('') : '<div style="padding:34px 16px;text-align:center;color:var(--text-secondary,#666);font-size:15px;">Nothing scheduled</div>'),
         "document.getElementById('mgSched').remove()");
 }
 
@@ -46777,7 +46955,7 @@ function mgOpenStatus() {
             '<i class="fa-solid ' + (healthy ? 'fa-circle-check' : 'fa-triangle-exclamation') + '" style="font-size:44px;color:' + (healthy ? '#31A24C' : '#F7B928') + ';"></i>' +
             '<div style="font-size:21px;font-weight:800;color:var(--text-primary,#000);margin-top:12px;">' +
                 (healthy ? 'In good standing' : 'Needs your attention') + '</div>' +
-            '<div style="font-size:15px;color:#65676b;line-height:1.4;margin-top:6px;">' +
+            '<div style="font-size:15px;color:var(--text-secondary,#666);line-height:1.4;margin-top:6px;">' +
                 (healthy ? 'No open reports and nothing flagged as spam.'
                          : (c.reported + ' open report' + (c.reported === 1 ? '' : 's') + ' to review.')) +
             '</div></div>') +
@@ -46898,8 +47076,8 @@ async function mgOpenYourContent() {
             try { when = new Date(p.created_at).toLocaleDateString(); } catch (e) {}
             return '<div style="padding:13px 16px;border-bottom:0.5px solid var(--border-color,#eee);">' +
                 '<div style="font-size:15px;color:var(--text-primary,#000);">' + escapeHtml((p.text_content || '(no text)').slice(0, 160)) + '</div>' +
-                '<div style="font-size:13px;color:#8a8d91;margin-top:4px;">' + escapeHtml(when) + '</div></div>';
-        }).join('') : '<div style="padding:34px 16px;text-align:center;color:#8a8d91;font-size:15px;">You have not posted here yet</div>'),
+                '<div style="font-size:13px;color:var(--text-secondary,#666);margin-top:4px;">' + escapeHtml(when) + '</div></div>';
+        }).join('') : '<div style="padding:34px 16px;text-align:center;color:var(--text-secondary,#666);font-size:15px;">You have not posted here yet</div>'),
         "document.getElementById('mgYours').remove()");
 }
 
