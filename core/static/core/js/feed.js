@@ -9212,7 +9212,7 @@ function openCommentContextMenu(item) {
 
     var actions = [
         { label:'Add to Story',          icon:'fa-circle-play',        color:'#007AFF' },
-        { label:'Share with',             icon:'fa-share-nodes',        color:'#34C759', hasSubRow: true },
+        { label:'Share with',             icon:'fa-share-nodes',        color:'#34C759' },
         { label:'Report',                 icon:'fa-flag',               color:'#FF3B30', red:true },
         { label:'Translate',              icon:'fa-language',           color:'#5856D6' },
         { label:'Copy',                   icon:'fa-copy',               color:'#888' },
@@ -9230,22 +9230,26 @@ function openCommentContextMenu(item) {
     }
 
     var rowsHTML = actions.map(function(a) {
-        var extra = a.hasSubRow ?
-            '<div style="display:flex;gap:10px;margin-left:46px;padding:8px 0 14px;">' +
-            ['❤️','👏','🔥','😂','🙌'].map(function(e){
-                return '<div onclick="reactToComment(\'' + e + '\')" style="width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;">' + e + '</div>';
-            }).join('') +
-            '</div>' : '';
         return '<div class="comment-ctx-row" onclick="commentCtxAction(\'' + a.label + '\')">' +
             '<div style="width:36px;height:36px;border-radius:12px;background:' + a.color + '22;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
                 '<i class="fa-solid ' + a.icon + '" style="color:' + a.color + ';font-size:15px;"></i></div>' +
             '<span style="font-size:15px;font-weight:600;color:' + (a.red?'rgba(255,59,48,0.9)':'white') + ';">' + a.label + '</span>' +
-        '</div>' + extra;
+        '</div>';
     }).join('');
+
+    // Reactions sit in their own row at the top (like iMessage) rather than
+    // hiding under "Share with", which now opens a real share sheet.
+    var reactRow =
+        '<div style="display:flex;justify-content:space-around;gap:6px;padding:2px 14px 14px;margin-bottom:6px;border-bottom:0.5px solid rgba(255,255,255,0.08);">' +
+        ['❤️','👏','🔥','😂','🙌'].map(function(e){
+            return '<div onclick="reactToComment(\'' + e + '\')" style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;">' + e + '</div>';
+        }).join('') +
+        '</div>';
 
     overlay.innerHTML =
         '<div class="comment-ctx-sheet">' +
             '<div style="width:36px;height:4px;background:rgba(255,255,255,0.18);border-radius:2px;margin:0 auto 14px;"></div>' +
+            reactRow +
             rowsHTML +
         '</div>';
 
@@ -9290,6 +9294,9 @@ function commentCtxAction(action) {
         case 'Translate':
             showToast('Translation coming soon');
             return;
+        case 'Share with':
+            openCommentShareSheet(text, cid);
+            return;
         case 'Delete':
             _deleteComment(cid, item);
             return;
@@ -9322,6 +9329,131 @@ async function _deleteComment(cid, item) {
             showToast('Could not delete');
         }
     }
+}
+
+// ==========================================================================
+// COMMENT SHARE SHEET — the "Share with" action. A bottom sheet with search, a
+// list of people to send the comment to, and an external-app row, styled after
+// the X share sheet.
+// ==========================================================================
+function openCommentShareSheet(text, cid) {
+    var old = document.getElementById('cShareOverlay');
+    if (old) old.remove();
+    window._cShareText = (text || '').slice(0, 240);
+    window._cShareUrl = 'https://trustfirst.app/c/' + (cid || '');
+
+    var overlay = document.createElement('div');
+    overlay.id = 'cShareOverlay';
+    overlay.style.cssText = 'position:absolute;inset:0;z-index:16050;background:rgba(0,0,0,0.5);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);';
+    overlay.innerHTML =
+        '<div id="cShareSheet" style="position:absolute;left:0;right:0;bottom:0;background:rgba(24,24,27,0.98);border-radius:22px 22px 0 0;height:72%;display:flex;flex-direction:column;padding-bottom:max(14px,env(safe-area-inset-bottom,14px));box-shadow:0 -20px 60px rgba(0,0,0,0.55);">' +
+            '<div style="width:38px;height:5px;background:rgba(255,255,255,0.22);border-radius:3px;margin:10px auto 8px;flex-shrink:0;"></div>' +
+            '<div style="flex-shrink:0;margin:6px 16px 10px;padding:11px 14px;background:rgba(255,255,255,0.08);border-radius:14px;display:flex;align-items:center;gap:10px;">' +
+                '<i class="fa-solid fa-magnifying-glass" style="color:#8a8a8e;font-size:14px;"></i>' +
+                '<input id="cShareSearch" type="text" placeholder="Search" autocomplete="off" oninput="_cShareFilter(this.value)" style="flex:1;border:none;background:transparent;outline:none;color:#fff;font-size:15px;">' +
+            '</div>' +
+            '<div id="cSharePeople" style="flex:1;overflow-y:auto;padding:0 8px;-webkit-overflow-scrolling:touch;">' +
+                '<div style="text-align:center;padding:24px;color:#8a8a8e;font-size:13px;"><i class="fa-solid fa-spinner fa-spin"></i></div>' +
+            '</div>' +
+            '<div style="flex-shrink:0;border-top:0.5px solid rgba(255,255,255,0.1);padding:14px 8px 2px;display:flex;gap:12px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;">' +
+                _cShareExt('fa-link', '#8e8e93', 'Copy Link', 'copy', false) +
+                _cShareExt('fa-arrow-up-from-bracket', '#8e8e93', 'Share via…', 'more', false) +
+                _cShareExt('fa-whatsapp', '#25D366', 'WhatsApp', 'whatsapp', true) +
+                _cShareExt('fa-telegram', '#229ED9', 'Telegram', 'telegram', true) +
+                _cShareExt('fa-comment-sms', '#34C759', 'Messages', 'sms', false) +
+            '</div>' +
+        '</div>';
+
+    overlay.addEventListener('click', function(e){ if (e.target === overlay) overlay.remove(); });
+    (document.getElementById('app') || document.body).appendChild(overlay);
+    var sheet = document.getElementById('cShareSheet');
+    if (typeof attachSheetSwipeClose === 'function') attachSheetSwipeClose(sheet, sheet, function(){ overlay.remove(); });
+    _cShareLoadPeople();
+}
+function _cShareExt(icon, color, label, method, brand) {
+    return '<div onclick="_cShareVia(\'' + method + '\')" style="flex-shrink:0;width:66px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;">' +
+        '<div style="width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;"><i class="' + (brand ? 'fa-brands ' : 'fa-solid ') + icon + '" style="color:' + color + ';font-size:22px;"></i></div>' +
+        '<span style="font-size:11px;color:rgba(255,255,255,0.7);text-align:center;line-height:1.2;">' + label + '</span>' +
+    '</div>';
+}
+function _cShareVia(method) {
+    var url = window._cShareUrl || 'https://trustfirst.app';
+    var text = window._cShareText ? (window._cShareText + ' — ') : '';
+    var payload = text + url;
+    switch (method) {
+        case 'copy':
+            if (navigator.clipboard) navigator.clipboard.writeText(payload).then(function(){ showToast('Link copied'); }).catch(function(){ showToast('Copied'); });
+            else showToast('Copied');
+            break;
+        case 'whatsapp': window.open('https://wa.me/?text=' + encodeURIComponent(payload)); break;
+        case 'telegram': window.open('https://t.me/share/url?url=' + encodeURIComponent(url) + '&text=' + encodeURIComponent(text)); break;
+        case 'sms': window.location.href = 'sms:?body=' + encodeURIComponent(payload); break;
+        case 'more':
+            if (navigator.share) navigator.share({ text: window._cShareText || '', url: url }).catch(function(){});
+            else showToast('Share not supported here');
+            break;
+    }
+    var ov = document.getElementById('cShareOverlay'); if (ov) ov.remove();
+}
+async function _cShareLoadPeople() {
+    var box = document.getElementById('cSharePeople');
+    if (!box) return;
+    if (!window.sb || !currentUser) { box.innerHTML = '<div style="text-align:center;padding:24px;color:#8a8a8e;font-size:13px;">Sign in to share with people</div>'; return; }
+    try {
+        var r = await sb.from('follows')
+            .select('following_id, users:following_id(id,username,full_name,avatar_url)')
+            .eq('follower_id', currentUser.id).limit(50);
+        var people = (r.data || []).map(function(f){ return f.users; }).filter(Boolean);
+        window._cSharePeople = people;
+        if (!people.length) { box.innerHTML = '<div style="text-align:center;padding:24px;color:#8a8a8e;font-size:13px;">You\'re not following anyone yet</div>'; return; }
+        box.innerHTML = people.map(_cSharePersonRow).join('');
+    } catch (e) {
+        box.innerHTML = '<div style="text-align:center;padding:24px;color:#8a8a8e;font-size:13px;">Could not load people</div>';
+    }
+}
+function _cSharePersonRow(u) {
+    var name = u.full_name || u.username || 'User';
+    var avatar = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=007AFF&color=fff');
+    return '<div class="cshare-person" data-q="' + escapeHtml((name + ' ' + (u.username || '')).toLowerCase()) + '" onclick="_cShareToPerson(\'' + escapeHtml(u.id) + '\')" style="display:flex;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;border-radius:12px;">' +
+        '<img src="' + escapeHtml(avatar) + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
+        '<div style="flex:1;min-width:0;">' +
+            '<div style="font-size:15px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(name) + '</div>' +
+            '<div style="font-size:13px;color:#8a8a8e;">@' + escapeHtml(u.username || 'user') + '</div>' +
+        '</div>' +
+        '<div style="width:26px;height:26px;border-radius:50%;border:1.5px solid rgba(255,255,255,0.25);flex-shrink:0;"></div>' +
+    '</div>';
+}
+function _cShareFilter(q) {
+    q = (q || '').toLowerCase();
+    document.querySelectorAll('#cSharePeople .cshare-person').forEach(function(row){
+        row.style.display = (!q || (row.getAttribute('data-q') || '').indexOf(q) >= 0) ? 'flex' : 'none';
+    });
+}
+function _cShareToPerson(uid) {
+    var person = (window._cSharePeople || []).filter(function(p){ return p.id === uid; })[0];
+    var name = person ? (person.full_name || person.username || 'them') : 'them';
+    var text = window._cShareText || '';
+    var ov = document.getElementById('cShareOverlay'); if (ov) ov.remove();
+    // Open the DM with them (same path the quick-camera share uses) and drop the
+    // comment in the input so the user just taps send. Degrades to a copy.
+    if (person && typeof openChat === 'function') {
+        try {
+            if (typeof closeComments === 'function') closeComments();
+            window._currentChatUserId = person.id;
+            currentConversationId = null;
+            var row = document.querySelector('.msg-row[data-uid="' + person.id + '"]');
+            if (row && typeof _openMsgRow === 'function') _openMsgRow(row);
+            else openChat(person.full_name || person.username || 'User');
+            setTimeout(function(){
+                var inp = document.getElementById('chat-msg-input');
+                if (inp) { inp.value = text; try { inp.dispatchEvent(new Event('input')); } catch(e){} inp.focus(); }
+            }, 420);
+            showToast('Sharing with ' + name);
+            return;
+        } catch (e) {}
+    }
+    if (navigator.clipboard && text) navigator.clipboard.writeText(text).catch(function(){});
+    showToast('Comment copied — paste it in your chat with ' + name);
 }
 
 // ==========================================================================
@@ -10891,6 +11023,9 @@ function _applyLiveAr(ar) {
 function openViewerLive(streamerName, streamerAvatar, room) {
     var overlay = document.getElementById('live-viewer-overlay');
     if (!overlay) return;
+    // The room is "live_<hostUserId>", so it tells us who the creator is — needed
+    // to pay them their 80% share of any gift (TrustFirst keeps the other 20%).
+    window._liveHostId = (room && room.indexOf('live_') === 0) ? room.slice(5) : null;
     overlay.style.display = 'block';
     var nameEl = document.getElementById('viewer-streamer-name');
     var avatarEl = document.getElementById('viewer-streamer-avatar');
@@ -11048,8 +11183,14 @@ async function sendViewerGift(emoji, name, cost) {
     cost = parseInt(cost, 10) || 0;
     if (!window.sb || !currentUser) return;
     var sheet = document.getElementById('viewer-gift-sheet');
+    var host = window._liveHostId || null;
     try {
-        var r = await sb.rpc('spend_coins', { p_amount: cost, p_reason: 'gift:' + (name || emoji) });
+        // send_gift charges the sender, pays the creator their 80% and records
+        // TrustFirst's 20%. If the host somehow isn't known, fall back to a plain
+        // spend so the gift still goes through rather than failing outright.
+        var r = host
+            ? await sb.rpc('send_gift', { p_creator_id: host, p_amount: cost, p_reason: 'gift:' + (name || emoji) })
+            : await sb.rpc('spend_coins', { p_amount: cost, p_reason: 'gift:' + (name || emoji) });
         if (r.error) {
             var m = (r.error.message || '');
             showToast(/insufficient/i.test(m) ? 'Not enough coins' : 'Could not send gift');
