@@ -9172,7 +9172,7 @@ function postComment() {
 }
 
 function setupCommentLongPress() {
-    var list = document.getElementById('comment-list');
+    var list = _cList();
     if (!list || list._ctxHooked) return;
     list._ctxHooked = true;   // delegation on the list survives re-renders
     var timer = null, startX = 0, startY = 0, target = null;
@@ -24614,6 +24614,9 @@ currentCommentPostId = null;
 async function realOpenComments(postId) {
     if (!currentUser) return;
     currentCommentPostId = postId;
+    // This surface (the modal sheet) is now where the thread renders + posts.
+    window._activeCommentList = document.getElementById('comment-list');
+    window._activeCommentInput = document.getElementById('comment-input');
 
     var overlay = document.getElementById('comment-overlay');
     if (overlay) {
@@ -24634,58 +24637,53 @@ async function realOpenComments(postId) {
 
     // The owner id powers the "From creator" filter; fetched alongside the
     // comments rather than after them, because this network bills per trip.
+    var ok = await _fetchCommentThread(postId);
+    if (!ok || !_cList()) return;   // viewer moved on mid-fetch
+    _renderSortChips();
+    _renderCommentList();
+}
+
+// Fetch a post's comment thread + like/reaction/creator-liked maps and store it
+// in window._cmt. Shared by the modal sheet and the post-detail page so both
+// show the exact same thread.
+async function _fetchCommentThread(postId) {
     var results = await Promise.all([
         RealData.getComments(postId),
         (async function () {
-            try {
-                var r = await sb.from('posts').select('user_id').eq('id', postId).single();
-                return (r.data && r.data.user_id) || null;
-            } catch (e) { return null; }
+            try { var r = await sb.from('posts').select('user_id').eq('id', postId).single(); return (r.data && r.data.user_id) || null; }
+            catch (e) { return null; }
         })()
     ]);
     var comments = results[0];
-    if (currentCommentPostId !== postId) return;   // viewer moved on mid-fetch
-    if (!list) return;
-
-    // Fetch like counts, this user's liked state, and every emoji reaction for
-    // all comments in two parallel queries (one network trip on this connection).
-    var likeCountMap = {};
-    var userLikedSet = new Set();
-    var creatorLikedSet = new Set();   // comments the post's own creator liked
-    var reactionMap = {};    // commentId -> { emoji: count }
-    var myReactionMap = {};  // commentId -> this user's chosen emoji (one each)
+    if (currentCommentPostId !== postId) return false;   // viewer moved on mid-fetch
+    var likeCountMap = {}, userLikedSet = new Set(), creatorLikedSet = new Set();
+    var reactionMap = {}, myReactionMap = {};
     var _ownerId = results[1];
     if (window.sb && currentUser && comments.length) {
         try {
-            var cIds = comments.map(function(c) { return c.id; });
+            var cIds = comments.map(function (c) { return c.id; });
             var _cr = await Promise.all([
                 sb.from('comment_likes').select('comment_id, user_id').in('comment_id', cIds),
                 sb.from('comment_reactions').select('comment_id, user_id, emoji').in('comment_id', cIds)
             ]);
             var allLikes = _cr[0].data, allReacts = _cr[1].data;
-            if (allLikes) {
-                allLikes.forEach(function(l) {
-                    likeCountMap[l.comment_id] = (likeCountMap[l.comment_id] || 0) + 1;
-                    if (l.user_id === currentUser.id) userLikedSet.add(l.comment_id);
-                    if (_ownerId && l.user_id === _ownerId) creatorLikedSet.add(l.comment_id);
-                });
-            }
-            if (allReacts) {
-                allReacts.forEach(function(r) {
-                    var m = reactionMap[r.comment_id] = reactionMap[r.comment_id] || {};
-                    m[r.emoji] = (m[r.emoji] || 0) + 1;
-                    if (r.user_id === currentUser.id) myReactionMap[r.comment_id] = r.emoji;
-                });
-            }
-        } catch(e) { /* non-critical */ }
+            if (allLikes) allLikes.forEach(function (l) {
+                likeCountMap[l.comment_id] = (likeCountMap[l.comment_id] || 0) + 1;
+                if (l.user_id === currentUser.id) userLikedSet.add(l.comment_id);
+                if (_ownerId && l.user_id === _ownerId) creatorLikedSet.add(l.comment_id);
+            });
+            if (allReacts) allReacts.forEach(function (r) {
+                var m = reactionMap[r.comment_id] = reactionMap[r.comment_id] || {};
+                m[r.emoji] = (m[r.emoji] || 0) + 1;
+                if (r.user_id === currentUser.id) myReactionMap[r.comment_id] = r.emoji;
+            });
+        } catch (e) { /* non-critical */ }
     }
-
     window._cmt = { postId: postId, comments: comments, likes: likeCountMap,
                     liked: userLikedSet, ownerId: results[1], creatorLiked: creatorLikedSet,
                     reactions: reactionMap, myReaction: myReactionMap,
                     expanded: (window._cmt && window._cmt.postId === postId && window._cmt.expanded) || new Set() };
-    _renderSortChips();
-    _renderCommentList();
+    return true;
 }
 
 // ---- comment sheet: sorting, counting, in-place updates -------------------
@@ -24763,8 +24761,13 @@ function setCommentSort(mode) {
     if (typeof triggerHaptic === 'function') triggerHaptic(10);
 }
 
+// The comment thread renders into whichever surface is active — the modal sheet
+// (#comment-list) or the post-detail page's own inline list — so the exact same
+// logic (reactions, likes, replies, long-press) serves both, one at a time.
+function _cList() { return window._activeCommentList || document.getElementById('comment-list'); }
+
 function _renderCommentList() {
-    var list = document.getElementById('comment-list');
+    var list = _cList();
     var st = window._cmt;
     if (!list || !st) return;
     var mode = window._commentSort || 'newest';
@@ -24868,7 +24871,7 @@ function _rootAncestorId(cid) {
 // never yanks the reader back to the top of the thread.
 function _appendCommentInPlace(c) {
     var st = window._cmt;
-    var list = document.getElementById('comment-list');
+    var list = _cList();
     if (!st || !list) return null;
     st.comments.push(c);
     _setCommentSheetCount(st.comments.length);
@@ -24964,13 +24967,16 @@ function _reactChip(emoji, n, isMine) {
 // Repaint just one comment's chip row after a reaction so the reader's scroll
 // position never jumps (rebuilding the whole thread would).
 function _updateCommentReactionRow(cid) {
-    var row = document.querySelector('.comment-item[data-comment-id="' + cid + '"] .c-reacts');
+    var cl = _cList();
+    var row = cl ? cl.querySelector('.comment-item[data-comment-id="' + cid + '"] .c-reacts') : null;
     if (row) row.innerHTML = _commentReactChipsHTML(cid);
 }
 // Sync a comment's like heart + count in the DOM. Used when a reaction clears an
-// existing like (a comment carries a like OR a reaction, never both).
+// existing like (a comment carries a like OR a reaction, never both). Scoped to
+// the active list so a stale hidden modal node isn't updated instead.
 function _setCommentLikeUI(cid, liked, count) {
-    var item = document.querySelector('.comment-item[data-comment-id="' + cid + '"]');
+    var cl = _cList();
+    var item = cl ? cl.querySelector('.comment-item[data-comment-id="' + cid + '"]') : null;
     if (!item) return;
     var icon = item.querySelector('.fa-heart');
     if (!icon) return;
@@ -25084,7 +25090,7 @@ postComment = async function() {
     }
     if (!canPerformAction('comment')) return;
 
-    var input = document.getElementById('comment-input');
+    var input = window._activeCommentInput || document.getElementById('comment-input');
     if (!input) return;
     var text = input.value.trim();
     if (!text) return;
@@ -26718,15 +26724,25 @@ async function openPostDetail(postId) {
     var ov = document.createElement('div');
     ov.className = 'post-detail-overlay';
     ov.style.cssText = 'position:absolute;inset:0;z-index:9900;background:var(--bg-primary,#fff);display:flex;flex-direction:column;animation:slideUpOverlay 0.25s cubic-bezier(0.32,0.72,0,1);';
+    var _pdAvatar = (currentUser && currentUser.avatar_url)
+        ? '<img src="' + escapeHtml(currentUser.avatar_url) + '" style="width:34px;height:34px;border-radius:50%;object-fit:cover;">'
+        : '<div style="width:34px;height:34px;border-radius:50%;background:#ccc;"></div>';
     ov.innerHTML =
         '<div style="display:flex;align-items:center;padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 12px;border-bottom:0.5px solid var(--border-color,#eee);gap:16px;flex-shrink:0;">' +
-            '<div onclick="this.closest(\'.post-detail-overlay\').remove()" style="width:34px;height:34px;border-radius:50%;background:rgba(120,120,128,0.12);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"><i class="fa-solid fa-arrow-left" style="font-size:15px;color:var(--text-primary,#000);"></i></div>' +
+            // Reset the active comment surface back to the modal when leaving.
+            '<div onclick="window._activeCommentList=null;window._activeCommentInput=null;this.closest(\'.post-detail-overlay\').remove()" style="width:34px;height:34px;border-radius:50%;background:rgba(120,120,128,0.12);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"><i class="fa-solid fa-arrow-left" style="font-size:15px;color:var(--text-primary,#000);"></i></div>' +
             '<b style="font-size:19px;color:var(--text-primary,#000);">Post</b>' +
         '</div>' +
         '<div id="_pdBody" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;"><div style="padding:40px;text-align:center;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:22px;"></i></div></div>' +
-        '<div onclick="realOpenComments(\'' + escapeHtml(String(postId)) + '\')" style="flex-shrink:0;display:flex;align-items:center;gap:10px;padding:10px 14px calc(env(safe-area-inset-bottom,0px) + 12px);border-top:0.5px solid var(--border-color,#eee);cursor:text;">' +
-            ((currentUser && currentUser.avatar_url) ? '<img src="' + escapeHtml(currentUser.avatar_url) + '" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0;">' : '<div style="width:32px;height:32px;border-radius:50%;background:#ccc;flex-shrink:0;"></div>') +
-            '<div style="flex:1;background:var(--bg-secondary,#f2f2f2);border-radius:20px;padding:10px 16px;color:#888;font-size:15px;">Post your comment</div>' +
+        // Same input bar + icons as the modal comment sheet (posts inline here).
+        '<div class="comment-input-bar">' +
+            _pdAvatar +
+            '<input type="text" placeholder="Add a comment..." id="_pdCommentInput">' +
+            '<div class="comment-tools">' +
+                '<i class="fa-regular fa-image" onclick="openMedia()"></i>' +
+                '<i class="fa-regular fa-face-smile" onclick="toggleCommentGifs()"></i>' +
+                '<i class="fa-solid fa-arrow-up" style="background:#007AFF; color:white; width:30px; height:30px; border-radius:50%; font-size:13px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0;" onclick="postComment()"></i>' +
+            '</div>' +
         '</div>';
     (document.getElementById('app') || document.body).appendChild(ov);
     var body = ov.querySelector('#_pdBody');
@@ -26738,11 +26754,17 @@ async function openPostDetail(postId) {
         if (!r.data) { body.innerHTML = '<div style="padding:40px;text-align:center;color:#888;">Post not found</div>'; return; }
         body.innerHTML = '';
         if (typeof renderRealPostCard === 'function') body.appendChild(renderRealPostCard(r.data));
-        // Comments come from the one shared sheet — the same thread the feed and
-        // notifications show — which realOpenComments raises above this detail
-        // overlay. No separate inline list to drift out of sync (the old one used
-        // a different query and always read "No replies yet").
-        if (typeof realOpenComments === 'function') realOpenComments(postId);
+        // Comments render INLINE here (not a separate modal on top): the exact
+        // same thread + renderer as the sheet, just pointed at this page's list.
+        var cl = document.createElement('div');
+        cl.id = '_pdComments';
+        cl.style.cssText = 'border-top:8px solid var(--bg-secondary,#f2f2f2);padding-bottom:20px;';
+        body.appendChild(cl);
+        currentCommentPostId = postId;
+        window._activeCommentList = cl;
+        window._activeCommentInput = document.getElementById('_pdCommentInput');
+        var ok = await _fetchCommentThread(postId);
+        if (ok) _renderCommentList();
     } catch (e) {
         body.innerHTML = '<div style="padding:40px;text-align:center;color:#888;">Could not load this post</div>';
     }
@@ -28182,12 +28204,13 @@ function _highlightComment(commentId) {
     if (!commentId) return;
     function tryFlash() {
         var st = window._cmt;
-        if (st && st.expanded && typeof _rootAncestorId === 'function') {
+        var cl = _cList();
+        if (st && st.expanded && cl && typeof _rootAncestorId === 'function') {
             var root = _rootAncestorId(commentId);
-            var wrap = document.querySelector('#comment-list .c-replies[data-parent="' + root + '"]');
+            var wrap = cl.querySelector('.c-replies[data-parent="' + root + '"]');
             if (wrap && wrap.style.display === 'none') { st.expanded.add(root); _renderCommentList(); }
         }
-        var node = document.querySelector('#comment-list .comment-item[data-comment-id="' + commentId + '"]');
+        var node = cl ? cl.querySelector('.comment-item[data-comment-id="' + commentId + '"]') : null;
         if (!node) return false;
         try { node.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
         node.style.transition = 'background-color 0.2s';
