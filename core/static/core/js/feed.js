@@ -25131,7 +25131,7 @@ postComment = async function() {
                 }
                 if (parentAuthorId) {
                     _tfNotify(parentAuthorId, {
-                        type: 'comment_reply', post_id: currentCommentPostId,
+                        type: 'comment_reply', post_id: currentCommentPostId, comment_id: result.id,
                         message: _tfActorName() + ' replied to your comment'
                     });
                 }
@@ -25139,7 +25139,7 @@ postComment = async function() {
                 // the parent-comment author, to avoid a double buzz.
                 if (ownerId && ownerId !== parentAuthorId) {
                     _tfNotify(ownerId, {
-                        type: 'comment', post_id: currentCommentPostId,
+                        type: 'comment', post_id: currentCommentPostId, comment_id: result.id,
                         message: _tfActorName() + ' commented on your post'
                     });
                 }
@@ -28082,7 +28082,9 @@ function renderNotifList(filter) {
     const area = document.getElementById('notif-content-area');
     if (!area) return;
 
-    const filtered = filter === 'all' ? allNotifications : allNotifications.filter(n => n.type === filter);
+    var base = filter === 'all' ? allNotifications : allNotifications.filter(n => n.type === filter);
+    // Drop notification types the user turned off via swipe -> Turn off.
+    const filtered = base.filter(n => (_notifMuted || []).indexOf(n.type) < 0);
 
     if (filtered.length === 0) {
         area.innerHTML = `<div style="text-align:center;padding:60px 20px;color:#888;">
@@ -28093,6 +28095,7 @@ function renderNotifList(filter) {
     }
 
     area.innerHTML = filtered.map(n => renderNotifCard(n)).join('');
+    if (typeof setupNotifSwipe === 'function') setupNotifSwipe();
 }
 
 function filterNotifs(type, el) {
@@ -28113,44 +28116,157 @@ function renderNotifCard(notif) {
     const timeAgo = getTimeAgo ? getTimeAgo(notif.created_at) : 'now';
 
     const styles = {
-        like:    { icon: 'fa-heart',      color: '#FF2D55', bg: '#FF2D5512' },
-        comment: { icon: 'fa-comment',    color: '#007AFF', bg: '#007AFF12' },
-        follow:  { icon: 'fa-user-plus',  color: '#34C759', bg: '#34C75912' },
-        repost:  { icon: 'fa-retweet',    color: '#34C759', bg: '#34C75912' },
-        mention: { icon: 'fa-at',         color: '#5856D6', bg: '#5856D612' },
-        reply:   { icon: 'fa-reply',      color: '#007AFF', bg: '#007AFF12' },
+        like:          { icon: 'fa-heart',      color: '#FF2D55', bg: '#FF2D5512' },
+        comment:       { icon: 'fa-comment',    color: '#007AFF', bg: '#007AFF12' },
+        comment_reply: { icon: 'fa-reply',      color: '#007AFF', bg: '#007AFF12' },
+        follow:        { icon: 'fa-user-plus',  color: '#34C759', bg: '#34C75912' },
+        repost:        { icon: 'fa-retweet',    color: '#34C759', bg: '#34C75912' },
+        mention:       { icon: 'fa-at',         color: '#5856D6', bg: '#5856D612' },
+        reply:         { icon: 'fa-reply',      color: '#007AFF', bg: '#007AFF12' },
     };
     const s = styles[notif.type] || styles.like;
 
     const messages = {
-        like:    'liked your post',
-        comment: 'commented on your post',
-        follow:  'started following you',
-        repost:  'reposted your post',
-        mention: 'mentioned you',
-        reply:   'replied to your comment',
+        like:          'liked your post',
+        comment:       'commented on your post',
+        comment_reply: 'replied to your comment',
+        follow:        'started following you',
+        repost:        'reposted your post',
+        mention:       'mentioned you',
+        reply:         'replied to your comment',
     };
     const message = notif.message || messages[notif.type] || 'interacted with you';
 
+    // Swipe a row left to reveal Turn off / Not interested. The foreground is
+    // opaque so it hides the actions until dragged.
     return `
-        <div style="display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border-color,#f0f0f0);${!notif.read ? 'background:rgba(0,122,255,0.02);' : ''}cursor:pointer;" onclick="viewUserProfile('${actor.id || ''}')">
-            <div style="position:relative;flex-shrink:0;">
-                <img src="${escapeHtml(avatar)}" style="width:46px;height:46px;border-radius:50%;object-fit:cover;">
-                <div style="position:absolute;bottom:-3px;right:-3px;width:22px;height:22px;border-radius:50%;background:${s.bg};border:2px solid var(--card-bg,#fff);display:flex;align-items:center;justify-content:center;">
-                    <i class="fa-solid ${s.icon}" style="font-size:9px;color:${s.color};"></i>
+        <div class="notif-row" data-nid="${notif.id}" style="position:relative;overflow:hidden;border-bottom:1px solid var(--border-color,#f0f0f0);">
+            <div class="notif-actions" style="position:absolute;top:0;right:0;bottom:0;display:flex;align-items:stretch;">
+                <div onclick="notifAction('${notif.id}','off')" style="width:78px;background:#48484a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:#fff;cursor:pointer;"><i class="fa-solid fa-bell-slash" style="font-size:16px;"></i><span style="font-size:11px;">Turn off</span></div>
+                <div onclick="notifAction('${notif.id}','notinterested')" style="width:82px;background:#636366;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:#fff;cursor:pointer;"><i class="fa-solid fa-circle-minus" style="font-size:16px;"></i><span style="font-size:10px;text-align:center;line-height:1.15;">Not<br>interested</span></div>
+            </div>
+            <div class="notif-fg" style="position:relative;display:flex;align-items:center;gap:12px;padding:14px 20px;background:var(--bg-primary,#fff);cursor:pointer;transition:transform 0.2s cubic-bezier(0.32,0.72,0,1);" onclick="openNotification('${notif.id}')">
+                <div style="position:relative;flex-shrink:0;">
+                    <img src="${escapeHtml(avatar)}" style="width:46px;height:46px;border-radius:50%;object-fit:cover;">
+                    <div style="position:absolute;bottom:-3px;right:-3px;width:22px;height:22px;border-radius:50%;background:${s.bg};border:2px solid var(--bg-primary,#fff);display:flex;align-items:center;justify-content:center;">
+                        <i class="fa-solid ${s.icon}" style="font-size:9px;color:${s.color};"></i>
+                    </div>
                 </div>
+                <div style="flex:1;min-width:0;">
+                    <p style="font-size:14px;color:var(--text-primary,#000);margin:0;line-height:1.4;">
+                        <b>${escapeHtml(actor.full_name || actor.username || 'Someone')}</b>
+                        ${actor.verified ? `<i class="fa-solid fa-circle-check ${badgeClass}" style="font-size:10px;"></i>` : ''}
+                        ${message}
+                    </p>
+                    <small style="color:#aaa;font-size:11px;">${timeAgo}</small>
+                </div>
+                ${!notif.read ? '<div style="width:8px;height:8px;border-radius:50%;background:#007AFF;flex-shrink:0;"></div>' : ''}
             </div>
-            <div style="flex:1;min-width:0;">
-                <p style="font-size:14px;color:var(--text-primary,#000);margin:0;line-height:1.4;">
-                    <b>${escapeHtml(actor.full_name || actor.username || 'Someone')}</b>
-                    ${actor.verified ? `<i class="fa-solid fa-circle-check ${badgeClass}" style="font-size:10px;"></i>` : ''}
-                    ${message}
-                </p>
-                ${notif.preview_text ? `<p style="font-size:12px;color:#888;margin:3px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">"${escapeHtml(notif.preview_text)}"</p>` : ''}
-                <small style="color:#aaa;font-size:11px;">${timeAgo}</small>
-            </div>
-            ${!notif.read ? '<div style="width:8px;height:8px;border-radius:50%;background:#007AFF;flex-shrink:0;"></div>' : ''}
         </div>`;
+}
+
+// Route a notification tap by type: follows -> the person's profile (Follow /
+// Follow back live there); everything post-related -> the post, and comment/
+// reply/mention also open comments and flash the exact comment blue.
+function openNotification(notifId) {
+    var n = (allNotifications || []).filter(function (x) { return x.id === notifId; })[0];
+    if (!n) return;
+    var t = n.type || '';
+    if (t === 'follow' || t === 'follow_back' || t === 'suggested' || t === 'suggested_follow' || t === 'follow_suggestion') {
+        if (typeof viewUserProfile === 'function') viewUserProfile(n.actor_id || '');
+        return;
+    }
+    if (n.post_id) {
+        var wantComments = (t === 'comment' || t === 'comment_reply' || t === 'reply' || t === 'mention');
+        if (typeof openPostDetail === 'function') { try { openPostDetail(n.post_id); } catch (e) {} }
+        if (wantComments && typeof openComments === 'function') {
+            setTimeout(function () {
+                openComments(n.post_id);
+                if (n.comment_id) _highlightComment(n.comment_id);
+            }, 260);
+        }
+        return;
+    }
+    if (typeof viewUserProfile === 'function') viewUserProfile(n.actor_id || '');
+}
+
+// Scroll to a comment and flash it blue for ~1s, fading out. Expands a collapsed
+// reply thread first, and retries while the comment sheet is still loading.
+function _highlightComment(commentId) {
+    if (!commentId) return;
+    function tryFlash() {
+        var st = window._cmt;
+        if (st && st.expanded && typeof _rootAncestorId === 'function') {
+            var root = _rootAncestorId(commentId);
+            var wrap = document.querySelector('#comment-list .c-replies[data-parent="' + root + '"]');
+            if (wrap && wrap.style.display === 'none') { st.expanded.add(root); _renderCommentList(); }
+        }
+        var node = document.querySelector('#comment-list .comment-item[data-comment-id="' + commentId + '"]');
+        if (!node) return false;
+        try { node.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+        node.style.transition = 'background-color 0.2s';
+        node.style.backgroundColor = 'rgba(0,122,255,0.20)';
+        node.style.borderRadius = '10px';
+        setTimeout(function () { node.style.transition = 'background-color 1s'; node.style.backgroundColor = 'transparent'; }, 1000);
+        return true;
+    }
+    var tries = 0;
+    var iv = setInterval(function () { tries++; if (tryFlash() || tries > 25) clearInterval(iv); }, 160);
+}
+
+var _notifMuted = (function () { try { return JSON.parse(localStorage.getItem('tf_muted_notif_types') || '[]'); } catch (e) { return []; } })();
+function notifAction(nid, action) {
+    var row = document.querySelector('.notif-row[data-nid="' + nid + '"]');
+    var n = (allNotifications || []).filter(function (x) { return x.id === nid; })[0];
+    if (action === 'notinterested') {
+        if (row) { row.style.transition = 'height 0.2s, opacity 0.2s'; row.style.height = row.offsetHeight + 'px'; requestAnimationFrame(function () { row.style.height = '0'; row.style.opacity = '0'; row.style.overflow = 'hidden'; }); setTimeout(function () { row.remove(); }, 220); }
+        allNotifications = (allNotifications || []).filter(function (x) { return x.id !== nid; });
+        if (window.sb && currentUser && nid) sb.from('notifications').delete().eq('id', nid).then(function () {}).catch(function () {});
+        showToast("You'll see fewer like this");
+    } else if (action === 'off') {
+        if (n && n.type && _notifMuted.indexOf(n.type) < 0) {
+            _notifMuted.push(n.type);
+            try { localStorage.setItem('tf_muted_notif_types', JSON.stringify(_notifMuted)); } catch (e) {}
+        }
+        showToast('Turned these notifications off');
+        renderNotifList(currentNotifFilter);
+    }
+}
+
+// Swipe a notification row left to reveal its actions; one open at a time.
+function setupNotifSwipe() {
+    var area = document.getElementById('notif-content-area');
+    if (!area || area._swipeHooked) return;
+    area._swipeHooked = true;
+    var fg = null, sx = 0, sy = 0, decided = false, horiz = false, startTx = 0;
+    var OPEN = 160;
+    function fgFrom(t) { return t && t.closest ? t.closest('.notif-fg') : null; }
+    function closeAll(except) { area.querySelectorAll('.notif-fg').forEach(function (el) { if (el !== except) { el.style.transform = ''; el.removeAttribute('data-open'); } }); }
+    area.addEventListener('touchstart', function (e) {
+        var t = e.touches && e.touches[0]; if (!t) return;
+        fg = fgFrom(e.target); sx = t.clientX; sy = t.clientY; decided = false; horiz = false;
+        startTx = (fg && fg.getAttribute('data-open')) ? -OPEN : 0;
+    }, { passive: true });
+    area.addEventListener('touchmove', function (e) {
+        var t = e.touches && e.touches[0]; if (!t || !fg) return;
+        var dx = t.clientX - sx, dy = t.clientY - sy;
+        if (!decided) { if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return; decided = true; horiz = Math.abs(dx) > Math.abs(dy) * 1.3; if (horiz) closeAll(fg); }
+        if (!horiz) return;
+        e.preventDefault();
+        var tx = Math.max(-OPEN, Math.min(0, startTx + dx));
+        fg.style.transition = 'none'; fg.style.transform = 'translateX(' + tx + 'px)';
+    }, { passive: false });
+    function end() {
+        if (!fg || !horiz) { fg = null; return; }
+        var m = fg.style.transform.match(/translateX\(([-0-9.]+)px\)/);
+        var tx = m ? parseFloat(m[1]) : 0;
+        fg.style.transition = 'transform 0.2s cubic-bezier(0.32,0.72,0,1)';
+        if (tx < -OPEN / 2) { fg.style.transform = 'translateX(-' + OPEN + 'px)'; fg.setAttribute('data-open', '1'); }
+        else { fg.style.transform = 'translateX(0)'; fg.removeAttribute('data-open'); }
+        fg = null;
+    }
+    area.addEventListener('touchend', end, { passive: true });
+    area.addEventListener('touchcancel', end, { passive: true });
 }
 
 async function markAllNotifsRead() {
@@ -33255,6 +33371,18 @@ function showMessageContextMenu(bubbleEl) {
         '<div class="msg-context-menu" style="position:absolute;top:' + Math.min(topOffset + rect.height + 10, appRect.height - 240) + 'px;left:20px;right:20px;">' +
             rows +
         '</div>';
+
+    // Lift a sharp copy of the pressed bubble above the blur (WhatsApp/iMessage
+    // style). The overlay's backdrop-filter only blurs what's BEHIND it — the
+    // real bubble — so a clone added as an overlay child renders crisp on top,
+    // sitting exactly where the original is between the reactions and the menu.
+    if (bubbleEl) {
+        var leftOffset = rect.left - appRect.left;
+        var clone = bubbleEl.cloneNode(true);
+        clone.removeAttribute('id');
+        clone.style.cssText += ';position:absolute;top:' + topOffset + 'px;left:' + leftOffset + 'px;width:' + rect.width + 'px;max-width:none;margin:0;pointer-events:none;z-index:1;';
+        overlay.appendChild(clone);
+    }
 
     (document.getElementById('chat-interface') || document.getElementById('app') || document.body).appendChild(overlay);
 }
