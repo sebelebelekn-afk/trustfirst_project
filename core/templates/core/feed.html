@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=76">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=77">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -1640,7 +1640,7 @@ function authenticateUser() {
 </div>
 
 
-    <div id="composer-overlay" class="white-overlay" style="z-index:5000; display:none; flex-direction:column; overflow:hidden;">
+    <div id="composer-overlay" class="white-overlay" style="z-index:9600; display:none; flex-direction:column; overflow:hidden;">
     <div class="header-container">
         <span onclick="showComposerCancelSheet()" style="cursor:pointer; font-size:16px; color:#888;">Cancel</span>
         <div style="display:flex; gap:8px; align-items:center;">
@@ -4133,7 +4133,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=157"></script>
+<script src="{% static 'core/js/feed.js' %}?v=158"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=74"></script>
 <script src="{% static 'core/js/verify.js' %}?v=74"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

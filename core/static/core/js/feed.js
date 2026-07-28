@@ -46826,9 +46826,10 @@ function _mgPage(id, title, bodyHTML, onBack) {
     if (old) old.remove();
     var p = document.createElement('div');
     p.id = id;
-    p.style.cssText = 'position:absolute;inset:0;z-index:8200;background:var(--bg-secondary,#f0f2f5);display:flex;flex-direction:column;';
+    p.className = 'mg-page';
+    p.style.cssText = 'position:absolute;inset:0;z-index:8200;display:flex;flex-direction:column;';
     p.innerHTML =
-        '<div style="display:flex;align-items:center;padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 14px;flex-shrink:0;background:var(--bg-primary,#fff);">' +
+        '<div class="mg-page" style="display:flex;align-items:center;padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 14px;flex-shrink:0;">' +
             '<button onclick="' + (onBack || ("document.getElementById('" + id + "').remove()")) + '" ' +
                 'style="background:none;border:none;font-size:20px;color:var(--text-primary,#000);cursor:pointer;padding:0;width:40px;text-align:left;"><i class="fa-solid fa-chevron-left"></i></button>' +
             '<b style="flex:1;text-align:center;font-size:19px;color:var(--text-primary,#000);">' + escapeHtml(title) + '</b>' +
@@ -46841,7 +46842,7 @@ function _mgPage(id, title, bodyHTML, onBack) {
 }
 
 function _mgCard(inner, pad) {
-    return '<div style="background:var(--bg-primary,#fff);border-radius:12px;margin:10px 10px 0;padding:' +
+    return '<div class="mg-card" style="margin:10px 10px 0;padding:' +
         (pad || '6px 0') + ';">' + inner + '</div>';
 }
 
@@ -46925,7 +46926,7 @@ function _mgRender() {
 
     body.innerHTML =
         // Group header row
-        '<div onclick="mgOpenGroupPage()" style="display:flex;align-items:center;gap:13px;padding:14px 16px;background:var(--bg-primary,#fff);cursor:pointer;">' +
+        '<div class="mg-card" onclick="mgOpenGroupPage()" style="display:flex;align-items:center;gap:13px;margin:10px 10px 0;padding:14px 16px;cursor:pointer;">' +
             '<img src="' + escapeHtml(cover) + '" style="width:52px;height:52px;border-radius:10px;object-fit:cover;flex-shrink:0;">' +
             '<div style="flex:1;min-width:0;">' +
                 '<div style="font-size:19px;font-weight:800;color:var(--text-primary,#000);">' + escapeHtml(g.name) + '</div>' +
