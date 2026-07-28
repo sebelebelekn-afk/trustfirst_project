@@ -657,6 +657,9 @@ input, textarea, [contenteditable="true"], .post-content {
 [data-theme="dark"] .mg-page { background: #0a0a0a; }
 .mg-card { background: #fff; border: 1px solid #ececec; border-radius: 12px; }
 [data-theme="dark"] .mg-card { background: #1a1a1a; border-color: #333; }
+/* Message long-press context menu: smooth spring-in instead of popping. */
+@keyframes msgReactPop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes msgMenuPop { from { transform: scale(0.92) translateY(12px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
 
 /* Repost sheet */
 [data-theme="dark"] .repost-sheet { background: #161616 !important; }

@@ -5490,6 +5490,7 @@ function switchprofiletab(tabName, element) {
     if (!grid) return;
     _profileTabGen++; // invalidate any in-flight async updates
     grid.dataset.tabGen = _profileTabGen;
+    grid.dataset.tab = tabName;   // so a profile reopen can tell if the grid matches the active tab
     if (typeof _updateProfileStickyCount === 'function') _updateProfileStickyCount(tabName);
     switch (tabName) {
         case 'posts':
@@ -5557,6 +5558,13 @@ function renderProfileTabs() {
     }).join('');
     // The count lives in the header subtitle (e.g. "11.2K posts"), tied to the active tab.
     if (typeof _updateProfileStickyCount === 'function') _updateProfileStickyCount(activeTab);
+    // Re-render the grid for the active tab if it doesn't already match — fixes
+    // reopening the profile on the trustclips tab showing a stale posts-style
+    // layout under the wrong tab.
+    var _pg = document.getElementById('profile-grid');
+    if (_pg && _pg.dataset.tab !== activeTab && typeof switchProfileTab === 'function') {
+        switchProfileTab(activeTab, bar.querySelector('.p-tab.active'));
+    }
 }
 
 function saveProfileTabOrder(order) {
@@ -12114,6 +12122,11 @@ async function fillMsgContent() {
                 return c;
             });
         }
+
+        // The tab may have changed during this async fetch — don't paint the
+        // primary list over Requests/Channels (that was the "primary messages
+        // flash in the Requests tab, then vanish" flicker).
+        if (window._activeMsgTab && window._activeMsgTab !== 'primary') return;
 
         if (!convos || convos.length === 0) {
             list.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#888;"><i class="fa-regular fa-comment" style="font-size:36px;color:#ccc;display:block;margin-bottom:12px;"></i>No messages yet</div>';
@@ -33302,7 +33315,8 @@ function showMessageContextMenu(bubbleEl) {
 
     var overlay = document.createElement('div');
     overlay.id = 'msgContextOverlay';
-    overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:15000;background:rgba(0,0,0,0.45);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);';
+    // Start transparent and fade the blur in so the menu eases open, not pops.
+    overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:15000;background:rgba(0,0,0,0.45);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);opacity:0;transition:opacity 0.2s ease;';
     overlay.addEventListener('click', function(e) {
         if (e.target === overlay) overlay.remove();
     });
@@ -33378,14 +33392,14 @@ function showMessageContextMenu(bubbleEl) {
     }
 
     overlay.innerHTML =
-        // Reaction bar — above bubble
-        '<div class="msg-reaction-bar" style="position:absolute;top:' + Math.max(topOffset - 58, 60) + 'px;left:20px;right:20px;justify-content:space-between;">' +
+        // Reaction bar — above bubble (springs in)
+        '<div class="msg-reaction-bar" style="position:absolute;top:' + Math.max(topOffset - 58, 60) + 'px;left:20px;right:20px;justify-content:space-between;animation:msgReactPop 0.32s cubic-bezier(0.34,1.56,0.64,1) both;transform-origin:center;">' +
             emojis.map(function(e) {
                 return '<div class="msg-react-emoji" onclick="sendMsgReaction(\'' + e + '\');document.getElementById(\'msgContextOverlay\').remove();">' + e + '</div>';
             }).join('') +
             '<div class="msg-react-emoji" onclick="openMoreReactions()" style="font-size:18px;color:rgba(255,255,255,0.6);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-chevron-down"></i></div>' +
         '</div>' +
-        '<div class="msg-context-menu" style="position:absolute;top:' + Math.min(topOffset + rect.height + 10, appRect.height - 240) + 'px;left:20px;right:20px;">' +
+        '<div class="msg-context-menu" style="position:absolute;top:' + Math.min(topOffset + rect.height + 10, appRect.height - 240) + 'px;left:20px;right:20px;animation:msgMenuPop 0.28s cubic-bezier(0.32,0.72,0,1) both;transform-origin:top center;">' +
             rows +
         '</div>';
 
@@ -33402,6 +33416,8 @@ function showMessageContextMenu(bubbleEl) {
     }
 
     (document.getElementById('chat-interface') || document.getElementById('app') || document.body).appendChild(overlay);
+    requestAnimationFrame(function(){ overlay.style.opacity = '1'; });   // fade the blur in
+    if (typeof triggerHaptic === 'function') triggerHaptic(15);
 }
 
 // Stubs for new context menu actions
