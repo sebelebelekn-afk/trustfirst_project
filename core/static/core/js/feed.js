@@ -8947,11 +8947,19 @@ const fakeComments = []; // Real comments must be fetched from Supabase
 
 function openComments(postId) {
     if (!currentUser) return;
-    currentCommentPostId = postId;
     const overlay = document.getElementById('comment-overlay');
-    overlay.style.display = 'flex';
-    // Drag the header down to dismiss (the list itself stays scrollable).
-    attachSheetSwipeClose(overlay.querySelector('.comment-header'), overlay, closeComments);
+    // Drag the header down to dismiss (idempotent, so safe on every open).
+    if (overlay) attachSheetSwipeClose(overlay.querySelector('.comment-header'), overlay, closeComments);
+    // Every real post goes through the full comment system (reactions, threaded
+    // replies, liked-by-creator) so the feed, reels, post detail and notifications
+    // all show the exact same thread — no more two-out-of-sync comment sections.
+    // Only the legacy local/null flow keeps the old lightweight render.
+    if (postId && !String(postId).startsWith('local_') && typeof realOpenComments === 'function') {
+        realOpenComments(postId);
+        return;
+    }
+    currentCommentPostId = postId;
+    if (overlay) overlay.style.display = 'flex';
     renderComments();
     setTimeout(setupCommentLongPress, 200);
 }
@@ -26727,34 +26735,11 @@ async function openPostDetail(postId) {
         if (!r.data) { body.innerHTML = '<div style="padding:40px;text-align:center;color:#888;">Post not found</div>'; return; }
         body.innerHTML = '';
         if (typeof renderRealPostCard === 'function') body.appendChild(renderRealPostCard(r.data));
-        var replies = document.createElement('div');
-        replies.style.cssText = 'border-top:8px solid var(--bg-secondary,#f2f2f2);';
-        body.appendChild(replies);
-        var cr = await sb.from('comments')
-            .select('id, text, created_at, user_id, users:user_id(full_name, username, avatar_url, badge_tier, verified)')
-            .eq('post_id', postId).eq('is_hidden', false).order('created_at', { ascending: true }).limit(50);
-        var comments = cr.data || [];
-        if (!comments.length) {
-            replies.innerHTML = '<div style="padding:32px 20px;text-align:center;color:#aaa;font-size:14px;">No replies yet. Be the first!</div>';
-            return;
-        }
-        comments.forEach(function(c) {
-            var u = c.users || {};
-            var av = u.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=random&color=fff&bold=true';
-            var row = document.createElement('div');
-            row.style.cssText = 'display:flex;gap:11px;padding:14px 16px;border-bottom:0.5px solid var(--border-color,#f0f0f0);';
-            row.innerHTML =
-                '<img src="' + escapeHtml(av) + '" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
-                '<div style="flex:1;min-width:0;">' +
-                    '<div style="display:flex;align-items:center;gap:5px;margin-bottom:2px;flex-wrap:wrap;">' +
-                        '<b style="font-size:14px;color:var(--text-primary,#000);">' + escapeHtml(u.full_name || u.username || 'User') + '</b>' +
-                        (u.verified ? '<i class="fa-solid fa-circle-check ' + (u.badge_tier || 'verify-blue') + '" style="font-size:10px;"></i>' : '') +
-                        '<small style="color:#888;font-size:12px;">@' + escapeHtml(u.username || 'user') + ' · ' + (typeof getTimeAgo === 'function' ? getTimeAgo(c.created_at) : '') + '</small>' +
-                    '</div>' +
-                    '<div style="font-size:14px;line-height:1.45;color:var(--text-primary,#000);word-break:break-word;">' + (typeof renderMentions === 'function' ? renderMentions(c.text) : escapeHtml(c.text || '')) + '</div>' +
-                '</div>';
-            replies.appendChild(row);
-        });
+        // Comments come from the one shared sheet — the same thread the feed and
+        // notifications show — which realOpenComments raises above this detail
+        // overlay. No separate inline list to drift out of sync (the old one used
+        // a different query and always read "No replies yet").
+        if (typeof realOpenComments === 'function') realOpenComments(postId);
     } catch (e) {
         body.innerHTML = '<div style="padding:40px;text-align:center;color:#888;">Could not load this post</div>';
     }
@@ -28178,12 +28163,10 @@ function openNotification(notifId) {
     }
     if (n.post_id) {
         var wantComments = (t === 'comment' || t === 'comment_reply' || t === 'reply' || t === 'mention');
+        // openPostDetail shows the post AND opens the one shared comment sheet.
         if (typeof openPostDetail === 'function') { try { openPostDetail(n.post_id); } catch (e) {} }
-        if (wantComments && typeof openComments === 'function') {
-            setTimeout(function () {
-                openComments(n.post_id);
-                if (n.comment_id) _highlightComment(n.comment_id);
-            }, 260);
+        if (wantComments && n.comment_id) {
+            setTimeout(function () { _highlightComment(n.comment_id); }, 500);
         }
         return;
     }
@@ -33530,7 +33513,78 @@ function _renderMsgReactionChip(bubble, emoji) {
         bubble.appendChild(chip);
     }
     chip.textContent = emoji;
+    // Tap the chip to see who reacted and remove your own (WhatsApp-style).
+    chip.style.cursor = 'pointer';
+    chip.style.pointerEvents = 'auto';
+    chip.onclick = function (e) { e.stopPropagation(); openMsgReactionDetail(bubble.getAttribute('data-msg-id') || ''); };
     chip.animate ? chip.animate([{ transform:'scale(0.3)' }, { transform:'scale(1.25)' }, { transform:'scale(1)' }], { duration: 260, easing:'ease-out' }) : null;
+}
+
+// The reactions detail sheet (image: "N Reactions" + who reacted, tap yours to
+// remove). Fetches every reaction on the message with the reactor's name.
+async function openMsgReactionDetail(msgId) {
+    if (!msgId || !window.sb) return;
+    var reacts = [];
+    try {
+        var r = await sb.from('message_reactions')
+            .select('emoji, user_id, users:user_id(full_name, username, avatar_url)')
+            .eq('message_id', msgId);
+        reacts = r.data || [];
+    } catch (e) {}
+    if (!reacts.length) return;
+
+    var meId = (currentUser && currentUser.id) || '';
+    var byEmoji = {};
+    reacts.forEach(function (x) { byEmoji[x.emoji] = (byEmoji[x.emoji] || 0) + 1; });
+    var tabs = Object.keys(byEmoji).map(function (e) {
+        return '<div style="display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:18px;background:rgba(52,199,89,0.18);color:#fff;font-size:15px;font-weight:600;">' + e + ' ' + byEmoji[e] + '</div>';
+    }).join('');
+    var rows = reacts.map(function (x) {
+        var u = x.users || {};
+        var mine = x.user_id === meId;
+        var name = mine ? 'You' : (u.full_name || u.username || 'User');
+        var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=007AFF&color=fff');
+        var rowStyle = 'display:flex;align-items:center;gap:12px;padding:10px 14px;' + (mine ? 'cursor:pointer;' : '');
+        return '<div ' + (mine ? 'onclick="removeMyMsgReaction(\'' + msgId + '\')" ' : '') + 'style="' + rowStyle + '">' +
+            '<img src="' + escapeHtml(av) + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
+            '<div style="flex:1;min-width:0;">' +
+                '<div style="font-size:16px;font-weight:600;color:#fff;">' + escapeHtml(name) + '</div>' +
+                (mine ? '<div style="font-size:13px;color:#8a8a8e;">Tap to remove</div>' : '') +
+            '</div>' +
+            '<span style="font-size:24px;">' + x.emoji + '</span>' +
+        '</div>';
+    }).join('');
+
+    var overlay = document.createElement('div');
+    overlay.id = 'msgReactDetail';
+    overlay.style.cssText = 'position:absolute;inset:0;z-index:16000;background:rgba(0,0,0,0.4);display:flex;align-items:flex-end;';
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+    overlay.innerHTML =
+        '<div class="mrd-sheet" style="width:100%;background:rgba(28,28,30,0.98);border-radius:22px 22px 0 0;padding:10px 0 max(20px,env(safe-area-inset-bottom,20px));box-shadow:0 -20px 60px rgba(0,0,0,0.5);">' +
+            '<div style="width:38px;height:5px;background:rgba(255,255,255,0.22);border-radius:3px;margin:2px auto 12px;"></div>' +
+            '<div style="text-align:center;font-size:17px;font-weight:700;color:#fff;margin-bottom:12px;">' + reacts.length + ' Reaction' + (reacts.length > 1 ? 's' : '') + '</div>' +
+            (Object.keys(byEmoji).length ? '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding:0 16px 14px;">' + tabs + '</div>' : '') +
+            '<div style="max-height:50vh;overflow-y:auto;padding:0 6px;">' + rows + '</div>' +
+        '</div>';
+    (document.getElementById('chat-interface') || document.getElementById('app') || document.body).appendChild(overlay);
+    var sheet = overlay.querySelector('.mrd-sheet');
+    if (typeof attachSheetSwipeClose === 'function') attachSheetSwipeClose(sheet, sheet, function () { overlay.remove(); });
+    if (typeof triggerHaptic === 'function') triggerHaptic(10);
+}
+
+async function removeMyMsgReaction(msgId) {
+    document.getElementById('msgReactDetail')?.remove();
+    if (!msgId || !window.sb || !currentUser) return;
+    try { await sb.from('message_reactions').delete().eq('message_id', msgId).eq('user_id', currentUser.id); } catch (e) {}
+    var bubble = document.querySelector('[data-msg-id="' + msgId + '"]');
+    var chip = bubble ? bubble.querySelector('[data-reaction-chip]') : null;
+    // Show a remaining reaction if one exists, else drop the chip entirely.
+    try {
+        var r = await sb.from('message_reactions').select('emoji').eq('message_id', msgId).limit(1);
+        if (r.data && r.data.length) { if (chip) chip.textContent = r.data[0].emoji; }
+        else if (chip) chip.remove();
+    } catch (e) { if (chip) chip.remove(); }
+    if (typeof triggerHaptic === 'function') triggerHaptic(15);
 }
 
 // Fetch + render reactions for the currently loaded messages.
