@@ -493,7 +493,7 @@ function authenticateUser() {
 
     <!-- ========== CLIP SELECTOR SCREEN ========== -->
 <div id="clip-selector-overlay" class="white-overlay" style="z-index:8600;display:none;flex-direction:column;">
-  <div class="header-container" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:0.5px solid rgba(128,128,128,0.15);">
+  <div class="header-container" style="display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top,0px) + 16px) 20px 16px;border-bottom:0.5px solid rgba(128,128,128,0.15);">
     <div class="liquid-glass-btn" onclick="closePage('clip-selector-overlay')"><i class="fa-solid fa-xmark"></i></div>
     <b style="font-size:16px;">Select Clips</b>
     <button id="clipNextBtn" onclick="openPreviewEditScreen()" style="background:#007AFF;color:white;border:none;border-radius:20px;padding:8px 18px;font-size:14px;font-weight:700;cursor:pointer;opacity:0.4;pointer-events:none;">Next</button>
@@ -4133,7 +4133,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=159"></script>
+<script src="{% static 'core/js/feed.js' %}?v=160"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=74"></script>
 <script src="{% static 'core/js/verify.js' %}?v=74"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

@@ -2419,6 +2419,9 @@ function renderInboxFilterTray() {
         '</div>';
 
     (document.getElementById('msg-overlay') || document.getElementById('app') || document.body).appendChild(tray);
+    // Swipe the sheet down to dismiss.
+    var _fSheet = tray.lastElementChild;
+    if (_fSheet && typeof attachSheetSwipeClose === 'function') attachSheetSwipeClose(_fSheet, _fSheet, function(){ tray.remove(); });
 }
 
 function toggleFilterTrayExpand() {
@@ -4310,7 +4313,7 @@ function lockVoiceRecord() {
     var lockUI = document.getElementById('vr-lock-ui');
     if (lockUI) lockUI.style.display = 'flex';
     var hint = document.getElementById('vr-hint');
-    if (hint) { hint.textContent = '🔒 Recording locked'; hint.style.color = '#007AFF'; }
+    if (hint) { hint.textContent = 'Recording locked'; hint.style.color = '#007AFF'; }
     triggerHaptic(40);
 }
 
@@ -30939,7 +30942,7 @@ function showRestrictSheet() {
         '<div><b style="color:white;font-size:14px;display:block;margin-bottom:2px;">Activity</b><small style="color:rgba(255,255,255,0.45);font-size:12px;line-height:1.5;">They won\'t see your active status or when you\'ve read their messages.</small></div></div>' +
         '</div>' +
 
-        '<button onclick="confirmRestrict(\'' + escapeHtml(userName) + '\')" style="width:100%;padding:16px;border-radius:18px;border:none;background:linear-gradient(135deg,rgba(255,149,0,0.85),rgba(255,99,0,0.85));backdrop-filter:blur(20px);color:white;font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(255,149,0,0.3),0 1px 0 rgba(255,255,255,0.15) inset;margin-bottom:10px;">' +
+        '<button onclick="confirmRestrict(\'' + escapeHtml(userName) + '\')" style="width:100%;padding:16px;border-radius:18px;border:none;background:#FF9500;color:white;font-size:16px;font-weight:800;cursor:pointer;margin-bottom:10px;">' +
         (isRestricted ? 'Unrestrict ' : 'Restrict ') + escapeHtml(userName) + '</button>' +
 
         '<button onclick="document.getElementById(\'restrictSheetOverlay\').remove()" style="width:100%;padding:14px;border-radius:18px;border:0.5px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.6);font-size:15px;cursor:pointer;">Cancel</button>' +
@@ -30973,15 +30976,23 @@ function showCPMoreMenu() {
     menu.id = 'cpMoreMenu';
     menu.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:15000;';
 
+    // Theme-aware: this menu was hardcoded white, so it glared in dark mode.
+    var _dk = document.documentElement.getAttribute('data-theme') === 'dark';
+    var mBg = _dk ? 'rgba(40,40,44,0.92)' : 'rgba(255,255,255,0.75)';
+    var mBorder = _dk ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.8)';
+    var mInset = _dk ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.9)';
+    var mDiv = _dk ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+    var mHover = _dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
+
     menu.innerHTML =
-        '<div style="position:absolute;top:220px;right:24px;width:200px;background:rgba(255,255,255,0.75);backdrop-filter:blur(50px) saturate(200%);-webkit-backdrop-filter:blur(50px) saturate(200%);border:0.5px solid rgba(255,255,255,0.8);border-radius:18px;box-shadow:0 10px 40px rgba(0,0,0,0.18),0 1.5px 0 rgba(255,255,255,0.9) inset;overflow:hidden;animation:jellyPop 0.25s cubic-bezier(0.68,-0.55,0.27,1.55);">' +
-        '<div onclick="openReportMenu(\'' + escapeHtml(userName) + '\',\'user\');document.getElementById(\'cpMoreMenu\').remove();" style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;border-bottom:0.5px solid rgba(0,0,0,0.06);" onmouseover="this.style.background=\'rgba(0,0,0,0.04)\'" onmouseout="this.style.background=\'\'">' +
+        '<div style="position:absolute;top:220px;right:24px;width:200px;background:' + mBg + ';backdrop-filter:blur(50px) saturate(200%);-webkit-backdrop-filter:blur(50px) saturate(200%);border:0.5px solid ' + mBorder + ';border-radius:18px;box-shadow:0 10px 40px rgba(0,0,0,0.28),0 1.5px 0 ' + mInset + ' inset;overflow:hidden;animation:jellyPop 0.25s cubic-bezier(0.68,-0.55,0.27,1.55);">' +
+        '<div onclick="openReportMenu(\'' + escapeHtml(userName) + '\',\'user\');document.getElementById(\'cpMoreMenu\').remove();" style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;border-bottom:0.5px solid ' + mDiv + ';" onmouseover="this.style.background=\'' + mHover + '\'" onmouseout="this.style.background=\'\'">' +
         '<i class="fa-solid fa-flag" style="color:#FF9500;font-size:15px;width:20px;text-align:center;"></i>' +
         '<span style="font-size:14px;font-weight:600;color:var(--text-primary,#000);">Report</span></div>' +
-        '<div onclick="showBlockConfirm();document.getElementById(\'cpMoreMenu\').remove();" style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;border-bottom:0.5px solid rgba(0,0,0,0.06);" onmouseover="this.style.background=\'rgba(0,0,0,0.04)\'" onmouseout="this.style.background=\'\'">' +
+        '<div onclick="showBlockConfirm();document.getElementById(\'cpMoreMenu\').remove();" style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;border-bottom:0.5px solid ' + mDiv + ';" onmouseover="this.style.background=\'' + mHover + '\'" onmouseout="this.style.background=\'\'">' +
         '<i class="fa-solid fa-ban" style="color:#FF3B30;font-size:15px;width:20px;text-align:center;"></i>' +
         '<span style="font-size:14px;font-weight:600;color:#FF3B30;">Block</span></div>' +
-        '<div onclick="showRestrictSheet();document.getElementById(\'cpMoreMenu\').remove();" style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;" onmouseover="this.style.background=\'rgba(0,0,0,0.04)\'" onmouseout="this.style.background=\'\'">' +
+        '<div onclick="showRestrictSheet();document.getElementById(\'cpMoreMenu\').remove();" style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;" onmouseover="this.style.background=\'' + mHover + '\'" onmouseout="this.style.background=\'\'">' +
         '<i class="fa-solid fa-user-minus" style="color:#FF9500;font-size:15px;width:20px;text-align:center;"></i>' +
         '<span style="font-size:14px;font-weight:600;color:var(--text-primary,#000);">Restrict</span></div>' +
         '</div>';
@@ -35339,6 +35350,8 @@ function openClipSelectorGallery() {
 function _renderClipGallery(files) {
     var grid = document.getElementById('clip-gallery-grid');
     if (!grid) return;
+    // No media picked -> show the clean gallery prompt, never a lone giant "+".
+    if (!files || !files.length) { openClipSelectorGallery(); return; }
     grid.innerHTML = '';
     files.forEach(function(file, idx) {
         var isVid = file.type.startsWith('video/');
