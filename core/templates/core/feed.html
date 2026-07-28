@@ -2829,7 +2829,7 @@ function authenticateUser() {
 <!-- ===== GROUPS OVERLAY ===== -->
 <div id="groups-overlay" class="white-overlay" style="z-index:5500; display:none; flex-direction:column; overflow:hidden !important;">
     <div class="header-container">
-        <div class="liquid-glass-btn" onclick="closePage('groups-overlay')"><i class="fa-solid fa-chevron-left"></i></div>
+        <div class="liquid-glass-btn" onclick="closePage('groups-overlay');showNavBar&&showNavBar()"><i class="fa-solid fa-chevron-left"></i></div>
         <b>Groups</b>
         <button onclick="toggleGroupAddMenu(this)"
     style="background:rgba(0,122,255,0.12);color:#007AFF;border:0.5px solid rgba(0,122,255,0.25);
@@ -2848,7 +2848,7 @@ function authenticateUser() {
 <!-- ===== GROUP PAGE OVERLAY ===== -->
 <div id="group-page-overlay" class="white-overlay" style="z-index:6000; display:none; flex-direction:column;">
     <div style="position:absolute; top:calc(env(safe-area-inset-top,0px) + 16px); left:20px; z-index:10;">
-        <div class="liquid-glass-btn" onclick="closePage('group-page-overlay')"><i class="fa-solid fa-chevron-left" style="color:white;"></i></div>
+        <div class="liquid-glass-btn" onclick="closePage('group-page-overlay');showNavBar&&showNavBar()"><i class="fa-solid fa-chevron-left" style="color:white;"></i></div>
     </div>
     <div id="group-page-header"></div>
 
@@ -3005,7 +3005,7 @@ function authenticateUser() {
     </div>
     <div style="padding:24px 16px;">
         <p style="font-size:11px;font-weight:800;color:#888;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px;padding:0 4px;">Messaging</p>
-        <div style="background:rgba(255,255,255,0.65);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.9);box-shadow:4px 4px 20px rgba(0,0,0,0.07),-2px -2px 10px rgba(255,255,255,0.8);border-radius:22px;overflow:hidden;margin-bottom:24px;">
+        <div style="background:var(--card-bg,#fff);border:0.5px solid var(--border-color,rgba(0,0,0,0.08));box-shadow:0 2px 12px rgba(0,0,0,0.06);border-radius:22px;overflow:hidden;margin-bottom:24px;">
             <div style="display:flex;align-items:center;gap:14px;padding:18px 18px;border-bottom:0.5px solid rgba(0,0,0,0.05);">
                 <div style="width:36px;height:36px;border-radius:10px;background:rgba(0,122,255,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-check-double" style="color:#007AFF;font-size:14px;"></i></div>
                 <div style="flex:1;">
@@ -3024,7 +3024,7 @@ function authenticateUser() {
             </div>
         </div>
         <p style="font-size:11px;font-weight:800;color:#888;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px;padding:0 4px;">Account Actions</p>
-        <div style="background:rgba(255,255,255,0.65);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.9);box-shadow:4px 4px 20px rgba(0,0,0,0.07),-2px -2px 10px rgba(255,255,255,0.8);border-radius:22px;overflow:hidden;margin-bottom:24px;">
+        <div style="background:var(--card-bg,#fff);border:0.5px solid var(--border-color,rgba(0,0,0,0.08));box-shadow:0 2px 12px rgba(0,0,0,0.06);border-radius:22px;overflow:hidden;margin-bottom:24px;">
             <div onclick="showRestrictSheet()" style="display:flex;align-items:center;gap:14px;padding:18px 18px;border-bottom:0.5px solid rgba(0,0,0,0.05);cursor:pointer;">
                 <div style="width:36px;height:36px;border-radius:10px;background:rgba(255,149,0,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-user-minus" style="color:#FF9500;font-size:14px;"></i></div>
                 <div style="flex:1;">
@@ -4133,7 +4133,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=161"></script>
+<script src="{% static 'core/js/feed.js' %}?v=162"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=74"></script>
 <script src="{% static 'core/js/verify.js' %}?v=74"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
