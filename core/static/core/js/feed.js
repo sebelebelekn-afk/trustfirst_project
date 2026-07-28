@@ -35456,6 +35456,22 @@ function openPreviewEditScreen() {
                     else if (found) { cc.startMs += diff; cc.endMs += diff; }
                 });
                 edRenderTimeline();
+                // Grab a frame for the clip's timeline-bar thumbnail (blob src is
+                // same-origin, so the canvas isn't tainted and toDataURL works).
+                try {
+                    v.onseeked = function() {
+                        v.onseeked = null;
+                        try {
+                            var cv = document.createElement('canvas');
+                            cv.width = 64;
+                            cv.height = Math.round(64 * ((v.videoHeight || 9) / (v.videoWidth || 16))) || 36;
+                            cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
+                            c.thumbnail = cv.toDataURL('image/jpeg', 0.5);
+                            edRenderTimeline();
+                        } catch (e) { /* decode/taint issue: skip the thumbnail */ }
+                    };
+                    v.currentTime = Math.min(0.5, (v.duration || 1) * 0.1);
+                } catch (e) {}
             };
         }
     });
@@ -35888,7 +35904,9 @@ function editorTogglePlay() {
     if (!vid) return;
     // Drive the actual <video>; the play/pause EVENTS keep icon + state in sync
     // (toggling a separate flag desynced the icon from what the video was doing).
-    if (vid.paused) vid.play().catch(function(){}); else vid.pause();
+    // Also kick the audio here, inside the tap, so autoplay policy lets it start.
+    if (vid.paused) { vid.play().catch(function(){}); if (typeof _edAudioSync === 'function') _edAudioSync(true); }
+    else { vid.pause(); if (typeof _edAudioSync === 'function') _edAudioSync(false); }
 }
 
 // Keep the play/pause icon, playhead tick and timestamp locked to the video's
@@ -35898,14 +35916,14 @@ function edWireVideo() {
     if (!vid || vid._edWired) return;
     vid._edWired = true;
     function icon() { var b = document.getElementById('edPlayBtn'); if (b) b.innerHTML = vid.paused ? '<i class="fa-solid fa-play"></i>' : '<i class="fa-solid fa-pause"></i>'; }
-    vid.addEventListener('play', function(){ edState.isPlaying = true; icon(); if (_edTickRAF) cancelAnimationFrame(_edTickRAF); edTickPlayhead(); });
-    vid.addEventListener('pause', function(){ edState.isPlaying = false; icon(); if (_edTickRAF) { cancelAnimationFrame(_edTickRAF); _edTickRAF = null; } edSyncTimelineScroll(); });
+    vid.addEventListener('play', function(){ edState.isPlaying = true; icon(); if (_edTickRAF) cancelAnimationFrame(_edTickRAF); edTickPlayhead(); _edAudioSync(true); });
+    vid.addEventListener('pause', function(){ edState.isPlaying = false; icon(); if (_edTickRAF) { cancelAnimationFrame(_edTickRAF); _edTickRAF = null; } edSyncTimelineScroll(); _edAudioSync(false); });
     // While playing, the requestAnimationFrame loop is the sole driver of the
     // playhead (smooth). timeupdate only fires ~4×/sec, so only use it to catch
     // up when paused (e.g. the user scrubbed the native control) — using it
     // during playback fought the RAF and made the scrubber jump.
-    vid.addEventListener('timeupdate', function(){ if (!edState.isPlaying) { edState.playheadMs = Math.round(vid.currentTime * 1000); edUpdateTimestamp(); edSyncTimelineScroll(); } });
-    vid.addEventListener('seeked', function(){ edState.playheadMs = Math.round(vid.currentTime * 1000); edUpdateTimestamp(); edSyncTimelineScroll(); });
+    vid.addEventListener('timeupdate', function(){ if (!edState.isPlaying) { edState.playheadMs = Math.round(vid.currentTime * 1000); edUpdateTimestamp(); edSyncTimelineScroll(); _edAudioSync(false); } });
+    vid.addEventListener('seeked', function(){ edState.playheadMs = Math.round(vid.currentTime * 1000); edUpdateTimestamp(); edSyncTimelineScroll(); _edAudioSync(false); });
     icon();
 }
 
@@ -35927,9 +35945,53 @@ function edTickPlayhead() {
         edState.playheadMs = Math.round(vid.currentTime * 1000);
         edUpdateTimestamp();
         edSyncTimelineScroll();
+        _edAudioSync(true);
     }
     _edTickRAF = requestAnimationFrame(edTickPlayhead);
 }
+
+// Play the editor's audio tracks (imported audio, music, voice-over) in time
+// with the video. They used to be stored but never actually played, which is
+// why imported audio "wasn't syncing" — there was no audio playback at all.
+function _edEnsureAudioEl(track) {
+    window._edAudioEls = window._edAudioEls || {};
+    var el = window._edAudioEls[track.id];
+    if (!el) { el = new Audio(); el.preload = 'auto'; el.src = track.url || ''; window._edAudioEls[track.id] = el; }
+    return el;
+}
+function _edAudioSync(playing) {
+    var pos = edState.playheadMs || 0;          // ms into the whole timeline
+    var live = {};
+    (edState.audioTracks || []).forEach(function (t) {
+        if (!t || !t.url) return;               // music entries without a preview url can't play
+        live[t.id] = true;
+        var el = _edEnsureAudioEl(t);
+        var start = t.startMs || 0;
+        var end = start + (t.durationMs || 0);
+        var inWindow = pos >= start && pos < end;
+        var into = (pos - start) / 1000;        // seconds into this track
+        el.volume = (typeof t.volume === 'number') ? t.volume : 1;
+        el.muted = !!t.muted;
+        if (inWindow) {
+            // Only correct drift > 250ms; seeking every frame would stutter.
+            if (Math.abs((el.currentTime || 0) - into) > 0.25) { try { el.currentTime = Math.max(0, into); } catch (e) {} }
+            if (playing) { if (el.paused) el.play().catch(function () {}); }
+            else if (!el.paused) el.pause();
+        } else if (!el.paused) { el.pause(); }
+    });
+    // Silence any element whose track was removed.
+    Object.keys(window._edAudioEls || {}).forEach(function (id) {
+        if (!live[id]) { try { window._edAudioEls[id].pause(); } catch (e) {} }
+    });
+}
+function _edAudioStop() {
+    Object.keys(window._edAudioEls || {}).forEach(function (id) {
+        try { window._edAudioEls[id].pause(); window._edAudioEls[id].currentTime = 0; } catch (e) {}
+    });
+}
+// Drop cached audio elements when the track set is rebuilt (draft load, undo),
+// so stale blob URLs don't linger.
+function _edAudioReset() { _edAudioStop(); window._edAudioEls = {}; }
 
 function edUpdateTimestamp() {
     var el = document.getElementById('edTimestamp');
@@ -35958,6 +36020,7 @@ function _edApplySnapshot(snap) {
     edState.clips = snap.clips || [];
     edState.audioTracks = snap.audioTracks || [];
     edState.textOverlays = snap.textOverlays || [];
+    if (typeof _edAudioReset === 'function') _edAudioReset();   // track set changed; drop stale audio els
     edRenderTimeline();
     if (typeof edRenderTextOverlays === 'function') edRenderTextOverlays();
     var vid = document.getElementById('edVideo');
@@ -39259,6 +39322,7 @@ function _edStopMedia() {
     var vid = document.getElementById('edVideo');
     if (vid) { try { vid.pause(); vid.currentTime = 0; } catch (e) {} }
     if (overlay) overlay.querySelectorAll('video,audio').forEach(function (m) { try { m.pause(); m.currentTime = 0; } catch (e) {} });
+    if (typeof _edAudioStop === 'function') _edAudioStop();   // synced audio els live outside the overlay DOM
 }
 function editorRealExit() {
     _edStopMedia();
