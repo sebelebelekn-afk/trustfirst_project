@@ -1650,6 +1650,17 @@ function takePhoto() {
 
 function openMedia() { document.getElementById('file-input').click(); }
 
+// Chat "Gallery": open the phone's real photos/videos straight from the tap.
+// A PWA can't render the camera roll, so the native OS picker IS the gallery.
+// Reset .value first so picking the same file twice still fires onchange.
+function openChatMediaPicker() {
+    var fi = document.getElementById('file-input');
+    if (!fi) return;
+    fi.accept = 'image/*,video/*';
+    try { fi.value = ''; } catch (e) {}
+    fi.click();
+}
+
 function filterChatList(query) {
     var rows = document.querySelectorAll('#chat-list-content .msg-row');
     var q = (query || '').toLowerCase().trim();
@@ -9516,9 +9527,9 @@ function openReplyWithClip(cid, text) {
         postId:    (typeof currentCommentPostId !== 'undefined' && currentCommentPostId) ? currentCommentPostId : null,
         ts:        Date.now()
     };
-    // Open the normal "select a clip" page — same as posting any clip.
-    if (typeof openClipSelectorGallery === 'function') openClipSelectorGallery();
-    else if (typeof openSelectClipsPage === 'function') openSelectClipsPage();
+    // Open the phone's real gallery straight away (same as posting any clip).
+    if (typeof pickTrustclipMedia === 'function') pickTrustclipMedia();
+    else if (typeof openClipSelectorGallery === 'function') openClipSelectorGallery();
     else { showToast('Choose a clip to reply with'); return; }
     if (window._clipReplyContext.username) showToast('Replying to @' + window._clipReplyContext.username + ' with a clip');
 }
@@ -35383,13 +35394,13 @@ function _filterAttachContacts(q) {
 
     function recentsTabHTML() {
         return '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 20px;gap:16px;">' +
-            '<div onclick="closeAttachModal();document.getElementById(\'file-input\').click();" style="width:72px;height:72px;border-radius:50%;background:rgba(0,122,255,0.1);display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid rgba(0,122,255,0.25);">' +
+            '<div onclick="openChatMediaPicker();closeAttachModal();" style="width:72px;height:72px;border-radius:50%;background:rgba(0,122,255,0.1);display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid rgba(0,122,255,0.25);">' +
                 '<i class="fa-solid fa-image" style="color:#007AFF;font-size:28px;"></i>' +
             '</div>' +
             '<p style="font-size:16px;font-weight:700;color:' + tc + ';margin:0;">Choose from Library</p>' +
             '<p style="font-size:13px;color:' + sc + ';text-align:center;margin:0;">Select a photo or video from your device</p>' +
             '<div style="display:flex;gap:12px;margin-top:4px;">' +
-                '<button onclick="document.getElementById(\'file-input\').accept=\'image/*,video/*\';document.getElementById(\'file-input\').click();closeAttachModal();" style="flex:1;padding:14px;border-radius:14px;background:#007AFF;border:none;color:white;font-size:15px;font-weight:700;cursor:pointer;">Photo / Video</button>' +
+                '<button onclick="openChatMediaPicker();closeAttachModal();" style="flex:1;padding:14px;border-radius:14px;background:#007AFF;border:none;color:white;font-size:15px;font-weight:700;cursor:pointer;">Photo / Video</button>' +
                 '<button onclick="closeAttachModal();startCamera();" style="flex:1;padding:14px;border-radius:14px;background:rgba(0,122,255,0.1);border:1px solid rgba(0,122,255,0.2);color:#007AFF;font-size:15px;font-weight:700;cursor:pointer;"><i class="fa-solid fa-camera"></i> Camera</button>' +
             '</div>' +
         '</div>';
@@ -35508,13 +35519,13 @@ window._attachTabFns = {
     // The web can't enumerate the device library, so tapping opens the OS picker.
     area.innerHTML =
         '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:34px 20px;gap:15px;">' +
-            '<div onclick="var fi=document.getElementById(\'file-input\');fi.accept=\'image/*,video/*\';fi.click();closeAttachModal();" style="width:76px;height:76px;border-radius:50%;background:rgba(0,122,255,0.1);display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid rgba(0,122,255,0.22);">' +
+            '<div onclick="openChatMediaPicker();closeAttachModal();" style="width:76px;height:76px;border-radius:50%;background:rgba(0,122,255,0.1);display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid rgba(0,122,255,0.22);">' +
                 '<i class="fa-regular fa-images" style="color:#007AFF;font-size:30px;"></i>' +
             '</div>' +
             '<p style="font-size:16px;font-weight:700;color:'+tc+';margin:0;">Choose from your gallery</p>' +
             '<p style="font-size:13px;color:'+sc+';text-align:center;margin:0;max-width:250px;line-height:1.5;">Pick a photo or video from your device, or take a new one.</p>' +
             '<div style="display:flex;gap:12px;margin-top:4px;width:100%;max-width:320px;">' +
-                '<button onclick="var fi=document.getElementById(\'file-input\');fi.accept=\'image/*,video/*\';fi.click();closeAttachModal();" style="flex:1;padding:14px;border-radius:14px;background:#007AFF;border:none;color:white;font-size:15px;font-weight:700;cursor:pointer;">Photo / Video</button>' +
+                '<button onclick="openChatMediaPicker();closeAttachModal();" style="flex:1;padding:14px;border-radius:14px;background:#007AFF;border:none;color:white;font-size:15px;font-weight:700;cursor:pointer;">Photo / Video</button>' +
                 '<button onclick="closeAttachModal();if(typeof startCamera===\'function\')startCamera();" style="flex:1;padding:14px;border-radius:14px;background:rgba(0,122,255,0.1);border:1px solid rgba(0,122,255,0.2);color:#007AFF;font-size:15px;font-weight:700;cursor:pointer;"><i class="fa-solid fa-camera"></i> Camera</button>' +
             '</div>' +
         '</div>';
@@ -35717,6 +35728,62 @@ function handleClipFileSelect(input) {
     input.value = '';
 }
 
+// One shared native file input for TrustClips. Kept visually-hidden (NOT
+// display:none) because iOS is far more reliable about opening the OS picker for
+// an input that's technically in layout. Whatever the user picks lands on the
+// Select Clips page as real thumbnails.
+function _ensureClipInput() {
+    var inp = document.getElementById('_clipGalleryInput');
+    if (!inp) {
+        inp = document.createElement('input');
+        inp.type = 'file';
+        inp.id = '_clipGalleryInput';
+        inp.accept = 'image/*,video/*';
+        inp.multiple = true;
+        inp.setAttribute('aria-hidden', 'true');
+        inp.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;';
+        inp.addEventListener('change', function() {
+            if (!inp.files || !inp.files.length) return;
+            _clipFileObjects = Array.from(inp.files);
+            selectedClipFiles = [];
+            openPage('clip-selector-overlay');
+            var nextBtn = document.getElementById('clipNextBtn');
+            if (nextBtn) { nextBtn.style.opacity = '0.4'; nextBtn.style.pointerEvents = 'none'; }
+            _renderClipGallery(_clipFileObjects);
+            _autoSelectAllClips();
+            try { inp.value = ''; } catch (e) {} // let the same file be re-picked later
+        });
+        document.body.appendChild(inp);
+    }
+    return inp;
+}
+
+// Open the phone's real gallery straight from the user's tap. Because the click
+// happens synchronously inside the gesture (no page transition first), iOS
+// actually shows the picker instead of silently ignoring it — which is what made
+// the old "open page, then auto-click" path a dead end.
+function pickTrustclipMedia() {
+    var inp = _ensureClipInput();
+    try { inp.value = ''; } catch (e) {}
+    inp.click();
+}
+
+// Pre-select everything they just picked so Next is ready immediately.
+function _autoSelectAllClips() {
+    var grid = document.getElementById('clip-gallery-grid');
+    if (!grid) return;
+    selectedClipFiles = [];
+    grid.querySelectorAll('.clip-thumb-item[data-idx]').forEach(function (el) {
+        var idx = parseInt(el.getAttribute('data-idx'), 10);
+        if (selectedClipFiles.indexOf(idx) === -1) selectedClipFiles.push(idx);
+        el.style.borderColor = '#007AFF';
+        var chk = el.querySelector('.clip-check');
+        if (chk) { chk.innerHTML = '<i class="fa-solid fa-check" style="color:white;font-size:11px;"></i>'; chk.style.background = '#007AFF'; }
+    });
+    var nextBtn = document.getElementById('clipNextBtn');
+    if (nextBtn && selectedClipFiles.length) { nextBtn.style.opacity = '1'; nextBtn.style.pointerEvents = 'auto'; }
+}
+
 function openClipSelectorGallery(noPicker) {
     selectedClipFiles = [];
     _clipFileObjects = [];
@@ -35725,40 +35792,19 @@ function openClipSelectorGallery(noPicker) {
     if (!grid) return;
     var nextBtn = document.getElementById('clipNextBtn');
     if (nextBtn) { nextBtn.style.opacity = '0.4'; nextBtn.style.pointerEvents = 'none'; }
+    _ensureClipInput(); // native picker ready for the prompt buttons below
 
-    // Hidden real file input — browser-native gallery picker
-    var inp = document.getElementById('_clipGalleryInput');
-    if (!inp) {
-        inp = document.createElement('input');
-        inp.type = 'file';
-        inp.id = '_clipGalleryInput';
-        inp.accept = 'image/*,video/*';
-        inp.multiple = true;
-        inp.style.display = 'none';
-        inp.addEventListener('change', function() {
-            if (!inp.files || !inp.files.length) return;
-            _clipFileObjects = Array.from(inp.files);
-            selectedClipFiles = [];
-            _renderClipGallery(_clipFileObjects);
-        });
-        document.body.appendChild(inp);
-    }
-
-    // Show gallery grid with a "Browse" button and instructions
+    // Prompt page (fallback / re-entry). The buttons open the real gallery on tap;
+    // the main entry points (New Trust Clip, reply-with-clip) open it directly.
     grid.innerHTML =
         '<div style="grid-column:1/-1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;gap:16px;">' +
-            '<div onclick="document.getElementById(\'_clipGalleryInput\').click()" style="width:80px;height:80px;border-radius:50%;background:rgba(0,122,255,0.1);border:2.5px dashed rgba(0,122,255,0.4);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+            '<div onclick="pickTrustclipMedia()" style="width:80px;height:80px;border-radius:50%;background:rgba(0,122,255,0.1);border:2.5px dashed rgba(0,122,255,0.4);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
                 '<i class="fa-solid fa-images" style="color:#007AFF;font-size:28px;"></i>' +
             '</div>' +
             '<p style="font-size:15px;font-weight:700;color:var(--text-primary,#000);text-align:center;">Select from your gallery</p>' +
             '<p style="font-size:13px;color:#888;text-align:center;max-width:240px;">Tap to open your camera roll and pick photos or videos</p>' +
-            '<button onclick="document.getElementById(\'_clipGalleryInput\').click()" style="padding:13px 32px;border-radius:50px;background:#007AFF;border:none;color:white;font-size:15px;font-weight:700;cursor:pointer;">Open Gallery</button>' +
+            '<button onclick="pickTrustclipMedia()" style="padding:13px 32px;border-radius:50px;background:#007AFF;border:none;color:white;font-size:15px;font-weight:700;cursor:pointer;">Open Gallery</button>' +
         '</div>';
-    // Jump straight to the device's real photos/videos (a PWA can't render the
-    // camera roll itself — the native picker is it). Runs inside the tap that
-    // opened this page so the picker is allowed. The prompt above is the fallback
-    // if they cancel. Skipped when the page is re-shown after leaving the editor.
-    if (!noPicker) { try { inp.click(); } catch (e) {} }
 }
 
 function _renderClipGallery(files) {
@@ -35790,7 +35836,7 @@ function _renderClipGallery(files) {
     var addMore = document.createElement('div');
     addMore.style.cssText = 'aspect-ratio:9/16;border-radius:6px;background:rgba(0,122,255,0.08);border:2px dashed rgba(0,122,255,0.3);display:flex;align-items:center;justify-content:center;cursor:pointer;';
     addMore.innerHTML = '<i class="fa-solid fa-plus" style="color:#007AFF;font-size:22px;"></i>';
-    addMore.onclick = function(){ document.getElementById('_clipGalleryInput').click(); };
+    addMore.onclick = function(){ pickTrustclipMedia(); };
     grid.appendChild(addMore);
 }
 
