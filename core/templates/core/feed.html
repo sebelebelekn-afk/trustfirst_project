@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=78">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=79">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -1197,6 +1197,18 @@ function authenticateUser() {
         <div style="width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,0.22);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-chevron-up" style="color:#fff;font-size:13px;"></i></div>
       </div>
     </div>
+  </div>
+
+  <!-- Floating draggable PiP for a minimized video call (keeps the p2p feed live) -->
+  <div id="call-pip" style="display:none;position:fixed;top:110px;right:14px;z-index:19999;width:118px;height:180px;border-radius:18px;overflow:hidden;background:#111;box-shadow:0 10px 34px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.18);cursor:grab;touch-action:none;">
+    <video id="call-pip-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;background:#111;"></video>
+    <div id="call-pip-fallback" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#1a1a2e,#0a0a1a);">
+      <div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-phone" style="color:#fff;font-size:16px;"></i></div>
+    </div>
+    <div style="position:absolute;bottom:0;left:0;right:0;padding:6px 8px;background:linear-gradient(transparent,rgba(0,0,0,0.7));pointer-events:none;">
+      <span id="call-pip-status" style="color:#fff;font-size:10px;font-weight:700;">Connected</span>
+    </div>
+    <div data-nodrag onclick="event.stopPropagation();endRealCall()" style="position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;background:rgba(220,0,0,0.85);display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-phone-slash" style="color:#fff;font-size:10px;"></i></div>
   </div>
 
   <audio id="call-remote-audio" autoplay style="display:none;"></audio>
@@ -2598,11 +2610,46 @@ function authenticateUser() {
         <div class="liquid-glass-btn" onclick="closeViewerLive()"><i class="fa-solid fa-xmark"></i></div>
     </div>
 
-    <!-- CHAT FEED (auto-scroll, bottom-left) -->
-    <div id="viewer-live-comments" style="position:absolute;bottom:100px;left:0;width:70%;max-height:40%;overflow:hidden;z-index:10;padding:0 14px;display:flex;flex-direction:column;justify-content:flex-end;gap:4px;pointer-events:none;"></div>
+    <!-- CHAT FEED (scrollable; follows newest, or stacks behind the "new" pill) -->
+    <div id="viewer-live-comments" class="live-chat-scroll" style="position:absolute;bottom:100px;left:0;width:72%;max-height:40%;overflow-y:auto;z-index:10;padding:0 14px;display:flex;flex-direction:column;justify-content:flex-end;gap:4px;pointer-events:auto;-webkit-overflow-scrolling:touch;"></div>
+
+    <!-- "N new messages" pill: tap to jump to the latest comment -->
+    <div id="live-newmsg-pill" onclick="liveChatJumpToLatest()" style="display:none;position:absolute;bottom:92px;left:14px;z-index:12;align-items:center;gap:7px;background:rgba(0,122,255,0.96);color:#fff;border-radius:20px;padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.4);backdrop-filter:blur(8px);">
+        <i class="fa-solid fa-arrow-down" style="font-size:11px;"></i><span id="live-newmsg-count">0</span> new
+    </div>
+
+    <!-- GUEST TILES (extra co-hosts publishing into the room) -->
+    <div id="live-guest-strip" style="display:none;position:absolute;top:max(108px,calc(env(safe-area-inset-top,50px)+58px));right:12px;z-index:11;flex-direction:column;gap:8px;pointer-events:none;"></div>
+
+    <!-- RIGHT ACTION RAIL: request to join + rankings -->
+    <div style="position:absolute;right:12px;top:52%;transform:translateY(-50%);z-index:11;display:flex;flex-direction:column;gap:14px;">
+        <button id="live-join-btn" onclick="openLiveJoinModal()" title="Request to join" style="width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,0.14);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.22);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;font-size:18px;"><i class="fa-solid fa-hand"></i></button>
+        <button onclick="openLiveRanks()" title="Rankings" style="width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,0.14);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.22);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#FFB800;font-size:18px;"><i class="fa-solid fa-ranking-star"></i></button>
+    </div>
 
     <!-- FLOATING GIFTS (right side going up) -->
     <div id="viewer-gifts-container" style="position:absolute;bottom:100px;right:14px;width:50px;z-index:10;pointer-events:none;overflow:hidden;height:42%;"></div>
+
+    <!-- REQUEST-TO-JOIN MODAL -->
+    <div id="live-join-modal" style="display:none;position:absolute;inset:0;z-index:30;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;padding:30px;" onclick="if(event.target===this)closeLiveJoinModal()">
+        <div style="background:rgba(24,24,26,0.98);backdrop-filter:blur(30px);border-radius:24px;padding:26px 22px;max-width:320px;width:100%;border:0.5px solid rgba(255,255,255,0.12);text-align:center;">
+            <div style="width:60px;height:60px;border-radius:50%;background:rgba(0,122,255,0.15);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;"><i class="fa-solid fa-hand" style="color:#007AFF;font-size:24px;"></i></div>
+            <b style="color:#fff;font-size:18px;display:block;margin-bottom:8px;">Request to join</b>
+            <p style="color:rgba(255,255,255,0.55);font-size:13px;line-height:1.5;margin-bottom:22px;">Ask the host to bring you on as a guest. They'll see your request and can accept or decline.</p>
+            <button onclick="submitLiveJoinRequest()" style="width:100%;padding:14px;border-radius:16px;background:#007AFF;color:#fff;border:none;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:10px;">Send request</button>
+            <button onclick="closeLiveJoinModal()" style="width:100%;padding:12px;border-radius:16px;background:rgba(255,255,255,0.08);color:#fff;border:none;font-size:14px;font-weight:600;cursor:pointer;">Cancel</button>
+        </div>
+    </div>
+
+    <!-- RANKINGS / TOP SUPPORTERS SHEET -->
+    <div id="live-ranks-sheet" style="display:none;position:absolute;inset:0;z-index:30;background:rgba(0,0,0,0.55);flex-direction:column;justify-content:flex-end;" onclick="if(event.target===this)closeLiveRanks()">
+        <div style="background:rgba(18,18,20,0.98);backdrop-filter:blur(30px);border-radius:26px 26px 0 0;padding:20px 20px max(30px,env(safe-area-inset-bottom,30px));max-height:70%;display:flex;flex-direction:column;">
+            <div style="width:40px;height:4px;background:rgba(255,255,255,0.2);border-radius:4px;margin:0 auto 16px;flex-shrink:0;"></div>
+            <b style="color:#fff;font-size:17px;margin-bottom:4px;flex-shrink:0;"><i class="fa-solid fa-ranking-star" style="color:#FFB800;"></i> Top Supporters</b>
+            <p style="color:rgba(255,255,255,0.4);font-size:12px;margin-bottom:10px;flex-shrink:0;">Ranked by gifts &amp; hearts sent in this live</p>
+            <div id="live-ranks-body" style="overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;"></div>
+        </div>
+    </div>
 
     <!-- BOTTOM BAR -->
     <div style="position:absolute;bottom:0;left:0;right:0;padding:10px 14px max(28px,env(safe-area-inset-bottom,28px));display:flex;align-items:center;gap:8px;z-index:10;">
@@ -4133,7 +4180,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=163"></script>
+<script src="{% static 'core/js/feed.js' %}?v=165"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=74"></script>
 <script src="{% static 'core/js/verify.js' %}?v=74"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

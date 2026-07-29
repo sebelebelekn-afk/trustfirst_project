@@ -5567,6 +5567,17 @@ function renderProfileTabs() {
     }
 }
 
+// Load the profile grid for whichever tab is currently highlighted — used by the
+// profile-open paths instead of always force-loading Posts, which is what made
+// reopening the profile on the trustclips tab show posts under the wrong tab.
+function _loadProfileActiveTab() {
+    var actEl = document.querySelector('#profile-tabs-bar .p-tab.active');
+    var tab = actEl ? (actEl.getAttribute('data-tab') || 'posts') : 'posts';
+    if (typeof switchProfileTab === 'function') { switchProfileTab(tab, actEl); return; }
+    var g = document.getElementById('profile-grid');
+    if (g && typeof loadProfilePosts === 'function') loadProfilePosts(g);
+}
+
 function saveProfileTabOrder(order) {
     try { localStorage.setItem('tf_profile_tab_order', JSON.stringify(order)); } catch(e) {}
     renderProfileTabs();
@@ -10914,6 +10925,7 @@ async function startLive() {
         // Real chat, hearts and viewer count — saved to Supabase and delivered
         // over Realtime (presence gives the true number of people watching).
         liveChatJoin('live_' + currentUser.id, 'live-comments', 'live-heart-count', 'live-viewer-count');
+        liveHostRequestsWatch('live_' + currentUser.id); // accept/decline viewers asking to guest
 
     } catch (err) {
         showToast('Camera access needed to go live');
@@ -11050,6 +11062,9 @@ function openViewerLive(streamerName, streamerAvatar, room) {
     var avatarEl = document.getElementById('viewer-streamer-avatar');
     if (nameEl) nameEl.textContent = streamerName || 'Live Stream';
     if (avatarEl && streamerAvatar) avatarEl.src = streamerAvatar;
+    window._lkPrimarySid = null;
+    _liveClearGuestTiles();
+    _liveResetJoinBtn();
     // Join the real video when LiveKit is configured; join the real chat either way.
     if (room && window.LivekitClient) _lkJoinViewer(room);
     if (room) liveChatJoin(room, 'viewer-live-comments', null, 'viewer-live-count');
@@ -11061,6 +11076,11 @@ function closeViewerLive() {
     if (overlay) overlay.style.display = 'none';
     liveChatLeave();
     _lkLeaveViewer();
+    _liveGuestLeave();
+    _liveClearGuestTiles();
+    _liveResetNewMsg();
+    _liveResetJoinBtn();
+    if (_liveJoinReqChan && window.sb) { try { sb.removeChannel(_liveJoinReqChan); } catch (e) {} _liveJoinReqChan = null; }
     var comments = document.getElementById('viewer-live-comments');
     if (comments) comments.innerHTML = '';
 }
@@ -11080,6 +11100,8 @@ async function liveChatJoin(room, commentsElId, heartCountElId, viewerCountElId)
     _liveChat.commentsId = commentsElId;
     _liveChat.heartsId = heartCountElId;
     _liveChat.countId = viewerCountElId;
+    _liveResetNewMsg();
+    _liveChatBindScroll();
 
     var feed = document.getElementById(commentsElId);
     if (feed) feed.innerHTML = '';
@@ -11129,8 +11151,17 @@ function _liveChatRender(m) {
     row.className = 'live-comment';
     row.innerHTML = '<b style="color:' + (mine ? '#34C759' : '#007AFF') + ';">' +
         escapeHtml(mine ? 'You' : ('@' + (m.username || 'user'))) + '</b> ' + escapeHtml(m.content || '');
+    // The viewer chat is scrollable with a "N new messages" pill; the host overlay
+    // keeps the old fixed 8-line ticker.
+    var viewer = _liveChat.commentsId === 'viewer-live-comments';
+    var wasNear = _liveChatNearBottom(feed);
     feed.appendChild(row);
-    while (feed.children.length > 8) feed.removeChild(feed.firstChild);
+    var cap = viewer ? 60 : 8;
+    while (feed.children.length > cap) feed.removeChild(feed.firstChild);
+    if (viewer) {
+        if (wasNear && !_liveNewMsg.stuck) { feed.scrollTop = feed.scrollHeight; }
+        else { _liveNewMsg.stuck = true; if (!mine) _liveBumpNewMsgPill(); else { feed.scrollTop = feed.scrollHeight; _liveResetNewMsg(); } }
+    }
 }
 function _liveChatSetHearts() {
     var el = document.getElementById(_liveChat.heartsId);
@@ -11258,6 +11289,7 @@ function confirmEndLive() {
 function endLive() {
     _lkStopBroadcast(); // disconnect LiveKit + remove from the live registry
     liveChatLeave();    // unsubscribe from the room's chat/presence channel
+    liveHostRequestsUnwatch();
     if (liveStream) {
         liveStream.getTracks().forEach(t => t.stop());
         liveStream = null;
@@ -11376,15 +11408,29 @@ async function _lkJoinViewer(room) {
     try {
         var info = await _lkToken(room, false, (currentUser ? (currentUser.full_name || currentUser.username) : 'Viewer'));
         var lkRoom = new LivekitClient.Room({ adaptiveStream: true });
-        lkRoom.on(LivekitClient.RoomEvent.TrackSubscribed, function(track) {
-            if (track.kind === 'video') {
+        lkRoom.on(LivekitClient.RoomEvent.TrackSubscribed, function(track, pub, participant) {
+            if (track.kind === 'audio') { track.attach(); return; }
+            if (track.kind !== 'video') return;
+            var ph = document.getElementById('live-stream-placeholder');
+            if (ph) ph.style.display = 'none';
+            var sid = participant && (participant.sid || participant.identity);
+            // First publisher = the host, fills the stage. Extra publishers become guest tiles.
+            if (!window._lkPrimarySid || window._lkPrimarySid === sid) {
+                window._lkPrimarySid = sid;
                 var v = document.getElementById('live-remote-video');
-                var ph = document.getElementById('live-stream-placeholder');
                 if (v) { track.attach(v); v.style.display = 'block'; }
-                if (ph) ph.style.display = 'none';
-            } else if (track.kind === 'audio') {
-                track.attach();
+            } else {
+                _liveAddGuestTile(sid, track, participant);
             }
+        });
+        lkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed, function(track, pub, participant) {
+            var sid = participant && (participant.sid || participant.identity);
+            if (sid && sid !== window._lkPrimarySid) _liveRemoveGuestTile(sid);
+        });
+        lkRoom.on(LivekitClient.RoomEvent.ParticipantDisconnected, function(participant) {
+            var sid = participant && (participant.sid || participant.identity);
+            if (sid === window._lkPrimarySid) { window._lkPrimarySid = null; }
+            else _liveRemoveGuestTile(sid);
         });
         await lkRoom.connect(info.url, info.token);
         window._lkViewerRoom = lkRoom;
@@ -11397,6 +11443,321 @@ async function _lkLeaveViewer() {
     window._lkViewerRoom = null;
     var v = document.getElementById('live-remote-video'); if (v) { v.style.display = 'none'; try { v.srcObject = null; } catch(e){} }
     var ph = document.getElementById('live-stream-placeholder'); if (ph) ph.style.display = 'flex';
+    _liveClearGuestTiles();
+}
+
+// ==========================================================================
+// LIVE / CALL UPGRADES
+//   - "N new messages" pill for the viewer chat (scroll-aware auto-follow)
+//   - Request-to-join (co-host) flow over live_join_requests + Realtime
+//   - Multi-guest video tiles (extra LiveKit publishers render as tiles)
+//   - Room rankings / top-supporter leaderboard (live_room_leaderboard RPC)
+//   - Floating draggable Picture-in-Picture for minimized video calls
+// ==========================================================================
+
+// ---- "N new messages" pill ----------------------------------------------
+// The viewer chat follows the newest comment while you're at the bottom. Scroll
+// up to read back and incoming comments stack behind a pill instead of yanking
+// you down; tap it (or scroll back to the bottom) to catch up.
+var _liveNewMsg = { pending: 0, stuck: false };
+
+function _liveChatNearBottom(feed) {
+    if (!feed) return true;
+    return (feed.scrollHeight - feed.scrollTop - feed.clientHeight) < 48;
+}
+function _liveChatBindScroll() {
+    var feed = document.getElementById('viewer-live-comments');
+    if (!feed || feed._nmBound) return;
+    feed._nmBound = true;
+    feed.addEventListener('scroll', function () {
+        if (_liveChatNearBottom(feed)) { _liveNewMsg.stuck = false; _liveClearNewMsgPill(); }
+    }, { passive: true });
+}
+function _liveResetNewMsg() { _liveNewMsg.stuck = false; _liveClearNewMsgPill(); }
+function _liveClearNewMsgPill() {
+    _liveNewMsg.pending = 0;
+    var pill = document.getElementById('live-newmsg-pill');
+    if (pill) pill.style.display = 'none';
+}
+function _liveBumpNewMsgPill() {
+    _liveNewMsg.pending++;
+    var pill = document.getElementById('live-newmsg-pill');
+    var label = document.getElementById('live-newmsg-count');
+    if (label) label.textContent = _liveNewMsg.pending > 99 ? '99+' : _liveNewMsg.pending;
+    if (pill) pill.style.display = 'inline-flex';
+}
+function liveChatJumpToLatest() {
+    var feed = document.getElementById('viewer-live-comments');
+    if (feed) feed.scrollTop = feed.scrollHeight;
+    _liveResetNewMsg();
+    triggerHaptic(8);
+}
+
+// ---- Request to join as a guest (co-host) -------------------------------
+var _liveJoinReqId = null;      // this viewer's own pending request id
+var _liveJoinReqChan = null;    // viewer's status channel
+var _liveHostReqChan = null;    // host's incoming-requests channel
+
+function openLiveJoinModal() {
+    if (!currentUser) { showToast('Sign in to request'); return; }
+    var m = document.getElementById('live-join-modal');
+    if (m) m.style.display = 'flex';
+}
+function closeLiveJoinModal() {
+    var m = document.getElementById('live-join-modal');
+    if (m) m.style.display = 'none';
+}
+function _liveCurrentRoom() {
+    return (_liveChat && _liveChat.room) || (window._liveHostId ? 'live_' + window._liveHostId : null);
+}
+async function submitLiveJoinRequest() {
+    closeLiveJoinModal();
+    var room = _liveCurrentRoom();
+    if (!room || !window.sb || !currentUser) { showToast('Not connected'); return; }
+    try {
+        // Retire any stale pending request first, then create a fresh one.
+        await sb.from('live_join_requests').update({ status: 'cancelled', updated_at: new Date().toISOString() })
+            .eq('requester_id', currentUser.id).eq('room', room).eq('status', 'pending');
+        var r = await sb.from('live_join_requests').insert({
+            room: room, requester_id: currentUser.id,
+            username: currentUser.username || 'user',
+            avatar_url: currentUser.avatar_url || '', status: 'pending'
+        }).select('id').single();
+        if (r.error) { showToast('Could not send request'); return; }
+        _liveJoinReqId = r.data.id;
+        showToast('Request sent to host');
+        _liveWatchOwnJoinRequest(room);
+        var btn = document.getElementById('live-join-btn');
+        if (btn) { btn.innerHTML = '<i class="fa-solid fa-hourglass-half"></i>'; btn.title = 'Waiting for host'; }
+    } catch (e) { showToast('Could not send request'); }
+}
+function _liveWatchOwnJoinRequest(room) {
+    if (_liveJoinReqChan && window.sb) { try { sb.removeChannel(_liveJoinReqChan); } catch (e) {} }
+    if (!window.sb || !_liveJoinReqId) return;
+    _liveJoinReqChan = sb.channel('ljr_self_' + _liveJoinReqId)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'live_join_requests', filter: 'id=eq.' + _liveJoinReqId },
+            function (p) {
+                var st = p.new && p.new.status;
+                if (st === 'accepted') {
+                    showToast('You are on! Joining as guest…');
+                    triggerHaptic(30);
+                    _liveGuestGoLive(room);
+                    _liveResetJoinBtn();
+                } else if (st === 'declined') {
+                    showToast('Host declined the request');
+                    _liveResetJoinBtn();
+                }
+            })
+        .subscribe();
+}
+function _liveResetJoinBtn() {
+    var btn = document.getElementById('live-join-btn');
+    if (btn) { btn.innerHTML = '<i class="fa-solid fa-hand"></i>'; btn.title = 'Request to join'; }
+    _liveJoinReqId = null;
+}
+
+// Host side: watch my room for incoming join requests and show an accept/decline tray.
+function liveHostRequestsWatch(room) {
+    liveHostRequestsUnwatch();
+    if (!window.sb || !room) return;
+    sb.from('live_join_requests').select('*').eq('room', room).eq('status', 'pending')
+        .order('created_at', { ascending: true })
+        .then(function (r) { (r.data || []).forEach(_liveHostAddRequest); });
+    _liveHostReqChan = sb.channel('ljr_host_' + room)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'live_join_requests', filter: 'room=eq.' + room },
+            function (p) { if (p.new && p.new.status === 'pending') { _liveHostAddRequest(p.new); triggerHaptic(20); } })
+        .subscribe();
+}
+function liveHostRequestsUnwatch() {
+    if (_liveHostReqChan && window.sb) { try { sb.removeChannel(_liveHostReqChan); } catch (e) {} }
+    _liveHostReqChan = null;
+    var tray = document.getElementById('live-host-requests');
+    if (tray) tray.remove();
+}
+function _liveHostRequestTray() {
+    var tray = document.getElementById('live-host-requests');
+    if (!tray) {
+        tray = document.createElement('div');
+        tray.id = 'live-host-requests';
+        tray.style.cssText = 'position:fixed;left:12px;right:12px;bottom:max(96px,calc(env(safe-area-inset-bottom,20px)+86px));z-index:21000;display:flex;flex-direction:column;gap:8px;pointer-events:none;';
+        document.body.appendChild(tray);
+    }
+    return tray;
+}
+function _liveHostAddRequest(req) {
+    if (!req || document.getElementById('ljr-card-' + req.id)) return;
+    var tray = _liveHostRequestTray();
+    var card = document.createElement('div');
+    card.id = 'ljr-card-' + req.id;
+    card.style.cssText = 'pointer-events:auto;background:rgba(20,20,22,0.92);backdrop-filter:blur(16px);border:0.5px solid rgba(255,255,255,0.14);border-radius:16px;padding:10px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 30px rgba(0,0,0,0.4);animation:msgMenuPop 0.28s cubic-bezier(0.32,0.72,0,1) both;';
+    var av = req.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(req.username || 'U') + '&background=007AFF&color=fff&size=64');
+    card.innerHTML =
+        '<img src="' + av + '" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.style.visibility=\'hidden\'">' +
+        '<div style="flex:1;min-width:0;">' +
+            '<div style="color:#fff;font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@' + escapeHtml(req.username || 'user') + '</div>' +
+            '<div style="color:rgba(255,255,255,0.55);font-size:11px;">wants to join your live</div>' +
+        '</div>' +
+        '<button onclick="respondLiveJoin(\'' + req.id + '\',true)" style="background:#34C759;color:#fff;border:none;border-radius:20px;padding:8px 14px;font-size:12px;font-weight:800;cursor:pointer;">Accept</button>' +
+        '<button onclick="respondLiveJoin(\'' + req.id + '\',false)" style="background:rgba(255,255,255,0.12);color:#fff;border:none;border-radius:20px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;">Decline</button>';
+    tray.appendChild(card);
+}
+async function respondLiveJoin(id, accept) {
+    if (!window.sb) return;
+    var card = document.getElementById('ljr-card-' + id);
+    if (card) card.style.opacity = '0.5';
+    try {
+        await sb.from('live_join_requests').update({ status: accept ? 'accepted' : 'declined', updated_at: new Date().toISOString() }).eq('id', id);
+        showToast(accept ? 'Guest added' : 'Request declined');
+        triggerHaptic(15);
+    } catch (e) { showToast('Could not update'); if (card) card.style.opacity = '1'; return; }
+    if (card) card.remove();
+}
+
+// An accepted viewer publishes their camera into the host's LiveKit room, so the
+// host and every viewer see them as a guest tile. No-op (with a note) when
+// LiveKit isn't configured on the server — the app runs local-only there.
+async function _liveGuestGoLive(room) {
+    if (!window.LivekitClient) { showToast('Guest video needs LiveKit'); return; }
+    try {
+        var stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
+        var info = await _lkToken(room, true, (currentUser && currentUser.username) || 'Guest');
+        var lkRoom = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
+        await lkRoom.connect(info.url, info.token);
+        var vt = stream.getVideoTracks()[0], at = stream.getAudioTracks()[0];
+        if (vt) await lkRoom.localParticipant.publishTrack(vt, { source: LivekitClient.Track.Source.Camera });
+        if (at) await lkRoom.localParticipant.publishTrack(at, { source: LivekitClient.Track.Source.Microphone });
+        window._lkGuestRoom = lkRoom;
+        window._lkGuestStream = stream;
+        showToast('You are live as a guest');
+    } catch (e) { showToast('Could not go live as guest'); }
+}
+function _liveGuestLeave() {
+    try { if (window._lkGuestRoom) window._lkGuestRoom.disconnect(); } catch (e) {}
+    if (window._lkGuestStream) { try { window._lkGuestStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} }
+    window._lkGuestRoom = null; window._lkGuestStream = null;
+}
+
+// ---- Multi-guest video tiles --------------------------------------------
+// The first publisher (the host) fills the stage; every extra publisher shows as
+// a floating tile, so "multiple people in one live" renders for viewers.
+function _liveAddGuestTile(sid, track, participant) {
+    if (!sid) return;
+    var strip = document.getElementById('live-guest-strip');
+    if (!strip) return;
+    strip.style.display = 'flex';
+    var tile = document.getElementById('lg-tile-' + sid);
+    if (!tile) {
+        tile = document.createElement('div');
+        tile.id = 'lg-tile-' + sid;
+        tile.style.cssText = 'position:relative;width:92px;height:132px;border-radius:14px;overflow:hidden;background:#111;border:1.5px solid rgba(255,255,255,0.25);flex-shrink:0;box-shadow:0 4px 16px rgba(0,0,0,0.4);';
+        var vid = document.createElement('video');
+        vid.autoplay = true; vid.playsInline = true;
+        vid.setAttribute('playsinline', '');
+        vid.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+        tile.appendChild(vid);
+        var name = document.createElement('div');
+        var nm = (participant && (participant.name || participant.identity)) || 'Guest';
+        name.textContent = String(nm).replace(/^live_/, '');
+        name.style.cssText = 'position:absolute;bottom:0;left:0;right:0;padding:3px 6px;font-size:10px;color:#fff;font-weight:700;background:linear-gradient(transparent,rgba(0,0,0,0.7));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        tile.appendChild(name);
+        strip.appendChild(tile);
+    }
+    try { track.attach(tile.querySelector('video')); } catch (e) {}
+}
+function _liveRemoveGuestTile(sid) {
+    if (!sid) return;
+    var tile = document.getElementById('lg-tile-' + sid);
+    if (tile) tile.remove();
+    var strip = document.getElementById('live-guest-strip');
+    if (strip && !strip.querySelector('[id^="lg-tile-"]')) strip.style.display = 'none';
+}
+function _liveClearGuestTiles() {
+    var strip = document.getElementById('live-guest-strip');
+    if (strip) { strip.innerHTML = ''; strip.style.display = 'none'; }
+    window._lkPrimarySid = null;
+}
+
+// ---- Rankings / top supporters ------------------------------------------
+async function openLiveRanks() {
+    var sheet = document.getElementById('live-ranks-sheet');
+    var body = document.getElementById('live-ranks-body');
+    if (!sheet || !body) return;
+    sheet.style.display = 'flex';
+    body.innerHTML = '<div style="color:rgba(255,255,255,0.5);text-align:center;padding:30px;font-size:13px;">Loading…</div>';
+    var room = _liveCurrentRoom();
+    if (!room || !window.sb) { body.innerHTML = '<div style="color:rgba(255,255,255,0.5);text-align:center;padding:30px;">No data</div>'; return; }
+    try {
+        var r = await sb.rpc('live_room_leaderboard', { p_room: room });
+        var rows = (r.data || []);
+        if (r.error || !rows.length) {
+            body.innerHTML = '<div style="color:rgba(255,255,255,0.5);text-align:center;padding:34px 20px;font-size:13px;">No supporters yet.<br>Be the first to send a gift! 🎁</div>';
+            return;
+        }
+        body.innerHTML = rows.map(function (u, i) {
+            var medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : ('<span style="color:rgba(255,255,255,0.4);font-weight:800;font-size:13px;">' + (i + 1) + '</span>');
+            var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.username || 'U') + '&background=007AFF&color=fff&size=64');
+            return '<div style="display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:0.5px solid rgba(255,255,255,0.06);">' +
+                '<div style="width:26px;text-align:center;font-size:16px;">' + medal + '</div>' +
+                '<img src="' + av + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.style.visibility=\'hidden\'">' +
+                '<div style="flex:1;color:#fff;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@' + escapeHtml(u.username || 'user') + '</div>' +
+                '<div style="color:#FFB800;font-size:13px;font-weight:800;flex-shrink:0;"><i class="fa-solid fa-gift" style="font-size:11px;"></i> ' + u.score + '</div>' +
+            '</div>';
+        }).join('');
+    } catch (e) { body.innerHTML = '<div style="color:rgba(255,255,255,0.5);text-align:center;padding:30px;">Could not load</div>'; }
+}
+function closeLiveRanks() {
+    var sheet = document.getElementById('live-ranks-sheet');
+    if (sheet) sheet.style.display = 'none';
+}
+
+// ---- Floating Picture-in-Picture for minimized video calls --------------
+function _syncCallPip() {
+    var st = document.getElementById('call-pip-status');
+    if (st) {
+        var ov = document.getElementById('call-overlay');
+        var s = ov ? ov.getAttribute('data-state') : '';
+        st.textContent = s === 'connected'
+            ? (_callTimerSeconds > 0 ? (Math.floor(_callTimerSeconds / 60) + ':' + ((_callTimerSeconds % 60) < 10 ? '0' : '') + (_callTimerSeconds % 60)) : 'Connected')
+            : (s === 'ringing' ? 'Ringing…' : 'Connecting…');
+    }
+    var vid = document.getElementById('call-pip-video');
+    var fallback = document.getElementById('call-pip-fallback');
+    if (vid && fallback) fallback.style.display = (vid.srcObject && vid.style.display !== 'none') ? 'none' : 'flex';
+}
+function _callPipMakeDraggable(el) {
+    if (!el || el._dragBound) return;
+    el._dragBound = true;
+    var startX = 0, startY = 0, baseL = 0, baseT = 0, moved = false, dragging = false;
+    function down(e) {
+        if (e.target && e.target.closest && e.target.closest('[data-nodrag]')) return;
+        dragging = true; moved = false;
+        var p = e.touches ? e.touches[0] : e;
+        startX = p.clientX; startY = p.clientY;
+        var r = el.getBoundingClientRect();
+        baseL = r.left; baseT = r.top;
+        el.style.transition = 'none'; el.style.cursor = 'grabbing';
+        document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+        document.addEventListener('touchmove', move, { passive: false }); document.addEventListener('touchend', up);
+    }
+    function move(e) {
+        if (!dragging) return;
+        var p = e.touches ? e.touches[0] : e;
+        var dx = p.clientX - startX, dy = p.clientY - startY;
+        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) moved = true;
+        if (e.cancelable) e.preventDefault();
+        var w = el.offsetWidth, h = el.offsetHeight;
+        var nl = Math.min(Math.max(6, baseL + dx), window.innerWidth - w - 6);
+        var nt = Math.min(Math.max(44, baseT + dy), window.innerHeight - h - 6);
+        el.style.left = nl + 'px'; el.style.top = nt + 'px'; el.style.right = 'auto'; el.style.bottom = 'auto';
+    }
+    function up() {
+        dragging = false; el.style.cursor = 'grab';
+        document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+        document.removeEventListener('touchmove', move); document.removeEventListener('touchend', up);
+        if (!moved) maximizeCall();
+    }
+    el.addEventListener('mousedown', down);
+    el.addEventListener('touchstart', down, { passive: true });
 }
 
 // ===== MINI-PLAYER STATE =====
@@ -28356,7 +28717,7 @@ navGoTo = function(destination) {
         openPage('profile-overlay');
         loadMyProfile();
         var _pg4 = document.getElementById('profile-grid');
-        if (_pg4 && typeof loadProfilePosts === 'function') loadProfilePosts(_pg4);
+        if (_pg4) _loadProfileActiveTab();   // respect the tab the profile was left on
         var ai = document.getElementById('nav-account'); if (ai) ai.classList.add('nav-active');
         return;
     }
@@ -28741,7 +29102,7 @@ function navGoTo(destination) {
             if (typeof openPage === 'function') openPage('profile-overlay');
             loadMyProfile();
             var _pg5 = document.getElementById('profile-grid');
-            if (_pg5 && typeof loadProfilePosts === 'function') loadProfilePosts(_pg5);
+            if (_pg5) _loadProfileActiveTab();   // respect the tab the profile was left on
             break;
     }
 
@@ -30542,6 +30903,10 @@ function endRealCall() {
     if (noAnswer) noAnswer.style.display = 'none';
     var mini = document.getElementById('call-mini-bubble');
     if (mini) mini.style.display = 'none';
+    var pip = document.getElementById('call-pip');
+    if (pip) pip.style.display = 'none';
+    var pipVid = document.getElementById('call-pip-video');
+    if (pipVid) { try { pipVid.srcObject = null; } catch(e) {} }
     var timerDisplay = document.getElementById('call-timer-display');
     var topStatus = document.getElementById('call-top-status');
     if (timerDisplay) { timerDisplay.style.display = 'none'; }
@@ -30596,17 +30961,20 @@ function _syncCallMiniBubble() {
 function minimizeCall() {
     var ov = document.getElementById('call-overlay');
     var mini = document.getElementById('call-mini-bubble');
-    // Picture-in-Picture for active video calls
+    // Video calls collapse into a floating, draggable picture-in-picture that keeps
+    // the live p2p feed playing (WhatsApp-style). Tap it to expand again.
     if (_callIsVideo) {
-        var remVid = document.getElementById('call-remote-video');
-        if (remVid && remVid.srcObject && document.pictureInPictureEnabled && typeof remVid.requestPictureInPicture === 'function') {
-            remVid.requestPictureInPicture().then(function() {
-                if (ov) ov.style.display = 'none';
-            }).catch(function() {
-                if (ov) ov.style.display = 'none';
-                if (mini) mini.style.display = 'block';
-                _syncCallMiniBubble();
-            });
+        var pip = document.getElementById('call-pip');
+        var pipVid = document.getElementById('call-pip-video');
+        if (pip && pipVid) {
+            var remVid = document.getElementById('call-remote-video');
+            if (remVid && remVid.srcObject) { pipVid.srcObject = remVid.srcObject; pipVid.style.display = 'block'; }
+            else { pipVid.style.display = 'none'; }
+            pip.style.display = 'block';
+            _callPipMakeDraggable(pip);
+            _syncCallPip();
+            if (ov) ov.style.display = 'none';
+            if (mini) mini.style.display = 'none';
             _callMinimized = true;
             return;
         }
@@ -30620,8 +30988,10 @@ function minimizeCall() {
 function maximizeCall() {
     var ov = document.getElementById('call-overlay');
     var mini = document.getElementById('call-mini-bubble');
+    var pip = document.getElementById('call-pip');
     if (ov) ov.style.display = 'flex';
     if (mini) mini.style.display = 'none';
+    if (pip) pip.style.display = 'none';
     _callMinimized = false;
 }
 
@@ -35347,7 +35717,7 @@ function handleClipFileSelect(input) {
     input.value = '';
 }
 
-function openClipSelectorGallery() {
+function openClipSelectorGallery(noPicker) {
     selectedClipFiles = [];
     _clipFileObjects = [];
     openPage('clip-selector-overlay');
@@ -35384,6 +35754,11 @@ function openClipSelectorGallery() {
             '<p style="font-size:13px;color:#888;text-align:center;max-width:240px;">Tap to open your camera roll and pick photos or videos</p>' +
             '<button onclick="document.getElementById(\'_clipGalleryInput\').click()" style="padding:13px 32px;border-radius:50px;background:#007AFF;border:none;color:white;font-size:15px;font-weight:700;cursor:pointer;">Open Gallery</button>' +
         '</div>';
+    // Jump straight to the device's real photos/videos (a PWA can't render the
+    // camera roll itself — the native picker is it). Runs inside the tap that
+    // opened this page so the picker is allowed. The prompt above is the fallback
+    // if they cancel. Skipped when the page is re-shown after leaving the editor.
+    if (!noPicker) { try { inp.click(); } catch (e) {} }
 }
 
 function _renderClipGallery(files) {
@@ -39383,7 +39758,8 @@ function editorRealExit() {
     var overlay = document.getElementById('preview-edit-overlay');
     if (overlay) overlay.style.display = 'none';
     // Re-render the gallery empty state instead of leaving a bare/stale grid.
-    if (typeof openClipSelectorGallery === 'function') openClipSelectorGallery();
+    // Pass true so it does NOT re-pop the native picker just from leaving the editor.
+    if (typeof openClipSelectorGallery === 'function') openClipSelectorGallery(true);
     else openPage('clip-selector-overlay');
 }
 

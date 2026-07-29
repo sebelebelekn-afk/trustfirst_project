@@ -661,6 +661,14 @@ input, textarea, [contenteditable="true"], .post-content {
 @keyframes msgReactPop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @keyframes msgMenuPop { from { transform: scale(0.92) translateY(12px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
 
+/* Live viewer chat: scrollable but with the scrollbar hidden (TikTok-style overlay). */
+.live-chat-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+.live-chat-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
+/* Keep guest co-host tiles from crowding the screen on narrow phones. */
+@media (max-width: 380px) {
+  #live-guest-strip > div { width: 76px !important; height: 110px !important; }
+}
+
 /* Repost sheet */
 [data-theme="dark"] .repost-sheet { background: #161616 !important; }
 
