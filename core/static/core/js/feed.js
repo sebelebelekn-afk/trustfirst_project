@@ -32509,6 +32509,12 @@ function clearSettingsSearch() { var i=document.getElementById('settingsSearchIn
 function openSub(id) {
     var el = document.getElementById(id);
     if (!el) return;
+    // A template close-tag slip left some sub-overlays (Sharing & Reuse, Featured
+    // Content) nested inside #img-viewer, which is display:none — so they could
+    // never appear. Rescue any such trapped overlay to the app root on first open.
+    if (el.closest && el.closest('#img-viewer')) {
+        (document.getElementById('app') || document.body).appendChild(el);
+    }
     el.style.display = 'flex';
     el.style.flexDirection = 'column';
     // Raise each newly-opened sub-overlay above the one it opened from, so it
@@ -36131,6 +36137,14 @@ function edBindTimelineScroll() {
             if (maxScroll > 0) {
                 edState.playheadMs = Math.round((clone.scrollLeft / maxScroll) * totalMs);
                 edUpdateTimestamp();
+                // Seek the preview to match the scrub so the bar and the video stay in
+                // sync (drag the timeline → the video moves with it). Single-clip is
+                // exact; multi-clip maps onto the current clip's timeline.
+                var vid = document.getElementById('edVideo');
+                if (vid && isFinite(vid.duration) && vid.duration > 0) {
+                    if (!vid.paused) { vid.pause(); }
+                    vid.currentTime = Math.max(0, Math.min(edState.playheadMs / 1000, vid.duration));
+                }
             }
         }, {passive: true});
 
@@ -36647,7 +36661,7 @@ function edOpenEffectsModal() {
     m.id = 'edEffectsModal';
     m.style.cssText = 'position:absolute;inset:0;z-index:500;background:rgba(0,0,0,0.88);backdrop-filter:blur(20px);display:flex;flex-direction:column;animation:slideUpOverlay 0.3s ease;';
     m.innerHTML =
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px 10px;">'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:max(50px,env(safe-area-inset-top,50px)) 18px 10px;">'+
             '<span style="color:white;font-size:17px;font-weight:700;">Effects</span>'+
             '<button onclick="document.getElementById(\'edEffectsModal\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button>'+
         '</div>'+
@@ -37308,7 +37322,7 @@ function edOpenMusicModal() {
     m.id = 'edMusicModal';
     m.style.cssText = 'position:absolute;inset:0;z-index:500;background:rgba(0,0,0,0.92);backdrop-filter:blur(20px);display:flex;flex-direction:column;animation:slideUpOverlay 0.3s ease;';
     m.innerHTML =
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px 10px;">'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:max(50px,env(safe-area-inset-top,50px)) 18px 10px;">'+
             '<span style="color:white;font-size:17px;font-weight:700;">Music</span>'+
             '<button onclick="document.getElementById(\'edMusicModal\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button>'+
         '</div>'+
@@ -39330,7 +39344,7 @@ function _edStickerConfigSheet(title, bodyHTML, onDone) {
     m.id = 'edStickerConfig';
     m.style.cssText = 'position:absolute;inset:0;z-index:650;background:rgba(0,0,0,0.9);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);display:flex;flex-direction:column;animation:slideUpOverlay 0.3s ease;';
     m.innerHTML =
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px 10px;">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:max(50px,env(safe-area-inset-top,50px)) 18px 10px;">' +
             '<button onclick="document.getElementById(\'edStickerConfig\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button>' +
             '<span style="color:white;font-size:16px;font-weight:700;">' + escapeHtml(title) + '</span>' +
             '<button id="edCfgDone" style="background:#007AFF;border:none;color:white;font-size:14px;font-weight:700;padding:7px 16px;border-radius:20px;cursor:pointer;">Add</button>' +
@@ -42879,7 +42893,7 @@ function openEditCoverSuite() {
         return '<div id="ecFrame'+i+'" onclick="scrubTo('+i+')" style="width:36px;height:46px;flex-shrink:0;border-radius:4px;background:#2a2a2a center/cover;border:1px solid #333;cursor:pointer;position:relative;overflow:hidden;"></div>';
     }).join('');
     suite.innerHTML =
-        '<div style="background:#fff;display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:0.5px solid #e0e0e0;">' +
+        '<div style="background:#fff;display:flex;align-items:center;justify-content:space-between;padding:max(50px,env(safe-area-inset-top,50px)) 20px 14px;border-bottom:0.5px solid #e0e0e0;">' +
             '<button onclick="document.getElementById(\'editCoverSuite\').remove()" style="background:none;border:none;color:#007AFF;font-size:16px;font-weight:500;cursor:pointer;">Cancel</button>' +
             '<b style="font-size:17px;color:#000;">Edit cover</b>' +
             '<button onclick="document.getElementById(\'editCoverSuite\').remove();showToast(\'Cover saved ✅\')" style="background:none;border:none;color:#007AFF;font-size:16px;font-weight:700;cursor:pointer;">Done</button>' +

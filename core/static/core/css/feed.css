@@ -80,13 +80,20 @@ input, textarea, [contenteditable="true"], .post-content {
 .nav-container { bottom: max(28px, env(safe-area-inset-bottom)); }
 #chat-bottom-bar { padding-bottom: max(28px, env(safe-area-inset-bottom)) !important; }
 
-/* iOS standalone PWA: 100dvh can resolve a touch short and expose the black
-   <body> as a bar under the app. -webkit-fill-available fills the TRUE visible
-   height, killing that gap. Scoped to phones so the desktop phone-frame stays. */
+/* Fill the whole screen on phones. 100dvh/vh both leave a black gap on iOS
+   standalone (dvh resolves short) and on Android with the 3-button nav bar.
+   Pinning .app to the viewport edges with position:fixed fills reliably on both
+   — the black <body> can no longer show through. Scoped to phones so the desktop
+   phone-frame card is untouched. */
+html, body { background: #000; }
 @media (max-width: 499px) {
-    html { height: -webkit-fill-available; }
-    body { min-height: -webkit-fill-available; height: -webkit-fill-available; }
-    .app { height: -webkit-fill-available; min-height: -webkit-fill-available; }
+    html, body { height: 100%; min-height: 100%; }
+    .app {
+        position: fixed;
+        top: 0; right: 0; bottom: 0; left: 0;
+        height: auto; min-height: 0;
+        width: auto; max-width: none;
+    }
 }
 
 

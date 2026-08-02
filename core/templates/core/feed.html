@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=80">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=81">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -463,7 +463,7 @@ function authenticateUser() {
                 <i class="fa-solid fa-plus" id="plus-icon-anim"></i>
             </div>
             <div class="add-menu" id="add-menu">
-                <div class="add-option" onclick="togglePlusMenu(); pickTrustclipMedia();"><i class="fa-solid fa-play"></i> New Trust Clip</div>
+                <div class="add-option" onclick="togglePlusMenu(); openClipSelectorGallery();"><i class="fa-solid fa-play"></i> New Trust Clip</div>
                 <div class="add-option" onclick="togglePlusMenu(); openPage('composer-overlay'); hideNavBar();"><i class="fa-solid fa-pen-nib"></i> Create Post</div>
                 <div class="add-option" onclick="togglePlusMenu(); setTimeout(openStoryPicker,50);"><i class="fa-solid fa-camera"></i> Story</div>
                 <div class="add-option" onclick="togglePlusMenu(); openLiveStreamFeed();"><i class="fa-solid fa-tower-broadcast"></i> Go Live</div>
@@ -505,7 +505,7 @@ function authenticateUser() {
 <div id="preview-edit-overlay" class="editor-overlay">
 
   <!-- TOP BAR -->
-  <div style="position:absolute;top:0;left:0;right:0;z-index:30;padding:48px 14px 12px;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(to bottom,rgba(0,0,0,0.7) 0%,transparent 100%);">
+  <div style="position:absolute;top:0;left:0;right:0;z-index:30;padding:max(48px,env(safe-area-inset-top,48px)) 14px 12px;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(to bottom,rgba(0,0,0,0.7) 0%,transparent 100%);">
     <button id="edExitBtn" onclick="editorTryExit()" style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,0.15);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.25);color:white;font-size:15px;display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>
     <div id="clipCounter" style="background:rgba(0,0,0,0.45);backdrop-filter:blur(10px);color:white;font-size:13px;font-weight:700;padding:5px 13px;border-radius:20px;display:none;">1 / 1</div>
     <div style="display:flex;gap:8px;align-items:center;">
@@ -4180,7 +4180,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=168"></script>
+<script src="{% static 'core/js/feed.js' %}?v=169"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=74"></script>
 <script src="{% static 'core/js/verify.js' %}?v=75"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
