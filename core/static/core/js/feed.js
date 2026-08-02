@@ -35973,6 +35973,9 @@ function openPreviewEditScreen() {
     edState.history = [];
     edState.historyIndex = -1;
     edZoom = 1.0;
+    window._tcCoverDataUrl = null;   // a new clip starts with no custom cover
+
+
 
     // Build clip objects from real file objects
     var cursor = 0;
@@ -36492,10 +36495,13 @@ function edWireVideo() {
 // RAF play loop and paused seeks so both move the scrubber identically).
 function edSyncTimelineScroll() {
     var totalMs = edState.clips.reduce(function(s,c){return s+c.durationMs;},0) || 1;
-    var scroller = document.querySelector('#preview-edit-overlay .ed-timeline-scroll');
-    if (!scroller) return;
-    var maxScroll = scroller.scrollWidth - scroller.clientWidth;
-    if (maxScroll > 0) scroller.scrollLeft = (edState.playheadMs / totalMs) * maxScroll;
+    // Keep ALL three tracks (video, audio, text) scrolled together so the playhead
+    // lines up across them — syncing only the video track let the others drift.
+    var scrollers = document.querySelectorAll('#preview-edit-overlay .ed-timeline-scroll');
+    scrollers.forEach(function(scroller){
+        var maxScroll = scroller.scrollWidth - scroller.clientWidth;
+        if (maxScroll > 0) scroller.scrollLeft = (edState.playheadMs / totalMs) * maxScroll;
+    });
 }
 
 var _edTickRAF = null;
@@ -40172,6 +40178,19 @@ async function submitTrustClip() {
         // Fallback to blob URL if upload failed (temporary, session-only)
         if (!videoUrl) videoUrl = blobUrl;
 
+        // Upload the cover chosen in Edit cover (a frame or a picked photo) as the
+        // clip's thumbnail. Without this, trustclips had no thumbnail at all.
+        if (window._tcCoverDataUrl && window.sb && currentUser) {
+            try {
+                var coverBlob = await (await fetch(window._tcCoverDataUrl)).blob();
+                var coverPath = currentUser.id + '/' + clipId + '_cover.jpg';
+                var coverUp = await sb.storage.from('trustclips').upload(coverPath, coverBlob, { contentType: 'image/jpeg', upsert: true });
+                if (!coverUp.error && coverUp.data) {
+                    thumbnailUrl = sb.storage.from('trustclips').getPublicUrl(coverUp.data.path).data.publicUrl;
+                }
+            } catch (e) { console.warn('[TrustClip] cover upload failed:', e && e.message); }
+        }
+
         // Insert row into trustclips table
         if (window.sb && currentUser && videoUrl) {
             var insertRow = {
@@ -42896,7 +42915,7 @@ function openEditCoverSuite() {
         '<div style="background:#fff;display:flex;align-items:center;justify-content:space-between;padding:max(50px,env(safe-area-inset-top,50px)) 20px 14px;border-bottom:0.5px solid #e0e0e0;">' +
             '<button onclick="document.getElementById(\'editCoverSuite\').remove()" style="background:none;border:none;color:#007AFF;font-size:16px;font-weight:500;cursor:pointer;">Cancel</button>' +
             '<b style="font-size:17px;color:#000;">Edit cover</b>' +
-            '<button onclick="document.getElementById(\'editCoverSuite\').remove();showToast(\'Cover saved ✅\')" style="background:none;border:none;color:#007AFF;font-size:16px;font-weight:700;cursor:pointer;">Done</button>' +
+            '<button onclick="edSaveCover()" style="background:none;border:none;color:#007AFF;font-size:16px;font-weight:700;cursor:pointer;">Done</button>' +
         '</div>' +
         '<div style="display:flex;border-bottom:0.5px solid #333;">' +
             '<button id="ecTabCover" onclick="switchCoverTab(\'cover\')" style="flex:1;padding:12px;background:none;border:none;border-bottom:2px solid #007AFF;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">Cover</button>' +
@@ -42910,7 +42929,7 @@ function openEditCoverSuite() {
         '</div>' +
         '<div style="padding:16px 20px;overflow-x:auto;display:flex;gap:3px;align-items:center;min-height:70px;background:#111;scrollbar-width:none;">' + frames + '</div>' +
         '<div style="padding:16px 20px;padding-bottom:max(28px,env(safe-area-inset-bottom));background:#000;">' +
-            '<button onclick="showToast(\'Opening camera roll…\')" style="width:100%;padding:16px;border-radius:14px;background:#007AFF;color:#fff;font-size:16px;font-weight:700;border:none;cursor:pointer;">Add from camera roll</button>' +
+            '<button onclick="edCoverFromCameraRoll()" style="width:100%;padding:16px;border-radius:14px;background:#007AFF;color:#fff;font-size:16px;font-weight:700;border:none;cursor:pointer;">Add from camera roll</button>' +
         '</div>';
     var src = document.getElementById('tcThumbVid');
     var _ecSrc = (src && src.src) ? src.src : (window._lastPickedVideoSrc || (function(){ var v = document.getElementById('edVideo'); return v && v.src; })() || (window.edState && edState.clips && edState.clips[0] && edState.clips[0].objectUrl) || '');
@@ -42976,6 +42995,50 @@ window.scrubTo = function(frame) {
         try { v.pause(); v.currentTime = window._ecTimes[frame]; } catch(e) {}
     }
     for (var i = 0; i < 18; i++) { var c = document.getElementById('ecFrame'+i); if (c) c.style.borderColor = (i === frame) ? '#007AFF' : '#333'; }
+};
+
+// Save the chosen frame as the clip's cover. Captures the current preview frame to
+// a JPEG data URL; submitTrustClip uploads it as thumbnail_url (trustclips had no
+// thumbnail at all before this). blob: video is same-origin so the canvas is clean.
+window.edSaveCover = function() {
+    var v = document.getElementById('ecPreviewVid');
+    try {
+        if (v && v.videoWidth) {
+            var c = document.createElement('canvas');
+            c.width = 720;
+            c.height = Math.round(720 * ((v.videoHeight || 16) / (v.videoWidth || 9))) || 1280;
+            c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+            window._tcCoverDataUrl = c.toDataURL('image/jpeg', 0.82);
+        }
+    } catch (e) { /* tainted/undecodable frame: keep whatever cover was there */ }
+    var suite = document.getElementById('editCoverSuite');
+    if (suite) suite.remove();
+    showToast(window._tcCoverDataUrl ? 'Cover saved ✅' : 'Could not capture that frame');
+    triggerHaptic(15);
+};
+
+// "Add from camera roll" — pick a photo to use as the cover instead of a frame.
+window.edCoverFromCameraRoll = function() {
+    var inp = document.getElementById('_ecCoverInput');
+    if (!inp) {
+        inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = 'image/*'; inp.id = '_ecCoverInput';
+        inp.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;';
+        inp.addEventListener('change', function() {
+            if (!inp.files || !inp.files.length) return;
+            var r = new FileReader();
+            r.onload = function() {
+                window._tcCoverDataUrl = r.result;
+                var suite = document.getElementById('editCoverSuite');
+                if (suite) suite.remove();
+                showToast('Cover set ✅');
+            };
+            r.readAsDataURL(inp.files[0]);
+        });
+        document.body.appendChild(inp);
+    }
+    try { inp.value = ''; } catch (e) {}
+    inp.click();
 };
 
 /* --- LINK CLIP GALLERY --- */
