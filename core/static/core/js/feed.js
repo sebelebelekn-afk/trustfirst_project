@@ -29602,7 +29602,11 @@ function _applyCoverPhoto(url) {
     cover.style.backgroundImage = 'url("' + url + '")';
     cover.style.backgroundSize = 'cover';
     cover.style.backgroundPosition = 'center';
-    cover.style.background = cover.style.backgroundImage ? cover.style.background : '';
+    cover.style.backgroundRepeat = 'no-repeat';
+    // Never assign the `background` shorthand here. Its getter returns "" unless
+    // every longhand is set inline, and assigning "" resets all of them, which
+    // wiped the image this function had just applied. That is why a saved cover
+    // vanished as soon as the profile rendered.
 }
 function chooseCoverPhoto() {
     document.getElementById('coverPhotoMenu')?.remove();
