@@ -35974,6 +35974,7 @@ function openPreviewEditScreen() {
     edState.historyIndex = -1;
     edZoom = 1.0;
     window._tcCoverDataUrl = null;   // a new clip starts with no custom cover
+    edState._draftVideoStored = false; // re-store this session's video on first autosave
 
 
 
@@ -39923,12 +39924,22 @@ function editorSaveDraft(andExit) {
     try {
         var t = _edCaptureThumb();
         if (t) edState._lastThumb = t;          // keep the last good frame
+        // Persist the real video blob to IndexedDB once per session, keyed 'editor'.
+        // The clips' objectUrl is a blob: URL that dies when the app is killed, so
+        // without this "Continue" reopened an editor with a dead src (blank video).
+        var firstVid = edState.clips.find(function(c){ return c.file && c.file.type && c.file.type.indexOf('video/') === 0; });
+        var hasVideo = !!firstVid;
+        if (hasVideo && !edState._draftVideoStored) {
+            edState._draftVideoStored = true;
+            _tcDraftPutVideo('editor', firstVid.file).catch(function(){ edState._draftVideoStored = false; });
+        }
         var draft = {
             clips: edState.clips,
             audioTracks: edState.audioTracks,
             textOverlays: edState.textOverlays,
             playheadMs: edState.playheadMs,
             thumbnail: edState._lastThumb || null,
+            hasVideo: hasVideo,
             savedAt: Date.now(),
             isDraftIncomplete: true
         };
@@ -39966,7 +39977,8 @@ function checkDraftRecovery() {
         }
     } catch(e) { if (e) console.warn('[Suppressed error]', e); }
 }
-function draftContinue() {
+async function draftContinue() {
+    var restoredVideo = false, hadVideo = false;
     try {
         var raw = localStorage.getItem('tf_editor_draft');
         if (!raw) return;
@@ -39976,6 +39988,25 @@ function draftContinue() {
         edState.textOverlays = draft.textOverlays || [];
         edState.playheadMs = draft.playheadMs || 0;
         edState.isDirty = false;
+        edState._draftVideoStored = true; // it's already in IndexedDB from last session
+        hadVideo = !!draft.hasVideo;
+        // The saved clips carry dead blob: URLs — re-hydrate the real video from
+        // IndexedDB and point clip 0 + the preview at a fresh object URL.
+        if (hadVideo && edState.clips[0]) {
+            var blob = await _tcDraftGetVideo('editor');
+            if (blob) {
+                var url = URL.createObjectURL(blob);
+                edState.clips[0].objectUrl = url;
+                edState.clips[0].file = blob;
+                var v = document.getElementById('edVideo');
+                if (v) {
+                    v.src = url; v.muted = false; v.loop = true; v.load();
+                    edWireVideo();
+                    v.play().catch(function(){});
+                    restoredVideo = true;
+                }
+            }
+        }
         if (typeof edRenderTextOverlays === 'function') edRenderTextOverlays();
     } catch(e) { showToast('Could not load draft, starting fresh'); }
     var modal = document.getElementById('draftRecoveryModal');
@@ -39983,6 +40014,7 @@ function draftContinue() {
     var overlay = document.getElementById('preview-edit-overlay');
     if (overlay) overlay.style.display = 'flex';
     edRenderTimeline(); edStartAutoSave(); triggerHaptic(10);
+    if (hadVideo && !restoredVideo) showToast('Draft video could not be restored, please re-add it');
 }
 function draftDiscardAndClose() {
     localStorage.removeItem('tf_editor_draft');
