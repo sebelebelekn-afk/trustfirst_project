@@ -631,6 +631,166 @@ def moderate_comment_image(request):
 
 
 # ---------------------------------------------------------------------------
+# 8b. PUSH NOTIFICATIONS (FCM HTTP v1)
+#
+# Auth is the service-account flow: sign a JWT with the account's private key,
+# swap it for an access token, then send. PyJWT + cryptography are already
+# dependencies (the LiveKit tokens are hand-signed the same way), so this needs
+# no extra packages. Set FCM_SERVICE_ACCOUNT_JSON to the whole service account
+# JSON. With it unset, sending is a no-op instead of an error.
+# ---------------------------------------------------------------------------
+_FCM_TOKEN_CACHE = {'token': None, 'expires_at': 0}
+
+
+def _fcm_service_account():
+    raw = os.environ.get('FCM_SERVICE_ACCOUNT_JSON', '').strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        print('[Push] FCM_SERVICE_ACCOUNT_JSON is not valid JSON')
+        return None
+
+
+def _fcm_access_token():
+    """OAuth2 access token for FCM, cached until shortly before it expires."""
+    import time as _time
+    import jwt as _jwt
+
+    if _FCM_TOKEN_CACHE['token'] and _FCM_TOKEN_CACHE['expires_at'] > _time.time() + 60:
+        return _FCM_TOKEN_CACHE['token']
+
+    sa = _fcm_service_account()
+    if not sa:
+        return None
+
+    now = int(_time.time())
+    assertion = _jwt.encode(
+        {
+            'iss': sa['client_email'],
+            'scope': 'https://www.googleapis.com/auth/firebase.messaging',
+            'aud': 'https://oauth2.googleapis.com/token',
+            'iat': now,
+            'exp': now + 3600,
+        },
+        sa['private_key'],
+        algorithm='RS256',
+    )
+    try:
+        r = requests.post(
+            'https://oauth2.googleapis.com/token',
+            data={
+                'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                'assertion': assertion,
+            },
+            timeout=10,
+        )
+        if r.status_code != 200:
+            print(f'[Push] token exchange failed: {r.status_code}')
+            return None
+        data = r.json()
+        _FCM_TOKEN_CACHE['token'] = data.get('access_token')
+        _FCM_TOKEN_CACHE['expires_at'] = now + int(data.get('expires_in', 3600))
+        return _FCM_TOKEN_CACHE['token']
+    except Exception as ex:
+        print(f'[Push] token exchange error: {ex}')
+        return None
+
+
+def _user_push_tokens(user_id):
+    """Every device token registered to a user, read with the service role."""
+    try:
+        r = httpx.get(
+            f'{settings.SUPABASE_URL}/rest/v1/device_push_tokens',
+            params={'user_id': f'eq.{user_id}', 'select': 'token'},
+            headers={
+                'apikey': settings.SUPABASE_SERVICE_KEY,
+                'Authorization': f'Bearer {settings.SUPABASE_SERVICE_KEY}',
+            },
+            timeout=10,
+        )
+        return [row['token'] for row in r.json()] if r.status_code == 200 else []
+    except Exception:
+        return []
+
+
+def send_push_to_user(user_id, title, body, data=None):
+    """Fire a push to all of a user's devices. Returns how many were delivered.
+    Safe to call when push isn't configured, it just returns 0."""
+    sa = _fcm_service_account()
+    access = _fcm_access_token()
+    if not sa or not access:
+        return 0
+
+    tokens = _user_push_tokens(user_id)
+    if not tokens:
+        return 0
+
+    url = f"https://fcm.googleapis.com/v1/projects/{sa['project_id']}/messages:send"
+    headers = {'Authorization': f'Bearer {access}', 'Content-Type': 'application/json'}
+    # FCM data values must all be strings.
+    payload_data = {k: str(v) for k, v in (data or {}).items()}
+    sent = 0
+    for token in tokens:
+        try:
+            resp = requests.post(
+                url,
+                headers=headers,
+                json={'message': {
+                    'token': token,
+                    'notification': {'title': title, 'body': body},
+                    'data': payload_data,
+                }},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                sent += 1
+            elif resp.status_code in (404, 400):
+                # Token is dead (app uninstalled, token rotated). Drop it.
+                try:
+                    httpx.delete(
+                        f'{settings.SUPABASE_URL}/rest/v1/device_push_tokens',
+                        params={'token': f'eq.{token}'},
+                        headers={
+                            'apikey': settings.SUPABASE_SERVICE_KEY,
+                            'Authorization': f'Bearer {settings.SUPABASE_SERVICE_KEY}',
+                        },
+                        timeout=10,
+                    )
+                except Exception:
+                    pass
+        except Exception as ex:
+            print(f'[Push] send error: {ex}')
+    return sent
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def push_test(request):
+    """Send a test push to the caller's own devices, so setup can be checked
+    without a way to notify anyone else."""
+    try:
+        payload = _verify_supabase_jwt(request)
+    except Exception:
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+
+    user_id = payload.get('sub')
+    if not _is_valid_uuid(user_id):
+        return JsonResponse({'error': 'Invalid user'}, status=400)
+    if not _fcm_service_account():
+        return JsonResponse({'ok': False, 'reason': 'push_not_configured', 'sent': 0})
+
+    sent = send_push_to_user(
+        user_id,
+        'TrustFirst',
+        'Push notifications are working.',
+        {'kind': 'test'},
+    )
+    return JsonResponse({'ok': sent > 0, 'sent': sent})
+
+
+# ---------------------------------------------------------------------------
 # 9. ELEVENLABS DUBBING (translate a clip's audio to English; key server-side)
 # ---------------------------------------------------------------------------
 @ratelimit(key='ip', rate='5/m', method='POST', block=True)

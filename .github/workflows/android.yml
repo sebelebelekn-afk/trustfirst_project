@@ -48,6 +48,20 @@ jobs:
       - name: Add the Android platform
         run: npx cap add android
 
+      - name: Add Firebase config for push
+        # Repo secret GOOGLE_SERVICES_JSON holds the contents of google-services.json
+        # from the Firebase console. Without it the app still builds and runs, it
+        # just cannot receive push notifications.
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            echo "google-services.json written, push enabled"
+          else
+            echo "No GOOGLE_SERVICES_JSON secret set, building without push"
+          fi
+
       - name: Sync
         run: npx cap sync android
 

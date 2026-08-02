@@ -4186,6 +4186,9 @@ function authenticateUser() {
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
 <script src="{% static 'core/js/admin.js' %}?v=75"></script>
+<!-- Native shell bridge. No-ops in the browser, so the PWA is unaffected.
+     Must load after feed.js because it wraps the media pickers defined there. -->
+<script src="{% static 'core/js/native.js' %}?v=1"></script>
 <!-- ===== LIVE MINI-PLAYER ===== -->
 <div id="liveMiniPlayer" style="display:none;position:absolute;bottom:max(96px,calc(env(safe-area-inset-bottom)+96px));left:12px;right:12px;z-index:9500;border-radius:20px;overflow:hidden;cursor:pointer;" onclick="maximizeLive()">
     <div style="background:rgba(18,18,18,0.88);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);border:0.5px solid rgba(255,255,255,0.14);border-radius:20px;padding:10px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,0.45);">
