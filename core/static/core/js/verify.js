@@ -13,7 +13,9 @@ function openGetVerified() {
 }
 
 window.applyForBadge = function(type) {
-    if (type === 'blue') return startIdVerification();
+    // Blue is reviewed by a human. The paid KYC provider (startIdVerification) stays
+    // available for when it is funded, but manual review is what runs today.
+    if (type === 'blue' && window.TF_USE_DIDIT_KYC) return startIdVerification();
     if (type === 'gold') {
         var followers = (currentUser && currentUser.follower_count) || 0;
         if (followers < 500000) { showToast('Gold verification unlocks at 500,000 followers'); return; }
@@ -61,6 +63,13 @@ async function startIdVerification() {
 
 function openBadgeForm(type) {
     var cfg = {
+        blue: { title: 'Identity verification', fields: [
+            { id: 'legal_name', label: 'Full name (as it appears on your ID)', type: 'text', ph: 'e.g. Naledi Mokoena' },
+            { id: 'issuing_country', label: 'Country that issued the document', type: 'text', ph: 'e.g. South Africa' }
+        ], doc: 'Photo of your government ID, with the ID number covered', docRequired: true,
+           notice: '<b style="color:#FF9500;">Cover your ID number before you take the photo.</b> A reviewer only needs your photo, your name and the document type, never the number.<br><br>' +
+                   'Your document is uploaded to private storage that only a reviewer can open, and it is <b>deleted the moment your application is decided</b>. Anything left unreviewed is deleted automatically after 7 days.<br><br>' +
+                   'We keep the result of the check, never your ID.' },
         red: { title: 'Government verification', fields: [
             { id: 'gov_email', label: 'Official government email', type: 'email', ph: 'name@gov.example' },
             { id: 'department', label: 'Department / agency', type: 'text', ph: 'e.g. Police, Health, Office of the President' }
@@ -87,9 +96,14 @@ function openBadgeForm(type) {
             '<input id="bf_' + f.id + '" type="' + f.type + '" placeholder="' + f.ph + '" style="width:100%;padding:13px 16px;border-radius:12px;border:1px solid var(--border-color,#e5e5e5);background:var(--input-bg,#f7f7f7);font-size:15px;color:var(--text-primary,#000);outline:none;box-sizing:border-box;">';
     }).join('');
     var docHtml = cfg.doc ? '<label style="display:block;font-size:12px;font-weight:700;color:#888;margin:16px 4px 6px;">' + cfg.doc + '</label><input id="bf_doc" type="file" accept="image/*,application/pdf" style="width:100%;font-size:13px;color:#888;">' : '';
+    var noticeHtml = cfg.notice
+        ? '<div style="background:rgba(255,149,0,0.08);border:1px solid rgba(255,149,0,0.25);border-radius:14px;padding:14px;margin-bottom:6px;font-size:13px;line-height:1.6;color:var(--text-primary,#000);">' +
+              '<i class="fa-solid fa-shield-halved" style="color:#FF9500;margin-right:6px;"></i>' + cfg.notice +
+          '</div>'
+        : '';
     ov.innerHTML =
         '<div class="header-container" style="flex-shrink:0;"><div class="liquid-glass-btn" onclick="document.getElementById(\'badgeFormOverlay\').remove()" style="cursor:pointer;"><i class="fa-solid fa-chevron-left"></i></div><b>' + cfg.title + '</b></div>' +
-        '<div style="padding:18px 18px 40px;">' + fieldsHtml + docHtml +
+        '<div style="padding:18px 18px 40px;">' + noticeHtml + fieldsHtml + docHtml +
             '<button onclick="submitBadgeApplication(\'' + type + '\',' + cfg.docRequired + ')" style="width:100%;padding:15px;border-radius:14px;border:none;background:#007AFF;color:#fff;font-size:16px;font-weight:700;cursor:pointer;margin-top:22px;">Submit for review</button>' +
             '<p style="font-size:11px;color:#aaa;text-align:center;margin-top:12px;line-height:1.5;">Our team reviews applications within a few days. You will be notified of the result.</p>' +
         '</div>';

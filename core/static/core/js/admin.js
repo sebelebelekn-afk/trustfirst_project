@@ -87,11 +87,29 @@ function _adminActions(prefix, withReject) {
 
 window.adminReviewVerif = async function(appId, userId, badgeType, decision) {
     try {
-        await sb.from('verification_applications').update({ status: decision, reviewed_by: currentUser.id, updated_at: new Date().toISOString() }).eq('id', appId);
+        // Destroy the submitted document the moment a decision is made — we keep the
+        // OUTCOME, never the ID. (A daily job also purges anything older than 7 days
+        // in case an application is never reviewed.)
+        var docsPurged = 0;
+        try {
+            var row = await sb.from('verification_applications').select('documents').eq('id', appId).single();
+            var paths = (row.data && row.data.documents) || [];
+            if (paths.length) {
+                var del = await sb.storage.from('verification_docs').remove(paths);
+                if (!del.error) docsPurged = paths.length;
+            }
+        } catch (e) { console.warn('[Admin] doc purge failed:', e && e.message); }
+
+        await sb.from('verification_applications').update({
+            status: decision, reviewed_by: currentUser.id,
+            documents: [],                       // forget the path too
+            updated_at: new Date().toISOString()
+        }).eq('id', appId);
+
         if (decision === 'approved') {
             await sb.from('users').update({ verified: true, badge_status: 'verified', badge_tier: 'verify-' + badgeType }).eq('id', userId);
         }
-        showToast(decision === 'approved' ? 'Approved & badge granted' : 'Application rejected');
+        showToast((decision === 'approved' ? 'Approved & badge granted' : 'Application rejected') + (docsPurged ? ' · ID deleted' : ''));
         adminSwitchTab('applications');
     } catch (e) { showToast('Action failed'); }
 };

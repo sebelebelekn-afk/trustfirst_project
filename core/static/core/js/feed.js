@@ -21783,7 +21783,7 @@ function openAccountTypeChooser() {
     var followers = (currentUser && currentUser.follower_count) || 0;
     var goldOk = followers >= 500000;
     var types = [
-        { id: 'normal',       title: 'Normal',        color: '#007AFF', icon: 'fa-circle-check', desc: 'For individuals. Verify your identity with a government ID (via Didit).' },
+        { id: 'normal',       title: 'Normal',        color: '#007AFF', icon: 'fa-circle-check', desc: 'For individuals. Reviewed by our team from a government ID, which is deleted right after the check.' },
         { id: 'business',     title: 'Business',      color: '#8E8E93', icon: 'fa-briefcase',    desc: 'For brands & companies. Needs legal entity name, company number and company email.' },
         { id: 'government',   title: 'Government',    color: '#FF3B30', icon: 'fa-landmark',     desc: 'For officials & agencies. Needs an official gov email, department and stamped letterhead.' }
     ];
@@ -21836,9 +21836,9 @@ function openIdentityVerification() {
                 '<div style="flex:1;min-width:0;"><b style="font-size:15px;color:var(--text-primary,#000);">Face Verification</b><p style="color:#888;font-size:13px;margin:3px 0 0;line-height:1.4;">Use your camera, look left, right, smile. No ID needed.</p></div>' +
                 '<i class="fa-solid fa-chevron-right" style="color:#ccc;flex-shrink:0;"></i>' +
             '</div>' +
-            '<div onclick="document.getElementById(\'identityVerifyOverlay\').remove();if(typeof startIdVerification===\'function\')startIdVerification();" style="background:var(--card-bg,#fff);border:1.5px solid var(--border-color,#eee);border-radius:18px;padding:18px;cursor:pointer;display:flex;align-items:center;gap:14px;">' +
+            '<div onclick="document.getElementById(\'identityVerifyOverlay\').remove();if(typeof applyForBadge===\'function\')applyForBadge(\'blue\');" style="background:var(--card-bg,#fff);border:1.5px solid var(--border-color,#eee);border-radius:18px;padding:18px;cursor:pointer;display:flex;align-items:center;gap:14px;">' +
                 '<div style="width:50px;height:50px;border-radius:50%;background:rgba(0,122,255,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-id-card" style="color:#007AFF;font-size:22px;"></i></div>' +
-                '<div style="flex:1;min-width:0;"><b style="font-size:15px;color:var(--text-primary,#000);">ID Document Scan</b><p style="color:#888;font-size:13px;margin:3px 0 0;line-height:1.4;">Scan a government ID via Didit (secure KYC).</p></div>' +
+                '<div style="flex:1;min-width:0;"><b style="font-size:15px;color:var(--text-primary,#000);">ID Document</b><p style="color:#888;font-size:13px;margin:3px 0 0;line-height:1.4;">Reviewed by our team, then deleted. Cover your ID number first.</p></div>' +
                 '<i class="fa-solid fa-chevron-right" style="color:#ccc;flex-shrink:0;"></i>' +
             '</div>' +
         '</div>';
