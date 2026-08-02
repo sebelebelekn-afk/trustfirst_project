@@ -563,6 +563,73 @@ def didit_webhook(request):
         return JsonResponse({'status': 'ok'})
 
 
+@csrf_exempt
+@require_http_methods(["POST"])
+def moderate_comment_image(request):
+    """Run Google Vision SAFE_SEARCH over an image posted in a comment. If it's
+    adult/violent/racy, flag the comment server-side (is_sensitive=true) so every
+    client blurs it behind a tap-to-reveal. The flag is set here (service role),
+    never trusted from the client, so a tampered client can't un-flag itself.
+    No-op (sensitive=false) when the Vision key isn't configured."""
+    try:
+        payload = _verify_supabase_jwt(request)
+    except ValueError:
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    except Exception:
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+
+    try:
+        body = json.loads(request.body or '{}')
+        comment_id = body.get('comment_id', '')
+        image_url = (body.get('image_url') or '').strip()
+        if not image_url or not _is_valid_uuid(comment_id):
+            return JsonResponse({'error': 'Missing image_url or comment_id'}, status=400)
+        if not (image_url.startswith('https://') or image_url.startswith('http://')):
+            return JsonResponse({'error': 'Bad image_url'}, status=400)
+
+        vision_key = settings.GOOGLE_CLOUD_VISION_API_KEY
+        if not vision_key:
+            # No moderator configured yet — don't block the comment, just don't flag.
+            return JsonResponse({'sensitive': False, 'reason': 'vision_unavailable'})
+
+        vision_url = f'https://vision.googleapis.com/v1/images:annotate?key={vision_key}'
+        vision_payload = {
+            "requests": [{
+                "image": {"source": {"imageUri": image_url}},
+                "features": [{"type": "SAFE_SEARCH_DETECTION"}],
+            }]
+        }
+        vr = requests.post(vision_url, json=vision_payload, timeout=10)
+        resp0 = (vr.json().get('responses') or [{}])[0]
+        safe = resp0.get('safeSearchAnnotation') or {}
+        FLAG = {'LIKELY', 'VERY_LIKELY'}
+        sensitive = (
+            safe.get('adult') in FLAG
+            or safe.get('violence') in FLAG
+            or safe.get('racy') in FLAG
+        )
+
+        if sensitive:
+            try:
+                httpx.patch(
+                    f"{settings.SUPABASE_URL}/rest/v1/comments?id=eq.{comment_id}",
+                    headers={
+                        "apikey": settings.SUPABASE_SERVICE_KEY,
+                        "Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}",
+                        "Content-Type": "application/json",
+                        "Prefer": "return=minimal",
+                    },
+                    json={"is_sensitive": True},
+                    timeout=10,
+                )
+            except Exception as ex:
+                print(f"[moderate_comment_image] supabase patch error: {ex}")
+
+        return JsonResponse({'sensitive': bool(sensitive)})
+    except Exception:
+        return JsonResponse({'error': 'Server error'}, status=500)
+
+
 # ---------------------------------------------------------------------------
 # 9. ELEVENLABS DUBBING (translate a clip's audio to English; key server-side)
 # ---------------------------------------------------------------------------

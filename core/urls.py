@@ -31,6 +31,7 @@ urlpatterns = [
     path('api/transcribe/', api_views.elevenlabs_transcribe, name='api_transcribe'),
     path('api/translate-text/', api_views.translate_text, name='api_translate_text'),
     path('api/liveness/submit/', api_views.submit_liveness, name='api_liveness'),
+    path('api/moderate/comment-image/', api_views.moderate_comment_image, name='api_moderate_comment_image'),
     path('api/live/token/', api_views.livekit_token, name='api_live_token'),
     path('sw.js', views.service_worker, name='sw'),
     path('manifest.json', views.manifest, name='manifest'),

@@ -9953,8 +9953,9 @@ async function postGifComment(src) {
                 post_id: currentCommentPostId,
                 text_content: '',
                 gif_url: src
-            });
+            }).select('id').single();
             if (gifRes && gifRes.error) { console.warn('[GIF Comment] insert failed:', gifRes.error.message); showToast('Could not post GIF'); }
+            else if (gifRes && gifRes.data && gifRes.data.id) { _moderateCommentImage(gifRes.data.id, src); }
             // Update comment count on the post card
             var postCard = document.querySelector('[data-post-id="' + currentCommentPostId + '"]');
             if (postCard) {
@@ -25286,6 +25287,42 @@ function _appendCommentInPlace(c) {
     return node;
 }
 
+// Ask the server to SAFE_SEARCH-check an image posted in a comment. The server
+// decides + sets is_sensitive (never trusted from the client); if it comes back
+// sensitive we reflect it locally and re-render so it blurs immediately.
+async function _moderateCommentImage(commentId, imageUrl) {
+    if (!commentId || !imageUrl || !window.sb) return;
+    try {
+        var s = await sb.auth.getSession();
+        var token = (s.data && s.data.session) ? s.data.session.access_token : '';
+        if (!token) return;
+        var r = await fetch('/api/moderate/comment-image/', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comment_id: commentId, image_url: imageUrl })
+        });
+        var d = await r.json();
+        if (d && d.sensitive) {
+            if (window._cmt && window._cmt.comments) {
+                window._cmt.comments.forEach(function (c) { if (c.id === commentId) c.is_sensitive = true; });
+            }
+            if (typeof _renderCommentList === 'function') _renderCommentList();
+        }
+    } catch (e) {}
+}
+
+// Tap a blurred sensitive comment image to reveal it.
+function revealCommentImage(el) {
+    if (!el) return;
+    var img = el.querySelector('img');
+    var veil = el.querySelector('.cmt-sensitive-veil');
+    if (img) { img.style.filter = 'none'; img.style.transform = 'none'; }
+    if (veil) veil.remove();
+    el.onclick = null;
+    el.style.cursor = 'default';
+    triggerHaptic(8);
+}
+
 function _buildCommentNode(c, depth) {
         var u = c.users || {};
         var avatar = u.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff';
@@ -25317,7 +25354,16 @@ function _buildCommentNode(c, depth) {
                 (c.clip_id
                     ? '<div onclick="openClipFromComment(\'' + escapeHtml(c.clip_id) + '\')" style="display:inline-flex;align-items:center;gap:8px;background:rgba(255,149,0,0.12);border:1px solid rgba(255,149,0,0.3);border-radius:12px;padding:8px 12px;margin:2px 0 6px;cursor:pointer;"><i class="fa-solid fa-clapperboard" style="color:#FF9500;font-size:14px;"></i><span style="font-size:13px;font-weight:600;color:var(--text-primary,#000);">' + escapeHtml(c.text_content || 'Replied with a TrustClip') + '</span><i class="fa-solid fa-play" style="color:#FF9500;font-size:10px;"></i></div>'
                     : (c.gif_url
-                        ? '<img src="' + escapeHtml(c.gif_url) + '" style="width:140px;max-width:60%;aspect-ratio:1;object-fit:cover;border-radius:12px;display:block;margin:2px 0 6px;">'
+                        ? (c.is_sensitive
+                            ? '<div class="cmt-sensitive" onclick="revealCommentImage(this)" style="position:relative;width:140px;max-width:60%;aspect-ratio:1;border-radius:12px;overflow:hidden;margin:2px 0 6px;cursor:pointer;">' +
+                                  '<img src="' + escapeHtml(c.gif_url) + '" style="width:100%;height:100%;object-fit:cover;filter:blur(24px);transform:scale(1.15);">' +
+                                  '<div class="cmt-sensitive-veil" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:rgba(0,0,0,0.32);color:#fff;text-align:center;padding:6px;">' +
+                                      '<i class="fa-solid fa-eye-slash" style="font-size:16px;"></i>' +
+                                      '<span style="font-size:10px;font-weight:800;">Sensitive</span>' +
+                                      '<span style="font-size:9px;opacity:0.85;">Tap to view</span>' +
+                                  '</div>' +
+                              '</div>'
+                            : '<img src="' + escapeHtml(c.gif_url) + '" style="width:140px;max-width:60%;aspect-ratio:1;object-fit:cover;border-radius:12px;display:block;margin:2px 0 6px;">')
                         : '<p style="font-size:14px;line-height:1.4;margin:0 0 6px;">' + escapeHtml(c.text_content || '') + '</p>')) +
                 '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">' +
                     '<div onclick="toggleCommentLike(this,\'' + c.id + '\')" style="display:flex;align-items:center;gap:4px;cursor:pointer;">' +
