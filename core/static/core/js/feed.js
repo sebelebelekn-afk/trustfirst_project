@@ -12868,7 +12868,7 @@ async function initReels() {
                 : '<img onclick="openProfile(\'' + post.user_id + '\')" src="' + avatar + '" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0;cursor:pointer;border:1.5px solid rgba(255,255,255,0.45);">';
             c.innerHTML += `
             <div class="reel-page" data-post-id="${post.id}">
-                <video src="${post.media_url || post.video_url}" class="reel-video" autoplay muted loop playsinline preload="auto" style="width:100%;height:100%;object-fit:cover;opacity:1;" onclick="reelTogglePlay(this)"></video>
+                <video src="${post.media_url || post.video_url}" class="reel-video" data-vol="${post.volume == null ? 100 : post.volume}" autoplay muted loop playsinline preload="auto" style="width:100%;height:100%;object-fit:cover;opacity:1;" onclick="reelTogglePlay(this)"></video>
                 <div class="reel-play-indicator" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:82px;height:82px;border-radius:50%;background:rgba(0,0,0,0.42);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;pointer-events:none;z-index:25;"><i class="fa-solid fa-play" style="color:#fff;font-size:32px;margin-left:4px;"></i></div>
                 <button class="reel-mute-btn" onclick="toggleReelMute(this)" style="position:absolute;top:max(54px,env(safe-area-inset-top,54px));right:14px;width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,0.5);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:30;"><i class="fa-solid fa-volume-xmark" style="color:#fff;font-size:15px;"></i></button>
                 <div class="reel-ui">
@@ -17506,6 +17506,27 @@ async function loadReels() {
         if (!reelsData || !reelsData.length) renderReelsFallback();
     }
 }
+
+// The editor cannot re-encode the file, so a clip's chosen volume travels with it
+// as data (trustclips.volume) and is applied to the <video> whenever it plays.
+// data-vol is a percentage: 100 is unchanged, 0 is silent, above 100 is capped at
+// 1.0 because the Web Audio-free <video>.volume cannot amplify past full scale.
+function _applyClipVolume(v) {
+    if (!v || !v.tagName || v.tagName !== 'VIDEO') return;
+    var raw = v.getAttribute('data-vol');
+    if (raw == null) return;
+    var pct = parseInt(raw, 10);
+    if (!isFinite(pct)) return;
+    try { v.volume = Math.max(0, Math.min(pct / 100, 1)); } catch (e) {}
+}
+document.addEventListener('play', function (e) { _applyClipVolume(e.target); }, true);
+document.addEventListener('volumechange', function (e) {
+    // Re-assert after an unmute (toggleReelMute resets volume implicitly on some browsers)
+    var v = e.target;
+    if (v && v.tagName === 'VIDEO' && !v.muted && v.hasAttribute('data-vol') && !v._volApplied) {
+        v._volApplied = true; _applyClipVolume(v); v._volApplied = false;
+    }
+}, true);
 
 function renderReelsFallback() {
     var loading = document.getElementById('reelsLoading');
@@ -37910,7 +37931,7 @@ function edOpenVolumePanel() {
             '</div>' +
         '</div>' +
         '<div style="display:flex;justify-content:flex-end;padding:8px 16px 0;">' +
-            '<button onclick="document.getElementById(\'edVolumePanel\').remove();showToast(\'Volume applied ✅\');triggerHaptic(15);" ' +
+            '<button onclick="document.getElementById(\'edVolumePanel\').remove();showToast(\'Volume saved ✅\');triggerHaptic(15);" ' +
                 'style="background:#007AFF;border:none;color:white;font-size:14px;font-weight:700;padding:10px 24px;border-radius:20px;cursor:pointer;">Done</button>' +
         '</div>';
 
@@ -40231,6 +40252,13 @@ async function submitTrustClip() {
                 video_url: videoUrl,
                 thumbnail_url: thumbnailUrl || null,
                 caption: text,
+                // Editor volume rides along as data and is applied on playback,
+                // because nothing re-encodes the file.
+                volume: (function(){
+                    var c = window.edState && edState.clips && edState.clips[0];
+                    var v = c && typeof c.volume === 'number' ? c.volume : 100;
+                    return Math.max(0, Math.min(v, 200));
+                })(),
                 audience: window._tcAudience || 'everyone',
                 sound_name: window._tcAudioName || 'Original Audio',
                 is_hidden: false,

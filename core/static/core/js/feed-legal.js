@@ -13,7 +13,7 @@ var _tfPrivacyHTML = `
     </div>
     <h1 style="font-size:28px;font-weight:900;color:var(--text-primary,#000);margin:0 0 10px;line-height:1.2;">Your privacy matters to us.</h1>
     <p style="font-size:15px;color:var(--text-secondary,#666);line-height:1.7;margin:0 0 14px;">TrustFirst is built on a simple promise: we protect what you share with us. We collect only what we need, we never sell your data, and we give you full control.</p>
-    <p style="font-size:12px;color:#aaa;">Effective Date: 20 April 2026 · Applies globally</p>
+    <p style="font-size:12px;color:#aaa;">Effective Date: 2 August 2026 · Applies globally · Governed by South African law, including POPIA</p>
   </div>
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:32px;">
@@ -48,7 +48,7 @@ var _tfPrivacyHTML = `
     </div>
     <div style="border-left:3px solid rgba(0,122,255,0.25);padding-left:16px;margin-bottom:12px;">
       <b style="font-size:14px;color:var(--text-primary,#000);">For verification:</b>
-      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.7;margin:4px 0 0;">Government ID (via Didit) or facial verification, used strictly for safety, never stored raw.</p>
+      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.7;margin:4px 0 0;">If you apply for a badge, the document you submit, such as a government ID with the number covered, a company registration or a department letter. We ask you to cover your ID number, because a reviewer only needs your photo, your name and the document type. See section 6 for exactly how long we keep it, which is not long.</p>
     </div>
     <div style="border-left:3px solid rgba(0,122,255,0.25);padding-left:16px;">
       <b style="font-size:14px;color:var(--text-primary,#000);">Automatically collected:</b>
@@ -65,7 +65,15 @@ var _tfPrivacyHTML = `
   <div style="margin-bottom:28px;">
     <h2 style="font-size:18px;font-weight:800;color:var(--text-primary,#000);margin:0 0 4px;">3. Sharing</h2>
     <div style="width:32px;height:3px;background:#007AFF;border-radius:2px;margin-bottom:14px;"></div>
-    <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;">Only with trusted service providers (Didit, cloud hosting) and only when required by South African law. <strong>Never sold to third parties.</strong></p>
+    <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;">Only with the service providers that make the app work, and only when required by South African law. <strong>Never sold to third parties, and never used for advertising.</strong> The providers we rely on are:</p>
+    <ul style="font-size:14px;color:var(--text-secondary,#555);line-height:1.8;padding-left:20px;margin:10px 0 0;">
+      <li><b>Supabase</b>, database, accounts and file storage</li>
+      <li><b>Render</b>, application hosting</li>
+      <li><b>Google Cloud Vision</b>, automated safety checks on images, described in section 7</li>
+      <li><b>LiveKit</b>, live video streaming and guest audio or video</li>
+      <li><b>Giphy</b>, the GIF picker, only when you open it</li>
+      <li><b>Email and AI providers</b> used for sign-in codes and for Eddie, our assistant</li>
+    </ul>
   </div>
 
   <div style="margin-bottom:28px;">
@@ -80,8 +88,46 @@ var _tfPrivacyHTML = `
     <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;">We use device storage (cookies and local storage) only to keep you signed in, remember your preferences such as light or dark mode, and let the app work offline. We do <strong>not</strong> use advertising or third-party tracking cookies. You can clear this at any time from your browser or device settings.</p>
   </div>
 
+  <div style="margin-bottom:28px;">
+    <h2 style="font-size:18px;font-weight:800;color:var(--text-primary,#000);margin:0 0 4px;">6. Verification Documents</h2>
+    <div style="width:32px;height:3px;background:#007AFF;border-radius:2px;margin-bottom:14px;"></div>
+    <div style="background:rgba(255,149,0,0.06);border:1px solid rgba(255,149,0,0.2);border-radius:16px;padding:16px 18px;margin-bottom:12px;">
+      <b style="font-size:14px;color:var(--text-primary,#000);">We do not keep your ID.</b>
+      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin:6px 0 0;">Badges are reviewed by a person on our team, not sold off to an identity company. Here is exactly what happens to a document you submit:</p>
+    </div>
+    <ul style="font-size:14px;color:var(--text-secondary,#555);line-height:1.85;padding-left:20px;margin:0;">
+      <li>It goes into private storage that only a reviewer can open. It is never public and never linked from your profile.</li>
+      <li>It is <b>deleted the moment your application is approved or rejected</b>. Reviewing it is what destroys it.</li>
+      <li>If nobody reviews it, it is deleted automatically after <b>7 days</b>.</li>
+      <li>We keep only the outcome, meaning whether you are verified and when. We never store your ID number or a copy of the document.</li>
+      <li>We ask you to cover your ID number before you photograph it, so that even the file we briefly hold contains as little as possible.</li>
+    </ul>
+  </div>
+
+  <div style="margin-bottom:28px;">
+    <h2 style="font-size:18px;font-weight:800;color:var(--text-primary,#000);margin:0 0 4px;">7. Automated Safety Checks</h2>
+    <div style="width:32px;height:3px;background:#007AFF;border-radius:2px;margin-bottom:14px;"></div>
+    <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;">To keep the app safe without a human reading your content, some images are checked automatically by Google Cloud Vision:</p>
+    <ul style="font-size:14px;color:var(--text-secondary,#555);line-height:1.85;padding-left:20px;margin:10px 0 0;">
+      <li><b>Images and GIFs posted in comments</b> are checked for adult or violent content. If flagged, the image is blurred for everyone behind a tap to reveal, so nobody is shown something graphic without choosing to look.</li>
+      <li><b>Face verification</b>, if you use it, checks that a real live face is present and that it is not a photo of a photo. It is not facial recognition and we do not build a face database.</li>
+      <li>We store the <b>result</b> of these checks, not a second copy of your image.</li>
+    </ul>
+  </div>
+
+  <div style="margin-bottom:28px;">
+    <h2 style="font-size:18px;font-weight:800;color:var(--text-primary,#000);margin:0 0 4px;">8. Live Streaming, Gifts and Coins</h2>
+    <div style="width:32px;height:3px;background:#007AFF;border-radius:2px;margin-bottom:14px;"></div>
+    <ul style="font-size:14px;color:var(--text-secondary,#555);line-height:1.85;padding-left:20px;margin:0;">
+      <li><b>Live chat and reactions are saved</b>, so someone joining late still sees the conversation. Treat a live chat as public.</li>
+      <li>If you <b>ask to join a live as a guest</b>, the host sees your username and profile picture so they can decide. If they accept, your camera and microphone are shared with everyone watching until you leave.</li>
+      <li><b>Coins</b> are a virtual item with no cash value and cannot be exchanged back into money. When you send a gift, the creator receives <b>80 percent</b> of its value and TrustFirst keeps <b>20 percent</b> to run the platform.</li>
+      <li>Your <b>wallet</b> balance is real money and is kept separate from coins.</li>
+    </ul>
+  </div>
+
   <div style="margin-bottom:32px;">
-    <h2 style="font-size:18px;font-weight:800;color:var(--text-primary,#000);margin:0 0 4px;">6. Contact</h2>
+    <h2 style="font-size:18px;font-weight:800;color:var(--text-primary,#000);margin:0 0 4px;">9. Contact</h2>
     <div style="width:32px;height:3px;background:#007AFF;border-radius:2px;margin-bottom:14px;"></div>
     <div style="background:var(--bg-secondary,#f5f5f5);border-radius:16px;padding:18px 20px;">
       <p style="font-size:14px;color:var(--text-secondary,#555);margin:0 0 4px;"><i class="fa-solid fa-envelope" style="color:#007AFF;margin-right:8px;"></i>privacy@trustfirst.app</p>

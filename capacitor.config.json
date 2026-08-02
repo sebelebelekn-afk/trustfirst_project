@@ -1,0 +1,14 @@
+{
+  "appId": "app.trustfirst.mobile",
+  "appName": "TrustFirst",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "url": "https://YOUR-APP-URL",
+    "cleartext": false
+  },
+  "android": {
+    "backgroundColor": "#000000",
+    "allowMixedContent": false
+  }
+}

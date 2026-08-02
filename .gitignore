@@ -18,3 +18,7 @@ media/
 # Remotion promo build artifacts
 .remotion/
 .cache/
+
+# Capacitor generated native projects (recreated by `npx cap add` in CI)
+/android/
+/ios/

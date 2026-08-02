@@ -2110,7 +2110,7 @@ function authenticateUser() {
 
   <p style="font-weight:700; margin-bottom:6px;">2.2 Verification Information</p>
   <ul style="padding-left:20px; margin-bottom:14px;">
-    <li>Government ID (for verified accounts via Didit)</li>
+    <li>A verification document you submit for a badge, reviewed by our team and then deleted. We ask you to cover your ID number first, and we keep only the outcome, never the document</li>
     <li>Facial verification data (via camera-based verification system)</li>
     <li>Device and authentication signals used for identity confirmation</li>
   </ul>
@@ -2176,8 +2176,9 @@ function authenticateUser() {
   </ul>
   <p style="font-weight:700; margin-bottom:6px;">4.2 With Service Providers</p>
   <ul style="padding-left:20px; margin-bottom:14px;">
-    <li>Didit (identity verification / KYC)</li>
-    <li>Hosting and cloud providers</li>
+    <li>Google Cloud Vision (automated safety checks on images and face liveness)</li>
+    <li>LiveKit (live video streaming)</li>
+    <li>Hosting and cloud providers (Supabase, Render)</li>
     <li>Security and anti-fraud systems</li>
   </ul>
   <p>These providers are only allowed to use data to support TrustFirst.</p>
@@ -2209,7 +2210,7 @@ function authenticateUser() {
   <p>We may use cookies or similar technologies to keep you logged in, understand app performance, and improve user experience and security.</p>
 
   <h3 style="color:var(--text-primary,#000); margin:25px 0 10px; font-size:17px;">8. Data Security</h3>
-  <p>We use industry-standard security measures including encryption, access controls, fraud detection systems, and secure verification systems (including Didit). However, no system is 100% secure.</p>
+  <p>We use industry-standard security measures including encryption, access controls, row-level database security and fraud detection. Verification documents are held in private storage that only a reviewer can open, and are deleted as soon as the application is decided, or automatically after 7 days if it is never reviewed. However, no system is 100% secure.</p>
 
   <h3 style="color:var(--text-primary,#000); margin:25px 0 10px; font-size:17px;">9. International Use</h3>
   <p>TrustFirst is a global platform. Your data may be processed in different countries, including servers outside South Africa, to ensure proper operation of the Service.</p>
@@ -2265,7 +2266,7 @@ function authenticateUser() {
   <p style="font-weight:700; margin-bottom:6px;">3.1 Verified Accounts</p>
   <p>To become a verified user and receive a checkmark, users must complete identity verification through:</p>
   <ul style="padding-left:20px; margin-bottom:14px;">
-    <li>Government-issued ID verification via Didit services, OR</li>
+    <li>A government-issued ID reviewed by our team, with the ID number covered, which is deleted once the review is done, OR</li>
     <li>Alternative camera-based identity verification system (facial verification system)</li>
   </ul>
   <p>Verified users gain full platform access including posting, commenting, starting conversations, and full interaction features.</p>
@@ -4180,8 +4181,8 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=172"></script>
-<script src="{% static 'core/js/feed-legal.js' %}?v=74"></script>
+<script src="{% static 'core/js/feed.js' %}?v=173"></script>
+<script src="{% static 'core/js/feed-legal.js' %}?v=75"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
 <script src="{% static 'core/js/admin.js' %}?v=75"></script>
