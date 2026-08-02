@@ -50,7 +50,11 @@ async function startIdVerification() {
             try { await sb.from('verification_applications').insert({ user_id: currentUser.id, badge_type: 'blue', provider: 'didit', provider_ref: data.session_id, status: 'pending' }); } catch (e) {}
             window.open(data.session_url, '_blank');
         } else {
-            showToast(data.error || 'Could not start verification');
+            // Don't leak server config hints (e.g. "set DIDIT_WORKFLOW_ID") to users.
+            var msg = /not configured|misconfigured/i.test(data.error || '')
+                ? 'Identity verification is being set up — please check back soon.'
+                : (data.error || 'Could not start verification');
+            showToast(msg);
         }
     } catch (e) { showToast('Verification error'); }
 }

@@ -32542,7 +32542,35 @@ function openStoryRepliesSettings() { openSub('msgStoryRepliesOverlay'); }
 function openCommentsSettings() { openSub('commentsSettingsOverlay'); }
 function openInteractionControl() { openSub('interactionControlOverlay'); }
 function openFilteredWords() { openSub('filteredWordsOverlay'); }
-function openSharingSettings() { openSub('sharingSettingsOverlay'); }
+// Sharing & Reuse preferences — remembered per device so the switches actually
+// stick (they used to only flip a CSS class and forget on reopen). Defaults
+// mirror each switch's initial position.
+var _SHARE_DEFAULTS = { storyShares:true, postsToStories:true, reposts:true, reusePosts:false, reuseTrustclip:true, downloads:false, storiesToStories:'everyone', websiteEmbeds:'on' };
+function _loadSharePrefs() {
+    try { return Object.assign({}, _SHARE_DEFAULTS, JSON.parse(localStorage.getItem('tf-sharing-prefs') || '{}')); }
+    catch (e) { return Object.assign({}, _SHARE_DEFAULTS); }
+}
+function saveSharePref(key, val) {
+    var p = _loadSharePrefs(); p[key] = val;
+    try { localStorage.setItem('tf-sharing-prefs', JSON.stringify(p)); } catch (e) {}
+    showToast('Saved');
+}
+function toggleSharePref(el, key) {
+    el.classList.toggle('active');
+    saveSharePref(key, el.classList.contains('active'));
+    triggerHaptic(8);
+}
+function _initSharingSettings() {
+    var p = _loadSharePrefs();
+    document.querySelectorAll('#sharingSettingsOverlay [data-share-key]').forEach(function (el) {
+        el.classList.toggle('active', !!p[el.getAttribute('data-share-key')]);
+    });
+    var s2s = document.querySelector('#sharingSettingsOverlay input[name="storiesToStories"][value="' + p.storiesToStories + '"]');
+    if (s2s) s2s.checked = true;
+    var we = document.querySelector('#sharingSettingsOverlay input[name="websiteEmbeds"][value="' + p.websiteEmbeds + '"]');
+    if (we) we.checked = true;
+}
+function openSharingSettings() { openSub('sharingSettingsOverlay'); _initSharingSettings(); }
 function openMutedAccounts() { openSub('mutedAccountsOverlay'); }
 function openPreferredContent() {
     // Not available for child (green tick) accounts

@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=79">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=80">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -4180,9 +4180,9 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=166"></script>
+<script src="{% static 'core/js/feed.js' %}?v=167"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=74"></script>
-<script src="{% static 'core/js/verify.js' %}?v=74"></script>
+<script src="{% static 'core/js/verify.js' %}?v=75"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
 <script src="{% static 'core/js/admin.js' %}?v=74"></script>
 <!-- ===== LIVE MINI-PLAYER ===== -->
@@ -4240,34 +4240,34 @@ function authenticateUser() {
   <div class="sub-scroll">
     <div class="settings-section-title">ALLOW PEOPLE TO SHARE YOUR STORIES</div>
     <div class="settings-card">
-      <div class="settings-row"><div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-circle-play" style="color:#007AFF;"></i><div><b>Story shares</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Let people share your stories to theirs</p></div></div><div class="toggle active" onclick="this.classList.toggle('active');"></div></div>
+      <div class="settings-row"><div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-circle-play" style="color:#007AFF;"></i><div><b>Story shares</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Let people share your stories to theirs</p></div></div><div class="toggle active" data-share-key="storyShares" onclick="toggleSharePref(this,'storyShares')"></div></div>
       <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:10px;padding:14px 16px;">
         <b style="font-size:15px;color:var(--text-primary,#000);">Stories to stories</b>
         <div style="width:100%;display:flex;flex-direction:column;gap:8px;" id="storiesToStoriesRadios">
-          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;"><input type="radio" name="storiesToStories" value="everyone" checked style="accent-color:#007AFF;width:18px;height:18px;"> <span style="font-size:14px;">Everyone</span></label>
-          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;"><input type="radio" name="storiesToStories" value="followers"> <span style="font-size:14px;">Followers you follow back</span></label>
-          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;"><input type="radio" name="storiesToStories" value="off"> <span style="font-size:14px;">Off</span></label>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;"><input type="radio" name="storiesToStories" value="everyone" checked onchange="saveSharePref('storiesToStories',this.value)" style="accent-color:#007AFF;width:18px;height:18px;"> <span style="font-size:14px;">Everyone</span></label>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;"><input type="radio" name="storiesToStories" value="followers" onchange="saveSharePref('storiesToStories',this.value)"> <span style="font-size:14px;">Followers you follow back</span></label>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;"><input type="radio" name="storiesToStories" value="off" onchange="saveSharePref('storiesToStories',this.value)"> <span style="font-size:14px;">Off</span></label>
         </div>
       </div>
     </div>
     <div class="settings-section-title">ALLOW PEOPLE TO SHARE YOUR POSTS AND TRUSTCLIP</div>
     <div class="settings-card">
-      <div class="settings-row"><div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-retweet" style="color:#34C759;"></i><div><b>Posts and TrustClip to stories</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Let others share your posts to their story</p></div></div><div class="toggle active" onclick="this.classList.toggle('active');"></div></div>
-      <div class="settings-row"><div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-arrows-rotate" style="color:#007AFF;"></i><div><b>Reposts on posts and TrustClip</b></div></div><div class="toggle active" onclick="this.classList.toggle('active');"></div></div>
+      <div class="settings-row"><div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-retweet" style="color:#34C759;"></i><div><b>Posts and TrustClip to stories</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Let others share your posts to their story</p></div></div><div class="toggle active" data-share-key="postsToStories" onclick="toggleSharePref(this,'postsToStories')"></div></div>
+      <div class="settings-row"><div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-arrows-rotate" style="color:#007AFF;"></i><div><b>Reposts on posts and TrustClip</b></div></div><div class="toggle active" data-share-key="reposts" onclick="toggleSharePref(this,'reposts')"></div></div>
     </div>
     <div class="settings-section-title">ALLOW PEOPLE TO CREATE WITH AND REUSE YOUR CONTENT</div>
     <div class="settings-card">
-      <div class="settings-row"><div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-pen-nib" style="color:#5856D6;"></i><div><b>Posts</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Let people remix or use your post content</p></div></div><div class="toggle" onclick="this.classList.toggle('active');"></div></div>
-      <div class="settings-row"><div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-film" style="color:#FF9500;"></i><div><b>TrustClip</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Anyone can create with your original audio on TrustFirst apps and websites</p></div></div><div class="toggle active" onclick="this.classList.toggle('active');"></div></div>
+      <div class="settings-row"><div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-pen-nib" style="color:#5856D6;"></i><div><b>Posts</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Let people remix or use your post content</p></div></div><div class="toggle" data-share-key="reusePosts" onclick="toggleSharePref(this,'reusePosts')"></div></div>
+      <div class="settings-row"><div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-film" style="color:#FF9500;"></i><div><b>TrustClip</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Anyone can create with your original audio on TrustFirst apps and websites</p></div></div><div class="toggle active" data-share-key="reuseTrustclip" onclick="toggleSharePref(this,'reuseTrustclip')"></div></div>
     </div>
     <div class="settings-section-title">ALLOW PEOPLE TO SHARE EXTERNALLY</div>
     <div class="settings-card">
-      <div class="settings-row"><div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-arrow-down-to-line" style="color:#888;"></i><div><b>Downloads</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Let people download your content</p></div></div><div class="toggle" onclick="this.classList.toggle('active');"></div></div>
+      <div class="settings-row"><div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-arrow-down-to-line" style="color:#888;"></i><div><b>Downloads</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Let people download your content</p></div></div><div class="toggle" data-share-key="downloads" onclick="toggleSharePref(this,'downloads')"></div></div>
       <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:10px;padding:14px 16px;">
         <b style="font-size:15px;color:var(--text-primary,#000);">Website embeds</b>
         <div style="width:100%;display:flex;flex-direction:column;gap:8px;">
-          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;"><input type="radio" name="websiteEmbeds" value="on" checked style="accent-color:#007AFF;width:18px;height:18px;"> <span style="font-size:14px;">On</span></label>
-          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;"><input type="radio" name="websiteEmbeds" value="off"> <span style="font-size:14px;">Off</span></label>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;"><input type="radio" name="websiteEmbeds" value="on" checked onchange="saveSharePref('websiteEmbeds',this.value)" style="accent-color:#007AFF;width:18px;height:18px;"> <span style="font-size:14px;">On</span></label>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;"><input type="radio" name="websiteEmbeds" value="off" onchange="saveSharePref('websiteEmbeds',this.value)"> <span style="font-size:14px;">Off</span></label>
         </div>
       </div>
     </div>

@@ -80,6 +80,15 @@ input, textarea, [contenteditable="true"], .post-content {
 .nav-container { bottom: max(28px, env(safe-area-inset-bottom)); }
 #chat-bottom-bar { padding-bottom: max(28px, env(safe-area-inset-bottom)) !important; }
 
+/* iOS standalone PWA: 100dvh can resolve a touch short and expose the black
+   <body> as a bar under the app. -webkit-fill-available fills the TRUE visible
+   height, killing that gap. Scoped to phones so the desktop phone-frame stays. */
+@media (max-width: 499px) {
+    html { height: -webkit-fill-available; }
+    body { min-height: -webkit-fill-available; height: -webkit-fill-available; }
+    .app { height: -webkit-fill-available; min-height: -webkit-fill-available; }
+}
+
 
 
     /* ==========================================================================
