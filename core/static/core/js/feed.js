@@ -31087,6 +31087,13 @@ function toggleCallMic() {
         btn.classList.toggle('call-ctrl-muted', _callMicMuted);
         btn.innerHTML = _callMicMuted ? '<i class="fa-solid fa-microphone-slash"></i>' : '<i class="fa-solid fa-microphone"></i>';
     }
+    // Keep the minimised voice banner's mic button showing the same state.
+    var mini = document.getElementById('call-mini-mute');
+    if (mini) {
+        mini.style.background = _callMicMuted ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.14)';
+        mini.innerHTML = '<i class="fa-solid fa-microphone' + (_callMicMuted ? '-slash' : '') +
+            '" style="color:' + (_callMicMuted ? '#000' : '#fff') + ';font-size:15px;"></i>';
+    }
     triggerHaptic(10);
 }
 
@@ -36097,26 +36104,112 @@ if (_edVidEl) {
 }
 
 
+// Grab a handful of frames spread across a clip so its timeline bar reads as a
+// filmstrip. Runs once per clip; the render call at the end repaints with them.
+function _edBuildFilmstrip(clip) {
+    if (!clip || !clip.objectUrl || clip._stripPending) return;
+    if (clip.filmstrip && clip.filmstrip.length) return;
+    clip._stripPending = true;
+
+    var COUNT = 8;
+    var v = document.createElement('video');
+    v.muted = true; v.playsInline = true; v.preload = 'auto';
+    var frames = [], times = [], idx = 0, finished = false;
+
+    function done() {
+        if (finished) return;
+        finished = true;
+        clip._stripPending = false;
+        if (frames.length) { clip.filmstrip = frames; edRenderTimeline(); }
+        try { v.src = ''; } catch (e) {}
+    }
+    v.addEventListener('error', done);
+    setTimeout(done, 12000);   // never leave a clip stuck pending
+
+    v.addEventListener('loadedmetadata', function () {
+        var dur = (v.duration && isFinite(v.duration)) ? v.duration : 0;
+        if (!dur) { done(); return; }
+        for (var i = 0; i < COUNT; i++) times.push(Math.min(dur - 0.05, dur * i / COUNT));
+        grab();
+    });
+
+    function grab() {
+        if (idx >= COUNT) { done(); return; }
+        var onSeek = function () {
+            v.removeEventListener('seeked', onSeek);
+            try {
+                var cv = document.createElement('canvas');
+                cv.width = 48; cv.height = 64;
+                cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
+                frames.push(cv.toDataURL('image/jpeg', 0.5));
+            } catch (e) { frames.push(null); }
+            idx++; grab();
+        };
+        v.addEventListener('seeked', onSeek);
+        try { v.currentTime = times[idx]; }
+        catch (e) { v.removeEventListener('seeked', onSeek); frames.push(null); idx++; grab(); }
+    }
+
+    v.src = clip.objectUrl;
+}
+
+// Time ruler above the tracks. It lives in its own synced scroller, so it slides
+// under the playhead with everything else.
+function _edRenderRuler() {
+    var ruler = document.getElementById('edRuler');
+    if (!ruler) return;
+    var totalMs = edState.clips.reduce(function (s, c) { return s + c.durationMs; }, 0);
+    if (!totalMs) { ruler.innerHTML = ''; return; }
+    var pxPerSec = ED_CLIP_PX_PER_SEC * edZoom;
+    // Aim for a tick roughly every 140px, snapped to a sensible number of
+    // seconds, so labels stay readable instead of crowding together.
+    var step = 1;
+    [1, 2, 5, 10, 15, 30, 60].some(function (s) { step = s; return s * pxPerSec >= 140; });
+    var out = '';
+    for (var t = 0; t <= Math.ceil(totalMs / 1000); t += step) {
+        out += '<div style="position:absolute;left:' + (t * pxPerSec) + 'px;top:0;transform:translateX(-50%);' +
+               'font-size:9px;font-weight:700;color:rgba(255,255,255,0.38);white-space:nowrap;">' + edFmt(t * 1000) + '</div>';
+    }
+    ruler.style.width = ((totalMs / 1000) * pxPerSec) + 'px';
+    ruler.innerHTML = out;
+}
+
 function edRenderTimeline() {
     var vTrack = document.getElementById('edVideoTrack');
     var aTrack = document.getElementById('edAudioTrack');
     var tTrack = document.getElementById('edTextTrack');
     if (!vTrack) return;
 
-    // Video clips
+    // Video clips, drawn as a filmstrip of real frames like a normal editor
+    // rather than a flat coloured block with the word "Clip" on it.
     vTrack.innerHTML = edState.clips.map(function(c) {
         var w = Math.max(60, (c.durationMs / 1000) * ED_CLIP_PX_PER_SEC * edZoom);
         var isSel = c.id === edState.selectedClipId;
+        _edBuildFilmstrip(c);   // no-op once this clip's frames exist
+        var strip;
+        if (c.filmstrip && c.filmstrip.length) {
+            strip = c.filmstrip.map(function (f) {
+                return '<div style="flex:1 0 0;min-width:0;height:100%;' +
+                       (f ? 'background-image:url(' + f + ');background-size:cover;background-position:center;' : 'background:#242424;') +
+                       '"></div>';
+            }).join('');
+        } else if (c.thumbnail) {
+            strip = '<div style="flex:1;height:100%;background-image:url(' + c.thumbnail + ');background-size:cover;background-position:center;"></div>';
+        } else {
+            strip = '<div style="flex:1;height:100%;background:' + c.color + ';"></div>';
+        }
         return '<div class="ed-clip' + (isSel ? ' selected' : '') + '" ' +
             'id="' + c.id + '" ' +
-            'style="width:' + w + 'px;background:' + c.color + ';" ' +
+            'style="width:' + w + 'px;background:#111;" ' +
             'onclick="edSelectClip(\'' + c.id + '\')">' +
+            '<div style="position:absolute;inset:0;display:flex;overflow:hidden;border-radius:inherit;pointer-events:none;">' + strip + '</div>' +
             '<div class="ed-trim ed-trim-l" ontouchstart="edTrimStart(event,\'' + c.id + '\',\'l\')" onmousedown="edTrimStart(event,\'' + c.id + '\',\'l\')">⠿</div>' +
-            (c.thumbnail ? '<img src="' + c.thumbnail + '" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.6;pointer-events:none;">' : '') +
-            '<span style="position:relative;z-index:1;pointer-events:none;">Clip ' + (edState.clips.indexOf(c)+1) + '</span>' +
+            '<span style="position:relative;z-index:1;pointer-events:none;font-size:10px;text-shadow:0 1px 3px rgba(0,0,0,0.9);">' + edFmt(c.durationMs) + '</span>' +
             '<div class="ed-trim ed-trim-r" ontouchstart="edTrimStart(event,\'' + c.id + '\',\'r\')" onmousedown="edTrimStart(event,\'' + c.id + '\',\'r\')">⠿</div>' +
             '</div>';
     }).join('');
+
+    _edRenderRuler();
 
     // Audio tracks
     if (aTrack) {
@@ -36501,10 +36594,35 @@ function editorTogglePlay() {
 
 // Keep the play/pause icon, playhead tick and timestamp locked to the video's
 // real state — including the autoplay when the editor first opens.
+// Shape the preview stage to the clip itself. A portrait clip gets a portrait
+// frame, a landscape clip a landscape one, and the whole frame stays visible
+// instead of being cropped to a fixed 9:16 box.
+function _edFitStage() {
+    var vid = document.getElementById('edVideo');
+    var stage = document.getElementById('edStage');
+    if (!vid || !stage || !vid.videoWidth || !vid.videoHeight) return;
+    var ratio = vid.videoWidth / vid.videoHeight;
+    stage.style.aspectRatio = vid.videoWidth + ' / ' + vid.videoHeight;
+    // Portrait fills the available height; landscape fills the width instead, so
+    // a wide clip is not squeezed into a tall sliver.
+    if (ratio >= 1) {
+        stage.style.height = 'auto';
+        stage.style.width = '100%';
+        stage.style.maxHeight = '100%';
+    } else {
+        stage.style.height = '100%';
+        stage.style.width = 'auto';
+        stage.style.maxWidth = '100%';
+    }
+}
+
 function edWireVideo() {
     var vid = document.getElementById('edVideo');
     if (!vid || vid._edWired) return;
     vid._edWired = true;
+    vid.addEventListener('loadedmetadata', _edFitStage);
+    vid.addEventListener('loadeddata', _edFitStage);
+    _edFitStage();
     function icon() { var b = document.getElementById('edPlayBtn'); if (b) b.innerHTML = vid.paused ? '<i class="fa-solid fa-play"></i>' : '<i class="fa-solid fa-pause"></i>'; }
     vid.addEventListener('play', function(){ edState.isPlaying = true; icon(); if (_edTickRAF) cancelAnimationFrame(_edTickRAF); edTickPlayhead(); _edAudioSync(true); });
     vid.addEventListener('pause', function(){ edState.isPlaying = false; icon(); if (_edTickRAF) { cancelAnimationFrame(_edTickRAF); _edTickRAF = null; } edSyncTimelineScroll(); _edAudioSync(false); });
@@ -36523,10 +36641,12 @@ function edSyncTimelineScroll() {
     var totalMs = edState.clips.reduce(function(s,c){return s+c.durationMs;},0) || 1;
     // Keep ALL three tracks (video, audio, text) scrolled together so the playhead
     // lines up across them — syncing only the video track let the others drift.
-    var scrollers = document.querySelectorAll('#preview-edit-overlay .ed-timeline-scroll');
-    scrollers.forEach(function(scroller){
-        var maxScroll = scroller.scrollWidth - scroller.clientWidth;
-        if (maxScroll > 0) scroller.scrollLeft = (edState.playheadMs / totalMs) * maxScroll;
+    // Scroll by absolute pixels rather than a fraction of each scroller's own
+    // width. Every track shares one pixels-per-second scale, so this keeps the
+    // ruler and the tracks agreeing even though their containers differ in size.
+    var offset = (edState.playheadMs / 1000) * ED_CLIP_PX_PER_SEC * edZoom;
+    document.querySelectorAll('#preview-edit-overlay .ed-timeline-scroll').forEach(function (scroller) {
+        scroller.scrollLeft = offset;
     });
 }
 

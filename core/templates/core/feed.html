@@ -515,13 +515,19 @@ function authenticateUser() {
   </div>
 
   <!-- VIDEO PREVIEW AREA -->
-  <div id="edPreviewArea" style="position:relative;width:100%;height:52%;background:#0a0a0a;display:flex;align-items:center;justify-content:center;overflow:hidden;">
-    <video id="edVideo" style="max-width:100%;max-height:100%;object-fit:contain;" playsinline loop></video>
-    <!-- Cutout compositor: shows the masked result and captures brush strokes.
-         Sits above the video, below text. Hidden until a cutout tool is used. -->
-    <canvas id="edCutoutCanvas" style="position:absolute;display:none;pointer-events:none;touch-action:none;"></canvas>
-    <!-- Text overlays will be injected here -->
-    <div id="edTextLayer" style="position:absolute;inset:0;pointer-events:none;"></div>
+  <div id="edPreviewArea" style="position:relative;width:100%;height:52%;background:#0a0a0a;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:10px 0;box-sizing:border-box;">
+    <!-- The stage is the frame the clip is composed inside. It keeps the source
+         shape: a portrait clip stays portrait, a landscape clip stays landscape,
+         and the whole frame is always visible rather than cropped. JS sets its
+         aspect-ratio from the video's real dimensions once metadata loads. -->
+    <div id="edStage" style="position:relative;height:100%;aspect-ratio:9/16;max-width:100%;background:#000;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,0.16);display:flex;align-items:center;justify-content:center;">
+      <video id="edVideo" style="width:100%;height:100%;object-fit:contain;background:#000;" playsinline loop></video>
+      <!-- Cutout compositor: shows the masked result and captures brush strokes.
+           Sits above the video, below text. Hidden until a cutout tool is used. -->
+      <canvas id="edCutoutCanvas" style="position:absolute;display:none;pointer-events:none;touch-action:none;"></canvas>
+      <!-- Text overlays will be injected here -->
+      <div id="edTextLayer" style="position:absolute;inset:0;pointer-events:none;"></div>
+    </div>
     <!-- Playback controls -->
     <div style="position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:12px;">
       <button id="edPlayBtn" onclick="editorTogglePlay()" style="width:42px;height:42px;border-radius:50%;background:rgba(0,0,0,0.55);backdrop-filter:blur(10px);border:0.5px solid rgba(255,255,255,0.25);color:white;font-size:16px;display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-play"></i></button>
@@ -543,33 +549,54 @@ function authenticateUser() {
     <!-- Track labels + rows -->
     <div style="display:flex;flex-direction:column;gap:6px;padding:0 0 6px;">
 
+      <!-- TIME RULER (scrolls with the tracks, so the labels stay under the playhead) -->
+      <div style="display:flex;align-items:center;gap:6px;">
+        <div style="width:36px;flex-shrink:0;"></div>
+        <div class="ed-timeline-scroll" style="flex:1;position:relative;height:14px;overflow:hidden;">
+          <div style="padding:0 50%;min-width:100%;height:100%;">
+            <div id="edRuler" style="position:relative;height:100%;"></div>
+          </div>
+        </div>
+      </div>
+
       <!-- VIDEO TRACK -->
       <div style="display:flex;align-items:center;gap:6px;">
         <div style="width:36px;flex-shrink:0;text-align:right;font-size:10px;font-weight:700;color:rgba(255,255,255,0.4);display:flex;flex-direction:column;align-items:flex-end;gap:1px;">
           <span>VID</span>
           <span onclick="edAddClipFromGallery()" style="font-size:14px;color:#007AFF;cursor:pointer;line-height:1;">+</span>
         </div>
-        <div class="ed-timeline-scroll" style="flex:1;padding:2px 0;position:relative;min-height:48px;">
+        <!-- The playhead lives OUTSIDE the scroller so it stays pinned at the
+             centre while the timeline slides underneath it. Inside the scroller
+             it scrolled away with the clips. -->
+        <!-- min-width:0 so this flex item can shrink to the row instead of
+             stretching to fit a long timeline, which pushed the playhead off centre. -->
+        <div style="flex:1;min-width:0;position:relative;min-height:48px;">
           <div class="ed-playhead"></div>
-          <div id="edVideoTrack" style="display:flex;gap:4px;padding:0 50%;min-width:100%;"></div>
+          <div class="ed-timeline-scroll" style="padding:2px 0;">
+            <div id="edVideoTrack" style="display:flex;gap:4px;padding:0 50%;min-width:100%;"></div>
+          </div>
         </div>
       </div>
 
       <!-- AUDIO TRACK -->
       <div style="display:flex;align-items:center;gap:6px;">
         <div onclick="edOpenMusicModal()" style="width:36px;flex-shrink:0;text-align:right;font-size:10px;font-weight:700;color:rgba(255,255,255,0.4);cursor:pointer;" title="Add music">AUD</div>
-        <div class="ed-timeline-scroll" style="flex:1;padding:2px 0;position:relative;min-height:42px;">
+        <div style="flex:1;min-width:0;position:relative;min-height:42px;">
           <div class="ed-playhead"></div>
-          <div id="edAudioTrack" style="display:flex;gap:4px;padding:0 50%;min-width:100%;"></div>
+          <div class="ed-timeline-scroll" style="padding:2px 0;">
+            <div id="edAudioTrack" style="display:flex;gap:4px;padding:0 50%;min-width:100%;"></div>
+          </div>
         </div>
       </div>
 
       <!-- TEXT TRACK -->
       <div style="display:flex;align-items:center;gap:6px;">
         <div style="width:36px;flex-shrink:0;text-align:right;font-size:10px;font-weight:700;color:rgba(255,255,255,0.4);">TXT</div>
-        <div class="ed-timeline-scroll" style="flex:1;padding:2px 0;position:relative;min-height:42px;">
+        <div style="flex:1;min-width:0;position:relative;min-height:42px;">
           <div class="ed-playhead"></div>
-          <div id="edTextTrack" style="display:flex;gap:4px;padding:0 50%;min-width:100%;"></div>
+          <div class="ed-timeline-scroll" style="padding:2px 0;">
+            <div id="edTextTrack" style="display:flex;gap:4px;padding:0 50%;min-width:100%;"></div>
+          </div>
         </div>
       </div>
 
@@ -1104,13 +1131,32 @@ function authenticateUser() {
       <button onclick="sendCallReaction('👏')" style="background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.18);border-radius:50px;padding:6px 12px;font-size:20px;cursor:pointer;">👏</button>
       <button onclick="sendCallReaction('🔥')" style="background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.18);border-radius:50px;padding:6px 12px;font-size:20px;cursor:pointer;">🔥</button>
     </div>
-    <!-- Main controls -->
-    <div style="display:flex;align-items:center;justify-content:center;gap:14px;background:rgba(255,255,255,0.08);backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.15);border-radius:50px;padding:14px 22px;">
-      <button id="call-mic-btn" onclick="toggleCallMic()" title="Hold for noise cancel" style="width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;"><i class="fa-solid fa-microphone"></i></button>
-      <button id="call-cam-btn" onclick="toggleCallCamera()" style="width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;"><i class="fa-solid fa-video"></i></button>
-      <button onclick="endRealCall()" style="width:64px;height:64px;border-radius:50%;background:#FF3B30;border:none;color:#fff;font-size:24px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(255,59,48,0.5);transition:transform 0.15s;" ontouchstart="this.style.transform='scale(0.92)'" ontouchend="this.style.transform='scale(1)'"><i class="fa-solid fa-phone-slash"></i></button>
-      <button id="call-speaker-btn" onclick="toggleCallSpeaker()" style="width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;"><i class="fa-solid fa-volume-high"></i></button>
-      <button onclick="openCallMoreMenu()" style="width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;"><i class="fa-solid fa-ellipsis"></i></button>
+    <!-- Main controls: a labelled grid, so every button says what it does -->
+    <div style="width:100%;display:grid;grid-template-columns:repeat(3,1fr);gap:18px 8px;background:rgba(40,40,42,0.82);backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.12);border-radius:28px;padding:22px 16px;box-sizing:border-box;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <button id="call-cam-btn" onclick="toggleCallCamera()" style="width:62px;height:62px;border-radius:50%;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;"><i class="fa-solid fa-video"></i></button>
+        <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">Video</span>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <button id="call-speaker-btn" onclick="toggleCallSpeaker()" style="width:62px;height:62px;border-radius:50%;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;"><i class="fa-solid fa-volume-high"></i></button>
+        <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">Speaker</span>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <button id="call-mic-btn" onclick="toggleCallMic()" title="Hold for noise cancel" style="width:62px;height:62px;border-radius:50%;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;"><i class="fa-solid fa-microphone"></i></button>
+        <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">Mute</span>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <button onclick="openCallMoreMenu()" style="width:62px;height:62px;border-radius:50%;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;"><i class="fa-solid fa-ellipsis"></i></button>
+        <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">More</span>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <button onclick="callShareScreen()" style="width:62px;height:62px;border-radius:50%;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;"><i class="fa-solid fa-desktop"></i></button>
+        <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">Share</span>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <button onclick="endRealCall()" style="width:62px;height:62px;border-radius:50%;background:#FF3B30;border:none;color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(255,59,48,0.45);transition:transform 0.15s;" ontouchstart="this.style.transform='scale(0.92)'" ontouchend="this.style.transform='scale(1)'"><i class="fa-solid fa-phone-slash"></i></button>
+        <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">End</span>
+      </div>
     </div>
   </div>
 
@@ -1181,21 +1227,24 @@ function authenticateUser() {
   </div>
 
   <!-- Mini bubble (shown when minimized) -->
-  <div id="call-mini-bubble" style="display:none;position:fixed;top:0;left:0;right:0;z-index:19999;background:linear-gradient(90deg,#34C759,#28a348);box-shadow:0 3px 20px rgba(0,0,0,0.35);">
-    <div onclick="maximizeCall()" style="display:flex;align-items:center;justify-content:space-between;padding:max(50px,env(safe-area-inset-top,50px)) 16px 10px;cursor:pointer;">
-      <div style="display:flex;align-items:center;gap:10px;">
-        <div id="call-mini-avatar-wrap" style="width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,0.25);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
-          <i class="fa-solid fa-phone" style="color:#fff;font-size:14px;"></i>
-        </div>
-        <div>
-          <div id="call-mini-name" style="color:#fff;font-size:14px;font-weight:700;line-height:1.2;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
-          <div id="call-mini-status" style="color:rgba(255,255,255,0.88);font-size:12px;font-weight:500;">TrustCall</div>
+  <!-- Voice call banner. Minimising a voice call drops to this, so you can carry
+       on using the chat while it rings or connects. Tapping it returns to the
+       call; mute and hang up stay reachable without going back. -->
+  <div id="call-mini-bubble" style="display:none;position:fixed;top:0;left:0;right:0;z-index:19999;background:#000;box-shadow:0 3px 20px rgba(0,0,0,0.5);">
+    <div onclick="maximizeCall()" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:max(50px,env(safe-area-inset-top,50px)) 16px 12px;cursor:pointer;">
+      <div id="call-mini-mute" onclick="event.stopPropagation();toggleCallMic()" style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,0.14);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <i class="fa-solid fa-microphone" style="color:#fff;font-size:15px;"></i>
+      </div>
+      <div style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:8px;">
+        <i class="fa-solid fa-phone" style="color:#34C759;font-size:14px;flex-shrink:0;"></i>
+        <div style="min-width:0;display:flex;align-items:center;gap:6px;">
+          <span id="call-mini-name" style="color:#34C759;font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+          <span style="color:#34C759;font-size:16px;font-weight:700;flex-shrink:0;">·</span>
+          <span id="call-mini-status" style="color:#34C759;font-size:16px;font-weight:700;flex-shrink:0;">Ringing</span>
         </div>
       </div>
-      <div style="display:flex;align-items:center;gap:12px;">
-        <div onclick="event.stopPropagation();endRealCall()" style="width:34px;height:34px;border-radius:50%;background:rgba(220,0,0,0.75);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-phone-slash" style="color:#fff;font-size:13px;"></i></div>
-        <div style="width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,0.22);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-chevron-up" style="color:#fff;font-size:13px;"></i></div>
-      </div>
+      <div id="call-mini-avatar-wrap" style="display:none;"></div>
+      <div onclick="event.stopPropagation();endRealCall()" style="width:44px;height:44px;border-radius:50%;background:#FF3B30;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-phone-slash" style="color:#fff;font-size:16px;"></i></div>
     </div>
   </div>
 
@@ -4181,7 +4230,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=174"></script>
+<script src="{% static 'core/js/feed.js' %}?v=175"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=75"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
