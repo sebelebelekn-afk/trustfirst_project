@@ -150,13 +150,16 @@ function openLgComposer(files) {
     var isVid = _lgIsVideo(first);
 
     var TOOLS = [
+        // Single quotes inside: these go into a double quoted onclick attribute,
+        // and double quotes here closed it early, truncating every handler to
+        // "lgTool(" so nothing but Edit did anything.
         { label: 'Edit',     icon: 'fa-sliders',        fn: 'lgToolEditor()' },
-        { label: 'Text',     icon: 'fa-font',           fn: 'lgTool("text")' },
-        { label: 'Stickers', icon: 'fa-face-smile',     fn: 'lgTool("sticker")' },
-        { label: 'Effects',  icon: 'fa-wand-magic-sparkles', fn: 'lgTool("effects")' },
-        { label: 'Filters',  icon: 'fa-circle-half-stroke', fn: 'lgTool("filter")' },
-        { label: 'Voice',    icon: 'fa-microphone',     fn: 'lgTool("voice")' },
-        { label: 'Captions', icon: 'fa-closed-captioning', fn: 'lgTool("captions")' }
+        { label: 'Text',     icon: 'fa-font',           fn: "lgTool('text')" },
+        { label: 'Stickers', icon: 'fa-face-smile',     fn: "lgTool('sticker')" },
+        { label: 'Effects',  icon: 'fa-wand-magic-sparkles', fn: "lgTool('effects')" },
+        { label: 'Filters',  icon: 'fa-circle-half-stroke', fn: "lgTool('filter')" },
+        { label: 'Voice',    icon: 'fa-microphone',     fn: "lgTool('voice')" },
+        { label: 'Captions', icon: 'fa-closed-captioning', fn: "lgTool('captions')" }
     ];
 
     var page = document.createElement('div');
@@ -305,22 +308,24 @@ function lgToolEditor() {
 
 // The other tools live in the editor, so open it and trigger the matching panel
 // rather than building a second copy of each one here.
+// The editor exposes one dispatcher, edOpenPanel(kind), and its kinds are the
+// same words used on this rail, so a tool passes its kind straight through.
+// Waits for the editor's video to be ready rather than guessing a delay, because
+// opening a panel before the clip has loaded lands on an empty editor.
 function lgTool(kind) {
-    var openers = {
-        text:     ['edOpenTextPanel', 'editorAddText', 'edAddText'],
-        sticker:  ['edOpenStickerPanel', 'openStickerPicker', 'edOpenStickers'],
-        effects:  ['edOpenEffectsModal', 'openEffectsPanel', 'edOpenEffects'],
-        filter:   ['edOpenFilterPanel', 'edOpenFilters', 'openFilterPanel'],
-        voice:    ['edOpenVoicePanel', 'edOpenVoiceover', 'edStartVoiceover'],
-        captions: ['edOpenCaptionsPanel', 'edGenerateCaptions', 'edOpenCaptions']
-    }[kind] || [];
     lgToolEditor();
-    setTimeout(function () {
-        for (var i = 0; i < openers.length; i++) {
-            if (typeof window[openers[i]] === 'function') { window[openers[i]](); return; }
+    var tries = 0;
+    (function waitForEditor() {
+        tries++;
+        var overlay = document.getElementById('preview-edit-overlay');
+        var ready = overlay && overlay.style.display !== 'none' && typeof window.edOpenPanel === 'function';
+        if (ready) { window.edOpenPanel(kind); return; }
+        if (tries > 40) {   // ~4s, the editor is open but the panel is not reachable
+            if (typeof showToast === 'function') showToast('Opened in the editor');
+            return;
         }
-        if (typeof showToast === 'function') showToast('Opened in the editor');
-    }, 420);
+        setTimeout(waitForEditor, 100);
+    })();
 }
 
 // ---------- 3. Sound picker ---------------------------------------------
