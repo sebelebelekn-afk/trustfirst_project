@@ -156,6 +156,32 @@ async function tfPickMedia(opts) {
     };
 })();
 
+// The story camera's gallery button, wrapped separately because story-camera.js
+// loads after this file. Deferred to first use so the override lands on the real
+// implementation rather than an undefined global.
+(function () {
+    var wrapped = false;
+    function wrapStoryGallery() {
+        if (wrapped || typeof window.lgGallery !== 'function') return;
+        wrapped = true;
+        var webPick = window.lgGallery;
+        window.lgGallery = function () {
+            if (!tfIsNative()) return webPick();
+            tfPickMedia({ multiple: true }).then(function (files) {
+                if (files === null) return webPick();      // plugin missing, use the web input
+                if (!files.length) return;                 // cancelled
+                window._lgPicked = files;
+                window._lgSelected = files.map(function (_, i) { return i; });
+                if (typeof openLgGalleryPicker === 'function') openLgGalleryPicker();
+            });
+        };
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wrapStoryGallery);
+    else wrapStoryGallery();
+    // story-camera.js may still be parsing at DOMContentLoaded, so try once more.
+    setTimeout(wrapStoryGallery, 1200);
+})();
+
 // ---------- Boot -------------------------------------------------------------
 // Register for push once there is a signed-in user to attach the token to.
 (function () {
