@@ -156,6 +156,73 @@ async function tfPickMedia(opts) {
     };
 })();
 
+// ---------- Native camera capture -------------------------------------------
+// The WebView camera is where the quality complaints come from: it hands back a
+// landscape stream that has to be cropped hard to fill a phone screen, which is
+// what looked like extreme zoom. The OS camera app has none of that problem, and
+// gives back a full resolution frame.
+
+// Photos go through the Camera plugin, which opens the real camera UI.
+async function tfCapturePhoto() {
+    var Camera = _tfPlugin('Camera');
+    if (!tfIsNative() || !Camera) return null;
+    try {
+        var photo = await Camera.getPhoto({
+            quality: 92,
+            allowEditing: false,
+            resultType: 'base64',
+            source: 'CAMERA',
+            direction: 'FRONT',
+            saveToGallery: false
+        });
+        if (!photo || !photo.base64String) return [];   // cancelled
+        var mime = 'image/' + (photo.format || 'jpeg');
+        return [_tfB64ToFile(photo.base64String, mime, 'photo_' + Date.now() + '.' + (photo.format || 'jpg'))];
+    } catch (e) {
+        // The plugin throws on cancel too, so treat it as "nothing picked"
+        // rather than falling back and reopening a second camera.
+        if (/cancel/i.test((e && e.message) || '')) return [];
+        console.warn('[Native camera] photo failed:', e && e.message);
+        return null;
+    }
+}
+
+// The Camera plugin does not record video, so video uses a capture input, which
+// on a device hands off to the system camera recorder rather than the WebView.
+function tfCaptureVideo() {
+    return new Promise(function (resolve) {
+        var inp = document.getElementById('_tfVideoCapture');
+        if (!inp) {
+            inp = document.createElement('input');
+            inp.type = 'file';
+            inp.id = '_tfVideoCapture';
+            inp.accept = 'video/*';
+            inp.setAttribute('capture', 'user');
+            inp.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;';
+            document.body.appendChild(inp);
+        }
+        inp.onchange = function () {
+            var files = inp.files && inp.files.length ? Array.prototype.slice.call(inp.files) : [];
+            try { inp.value = ''; } catch (e) {}
+            resolve(files);
+        };
+        try { inp.value = ''; } catch (e) {}
+        inp.click();
+    });
+}
+
+// Capture straight into the story composer.
+async function tfStoryCapture(mode) {
+    var files = (mode === 'video') ? await tfCaptureVideo() : await tfCapturePhoto();
+    if (!files || !files.length) return false;
+    if (typeof openLgComposer === 'function') {
+        if (typeof closeLgCam === 'function') { try { closeLgCam(); } catch (e) {} }
+        openLgComposer(files);
+        return true;
+    }
+    return false;
+}
+
 // The story camera's gallery button, wrapped separately because story-camera.js
 // loads after this file. Deferred to first use so the override lands on the real
 // implementation rather than an undefined global.
@@ -180,6 +247,26 @@ async function tfPickMedia(opts) {
     else wrapStoryGallery();
     // story-camera.js may still be parsing at DOMContentLoaded, so try once more.
     setTimeout(wrapStoryGallery, 1200);
+})();
+
+// The story camera's shutter. In the shell this hands off to the system camera
+// instead of recording through the WebView preview.
+(function () {
+    var wrapped = false;
+    function wrapShutter() {
+        if (wrapped || typeof window.lgToggleRec !== 'function') return;
+        wrapped = true;
+        var webRec = window.lgToggleRec;
+        window.lgToggleRec = function () {
+            if (!tfIsNative()) return webRec();
+            tfStoryCapture('video').then(function (ok) {
+                if (!ok) webRec();     // capture unavailable or cancelled early
+            });
+        };
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wrapShutter);
+    else wrapShutter();
+    setTimeout(wrapShutter, 1200);
 })();
 
 // ---------- Boot -------------------------------------------------------------
