@@ -61,7 +61,11 @@ function openLgGalleryPicker() {
         '<div style="flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:10px;' +
             'padding:max(50px,env(safe-area-inset-top,50px)) 16px 12px;">' +
             '<button onclick="closeLgGalleryPicker()" style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:16px;cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>' +
-            '<div style="background:rgba(255,255,255,0.12);border-radius:20px;padding:8px 16px;color:#fff;font-size:14px;font-weight:700;">Recents</div>' +
+            // A page cannot list the device's albums, so this sorts what you
+            // picked by date instead of pretending to browse the library.
+            '<div id="lgSortChip" onclick="lgToggleSort()" style="background:rgba(255,255,255,0.12);border-radius:20px;padding:8px 16px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px;">' +
+                '<span id="lgSortLabel">Recents</span><i class="fa-solid fa-chevron-down" style="font-size:10px;opacity:0.7;"></i>' +
+            '</div>' +
             '<button onclick="lgGallery()" style="background:rgba(255,255,255,0.12);border:none;border-radius:20px;padding:8px 14px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Add more</button>' +
         '</div>' +
         '<div style="flex-shrink:0;display:flex;gap:18px;padding:0 18px 10px;">' +
@@ -83,7 +87,28 @@ function closeLgGalleryPicker() {
     if (p) p.remove();
 }
 
+// Newest first by default, matching what the chip says.
+var _lgSortNewest = true;
+var _lgActiveFilter = 'all';
+
+function lgToggleSort() {
+    _lgSortNewest = !_lgSortNewest;
+    // Keep the same files ticked across a re-sort: the selection is held as
+    // indexes, so remap it through the files themselves rather than the numbers.
+    var chosen = _lgSelected.map(function (i) { return _lgPicked[i]; }).filter(Boolean);
+    _lgPicked = _lgPicked.slice().sort(function (a, b) {
+        var d = (b.lastModified || 0) - (a.lastModified || 0);
+        return _lgSortNewest ? d : -d;
+    });
+    _lgSelected = chosen.map(function (f) { return _lgPicked.indexOf(f); }).filter(function (i) { return i >= 0; });
+    var lbl = document.getElementById('lgSortLabel');
+    if (lbl) lbl.textContent = _lgSortNewest ? 'Recents' : 'Oldest';
+    if (typeof triggerHaptic === 'function') triggerHaptic(6);
+    _lgRenderGalleryGrid(_lgActiveFilter);
+}
+
 function lgGalleryFilter(kind, el) {
+    _lgActiveFilter = kind;
     document.querySelectorAll('#lgGalleryPage .lg-gal-tab').forEach(function (t) {
         t.style.color = 'rgba(255,255,255,0.45)'; t.style.fontWeight = '600'; t.style.borderBottomColor = 'transparent';
     });
@@ -782,9 +807,24 @@ window.lgDropYoursFromStory = function (template) {
     var t = template || window._lgTemplate || null;
     if (!t) return;
     if (t.kind === 'photo') {
-        if (typeof showToast === 'function') showToast('Add yours');
-        if (typeof openStoryEditor === 'function') { openStoryEditor(); return; }
-        lgGallery();     // pick a photo, then the composer
+        // A photo template has nothing to shoot, so it goes to the existing story
+        // editor, openStoryPostArea for a picture and openStoryVideoTrim for a
+        // clip, rather than the camera composer.
+        var inp = document.createElement('input');
+        inp.type = 'file';
+        inp.accept = 'image/*,video/*';
+        inp.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;';
+        inp.onchange = function () {
+            var f = inp.files && inp.files[0];
+            inp.remove();
+            if (!f) return;
+            var url = URL.createObjectURL(f);
+            if (_lgIsVideo(f) && typeof openStoryVideoTrim === 'function') openStoryVideoTrim(f, url);
+            else if (typeof openStoryPostArea === 'function') openStoryPostArea(f, url);
+            else openLgComposer([f]);
+        };
+        document.body.appendChild(inp);
+        inp.click();
         return;
     }
     if (typeof openLiquidGlassCamera === 'function') openLiquidGlassCamera();

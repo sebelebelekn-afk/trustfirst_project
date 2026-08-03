@@ -3972,8 +3972,44 @@ function toggleChatCamFlash() {
     }
 }
 
+// Video notes are round, so everything outside the circle is blurred and dimmed
+// and only what lands inside stays sharp. The mask punches a hole in the blur
+// layer, which is what keeps the middle clear rather than blurring the whole
+// frame.
+function _chatCamSyncNoteMask(on) {
+    var page = document.getElementById('chatCameraPage');
+    if (!page) return;
+    var mask = document.getElementById('chatCamNoteMask');
+    if (!on) {
+        if (mask) mask.remove();
+        var oldRing = document.getElementById('chatCamNoteRing');
+        if (oldRing) oldRing.remove();   // the ring is a sibling, remove it too
+        return;
+    }
+    if (!mask) {
+        mask = document.createElement('div');
+        mask.id = 'chatCamNoteMask';
+        var hole = 'radial-gradient(circle at 50% 42%, transparent 0 41%, #000 41.6%)';
+        mask.style.cssText =
+            'position:absolute;inset:0;z-index:3;pointer-events:none;' +
+            'backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);' +
+            'background:rgba(0,0,0,0.45);' +
+            '-webkit-mask-image:' + hole + ';mask-image:' + hole + ';';
+        page.appendChild(mask);
+        // The ring itself, so the recording area is obvious.
+        var ring = document.createElement('div');
+        ring.id = 'chatCamNoteRing';
+        ring.style.cssText =
+            'position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);' +
+            'width:82%;aspect-ratio:1;border-radius:50%;' +
+            'border:2px solid rgba(255,255,255,0.85);z-index:4;pointer-events:none;';
+        mask.after(ring);
+    }
+}
+
 function setChatCamMode(mode) {
     window._chatCamMode = mode;
+    _chatCamSyncNoteMask(mode === 'note');
     var tabs = { video: 'chatCamTabVid', photo: 'chatCamTabPhoto', note: 'chatCamTabNote' };
     Object.keys(tabs).forEach(function(m) {
         var el = document.getElementById(tabs[m]);
