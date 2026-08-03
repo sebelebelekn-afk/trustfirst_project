@@ -12345,6 +12345,13 @@ function _previewForMessage(m, meId) {
         case 'gif':      return mine ? 'You sent a GIF'           : 'You received a GIF';
         case 'sticker':  return mine ? 'You sent a sticker'       : 'You received a sticker';
         case 'deleted':  return 'This message was deleted';
+        case 'call_log':
+            // The call log text already reads "Voice call" or "Video call", with
+            // the duration after a dot. Show the kind with an arrow for who
+            // placed it, rather than the useless "New message".
+            var _ct = (m.content || m.ciphertext || 'Call');
+            var _kind = /video/i.test(_ct) ? 'Video call' : 'Voice call';
+            return (mine ? '↗ ' : '↙ ') + _kind;
         default:
             // Never leak raw ciphertext for unknown/non-text types.
             if (m.message_type && m.message_type !== 'text' && !m.content) return 'New message';
@@ -14746,7 +14753,8 @@ function openStoryPicker() {
             '-webkit-backdrop-filter:blur(40px) saturate(200%);',
             'border:0.5px solid ' + cardBord + ';',
             'border-radius:50px;',
-            'box-shadow:0 6px 24px rgba(0,0,0,0.1),0 1.5px 0 rgba(255,255,255,0.8) inset;',
+            // The inset white highlight read as a bright rim on a dark screen.
+            'box-shadow:0 4px 18px rgba(0,0,0,0.18);',
             'display:flex;align-items:center;justify-content:space-between;',
         '">',
             '<button onclick="document.getElementById(\'storyPickerOverlay\').remove()" ',
@@ -30337,7 +30345,9 @@ function openLiquidGlassCamera(audioTrack) {
                     '<span>' + escapeHtml(lgAudioTrack) + '</span>' +
                 '</div>'
             :
-                '<div class="cam-audio-pill" onclick="closeLgCam();openSoundHub();">' +
+                // Opens the sound picker in place rather than closing the camera
+                // and jumping to the hub, which lost whatever you were shooting.
+                '<div class="cam-audio-pill" onclick="openLgSoundModal()">' +
                     '<i class="fa-solid fa-music" style="color:rgba(255,255,255,0.7);font-size:12px;flex-shrink:0;"></i>' +
                     '<span style="color:rgba(255,255,255,0.7);">Add Audio</span>' +
                 '</div>'
@@ -36676,8 +36686,15 @@ function edWireVideo() {
     var vid = document.getElementById('edVideo');
     if (!vid || vid._edWired) return;
     vid._edWired = true;
+    // A video recorded on a phone carries rotation metadata, and until the first
+    // frame decodes the browser can report the UNROTATED size. A portrait
+    // recording then measures as landscape, which is why a clip shot in the
+    // camera arrived in the editor as a wide frame. The resize event fires when
+    // the intrinsic dimensions are corrected, so that is the one that matters.
     vid.addEventListener('loadedmetadata', _edFitStage);
     vid.addEventListener('loadeddata', _edFitStage);
+    vid.addEventListener('canplay', _edFitStage);
+    vid.addEventListener('resize', _edFitStage);
     _edFitStage();
     function icon() { var b = document.getElementById('edPlayBtn'); if (b) b.innerHTML = vid.paused ? '<i class="fa-solid fa-play"></i>' : '<i class="fa-solid fa-pause"></i>'; }
     vid.addEventListener('play', function(){ edState.isPlaying = true; icon(); if (_edTickRAF) cancelAnimationFrame(_edTickRAF); edTickPlayhead(); _edAudioSync(true); });

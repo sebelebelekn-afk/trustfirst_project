@@ -1,5 +1,5 @@
 // ============================================================
-// STORY CAMERA (liquid glass) — gallery picker, composer, sound
+// STORY CAMERA (liquid glass) - gallery picker, composer, sound
 // picker and sound trimmer.
 //
 // Scoped to the camera opened from the story area. It reuses the existing
@@ -72,7 +72,7 @@ function openLgGalleryPicker() {
         '<div id="lgGalleryGrid" style="flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:3px;padding:0 3px 12px;"></div>' +
         '<div style="flex-shrink:0;display:flex;align-items:center;gap:12px;padding:12px 16px max(28px,env(safe-area-inset-bottom,28px));">' +
             '<span id="lgSelCount" style="flex:1;color:rgba(255,255,255,0.6);font-size:13px;font-weight:600;"></span>' +
-            '<button id="lgNextBtn" onclick="lgGalleryNext()" style="background:#FF3B5C;border:none;border-radius:24px;padding:13px 34px;color:#fff;font-size:15px;font-weight:800;cursor:pointer;">Next</button>' +
+            '<button id="lgNextBtn" onclick="lgGalleryNext()" style="background:#007AFF;border:none;border-radius:24px;padding:13px 34px;color:#fff;font-size:15px;font-weight:800;cursor:pointer;">Next</button>' +
         '</div>';
     (document.getElementById('app') || document.body).appendChild(page);
     _lgRenderGalleryGrid('all');
@@ -109,7 +109,7 @@ function _lgRenderGalleryGrid(kind) {
                 : '<img src="' + url + '" style="width:100%;height:100%;object-fit:cover;">') +
             '<div class="lg-tick" style="position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;' +
                 'border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;' +
-                'background:' + (on ? '#FF3B5C' : 'rgba(0,0,0,0.3)') + ';">' + (on ? (_lgSelected.indexOf(i) + 1) : '') + '</div>';
+                'background:' + (on ? '#007AFF' : 'rgba(0,0,0,0.3)') + ';">' + (on ? (_lgSelected.indexOf(i) + 1) : '') + '</div>';
         cell.onclick = function () { _lgToggleSelect(i, kind); };
         grid.appendChild(cell);
     });
@@ -189,7 +189,7 @@ function openLgComposer(files) {
 
         '<div style="flex-shrink:0;display:flex;align-items:center;gap:10px;padding:12px 14px max(26px,env(safe-area-inset-bottom,26px));">' +
             '<button id="lgStoryBtn" style="flex:1;background:#fff;border:none;border-radius:26px;padding:14px;color:#000;font-size:15px;font-weight:800;cursor:pointer;">Your Story</button>' +
-            '<button onclick="lgComposerNext()" style="flex:1;background:#FF3B5C;border:none;border-radius:26px;padding:14px;color:#fff;font-size:15px;font-weight:800;cursor:pointer;">Next</button>' +
+            '<button onclick="lgComposerNext()" style="flex:1;background:#007AFF;border:none;border-radius:26px;padding:14px;color:#fff;font-size:15px;font-weight:800;cursor:pointer;">Next</button>' +
         '</div>';
     (document.getElementById('app') || document.body).appendChild(page);
     _lgSyncSoundPill();
@@ -365,7 +365,7 @@ async function lgSoundTab(tab, el) {
     }
     var list = document.getElementById('lgSoundList');
     if (!list) return;
-    list.innerHTML = '<div style="text-align:center;padding:30px;color:#888;font-size:13px;">Loading…</div>';
+    list.innerHTML = '<div style="text-align:center;padding:30px;color:#888;font-size:13px;">Loading...</div>';
     var rows = [];
     try {
         if (!window.sb) throw new Error('no sb');
@@ -389,12 +389,12 @@ async function lgSoundTab(tab, el) {
         return;
     }
     list.innerHTML = rows.map(function (s) {
-        var cover = s.cover_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(s.name || 'S') + '&background=FF3B5C&color=fff&size=64';
+        var cover = s.cover_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(s.name || 'S') + '&background=007AFF&color=fff&size=64';
         return '<div style="display:flex;align-items:center;gap:12px;padding:11px 18px;">' +
             '<img src="' + cover + '" onclick="lgPreviewSound(\'' + s.id + '\')" style="width:46px;height:46px;border-radius:8px;object-fit:cover;flex-shrink:0;cursor:pointer;">' +
             '<div style="flex:1;min-width:0;cursor:pointer;" onclick="lgPreviewSound(\'' + s.id + '\')">' +
                 '<div style="font-size:15px;font-weight:700;color:var(--text-primary,#000);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(s.name || 'Sound') + '</div>' +
-                '<div style="font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(s.artist || 'Original sound') + ' · ' + _lgFmt(s.duration_sec) + '</div>' +
+                '<div style="font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(s.artist || 'Original sound') + ' Â· ' + _lgFmt(s.duration_sec) + '</div>' +
             '</div>' +
             '<i class="fa-solid fa-scissors" onclick="lgOpenSoundTrim(\'' + s.id + '\')" title="Trim" style="color:var(--text-primary,#000);font-size:16px;padding:8px;cursor:pointer;"></i>' +
             '<i class="fa-regular fa-bookmark" onclick="lgFavSound(\'' + s.id + '\',this)" style="color:var(--text-primary,#000);font-size:16px;padding:8px;cursor:pointer;"></i>' +
@@ -423,7 +423,7 @@ async function lgFavSound(id, el) {
     if (!window.sb || !window.currentUser) return;
     try {
         await sb.from('sound_favourites').upsert({ user_id: currentUser.id, sound_id: id });
-        if (el) { el.className = 'fa-solid fa-bookmark'; el.style.color = '#FF3B5C'; }
+        if (el) { el.className = 'fa-solid fa-bookmark'; el.style.color = '#007AFF'; }
         if (typeof showToast === 'function') showToast('Saved to favourites');
     } catch (e) {}
 }
@@ -486,7 +486,7 @@ function _lgPaintWave() {
     var bars = document.querySelectorAll('#lgWave .lg-wave-bar');
     var from = Math.round((t.start / t.total) * bars.length);
     var to = Math.round(((t.start + t.len) / t.total) * bars.length);
-    bars.forEach(function (b, i) { b.style.background = (i >= from && i < to) ? '#FF3B5C' : '#c9c9c9'; });
+    bars.forEach(function (b, i) { b.style.background = (i >= from && i < to) ? '#007AFF' : '#c9c9c9'; });
     var lbl = document.getElementById('lgTrimLabel');
     if (lbl) lbl.textContent = t.len + 's selected';
 }
@@ -524,7 +524,7 @@ function lgToggleLoop(el) {
     var t = window._lgTrim; if (!t) return;
     t.loop = !t.loop;
     var dot = document.getElementById('lgLoopDot');
-    if (dot) { dot.style.background = t.loop ? '#FF3B5C' : 'transparent'; dot.style.borderColor = t.loop ? '#FF3B5C' : '#bbb'; }
+    if (dot) { dot.style.background = t.loop ? '#007AFF' : 'transparent'; dot.style.borderColor = t.loop ? '#007AFF' : '#bbb'; }
     if (typeof triggerHaptic === 'function') triggerHaptic(6);
 }
 
