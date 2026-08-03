@@ -10912,6 +10912,9 @@ var _liveDurationSecs = 0;
 var _liveHearts = 0;
 
 async function startLive() {
+    if (typeof _tfCallIsRunning === 'function' && _tfCallIsRunning()) {
+        showToast('End your call before going live'); return;
+    }
     try {
         if (liveStream) liveStream.getTracks().forEach(t => t.stop());
         liveStream = await navigator.mediaDevices.getUserMedia({
@@ -14762,11 +14765,8 @@ function openStoryPicker() {
             // Drop Yours — hero
             '<div onclick="storyPickerDropYours()" style="',
                 'flex:1;border-radius:22px;overflow:hidden;position:relative;aspect-ratio:3/4;',
-                'background:linear-gradient(135deg,rgba(0,122,255,0.18),rgba(88,86,214,0.22));',
-                'backdrop-filter:blur(30px) saturate(180%);',
-                '-webkit-backdrop-filter:blur(30px) saturate(180%);',
-                'border:0.5px solid rgba(0,122,255,0.3);',
-                'box-shadow:0 8px 28px rgba(0,122,255,0.2),0 1.5px 0 rgba(255,255,255,0.18) inset;',
+                'background:var(--card-bg,#1a1a1a);',
+                'border:0.5px solid var(--border-color,rgba(255,255,255,0.1));',
                 'cursor:pointer;display:flex;flex-direction:column;align-items:center;',
                 'justify-content:center;gap:8px;',
             '">',
@@ -14777,20 +14777,13 @@ function openStoryPicker() {
                 '</div>',
                 '<b style="color:' + textCol + ';font-size:14px;text-align:center;">Drop Yours</b>',
                 '<small style="color:' + subCol + ';font-size:11px;text-align:center;padding:0 8px;">Join a prompt</small>',
-                // surface-tension highlight
-                '<div style="position:absolute;top:0;left:0;right:0;height:40%;',
-                    'background:linear-gradient(to bottom,rgba(255,255,255,0.12),transparent);',
-                    'border-radius:22px 22px 0 0;pointer-events:none;"></div>',
             '</div>',
 
             // Music — hero
             '<div onclick="storyPickerMusic()" style="',
                 'flex:1;border-radius:22px;overflow:hidden;position:relative;aspect-ratio:3/4;',
-                'background:linear-gradient(135deg,rgba(29,185,84,0.18),rgba(0,122,255,0.14));',
-                'backdrop-filter:blur(30px) saturate(180%);',
-                '-webkit-backdrop-filter:blur(30px) saturate(180%);',
-                'border:0.5px solid rgba(29,185,84,0.28);',
-                'box-shadow:0 8px 28px rgba(29,185,84,0.18),0 1.5px 0 rgba(255,255,255,0.16) inset;',
+                'background:var(--card-bg,#1a1a1a);',
+                'border:0.5px solid var(--border-color,rgba(255,255,255,0.1));',
                 'cursor:pointer;display:flex;flex-direction:column;align-items:center;',
                 'justify-content:center;gap:8px;',
             '">',
@@ -14801,9 +14794,6 @@ function openStoryPicker() {
                 '</div>',
                 '<b style="color:' + textCol + ';font-size:14px;text-align:center;">Music</b>',
                 '<small style="color:' + subCol + ';font-size:11px;text-align:center;padding:0 8px;">Add a soundtrack</small>',
-                '<div style="position:absolute;top:0;left:0;right:0;height:40%;',
-                    'background:linear-gradient(to bottom,rgba(255,255,255,0.1),transparent);',
-                    'border-radius:22px 22px 0 0;pointer-events:none;"></div>',
             '</div>',
 
         '</div>',
@@ -18140,7 +18130,7 @@ function openClipCamera(preSelectedAudio) {
         ">
             <!-- Camera Preview -->
             <video id="cameraPreview" autoplay playsinline muted style="
-                width:100%; height:100%; object-fit:cover;
+                width:100%; height:100%; object-fit:contain; background:#000;
             "></video>
 
             <!-- Top Controls -->
@@ -22033,12 +22023,16 @@ function startFaceVerification() {
         '<span style="color:white; font-size:12px; font-weight:700;" id="livenessProgress">Step 1 of 5</span>' +
         '</div></div>' +
 
+        // contain, not cover: cover cropped a 720x1280 stream hard on a tall
+        // screen, which is why the preview looked zoomed right into the face.
         '<video id="livenessVideo" autoplay playsinline muted style="' +
-        'width:100%; height:100%; object-fit:cover; transform:scaleX(-1);"></video>' +
+        'width:100%; height:100%; object-fit:contain; background:#000; transform:scaleX(-1);"></video>' +
 
+        // The huge spread shadow darkens everything outside the oval, so the
+        // cut-out is obvious and you can see whether your face is actually in it.
         '<div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);' +
-        'width:260px; height:340px; border:3px solid rgba(255,255,255,0.4);' +
-        'border-radius:50%; pointer-events:none;" id="faceGuide"></div>' +
+        'width:260px; height:340px; border:3px solid rgba(255,255,255,0.85);' +
+        'border-radius:50%; pointer-events:none; box-shadow:0 0 0 9999px rgba(0,0,0,0.7);" id="faceGuide"></div>' +
 
         '<div id="livenessInstructionBox" style="position:absolute; bottom:calc(env(safe-area-inset-bottom,0px) + 130px);' +
         'left:50%; transform:translateX(-50%); text-align:center; z-index:10; width:88%;">' +
@@ -36605,14 +36599,23 @@ function _edFitStage() {
     stage.style.aspectRatio = vid.videoWidth + ' / ' + vid.videoHeight;
     // Portrait fills the available height; landscape fills the width instead, so
     // a wide clip is not squeezed into a tall sliver.
-    if (ratio >= 1) {
-        stage.style.height = 'auto';
+    stage.style.flex = '0 0 auto';   // never let the flex parent stretch it
+    stage.style.maxWidth = '100%';
+    stage.style.maxHeight = '100%';
+    // Fit against the area's own shape, not just portrait vs landscape. Forcing
+    // width:100% on anything wide let max-height clamp it, which squashed the
+    // frame to the area's aspect instead of the clip's.
+    var area = document.getElementById('edPreviewArea');
+    var box = area ? area.getBoundingClientRect() : null;
+    var areaRatio = (box && box.height) ? (box.width / box.height) : 1;
+    if (ratio > areaRatio) {
+        // Wider than the space: the width is the binding constraint.
         stage.style.width = '100%';
-        stage.style.maxHeight = '100%';
+        stage.style.height = 'auto';
     } else {
+        // Taller than the space: the height binds instead.
         stage.style.height = '100%';
         stage.style.width = 'auto';
-        stage.style.maxWidth = '100%';
     }
 }
 
@@ -44562,8 +44565,18 @@ async function changePassword() {
 }
 
 
+// A live stream and a call both want the camera and the microphone, and running
+// both would leak one into the other. Whichever started first keeps the devices.
+function _tfLiveIsRunning() {
+    try { return !!(typeof liveStream !== 'undefined' && liveStream); } catch (e) { return false; }
+}
+function _tfCallIsRunning() {
+    try { return !!(typeof rtcCallActive !== 'undefined' && rtcCallActive); } catch (e) { return false; }
+}
+
 async function initiateCall(userId, type) {
     if (!userId) return;
+    if (_tfLiveIsRunning()) { showToast('End your live before starting a call'); return; }
     try {
         var { data, error } = await window.sb
             .from('calls')

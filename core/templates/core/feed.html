@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=81">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=82">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -521,7 +521,10 @@ function authenticateUser() {
          and the whole frame is always visible rather than cropped. JS sets its
          aspect-ratio from the video's real dimensions once metadata loads. -->
     <div id="edStage" style="position:relative;height:100%;aspect-ratio:9/16;max-width:100%;background:#000;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,0.16);display:flex;align-items:center;justify-content:center;">
-      <video id="edVideo" style="width:100%;height:100%;object-fit:contain;background:#000;" playsinline loop></video>
+      <!-- Absolutely positioned so the video cannot drive the stage's size. As a
+           normal flex child its width:100% fought the stage's aspect-ratio and
+           the frame stretched to full width instead of staying portrait. -->
+      <video id="edVideo" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;" playsinline loop></video>
       <!-- Cutout compositor: shows the masked result and captures brush strokes.
            Sits above the video, below text. Hidden until a cutout tool is used. -->
       <canvas id="edCutoutCanvas" style="position:absolute;display:none;pointer-events:none;touch-action:none;"></canvas>
@@ -1121,7 +1124,10 @@ function authenticateUser() {
   </div>
 
   <!-- Active call bottom dock -->
-  <div id="call-bottom-dock" style="position:absolute;bottom:max(34px,env(safe-area-inset-bottom,34px));left:16px;right:16px;z-index:12;display:none;flex-direction:column;gap:14px;align-items:center;transition:opacity 0.3s;">
+  <!-- No inline display here: an inline style outranks the stylesheet, so the
+       data-state rules that reveal this dock could never take effect and the
+       controls stayed hidden for the whole call. Default hidden lives in CSS. -->
+  <div id="call-bottom-dock" style="position:absolute;bottom:max(34px,env(safe-area-inset-bottom,34px));left:16px;right:16px;z-index:12;flex-direction:column;gap:14px;align-items:center;transition:opacity 0.3s;">
     <!-- Reactions row -->
     <div style="display:flex;gap:10px;">
       <button onclick="sendCallReaction('👍')" style="background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.18);border-radius:50px;padding:6px 12px;font-size:20px;cursor:pointer;color:#fff;">👍</button>
@@ -4230,7 +4236,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=175"></script>
+<script src="{% static 'core/js/feed.js' %}?v=176"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=75"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
@@ -4239,7 +4245,9 @@ function authenticateUser() {
      Must load after feed.js because it wraps the media pickers defined there. -->
 <script src="{% static 'core/js/native.js' %}?v=1"></script>
 <!-- ===== LIVE MINI-PLAYER ===== -->
-<div id="liveMiniPlayer" style="display:none;position:absolute;bottom:max(96px,calc(env(safe-area-inset-bottom)+96px));left:12px;right:12px;z-index:9500;border-radius:20px;overflow:hidden;cursor:pointer;" onclick="maximizeLive()">
+<!-- Docked directly under the header rather than floating over the middle of the
+     feed, so it never covers a post you are reading. -->
+<div id="liveMiniPlayer" style="display:none;position:absolute;top:calc(env(safe-area-inset-top,44px) + 56px);left:12px;right:12px;z-index:9500;border-radius:20px;overflow:hidden;cursor:pointer;" onclick="maximizeLive()">
     <div style="background:rgba(18,18,18,0.88);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);border:0.5px solid rgba(255,255,255,0.14);border-radius:20px;padding:10px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,0.45);">
         <!-- Avatar stack -->
         <div style="display:flex;align-items:center;flex-shrink:0;position:relative;width:52px;height:36px;">

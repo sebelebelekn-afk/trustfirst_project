@@ -3603,6 +3603,8 @@ html, body { background: #000; }
 @keyframes vmBarAnim { 0%,100%{transform:scaleY(0.3);} 50%{transform:scaleY(1);} }
 @keyframes callReactionFloat { 0%{opacity:1;transform:translateY(0) scale(1);} 80%{opacity:0.9;transform:translateY(-180px) scale(1.1);} 100%{opacity:0;transform:translateY(-220px) scale(0.8);} }
 
+/* Hidden by default here rather than inline, so the state rules below can win. */
+#call-bottom-dock { display: none; }
 #call-overlay[data-state="connected"] #call-avatar-state { display: none; }
 #call-overlay[data-state="connected"] #call-remote-video { display: block; }
 #call-overlay[data-state="connected"] #call-bottom-dock { display: flex; }
@@ -3613,7 +3615,10 @@ html, body { background: #000; }
 #call-overlay[data-state="incoming"] #call-bottom-dock { display: none; }
 
 #call-overlay[data-state="calling"] #call-incoming-actions { display: none; }
-#call-overlay[data-state="calling"] #call-bottom-dock { display: none; }
+/* Show the controls while it is still ringing, so mute, speaker and hang up are
+   reachable before the other side picks up. Hiding them left the outgoing call
+   looking like the old screen with no controls at all. */
+#call-overlay[data-state="calling"] #call-bottom-dock { display: flex; }
 
 .call-ctrl-active {
     background: rgba(255,255,255,0.9) !important;
