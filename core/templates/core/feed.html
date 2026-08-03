@@ -4238,6 +4238,9 @@ function authenticateUser() {
 <!-- Native shell bridge. No-ops in the browser, so the PWA is unaffected.
      Must load after feed.js because it wraps the media pickers defined there. -->
 <script src="{% static 'core/js/native.js' %}?v=1"></script>
+<!-- Story camera: gallery picker, composer, sound picker and trimmer.
+     Loads after feed.js because it overrides lgGallery(). -->
+<script src="{% static 'core/js/story-camera.js' %}?v=1"></script>
 <!-- ===== LIVE MINI-PLAYER ===== -->
 <!-- Docked directly under the header rather than floating over the middle of the
      feed, so it never covers a post you are reading. -->

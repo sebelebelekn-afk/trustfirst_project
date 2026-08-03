@@ -40441,6 +40441,9 @@ async function submitTrustClip() {
                 })(),
                 audience: window._tcAudience || 'everyone',
                 sound_name: window._tcAudioName || 'Original Audio',
+                // Links the clip to the sound it used, so it shows up in that
+                // sound's hub alongside the clip the sound came from.
+                sound_id: window._tcSoundId || null,
                 is_hidden: false,
 is_demo: window._tcIsDemoClip || false,
                 demo_expiry: window._tcIsDemoClip ? new Date(Date.now() + 7*24*60*60*1000).toISOString() : null,
