@@ -566,3 +566,242 @@ function _lgSyncSoundPill() {
 
 // Expose the chosen sound so the trustclip insert can record which one was used.
 window.lgCurrentSound = function () { return _lgSound; };
+
+// ---------- 6. Collage ---------------------------------------------------
+// Shoot several frames into one image. Cells are fractions of the canvas, so a
+// layout works at any output size. Order is the order you shoot them in.
+var LG_COLLAGE_LAYOUTS = [
+    { id: 'grid4',  label: 'Four',        cells: [[0,0,.5,.5],[.5,0,.5,.5],[0,.5,.5,.5],[.5,.5,.5,.5]] },
+    { id: 'split2h',label: 'Top bottom',  cells: [[0,0,1,.5],[0,.5,1,.5]] },
+    { id: 'strip3', label: 'Three rows',  cells: [[0,0,1,1/3],[0,1/3,1,1/3],[0,2/3,1,1/3]] },
+    { id: 'hero3',  label: 'One and two', cells: [[0,0,1,.5],[0,.5,.5,.5],[.5,.5,.5,.5]] },
+    { id: 'grid6',  label: 'Six',         cells: [[0,0,.5,1/3],[.5,0,.5,1/3],[0,1/3,.5,1/3],[.5,1/3,.5,1/3],[0,2/3,.5,1/3],[.5,2/3,.5,1/3]] },
+    { id: 'split2v',label: 'Side by side',cells: [[0,0,.5,1],[.5,0,.5,1]] }
+];
+
+var _lgCollage = null;   // { layout, shots:[dataUrl], idx }
+
+function _lgLayoutIcon(cells) {
+    return '<svg viewBox="0 0 24 24" width="26" height="26" style="display:block;">' +
+        cells.map(function (c) {
+            return '<rect x="' + (1 + c[0] * 22).toFixed(1) + '" y="' + (1 + c[1] * 22).toFixed(1) +
+                   '" width="' + (c[2] * 22 - 1).toFixed(1) + '" height="' + (c[3] * 22 - 1).toFixed(1) +
+                   '" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/>';
+        }).join('') + '</svg>';
+}
+
+// Layout picker, opened from the collage button in the camera.
+function lgOpenCollagePicker() {
+    var ex = document.getElementById('lgCollagePicker');
+    if (ex) { ex.remove(); return; }
+    var box = document.createElement('div');
+    box.id = 'lgCollagePicker';
+    box.style.cssText = 'position:absolute;left:14px;bottom:150px;z-index:30;background:rgba(40,40,42,0.92);backdrop-filter:blur(24px);border-radius:18px;padding:12px;display:grid;grid-template-columns:repeat(2,1fr);gap:12px;';
+    box.innerHTML = LG_COLLAGE_LAYOUTS.map(function (l) {
+        return '<div onclick="lgStartCollage(\'' + l.id + '\')" title="' + l.label + '" ' +
+            'style="width:52px;height:52px;border-radius:12px;background:rgba(255,255,255,0.1);color:#fff;' +
+            'display:flex;align-items:center;justify-content:center;cursor:pointer;">' + _lgLayoutIcon(l.cells) + '</div>';
+    }).join('');
+    var page = document.getElementById('lgCameraPage') || document.getElementById('app') || document.body;
+    page.appendChild(box);
+}
+
+function lgStartCollage(id) {
+    var layout = LG_COLLAGE_LAYOUTS.find(function (l) { return l.id === id; });
+    if (!layout) return;
+    _lgCollage = { layout: layout, shots: [], idx: 0 };
+    var p = document.getElementById('lgCollagePicker');
+    if (p) p.remove();
+    _lgRenderCollageHud();
+    if (typeof showToast === 'function') showToast('Tap the shutter for shot 1 of ' + layout.cells.length);
+}
+
+function lgCancelCollage() {
+    _lgCollage = null;
+    var h = document.getElementById('lgCollageHud');
+    if (h) h.remove();
+    _lgSyncShutter();
+}
+
+// A live preview of the collage: filled cells show their shot, the next one is
+// outlined so you know where the shutter is about to put the frame.
+function _lgRenderCollageHud() {
+    if (!_lgCollage) return;
+    var hud = document.getElementById('lgCollageHud');
+    if (!hud) {
+        hud = document.createElement('div');
+        hud.id = 'lgCollageHud';
+        hud.style.cssText = 'position:absolute;left:12px;top:120px;width:78px;aspect-ratio:9/16;z-index:26;border-radius:10px;overflow:hidden;background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.3);';
+        var page = document.getElementById('lgCameraPage') || document.getElementById('app') || document.body;
+        page.appendChild(hud);
+    }
+    hud.innerHTML = _lgCollage.layout.cells.map(function (c, i) {
+        var shot = _lgCollage.shots[i];
+        var base = 'position:absolute;left:' + (c[0] * 100) + '%;top:' + (c[1] * 100) + '%;width:' + (c[2] * 100) + '%;height:' + (c[3] * 100) + '%;box-sizing:border-box;';
+        if (shot) return '<div style="' + base + 'background-image:url(' + shot + ');background-size:cover;background-position:center;"></div>';
+        var next = i === _lgCollage.idx;
+        return '<div style="' + base + 'border:' + (next ? '2px solid #007AFF' : '1px solid rgba(255,255,255,0.25)') + ';background:rgba(255,255,255,0.05);"></div>';
+    }).join('');
+    _lgSyncShutter();
+}
+
+// Once every cell is filled the shutter becomes a tick, which finishes it.
+function _lgSyncShutter() {
+    var dot = document.getElementById('lgDot');
+    if (!dot) return;
+    var done = _lgCollage && _lgCollage.shots.length >= _lgCollage.layout.cells.length;
+    if (done) {
+        dot.innerHTML = '<i class="fa-solid fa-check" style="color:#111;font-size:22px;"></i>';
+        dot.style.display = 'flex'; dot.style.alignItems = 'center'; dot.style.justifyContent = 'center';
+        dot.style.background = '#fff';
+    } else {
+        dot.innerHTML = '';
+        dot.style.background = '';
+    }
+}
+
+// Grab the current camera frame into the next cell.
+function lgCollageShoot() {
+    if (!_lgCollage) return false;
+    if (_lgCollage.shots.length >= _lgCollage.layout.cells.length) { lgFinishCollage(); return true; }
+    var v = document.getElementById('lgVid');
+    if (!v || !v.videoWidth) return false;
+    try {
+        var c = document.createElement('canvas');
+        c.width = 720; c.height = Math.round(720 * (v.videoHeight / v.videoWidth));
+        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+        _lgCollage.shots.push(c.toDataURL('image/jpeg', 0.85));
+        _lgCollage.idx = _lgCollage.shots.length;
+        if (typeof triggerHaptic === 'function') triggerHaptic(12);
+        _lgRenderCollageHud();
+        var left = _lgCollage.layout.cells.length - _lgCollage.shots.length;
+        if (typeof showToast === 'function') {
+            showToast(left ? ('Shot ' + (_lgCollage.shots.length + 1) + ' of ' + _lgCollage.layout.cells.length) : 'Tap the tick when ready');
+        }
+        return true;
+    } catch (e) { return false; }
+}
+
+// Composite every shot into one portrait image, cropping each to fill its cell,
+// then hand it to the story composer.
+function lgFinishCollage() {
+    if (!_lgCollage || !_lgCollage.shots.length) return;
+    var W = 1080, H = 1920;
+    var canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+
+    var cells = _lgCollage.layout.cells;
+    var loaded = 0;
+    var imgs = [];
+    cells.forEach(function (c, i) {
+        var im = new Image();
+        im.onload = im.onerror = function () {
+            loaded++;
+            if (loaded === cells.length) paint();
+        };
+        im.src = _lgCollage.shots[i] || '';
+        imgs.push(im);
+    });
+
+    function paint() {
+        cells.forEach(function (c, i) {
+            var im = imgs[i];
+            if (!im || !im.width) return;
+            var dx = c[0] * W, dy = c[1] * H, dw = c[2] * W, dh = c[3] * H;
+            // Cover: crop the source so the cell is filled without stretching.
+            var sr = im.width / im.height, dr = dw / dh;
+            var sw = im.width, sh = im.height, sx = 0, sy = 0;
+            if (sr > dr) { sw = im.height * dr; sx = (im.width - sw) / 2; }
+            else { sh = im.width / dr; sy = (im.height - sh) / 2; }
+            ctx.drawImage(im, sx, sy, sw, sh, dx, dy, dw, dh);
+            ctx.strokeStyle = '#000'; ctx.lineWidth = 6; ctx.strokeRect(dx, dy, dw, dh);
+        });
+        canvas.toBlob(function (blob) {
+            if (!blob) return;
+            var file = new File([blob], 'collage_' + Date.now() + '.jpg', { type: 'image/jpeg' });
+            var layoutId = _lgCollage.layout.id;
+            lgCancelCollage();
+            if (typeof closeLgCam === 'function') { try { closeLgCam(); } catch (e) {} }
+            // Carried through so a viewer can shoot the same layout from the pill.
+            window._lgTemplate = { kind: 'collage', layout: layoutId };
+            openLgComposer([file]);
+            _lgShowTemplatePill();
+        }, 'image/jpeg', 0.9);
+    }
+}
+
+// The Drop Yours pill on the composer, so the story carries its template.
+function _lgShowTemplatePill() {
+    var comp = document.getElementById('lgComposer');
+    if (!comp || document.getElementById('lgTemplatePill')) return;
+    var pill = document.createElement('div');
+    pill.id = 'lgTemplatePill';
+    pill.style.cssText = 'position:absolute;left:50%;bottom:86px;transform:translateX(-50%);z-index:20;display:flex;align-items:center;gap:8px;background:#fff;border-radius:24px;padding:9px 18px;box-shadow:0 4px 18px rgba(0,0,0,0.35);';
+    pill.innerHTML = '<i class="fa-solid fa-reply" style="color:#007AFF;font-size:13px;"></i>' +
+                     '<span style="color:#007AFF;font-size:14px;font-weight:800;">Drop yours</span>';
+    comp.appendChild(pill);
+}
+
+// Viewers tap the pill on a posted story. A collage template reopens the camera
+// on that same layout. A photo template made by someone else has nothing to
+// shoot, so it goes straight to the composer instead.
+window.lgDropYoursFromStory = function (template) {
+    var t = template || window._lgTemplate || null;
+    if (!t) return;
+    if (t.kind === 'photo') {
+        if (typeof showToast === 'function') showToast('Add yours');
+        if (typeof openStoryEditor === 'function') { openStoryEditor(); return; }
+        lgGallery();     // pick a photo, then the composer
+        return;
+    }
+    if (typeof openLiquidGlassCamera === 'function') openLiquidGlassCamera();
+    setTimeout(function () { if (t.layout) lgStartCollage(t.layout); }, 500);
+};
+
+// While a collage is in progress the shutter fills the next cell instead of
+// recording, and once every cell is filled it finishes the collage. This wrap is
+// last in the chain, so it runs before the native and web recorders.
+(function () {
+    var wrapped = false;
+    function wrapShutterForCollage() {
+        if (wrapped || typeof window.lgToggleRec !== 'function') return;
+        wrapped = true;
+        var prev = window.lgToggleRec;
+        window.lgToggleRec = function () {
+            if (_lgCollage) {
+                if (_lgCollage.shots.length >= _lgCollage.layout.cells.length) { lgFinishCollage(); return; }
+                if (lgCollageShoot()) return;
+            }
+            return prev.apply(this, arguments);
+        };
+    }
+    // Add the collage button to the camera each time it opens.
+    function wrapCameraOpen() {
+        if (typeof window.openLiquidGlassCamera !== 'function' || window.openLiquidGlassCamera._collageWrapped) return;
+        var orig = window.openLiquidGlassCamera;
+        window.openLiquidGlassCamera = function () {
+            var r = orig.apply(this, arguments);
+            setTimeout(function () {
+                var page = document.getElementById('lgCameraPage');
+                if (!page || document.getElementById('lgCollageBtn')) return;
+                var rail = page.querySelector('div[style*="right:14px"]');
+                if (!rail) return;
+                var btn = document.createElement('button');
+                btn.id = 'lgCollageBtn';
+                btn.className = 'lg-btn';
+                btn.title = 'Collage';
+                btn.onclick = lgOpenCollagePicker;
+                btn.innerHTML = '<i class="fa-solid fa-table-cells-large" style="font-size:16px;"></i>';
+                rail.appendChild(btn);
+            }, 60);
+            return r;
+        };
+        window.openLiquidGlassCamera._collageWrapped = true;
+    }
+    function go() { wrapShutterForCollage(); wrapCameraOpen(); }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go);
+    else go();
+    setTimeout(go, 1400);
+})();
