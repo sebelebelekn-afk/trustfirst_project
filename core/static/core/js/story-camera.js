@@ -687,6 +687,32 @@ function lgCollageShoot() {
     } catch (e) { return false; }
 }
 
+// Shoot a cell with the system camera. Falls back to the preview frame if the
+// capture is unavailable, and treats a cancel as "no shot" rather than an error.
+async function lgCollageShootNative() {
+    if (!_lgCollage) return false;
+    var files = null;
+    try { files = await tfCapturePhoto(); } catch (e) { files = null; }
+    if (files === null) return lgCollageShoot();   // plugin missing, use the preview
+    if (!files.length) return false;               // cancelled, leave the cell empty
+    var url = await new Promise(function (res) {
+        var r = new FileReader();
+        r.onload = function () { res(r.result); };
+        r.onerror = function () { res(null); };
+        r.readAsDataURL(files[0]);
+    });
+    if (!url) return false;
+    _lgCollage.shots.push(url);
+    _lgCollage.idx = _lgCollage.shots.length;
+    if (typeof triggerHaptic === 'function') triggerHaptic(12);
+    _lgRenderCollageHud();
+    var left = _lgCollage.layout.cells.length - _lgCollage.shots.length;
+    if (typeof showToast === 'function') {
+        showToast(left ? ('Shot ' + (_lgCollage.shots.length + 1) + ' of ' + _lgCollage.layout.cells.length) : 'Tap the tick when ready');
+    }
+    return true;
+}
+
 // Composite every shot into one portrait image, cropping each to fill its cell,
 // then hand it to the story composer.
 function lgFinishCollage() {
@@ -777,6 +803,13 @@ window.lgDropYoursFromStory = function (template) {
         window.lgToggleRec = function () {
             if (_lgCollage) {
                 if (_lgCollage.shots.length >= _lgCollage.layout.cells.length) { lgFinishCollage(); return; }
+                // In the shell each cell is shot with the system camera, so the
+                // collage is made of full resolution frames instead of frames
+                // grabbed off the WebView preview.
+                if (typeof tfIsNative === 'function' && tfIsNative() && typeof tfCapturePhoto === 'function') {
+                    lgCollageShootNative();
+                    return;
+                }
                 if (lgCollageShoot()) return;
             }
             return prev.apply(this, arguments);

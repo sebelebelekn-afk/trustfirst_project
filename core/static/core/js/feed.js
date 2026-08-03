@@ -27477,9 +27477,13 @@ async function loadGroups() {
     function buildGroupCard(g, joined) {
         var emoji = g.emoji || '👥';
         var color = g.color || '#007AFF';
-        var unread = joined ? (Math.floor(Math.random() * 20)) : 0;
-        var snippet = g.latest_message || (joined ? '@user: Entry price reached...' : g.description || '');
-        var timeStr = '2m';
+        // These were invented: a random unread badge, a hardcoded snippet and a
+        // hardcoded "2m". Show the real values, and show nothing when there is
+        // nothing to show rather than making a number up.
+        var unread = joined ? (parseInt(g.unread_count, 10) || 0) : 0;
+        var snippet = g.latest_message || (joined ? 'No messages yet' : (g.description || ''));
+        var stamp = g.last_message_at || g.updated_at || null;
+        var timeStr = stamp && typeof getTimeAgo === 'function' ? getTimeAgo(stamp) : '';
         return '<div onclick="openGroup(\'' + g.id + '\')" style="' +
             'display:flex;align-items:center;gap:14px;padding:16px 20px;' +
             'border-bottom:1px solid ' + (isDark?'#1e1e1e':'#f0f0f0') + ';cursor:pointer;' +
