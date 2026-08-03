@@ -156,6 +156,97 @@ async function tfPickMedia(opts) {
     };
 })();
 
+// ---------- Reading the real photo library ----------------------------------
+// A web page cannot enumerate the camera roll, which is why every picker so far
+// has had to hand off to the OS sheet. Inside the shell a native plugin CAN read
+// the library, so the grids can show the user's actual photos and videos.
+//
+// Thumbnails come back as base64 so the grid paints immediately. The full file
+// is only fetched for the items actually chosen, because pulling originals for a
+// whole library would be slow and memory hungry.
+
+// True when the grid can be filled with the real library.
+function tfCanListLibrary() {
+    return !!(tfIsNative() && _tfPlugin('Media'));
+}
+
+// Ask once; without permission the plugin returns nothing useful.
+async function tfLibraryPermission() {
+    var Media = _tfPlugin('Media');
+    if (!Media) return false;
+    try {
+        if (typeof Media.checkPermissions === 'function') {
+            var p = await Media.checkPermissions();
+            var ok = p && (p.photos === 'granted' || p.photos === 'limited' ||
+                           p.publicStorage === 'granted' || p.mediaLibrary === 'granted');
+            if (!ok && typeof Media.requestPermissions === 'function') {
+                p = await Media.requestPermissions();
+                ok = p && (p.photos === 'granted' || p.photos === 'limited' ||
+                           p.publicStorage === 'granted' || p.mediaLibrary === 'granted');
+            }
+            return !!ok;
+        }
+        return true;   // older plugin versions prompt on first read
+    } catch (e) { return false; }
+}
+
+// Returns [{ id, thumb, isVideo, created }] newest first, or null when the
+// library cannot be read so the caller can fall back to the OS picker.
+async function tfListLibrary(opts) {
+    var Media = _tfPlugin('Media');
+    if (!tfIsNative() || !Media) return null;
+    opts = opts || {};
+    try {
+        if (!(await tfLibraryPermission())) return null;
+        var res = await Media.getMedias({
+            quantity: opts.limit || 120,
+            thumbnailWidth: 320,
+            thumbnailHeight: 320,
+            thumbnailQuality: 88,
+            sort: 'creationDate'
+        });
+        var items = (res && (res.medias || res.media)) || [];
+        return items.map(function (m) {
+            var thumb = m.data || m.thumbnail || '';
+            if (thumb && thumb.indexOf('data:') !== 0) thumb = 'data:image/jpeg;base64,' + thumb;
+            return {
+                id: m.identifier || m.id,
+                thumb: thumb,
+                // The plugin reports videos either by a type field or a duration.
+                isVideo: (m.mediaType === 'video' || m.type === 'video' || !!m.duration),
+                created: m.creationDate || m.created || 0
+            };
+        }).filter(function (m) { return m.id && m.thumb; });
+    } catch (e) {
+        console.warn('[Library] read failed, falling back to the picker:', e && e.message);
+        return null;
+    }
+}
+
+// Pull the full file for one library item, only when it is actually chosen.
+async function tfLibraryFile(id, isVideo) {
+    var Media = _tfPlugin('Media');
+    if (!Media || !id) return null;
+    try {
+        var fn = Media.getMediaByIdentifier || Media.getMedia || null;
+        if (!fn) return null;
+        var res = await fn.call(Media, { identifier: id });
+        var b64 = res && (res.data || res.base64 || res.base64String);
+        if (b64) {
+            if (b64.indexOf('data:') === 0) b64 = b64.split(',')[1];
+            var mime = isVideo ? 'video/mp4' : 'image/jpeg';
+            return _tfB64ToFile(b64, mime, (isVideo ? 'video_' : 'photo_') + id + (isVideo ? '.mp4' : '.jpg'));
+        }
+        // Some versions hand back a path instead of bytes.
+        var path = res && (res.path || res.url || res.webPath);
+        if (path) {
+            var blob = await (await fetch(path)).blob();
+            return new File([blob], (isVideo ? 'video.mp4' : 'photo.jpg'), { type: blob.type || (isVideo ? 'video/mp4' : 'image/jpeg') });
+        }
+        return null;
+    } catch (e) { return null; }
+}
+
 // ---------- Native camera capture -------------------------------------------
 // The WebView camera is where the quality complaints come from: it hands back a
 // landscape stream that has to be cropped hard to fill a phone screen, which is
@@ -234,6 +325,23 @@ async function tfStoryCapture(mode) {
         var webPick = window.lgGallery;
         window.lgGallery = function () {
             if (!tfIsNative()) return webPick();
+            // Show the real camera roll when the library can be read, so the grid
+            // is the user's own photos rather than an OS sheet handoff.
+            if (tfCanListLibrary()) {
+                tfListLibrary({ limit: 120 }).then(function (items) {
+                    if (items && items.length) {
+                        window._lgPicked = items;
+                        window._lgSelected = [];       // nothing preselected when browsing
+                        if (typeof openLgGalleryPicker === 'function') openLgGalleryPicker();
+                        return;
+                    }
+                    pickViaSheet();                    // no permission or empty library
+                });
+                return;
+            }
+            pickViaSheet();
+        };
+        function pickViaSheet() {
             tfPickMedia({ multiple: true }).then(function (files) {
                 if (files === null) return webPick();      // plugin missing, use the web input
                 if (!files.length) return;                 // cancelled
@@ -241,7 +349,7 @@ async function tfStoryCapture(mode) {
                 window._lgSelected = files.map(function (_, i) { return i; });
                 if (typeof openLgGalleryPicker === 'function') openLgGalleryPicker();
             });
-        };
+        }
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wrapStoryGallery);
     else wrapStoryGallery();

@@ -14,7 +14,14 @@ var _lgPicked = [];        // File objects chosen for this story
 var _lgSelected = [];      // indexes ticked in the picker grid
 var _lgSound = null;       // { id, name, artist, audio_url, startSec, endSec, loop }
 
-function _lgIsVideo(f) { return !!(f && f.type && f.type.indexOf('video/') === 0); }
+// An entry is either a File the OS picker handed over, or a library item read
+// natively as { id, thumb, isVideo }. Both render in the same grid.
+function _lgIsVideo(f) {
+    if (!f) return false;
+    if (f.isVideo !== undefined) return !!f.isVideo;
+    return !!(f.type && f.type.indexOf('video/') === 0);
+}
+function _lgIsLibraryItem(f) { return !!(f && f.thumb && f.id && !(f instanceof File)); }
 function _lgFmt(s) {
     s = Math.max(0, Math.round(s || 0));
     return Math.floor(s / 60) + ':' + (s % 60 < 10 ? '0' : '') + (s % 60);
@@ -124,14 +131,21 @@ function _lgRenderGalleryGrid(kind) {
         var isVid = _lgIsVideo(f);
         if (kind === 'videos' && !isVid) return;
         if (kind === 'photos' && isVid) return;
-        var url = URL.createObjectURL(f);
         var on = _lgSelected.indexOf(i) !== -1;
         var cell = document.createElement('div');
         cell.style.cssText = 'position:relative;aspect-ratio:1;background:#111;overflow:hidden;cursor:pointer;';
-        cell.innerHTML =
-            (isVid
+        // Library items already carry a thumbnail; picked Files need an object URL.
+        var media;
+        if (_lgIsLibraryItem(f)) {
+            media = '<img src="' + f.thumb + '" style="width:100%;height:100%;object-fit:cover;">' +
+                    (isVid ? '<i class="fa-solid fa-video" style="position:absolute;left:6px;bottom:6px;color:#fff;font-size:12px;text-shadow:0 1px 3px rgba(0,0,0,0.8);"></i>' : '');
+        } else {
+            var url = URL.createObjectURL(f);
+            media = isVid
                 ? '<video src="' + url + '" muted playsinline preload="metadata" style="width:100%;height:100%;object-fit:cover;"></video>'
-                : '<img src="' + url + '" style="width:100%;height:100%;object-fit:cover;">') +
+                : '<img src="' + url + '" style="width:100%;height:100%;object-fit:cover;">';
+        }
+        cell.innerHTML = media +
             '<div class="lg-tick" style="position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;' +
                 'border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;' +
                 'background:' + (on ? '#007AFF' : 'rgba(0,0,0,0.3)') + ';">' + (on ? (_lgSelected.indexOf(i) + 1) : '') + '</div>';
@@ -155,9 +169,29 @@ function _lgUpdateCount() {
     if (b) { b.style.opacity = _lgSelected.length ? '1' : '0.45'; b.style.pointerEvents = _lgSelected.length ? 'auto' : 'none'; }
 }
 
-function lgGalleryNext() {
+async function lgGalleryNext() {
     if (!_lgSelected.length) return;
-    var files = _lgSelected.map(function (i) { return _lgPicked[i]; }).filter(Boolean);
+    var chosen = _lgSelected.map(function (i) { return _lgPicked[i]; }).filter(Boolean);
+    var btn = document.getElementById('lgNextBtn');
+    if (btn) { btn.textContent = 'Loading...'; btn.style.pointerEvents = 'none'; }
+
+    // Library entries are thumbnails only, so fetch the originals now, for the
+    // few that were actually chosen rather than the whole library.
+    var files = [];
+    for (var i = 0; i < chosen.length; i++) {
+        var it = chosen[i];
+        if (_lgIsLibraryItem(it)) {
+            var full = (typeof tfLibraryFile === 'function') ? await tfLibraryFile(it.id, it.isVideo) : null;
+            if (full) files.push(full);
+        } else {
+            files.push(it);
+        }
+    }
+    if (btn) { btn.textContent = 'Next'; btn.style.pointerEvents = 'auto'; }
+    if (!files.length) {
+        if (typeof showToast === 'function') showToast('Could not open that media');
+        return;
+    }
     closeLgGalleryPicker();
     openLgComposer(files);
 }
