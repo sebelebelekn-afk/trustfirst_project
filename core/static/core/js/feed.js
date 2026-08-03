@@ -36054,6 +36054,34 @@ var edState = {
 var ED_CLIP_PX_PER_SEC = 80; // pixels per second at default zoom
 var edZoom = 1.0;
 
+// ── Where a screen was opened from ──────────────────────────────────────────
+// The editor and the trustclip page each used to hardcode where Back went, so
+// leaving the editor always landed on the clip selector and leaving the
+// trustclip page always landed back in the editor, no matter how you got there.
+// Callers set the origin before opening a screen and Back reads it.
+window._tfOrigin = window._tfOrigin || {};
+function tfSetOrigin(screen, from) { window._tfOrigin[screen] = from || null; }
+function tfGetOrigin(screen) { return window._tfOrigin[screen] || null; }
+
+// Back from the trustclip page.
+function tcGoBack() {
+    closePage('new-trust-clip-overlay');
+    var from = tfGetOrigin('trustclip');
+    tfSetOrigin('trustclip', null);
+    if (from === 'story-camera') {          // came straight from the composer
+        if (typeof openLgComposer === 'function' && (window._lgComposerFiles || []).length) {
+            openLgComposer(window._lgComposerFiles);
+            return;
+        }
+    }
+    if (from === 'drafts') {
+        if (typeof openTrustclipDraftsScreen === 'function') { openTrustclipDraftsScreen(); return; }
+    }
+    if (from === 'feed') { if (typeof showNavBar === 'function') showNavBar(); return; }
+    // Default and the 'editor' case: back into the editor it was composed in.
+    openPage('preview-edit-overlay');
+}
+
 function openPreviewEditScreen() {
     if (selectedClipFiles.length === 0) return;
     closePage('clip-selector-overlay');
@@ -36067,6 +36095,8 @@ function openPreviewEditScreen() {
     edState.history = [];
     edState.historyIndex = -1;
     edZoom = 1.0;
+    // Unless a caller said otherwise, the editor was reached from the selector.
+    if (!tfGetOrigin('editor')) tfSetOrigin('editor', 'clip-selector');
     window._tcCoverDataUrl = null;   // a new clip starts with no custom cover
     edState._draftVideoStored = false; // re-store this session's video on first autosave
 
@@ -40156,8 +40186,19 @@ function editorRealExit() {
     localStorage.removeItem('tf_editor_draft');
     var overlay = document.getElementById('preview-edit-overlay');
     if (overlay) overlay.style.display = 'none';
-    // Re-render the gallery empty state instead of leaving a bare/stale grid.
-    // Pass true so it does NOT re-pop the native picker just from leaving the editor.
+    var from = tfGetOrigin('editor');
+    tfSetOrigin('editor', null);
+    if (from === 'story-camera') {
+        // Came in from the story composer, so go back to it rather than dumping
+        // the user on the clip selector they never visited.
+        if (typeof openLgComposer === 'function' && (window._lgComposerFiles || []).length) {
+            openLgComposer(window._lgComposerFiles);
+            return;
+        }
+    }
+    if (from === 'feed') { if (typeof showNavBar === 'function') showNavBar(); return; }
+    // Default: the clip selector, re-rendered to its empty state rather than a
+    // stale grid. Pass true so leaving does not re-pop the native picker.
     if (typeof openClipSelectorGallery === 'function') openClipSelectorGallery(true);
     else openPage('clip-selector-overlay');
 }
@@ -40356,6 +40397,8 @@ function stopWbAudio() {
 }
 
 function openNewTrustClipPost() {
+    // Unless a caller said otherwise, this was reached from the editor.
+    if (!tfGetOrigin('trustclip')) tfSetOrigin('trustclip', 'editor');
     // Capture placed stickers before the editor DOM is torn down; they ride
     // along to the trustclips insert and render over the video in the feed.
     try { window._pendingClipStickers = _edCollectOverlays(); } catch (e) { window._pendingClipStickers = []; }
@@ -40763,6 +40806,7 @@ async function continueTrustclipDraft(draftId) {
         var cap = document.getElementById('tcCaption');
         if (cap && draft.caption) cap.value = draft.caption;
     }, 200);
+    tfSetOrigin('trustclip', 'drafts');   // Back returns to the drafts screen
     if (draft.hasVideo && !blob) showToast('Draft video could not be restored, please re-add it');
 }
 

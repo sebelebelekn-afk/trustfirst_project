@@ -314,6 +314,8 @@ function lgComposerNext() {
     try { window._lastPickedVideoSrc = URL.createObjectURL(f); window._lastRecordedBlob = null; } catch (e) {}
     if (_lgSound && _lgSound.name) window._tcAudioName = _lgSound.name;
     if (_lgSound && _lgSound.id) window._tcSoundId = _lgSound.id;
+    // Next skips the editor, so Back must return here rather than opening one.
+    if (typeof tfSetOrigin === 'function') tfSetOrigin('trustclip', 'story-camera');
     closeLgComposer();
     if (typeof closeLgCam === 'function') { try { closeLgCam(); } catch (e) {} }
     if (typeof openNewTrustClipPost === 'function') openNewTrustClipPost();
@@ -326,6 +328,8 @@ function lgToolEditor() {
     if (!files.length) return;
     window._clipFileObjects = files;
     window.selectedClipFiles = files.map(function (_, i) { return i; });
+    // Leaving the editor should come back here, not to the clip selector.
+    if (typeof tfSetOrigin === 'function') tfSetOrigin('editor', 'story-camera');
     closeLgComposer();
     if (typeof closeLgCam === 'function') { try { closeLgCam(); } catch (e) {} }
     if (typeof openPreviewEditScreen === 'function') openPreviewEditScreen();
