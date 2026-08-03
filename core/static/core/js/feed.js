@@ -11886,7 +11886,7 @@ async function openLiveStreamFeed() {
 
     page.innerHTML =
         // Top bar
-        '<div style="position:absolute;top:0;left:0;right:0;z-index:10;padding:max(50px,env(safe-area-inset-top,50px)) 16px 14px;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(to bottom,rgba(0,0,0,0.9),transparent);">' +
+        '<div style="position:absolute;top:0;left:0;right:0;z-index:10;padding:max(50px,env(safe-area-inset-top,50px)) 16px 14px;display:flex;align-items:center;justify-content:space-between;background:#000;">' +
             '<div style="display:flex;align-items:center;gap:10px;">' +
                 '<div style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,0.12);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;border:0.5px solid rgba(255,255,255,0.2);overflow:hidden;cursor:pointer;" onclick="startLive()">' +
                     '<img src="https://ui-avatars.com/api/?name=ME&background=007AFF&color=fff&size=80" style="width:100%;height:100%;object-fit:cover;">' +
@@ -11899,8 +11899,10 @@ async function openLiveStreamFeed() {
             '</div>' +
         '</div>' +
         // Feed grid
-        '<div style="position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:max(110px,calc(env(safe-area-inset-top,50px)+60px)) 12px 40px;">' +
-            '<h2 style="color:white;font-size:18px;font-weight:800;margin-bottom:14px;">Live Now</h2>' +
+        // Start the scroll area below the top bar instead of behind it, so the
+        // heading cannot ride up under the status bar as you scroll.
+        '<div style="position:absolute;left:0;right:0;bottom:0;top:calc(env(safe-area-inset-top,50px) + 74px);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:8px 12px 40px;">' +
+            '<h2 style="color:white;font-size:18px;font-weight:800;margin:0 0 14px;">Live Now</h2>' +
             '<div style="display:flex;flex-wrap:wrap;gap:12px;">' + cards + '</div>' +
         '</div>';
 
@@ -22023,10 +22025,11 @@ function startFaceVerification() {
         '<span style="color:white; font-size:12px; font-weight:700;" id="livenessProgress">Step 1 of 5</span>' +
         '</div></div>' +
 
-        // contain, not cover: cover cropped a 720x1280 stream hard on a tall
-        // screen, which is why the preview looked zoomed right into the face.
+        // cover so it fills the screen, paired with a portrait constraint on the
+        // stream itself (see startLivenessCamera). contain letterboxed a landscape
+        // webcam feed into a thin band that did not line up with the oval at all.
         '<video id="livenessVideo" autoplay playsinline muted style="' +
-        'width:100%; height:100%; object-fit:contain; background:#000; transform:scaleX(-1);"></video>' +
+        'width:100%; height:100%; object-fit:cover; background:#000; transform:scaleX(-1);"></video>' +
 
         // The huge spread shadow darkens everything outside the oval, so the
         // cut-out is obvious and you can see whether your face is actually in it.
@@ -22067,8 +22070,15 @@ function startFaceVerification() {
 
 async function startLivenessCamera() {
     try {
+        // Ask for a portrait frame. Without this the camera hands back a
+        // landscape feed, which then has to be cropped hard to fill a tall phone
+        // screen, and that crop is what looked like extreme zoom.
         livenessStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 1280 } },
+            video: {
+                facingMode: 'user',
+                width: { ideal: 1080 }, height: { ideal: 1920 },
+                aspectRatio: { ideal: 0.5625 }
+            },
             audio: false
         });
         var video = document.getElementById('livenessVideo');
@@ -30836,12 +30846,13 @@ function _showCallOverlay(name, isVideo, direction, avatarUrl, targetId) {
         }).catch(function(){});
     }
 
-    // Tap to show/hide controls
-    ov.onclick = function(e) {
-        if (e.target === ov || e.target.id === 'call-remote-video' || e.target.id === 'call-avatar-state') {
-            _toggleCallControls();
-        }
-    };
+    // The controls stay put. Tapping the screen used to fade them out, which is
+    // why the call ended up with no visible buttons at all.
+    ov.onclick = null;
+    var _tb = document.getElementById('call-top-bar');
+    var _bd = document.getElementById('call-bottom-dock');
+    if (_tb) _tb.style.opacity = '1';
+    if (_bd) _bd.style.opacity = '1';
 
     // Swipe down to minimize
     var startY = 0;
@@ -31037,6 +31048,13 @@ function _syncCallMiniBubble() {
 function minimizeCall() {
     var ov = document.getElementById('call-overlay');
     var mini = document.getElementById('call-mini-bubble');
+    // The banner and the PiP live inside #call-overlay, and minimising hides that
+    // overlay, so they were hidden along with it and minimising looked like it
+    // did nothing at all. Lift them to the app root first.
+    var root = document.getElementById('app') || document.body;
+    if (mini && mini.parentElement !== root) root.appendChild(mini);
+    var _pipEl = document.getElementById('call-pip');
+    if (_pipEl && _pipEl.parentElement !== root) root.appendChild(_pipEl);
     // Video calls collapse into a floating, draggable picture-in-picture that keeps
     // the live p2p feed playing (WhatsApp-style). Tap it to expand again.
     if (_callIsVideo) {

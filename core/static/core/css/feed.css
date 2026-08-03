@@ -166,12 +166,16 @@ html, body { background: #000; }
         cursor:pointer; flex-shrink:0; overflow:hidden; transition:outline 0.15s;
     }
     .ed-clip.selected{ outline:2px solid #fff; }
+    /* Wider and higher contrast: at 14px these were very hard to grab when
+       trimming the start or end of a clip. touch-action:none so dragging a
+       handle is not stolen by the timeline's horizontal scroll. */
     .ed-trim {
-        position:absolute; top:0; bottom:0; width:14px;
-        background:rgba(255,255,255,0.28); display:flex;
+        position:absolute; top:0; bottom:0; width:24px; z-index:4;
+        background:rgba(255,255,255,0.55); display:flex;
         align-items:center; justify-content:center; cursor:ew-resize;
-        font-size:9px; color:rgba(255,255,255,0.7);
+        font-size:11px; color:rgba(0,0,0,0.75); touch-action:none;
     }
+    .ed-clip.selected .ed-trim { background:#fff; }
     .ed-trim-l{ left:0; border-radius:10px 0 0 10px; }
     .ed-trim-r{ right:0; border-radius:0 10px 10px 0; }
     /* Without a width cap the scroller grew to fit the whole timeline, so its

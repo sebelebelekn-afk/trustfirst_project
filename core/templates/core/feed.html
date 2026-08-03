@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=83">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=84">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -1131,15 +1131,6 @@ function authenticateUser() {
        data-state rules that reveal this dock could never take effect and the
        controls stayed hidden for the whole call. Default hidden lives in CSS. -->
   <div id="call-bottom-dock" style="position:absolute;bottom:max(34px,env(safe-area-inset-bottom,34px));left:16px;right:16px;z-index:12;flex-direction:column;gap:14px;align-items:center;transition:opacity 0.3s;">
-    <!-- Reactions row -->
-    <div style="display:flex;gap:10px;">
-      <button onclick="sendCallReaction('👍')" style="background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.18);border-radius:50px;padding:6px 12px;font-size:20px;cursor:pointer;color:#fff;">👍</button>
-      <button onclick="sendCallReaction('❤️')" style="background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.18);border-radius:50px;padding:6px 12px;font-size:20px;cursor:pointer;">❤️</button>
-      <button onclick="sendCallReaction('😂')" style="background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.18);border-radius:50px;padding:6px 12px;font-size:20px;cursor:pointer;">😂</button>
-      <button onclick="sendCallReaction('😮')" style="background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.18);border-radius:50px;padding:6px 12px;font-size:20px;cursor:pointer;">😮</button>
-      <button onclick="sendCallReaction('👏')" style="background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.18);border-radius:50px;padding:6px 12px;font-size:20px;cursor:pointer;">👏</button>
-      <button onclick="sendCallReaction('🔥')" style="background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.18);border-radius:50px;padding:6px 12px;font-size:20px;cursor:pointer;">🔥</button>
-    </div>
     <!-- Main controls: a labelled grid, so every button says what it does -->
     <div style="width:100%;display:grid;grid-template-columns:repeat(3,1fr);gap:18px 8px;background:rgba(40,40,42,0.82);backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.12);border-radius:28px;padding:22px 16px;box-sizing:border-box;">
       <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
@@ -4239,7 +4230,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=177"></script>
+<script src="{% static 'core/js/feed.js' %}?v=178"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=75"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
