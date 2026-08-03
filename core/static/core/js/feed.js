@@ -36105,7 +36105,13 @@ function _edBuildFilmstrip(clip) {
     if (clip.filmstrip && clip.filmstrip.length) return;
     clip._stripPending = true;
 
-    var COUNT = 8;
+    // Enough frames that each tile is about 56px wide at base zoom, so the strip
+    // is not eight thumbnails stretched across the whole bar. Captured at 96x128
+    // rather than 48x64, so a tile is downscaled instead of blown up and blurry.
+    var TILE_PX = 56, GRAB_W = 96, GRAB_H = 128;
+    var widthAtBaseZoom = (clip.durationMs / 1000) * ED_CLIP_PX_PER_SEC;
+    var COUNT = Math.max(6, Math.min(24, Math.round(widthAtBaseZoom / TILE_PX)));
+
     var v = document.createElement('video');
     v.muted = true; v.playsInline = true; v.preload = 'auto';
     var frames = [], times = [], idx = 0, finished = false;
@@ -36133,9 +36139,9 @@ function _edBuildFilmstrip(clip) {
             v.removeEventListener('seeked', onSeek);
             try {
                 var cv = document.createElement('canvas');
-                cv.width = 48; cv.height = 64;
+                cv.width = GRAB_W; cv.height = GRAB_H;
                 cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
-                frames.push(cv.toDataURL('image/jpeg', 0.5));
+                frames.push(cv.toDataURL('image/jpeg', 0.72));
             } catch (e) { frames.push(null); }
             idx++; grab();
         };
@@ -36145,6 +36151,34 @@ function _edBuildFilmstrip(clip) {
     }
 
     v.src = clip.objectUrl;
+}
+
+// Give every track exactly half the visible width as padding on each side, in
+// real pixels. A percentage padding resolved against a different box than
+// expected, so the last second of a clip could never scroll under the centred
+// playhead. With this the timeline reaches both ends exactly.
+function _edSyncTrackPadding() {
+    document.querySelectorAll('#preview-edit-overlay .ed-timeline-scroll').forEach(function (scroller) {
+        var half = Math.round(scroller.clientWidth / 2);
+        if (!half) return;
+        var inner = scroller.firstElementChild;
+        if (!inner) return;
+        inner.style.paddingLeft = half + 'px';
+        // Trailing padding is not counted in scrollWidth here, so the last second
+        // could never scroll under the playhead. A real spacer element always is.
+        inner.style.paddingRight = '0px';
+        var spacer = inner.querySelector(':scope > .ed-track-spacer');
+        if (!spacer) {
+            spacer = document.createElement('div');
+            spacer.className = 'ed-track-spacer';
+            spacer.style.cssText = 'flex:0 0 auto;height:1px;pointer-events:none;';
+            inner.appendChild(spacer);
+        } else {
+            inner.appendChild(spacer);   // keep it last after a re-render
+        }
+        spacer.style.width = half + 'px';
+        spacer.style.minWidth = half + 'px';
+    });
 }
 
 // Time ruler above the tracks. It lives in its own synced scroller, so it slides
@@ -36204,6 +36238,7 @@ function edRenderTimeline() {
     }).join('');
 
     _edRenderRuler();
+    _edSyncTrackPadding();
 
     // Audio tracks
     if (aTrack) {
