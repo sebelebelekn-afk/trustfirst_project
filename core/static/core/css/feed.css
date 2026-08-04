@@ -486,7 +486,10 @@ html, body { background: #000; }
     .post-info small { color: #888; font-size: 13px; }
 
     .post-content { font-size: 15px; line-height: 1.5; margin-bottom: 12px; color: #1a1a1a; }
-    .post-media-box { border-radius: 18px; overflow: hidden; position: relative; background: #f9f9f9; border: 1px solid #eee; aspect-ratio: 4/5; }
+    /* The background and border were hardcoded light, so any letterboxing around
+       a posted image showed up as a white slab on a dark feed. */
+    .post-media-box { border-radius: 18px; overflow: hidden; position: relative;
+        background: var(--bg-secondary, #f9f9f9); border: 1px solid var(--border-color, #eee); aspect-ratio: 4/5; }
     .post-img { width: 100%; height: 100%; object-fit: cover; }
 
     .post-icons { display: flex; justify-content: space-between; align-items: center; margin-top: 15px; padding: 4px 5px 8px; color: #555; }
@@ -3615,8 +3618,12 @@ html, body { background: #000; }
 @keyframes vmBarAnim { 0%,100%{transform:scaleY(0.3);} 50%{transform:scaleY(1);} }
 @keyframes callReactionFloat { 0%{opacity:1;transform:translateY(0) scale(1);} 80%{opacity:0.9;transform:translateY(-180px) scale(1.1);} 100%{opacity:0;transform:translateY(-220px) scale(0.8);} }
 
-/* Hidden by default here rather than inline, so the state rules below can win. */
-#call-bottom-dock { display: none; }
+/* Shown by default and hidden only where something else takes over, rather than
+   listed state by state. Naming the states meant any state without a rule, such
+   as "ringing", silently lost the controls. */
+#call-bottom-dock { display: flex; }
+#call-overlay[data-state="incoming"] #call-bottom-dock,
+#call-overlay[data-state="noanswer"] #call-bottom-dock { display: none !important; }
 #call-overlay[data-state="connected"] #call-avatar-state { display: none; }
 #call-overlay[data-state="connected"] #call-remote-video { display: block; }
 #call-overlay[data-state="connected"] #call-bottom-dock { display: flex; }

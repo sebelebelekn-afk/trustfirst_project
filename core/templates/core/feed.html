@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=84">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=85">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -1070,7 +1070,9 @@ function authenticateUser() {
     <div id="call-overlay" style="position:absolute;inset:0;z-index:9500;display:none;flex-direction:column;background:#000;overflow:hidden;">
 
   <!-- Background layer: blurred remote video / gradient -->
-  <div id="call-bg-blur" style="position:absolute;inset:0;background:linear-gradient(160deg,#0a0a1a 0%,#1a0a2e 50%,#0a1a0a 100%);z-index:0;"></div>
+  <!-- The purple-to-green gradient did not belong to this app. Neutral dark with
+       a hint of the brand blue, so the controls sit on it rather than fight it. -->
+  <div id="call-bg-blur" style="position:absolute;inset:0;background:linear-gradient(180deg,#0d1420 0%,#0a0a0c 60%,#000 100%);z-index:0;"></div>
   <video id="call-bg-video" autoplay playsinline muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:blur(20px) brightness(0.3);z-index:1;display:none;"></video>
 
   <!-- Remote video (full screen) -->
