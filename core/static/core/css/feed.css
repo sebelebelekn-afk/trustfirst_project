@@ -488,9 +488,20 @@ html, body { background: #000; }
     .post-content { font-size: 15px; line-height: 1.5; margin-bottom: 12px; color: #1a1a1a; }
     /* The background and border were hardcoded light, so any letterboxing around
        a posted image showed up as a white slab on a dark feed. */
+    /* No fixed aspect-ratio: the box takes the shape of the picture inside it.
+       A forced 4/5 frame left empty bands above and below anything that was not
+       4/5, which is the padding that looked like a slab around the image. The
+       max-height stops a very tall picture from taking over the whole feed. */
     .post-media-box { border-radius: 18px; overflow: hidden; position: relative;
-        background: var(--bg-secondary, #f9f9f9); border: 1px solid var(--border-color, #eee); aspect-ratio: 4/5; }
-    .post-img { width: 100%; height: 100%; object-fit: cover; }
+        background: var(--bg-secondary, #f9f9f9); border: 1px solid var(--border-color, #eee);
+        line-height: 0; }
+    .post-img { width: 100%; height: auto; display: block; max-height: 82vh; object-fit: contain; }
+
+    /* A carousel still needs one shared frame, otherwise every slide would be a
+       different height and the track would jump as you swipe. Single images keep
+       their own shape; only multi-image posts get a fixed frame. */
+    .post-media-box:has(.tf-car-track) { aspect-ratio: 4/5; }
+    .tf-car-item .post-img { max-height: 100%; height: 100%; object-fit: contain; }
 
     /* Multi-image posts: one horizontal snap track, dots and a counter over it.
        Snapping is done by the browser so the swipe stays native-smooth. */

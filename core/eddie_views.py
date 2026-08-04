@@ -122,6 +122,50 @@ def _limit_message(blocked_on):
             % settings.EDDIE_LIMIT_MESSAGES)
 
 
+def _post_image_attachments(row, limit=4):
+    """Download a post's images so Eddie can actually look at them.
+
+    Providers want raw bytes, not a URL, so a tagged post's pictures have to be
+    fetched and base64'd here. Without this Eddie only ever received the caption,
+    which is why asking "which of these is best" read as nonsense to it.
+    """
+    import base64
+
+    urls = []
+    many = row.get('media_urls')
+    if isinstance(many, list):
+        urls.extend([u for u in many if u])
+    one = row.get('media_url')
+    if one and one not in urls:
+        urls.append(one)
+
+    out = []
+    for url in urls[:limit]:
+        if not isinstance(url, str) or not url.startswith(('http://', 'https://')):
+            continue
+        try:
+            r = requests.get(url, timeout=8, stream=True)
+            if r.status_code != 200:
+                continue
+            media = (r.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+            if not media.startswith('image/'):
+                continue        # videos and everything else are not readable here
+            # Cap the download so one enormous upload cannot stall the reply.
+            data = b''
+            for chunk in r.iter_content(65536):
+                data += chunk
+                if len(data) > 6 * 1024 * 1024:
+                    data = b''
+                    break
+            if not data:
+                continue
+            out.append({'media_type': media,
+                        'data': base64.b64encode(data).decode('ascii')})
+        except Exception:
+            continue
+    return out
+
+
 def _build_spec(history, prompt, attachments, route_text=None):
     """Turn the client payload into the provider-neutral spec.
 
@@ -334,7 +378,8 @@ def eddie_mention(request):
         })
     else:
         rows = _sb_get('posts', {
-            'id': 'eq.' + source_id, 'select': 'id,user_id,text_content',
+            'id': 'eq.' + source_id,
+            'select': 'id,user_id,text_content,media_url,media_urls',
         })
     if not rows:
         return JsonResponse({'error': 'Not found'}, status=404)
@@ -372,9 +417,14 @@ def eddie_mention(request):
 
     post_text = ''
     history = []
+    post_row = row if source_type == 'post' else None
     if source_type == 'comment':
-        posts = _sb_get('posts', {'id': 'eq.' + post_id, 'select': 'text_content'})
-        post_text = (posts[0].get('text_content') or '') if posts else ''
+        posts = _sb_get('posts', {
+            'id': 'eq.' + post_id,
+            'select': 'text_content,media_url,media_urls',
+        })
+        post_row = posts[0] if posts else None
+        post_text = (post_row.get('text_content') or '') if post_row else ''
         # The thread root anchors the conversation: replies are one level deep,
         # so the root is the parent's parent, or the parent, or this comment.
         root_id = (parent.get('parent_comment_id') or parent.get('id')) if parent \
@@ -391,8 +441,16 @@ def eddie_mention(request):
         return JsonResponse({'error': _limit_message(info.get('blocked_on')),
                              'limit': info.get('blocked_on')}, status=429)
 
+    # The pictures on the tagged post, so a question about them can be answered.
+    # Counted against the image quota, since reading one costs the same as any
+    # other image turn.
+    images = _post_image_attachments(post_row or {})
+    if images:
+        _consume(user_id, images=len(images))
+
     text, _sources = eddie_once(_mention_prompt(question, post_text),
-                                history=history, route_text=question)
+                                history=history, route_text=question,
+                                attachments=images)
     text = (text or '').strip()
     if not text:
         _release_mention(claim.get('id'))
