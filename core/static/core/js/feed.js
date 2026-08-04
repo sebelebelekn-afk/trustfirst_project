@@ -35754,11 +35754,61 @@ function openClipSelectorGallery(noPicker) {
             '<p style="font-size:13px;color:#888;text-align:center;max-width:240px;">Tap to open your camera roll and pick photos or videos</p>' +
             '<button onclick="document.getElementById(\'_clipGalleryInput\').click()" style="padding:13px 32px;border-radius:50px;background:#007AFF;border:none;color:white;font-size:15px;font-weight:700;cursor:pointer;">Open Gallery</button>' +
         '</div>';
-    // Jump straight to the device's real photos/videos (a PWA can't render the
-    // camera roll itself — the native picker is it). Runs inside the tap that
-    // opened this page so the picker is allowed. The prompt above is the fallback
-    // if they cancel. Skipped when the page is re-shown after leaving the editor.
-    if (!noPicker) { try { inp.click(); } catch (e) {} }
+    // Prefer a true native picker when running inside a native shell (Capacitor).
+    // A plain PWA can't render the camera roll itself, so there we fall back to the
+    // hidden file input below. Either way the picked files flow into the same
+    // _renderClipGallery() pipeline, so nothing downstream changes.
+    if (!noPicker) {
+        if (_hasNativeGallery()) { _pickClipsNative(); return; }
+        // Web fallback: jump straight to the OS file sheet inside the opening tap
+        // so the picker is allowed. The prompt above shows if they cancel.
+        try { inp.click(); } catch (e) {}
+    }
+}
+
+// True when a native photo-library bridge (Capacitor Camera plugin) is present.
+// In a plain browser/PWA this is false and we keep using the <input type=file>.
+function _hasNativeGallery() {
+    try {
+        return !!(window.Capacitor
+            && typeof window.Capacitor.isNativePlatform === 'function'
+            && window.Capacitor.isNativePlatform()
+            && window.Capacitor.Plugins
+            && window.Capacitor.Plugins.Camera);
+    } catch (e) { return false; }
+}
+
+// Open the device's native photo library via the Capacitor Camera plugin and
+// feed the chosen media into the existing clip-gallery pipeline as File objects.
+async function _pickClipsNative() {
+    var Camera = window.Capacitor.Plugins.Camera;
+    try {
+        // pickImages returns { photos: [{ webPath, format }] } from the OS gallery.
+        var res = await Camera.pickImages({ quality: 90 });
+        var photos = (res && res.photos) || [];
+        if (!photos.length) { return; } // cancelled — leave the prompt on screen
+        var files = [];
+        for (var i = 0; i < photos.length; i++) {
+            var p = photos[i];
+            try {
+                var resp = await fetch(p.webPath);
+                var blob = await resp.blob();
+                var ext = (p.format || (blob.type.split('/')[1]) || 'jpg');
+                files.push(new File([blob], 'clip_' + Date.now() + '_' + i + '.' + ext,
+                    { type: blob.type || 'image/jpeg' }));
+            } catch (e) { /* skip an unreadable item rather than failing the whole pick */ }
+        }
+        if (!files.length) { showToast && showToast('Could not read selected media'); return; }
+        _clipFileObjects = files;
+        selectedClipFiles = [];
+        _renderClipGallery(_clipFileObjects);
+    } catch (e) {
+        // Permission denied / plugin error — fall back to the web file input so the
+        // user is never stranded on an empty picker.
+        console.warn('[TrustClip] Native gallery failed, falling back to web input:', e && e.message);
+        var inp = document.getElementById('_clipGalleryInput');
+        if (inp) { try { inp.click(); } catch (e2) {} }
+    }
 }
 
 function _renderClipGallery(files) {
