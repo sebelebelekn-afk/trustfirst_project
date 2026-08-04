@@ -144,6 +144,18 @@ async function tfPickMedia(opts) {
         });
     };
 
+    // Composer "add photo": the OS sheet returns several files at once, which
+    // is what the composer's carousel wants.
+    var _webComposerPick = window.openMedia;
+    window.openMedia = function () {
+        if (!tfIsNative()) return _webComposerPick && _webComposerPick();
+        tfPickMedia({ multiple: true }).then(function (files) {
+            if (files === null) return _webComposerPick && _webComposerPick();
+            if (!files.length) return;             // user cancelled
+            if (typeof handleMediaSelected === 'function') handleMediaSelected({ files: files, value: '' });
+        });
+    };
+
     var _webChatPick = window.openChatMediaPicker;
     window.openChatMediaPicker = function () {
         if (!tfIsNative()) return _webChatPick && _webChatPick();

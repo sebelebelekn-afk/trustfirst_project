@@ -492,6 +492,32 @@ html, body { background: #000; }
         background: var(--bg-secondary, #f9f9f9); border: 1px solid var(--border-color, #eee); aspect-ratio: 4/5; }
     .post-img { width: 100%; height: 100%; object-fit: cover; }
 
+    /* Multi-image posts: one horizontal snap track, dots and a counter over it.
+       Snapping is done by the browser so the swipe stays native-smooth. */
+    .tf-car-track { display: flex; height: 100%; overflow-x: auto; overflow-y: hidden;
+        scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+        scrollbar-width: none; -ms-overflow-style: none; }
+    .tf-car-track::-webkit-scrollbar { display: none; }
+    .tf-car-item { flex: 0 0 100%; height: 100%; scroll-snap-align: center; scroll-snap-stop: always;
+        display: flex; align-items: center; justify-content: center; background: var(--bg-secondary, #f9f9f9); }
+    .tf-car-count { position: absolute; top: 10px; right: 10px; z-index: 2;
+        background: rgba(0,0,0,0.6); color: #fff; font-size: 12px; font-weight: 700;
+        padding: 3px 9px; border-radius: 12px; pointer-events: none; }
+    .tf-car-dots { position: absolute; bottom: 10px; left: 0; right: 0; z-index: 2;
+        display: flex; justify-content: center; gap: 5px; pointer-events: none; }
+    .tf-car-dots span { width: 6px; height: 6px; border-radius: 50%;
+        background: rgba(255,255,255,0.55); box-shadow: 0 0 3px rgba(0,0,0,0.4);
+        transition: background 0.2s, transform 0.2s; }
+    .tf-car-dots span.active { background: #fff; transform: scale(1.2); }
+
+    /* Composer attachments: one big preview, or a scrollable row of thumbnails. */
+    .tf-composer-single { position: relative; }
+    .tf-composer-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
+        -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+    .tf-composer-strip::-webkit-scrollbar { display: none; }
+    .tf-composer-thumb { position: relative; flex: 0 0 auto; width: 120px; height: 120px;
+        border-radius: 14px; overflow: hidden; background: var(--bg-secondary, #f2f2f2); }
+
     .post-icons { display: flex; justify-content: space-between; align-items: center; margin-top: 15px; padding: 4px 5px 8px; color: #555; }
     .post-icons > div { display: inline-flex; align-items: center; gap: 5px; padding: 8px 6px; cursor: pointer; border-radius: 10px; -webkit-tap-highlight-color: transparent; min-width: 36px; }
     .post-icons i { font-size: 20px; transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }

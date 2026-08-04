@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=85">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=86">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -1739,13 +1739,9 @@ function authenticateUser() {
     <!-- Scrollable content area -->
     <div style="flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding-bottom:4px;">
 
-        <div id="composer-media-preview" style="display:none; padding:0 20px 12px; position:relative;">
-  <img id="composer-img-preview" style="width:100%; border-radius:14px; max-height:320px; object-fit:cover; display:none;">
-  <video id="composer-vid-preview" style="width:100%; border-radius:14px; max-height:480px; object-fit:contain; display:none; background:#000;" controls playsinline onloadedmetadata="(function(v){if(v.videoHeight>v.videoWidth){v.style.maxHeight='480px';}else{v.style.maxHeight='240px';}})(this)"></video>
-  <div onclick="clearComposerMedia()" style="position:absolute; top:8px; right:28px; width:28px; height:28px; background:rgba(0,0,0,0.6); border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2;">
-    <i class="fa-solid fa-xmark" style="color:white; font-size:12px;"></i>
-  </div>
-</div>
+        <!-- Attached photos and videos. tfRenderComposerMedia() fills this: one
+             big preview for a single item, a thumbnail strip for several. -->
+        <div id="composer-media-preview" style="display:none; padding:0 20px 12px; position:relative;"></div>
     <!-- Text area -->
     <div style="padding:16px 20px 0;">
         <textarea id="composer-text" placeholder="What's on your mind?" oninput="updateComposerState()" style="width:100%; min-height:140px; border:none; outline:none; font-size:17px; resize:none; background:transparent; color:var(--text-primary,#000); line-height:1.5;"></textarea>
@@ -4232,14 +4228,14 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=182"></script>
+<script src="{% static 'core/js/feed.js' %}?v=184"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=75"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
 <script src="{% static 'core/js/admin.js' %}?v=75"></script>
 <!-- Native shell bridge. No-ops in the browser, so the PWA is unaffected.
      Must load after feed.js because it wraps the media pickers defined there. -->
-<script src="{% static 'core/js/native.js' %}?v=4"></script>
+<script src="{% static 'core/js/native.js' %}?v=5"></script>
 <!-- Story camera: gallery picker, composer, sound picker and trimmer.
      Loads after feed.js because it overrides lgGallery(). -->
 <script src="{% static 'core/js/story-camera.js' %}?v=9"></script>

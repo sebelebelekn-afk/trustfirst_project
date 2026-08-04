@@ -5410,7 +5410,10 @@ function fillProfileGrid() {
                 var tile = document.createElement('div');
                 tile.style.cssText = 'background:#eee;height:130px;border:1px solid #fff;overflow:hidden;cursor:pointer;position:relative;';
                 if (mediaUrl) {
-                    tile.innerHTML = '<img src="' + mediaUrl + '" style="width:100%;height:100%;object-fit:cover;" loading="lazy" onerror="this.parentNode.style.background=\'#eee\';this.remove();">';
+                    // Same stacked-squares mark other apps use for a carousel.
+                    var multi = (post.media_urls && post.media_urls.length > 1)
+                        ? '<i class="fa-solid fa-layer-group" style="position:absolute;top:6px;right:6px;color:#fff;font-size:12px;text-shadow:0 1px 3px rgba(0,0,0,0.5);"></i>' : '';
+                    tile.innerHTML = '<img src="' + mediaUrl + '" style="width:100%;height:100%;object-fit:cover;" loading="lazy" onerror="this.parentNode.style.background=\'#eee\';this.remove();">' + multi;
                 } else {
                     tile.style.cssText += 'background:linear-gradient(135deg,rgba(0,122,255,0.08),rgba(88,86,214,0.08));display:flex;align-items:center;justify-content:center;';
                     tile.innerHTML = '<i class="fa-solid fa-align-left" style="color:#007AFF;opacity:0.5;font-size:18px;"></i>';
@@ -10603,19 +10606,16 @@ function shareStoryAsPost() {
     var story = _storyItems && _storyItems[currentStoryIndex];
     if (!story || !story.media_url) { showToast('Nothing to share'); return; }
     closeStoryViewer();
+    // Seed the composer's media list so the story arrives as a normal
+    // attachment — removable, and able to sit alongside more photos.
+    window._composerMedia = [{ file: null, localUrl: null, url: story.media_url, type: story.media_type || 'image', status: 'ready' }];
     window._composerMediaUrl  = story.media_url;
     window._composerMediaType = story.media_type || 'image';
     if (typeof openPage === 'function') openPage('composer-overlay');
     setTimeout(function() {
         var input = document.getElementById('composer-text-input') || document.querySelector('#composer-overlay textarea');
         if (input && story.caption) { input.value = story.caption; input.dispatchEvent(new Event('input')); }
-        var preview = document.getElementById('composer-media-preview') || document.getElementById('composerImagePreview');
-        if (preview) {
-            preview.innerHTML = story.media_type === 'video'
-                ? '<video src="'+story.media_url+'" style="width:100%;max-height:260px;border-radius:12px;object-fit:cover;" autoplay loop muted playsinline></video>'
-                : '<img src="'+story.media_url+'" style="width:100%;max-height:260px;border-radius:12px;object-fit:cover;">';
-            preview.style.display = 'block';
-        }
+        if (typeof tfRenderComposerMedia === 'function') tfRenderComposerMedia();
     }, 200);
 }
 
@@ -24733,6 +24733,60 @@ function getTimeAgo(dateStr) {
 // ==========================================================================
 // RENDER REAL POST CARD
 // ==========================================================================
+// A post's media. One item renders exactly as it always has; several render as
+// a swipeable carousel with dots and a counter. media_url is still the first
+// item, so posts written before media_urls existed keep working.
+function tfPostMediaHTML(post) {
+    var urls = Array.isArray(post.media_urls) ? post.media_urls.filter(Boolean) : [];
+    if (!urls.length && post.media_url) urls = [post.media_url];
+    if (!urls.length) return '';
+
+    var firstIsVideo = (post.media_type === 'video' || post.post_type === 'video');
+    function isVideoUrl(u, i) {
+        if (i === 0 && firstIsVideo) return true;
+        return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(u);
+    }
+
+    if (urls.length === 1) {
+        return '<div class="post-media-box">' + (isVideoUrl(urls[0], 0) ?
+            '<video src="' + escapeHtml(urls[0]) + '"' + (post.thumbnail_url ? ' poster="' + escapeHtml(post.thumbnail_url) + '"' : '') + ' controls playsinline preload="metadata" onloadedmetadata="try{this.currentTime=0.1;}catch(e){}" style="width:100%;max-height:480px;border-radius:12px;object-fit:contain;background:#000;display:block;"></video>' :
+            '<img src="' + escapeHtml(urls[0]) + '" class="post-img" loading="lazy" style="object-fit:contain;max-height:480px;" onerror="this.closest(\'.post-media-box\').style.display=\'none\'">') + '</div>';
+    }
+
+    var items = urls.map(function(u, i) {
+        var inner = isVideoUrl(u, i)
+            ? '<video src="' + escapeHtml(u) + '"' + ((i === 0 && post.thumbnail_url) ? ' poster="' + escapeHtml(post.thumbnail_url) + '"' : '') + ' controls playsinline preload="metadata" style="width:100%;height:100%;object-fit:contain;background:#000;"></video>'
+            : '<img src="' + escapeHtml(u) + '" loading="lazy" style="width:100%;height:100%;object-fit:contain;" onerror="this.style.visibility=\'hidden\'">';
+        return '<div class="tf-car-item">' + inner + '</div>';
+    }).join('');
+    var dots = urls.map(function(_, i) { return '<span' + (i === 0 ? ' class="active"' : '') + '></span>'; }).join('');
+
+    return '<div class="post-media-box tf-carousel">' +
+        '<div class="tf-car-track" onscroll="tfCarouselScrolled(this)">' + items + '</div>' +
+        '<div class="tf-car-count">1/' + urls.length + '</div>' +
+        '<div class="tf-car-dots">' + dots + '</div>' +
+    '</div>';
+}
+
+// Keep the counter and dots in step with the swipe. Scroll fires often, so the
+// work is folded into one frame.
+function tfCarouselScrolled(track) {
+    if (track._tfCarTick) return;
+    track._tfCarTick = true;
+    requestAnimationFrame(function() {
+        track._tfCarTick = false;
+        var box = track.parentElement;
+        if (!box) return;
+        var i = Math.round(track.scrollLeft / (track.clientWidth || 1));
+        var dots = box.querySelectorAll('.tf-car-dots span');
+        var count = box.querySelector('.tf-car-count');
+        if (i < 0) i = 0;
+        if (i > dots.length - 1) i = dots.length - 1;
+        if (count) count.textContent = (i + 1) + '/' + dots.length;
+        for (var d = 0; d < dots.length; d++) dots[d].classList.toggle('active', d === i);
+    });
+}
+
 function renderRealPostCard(post) {
     var user = post.users || {};
     var card = document.createElement('div');
@@ -24832,9 +24886,7 @@ function renderRealPostCard(post) {
             return txt ? '<div class="post-content">' + (typeof formatPostText === 'function' ? formatPostText(txt) : escapeHtml(txt).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#007AFF;text-decoration:underline;">$1</a>')) + '</div>' : '';
         })() +
         (post.location_name ? tfLocationCardHTML(post) : '') +
-        (post.media_url ? '<div class="post-media-box">' + ((post.media_type === 'video' || post.post_type === 'video') ?
-    '<video src="' + escapeHtml(post.media_url) + '"' + (post.thumbnail_url ? ' poster="' + escapeHtml(post.thumbnail_url) + '"' : '') + ' controls playsinline preload="metadata" onloadedmetadata="try{this.currentTime=0.1;}catch(e){}" style="width:100%;max-height:480px;border-radius:12px;object-fit:contain;background:#000;display:block;"></video>' :
-    '<img src="' + escapeHtml(post.media_url) + '" class="post-img" loading="lazy" style="object-fit:contain;max-height:480px;" onerror="this.closest(\'.post-media-box\').style.display=\'none\'">') + '</div>' : '') +
+        tfPostMediaHTML(post) +
         interactiveHTML +
         '<div class="post-icons">' +
             '<div onclick="realToggleLike(this,\'' + post.id + '\')" data-liked="' + (post._liked ? 'true' : 'false') + '">' +
@@ -27182,6 +27234,9 @@ function cancelComposer() {
     window._composerLocation = null;
     window._composerMusic = null;
     window._composerMusicActive = false;
+    // Without this the attachments from the last post are still sitting there
+    // when the composer is opened again, and ride along on the next one.
+    if (typeof clearComposerMedia === 'function') clearComposerMedia();
     var _lc = document.getElementById('composer-location-card'); if (_lc) _lc.remove();
     var _mc = document.getElementById('composer-music-card'); if (_mc) _mc.remove();
     const textarea = document.getElementById('composer-text');
@@ -32222,6 +32277,7 @@ createPostFromComposer = async function() {
     var postType = currentPostType || 'text';
 
     if (!postText && !window._composerMediaUrl && !window._composerImageData && !window._composerLocation && !window._composerMusic && postType === 'text') { showToast('Write something first!'); return; }
+    if (tfComposerUploading()) { showToast('Hang on, your photos are still uploading.'); return; }
     if (postType === 'poll' && pollOptions.filter(function(o){ return o.trim(); }).length < 2) { showToast('Add at least 2 poll options'); return; }
     if (postType === 'quiz' && quizOptions.filter(function(o){ return o.trim(); }).length < 2) { showToast('Add at least 2 quiz options'); return; }
     if (containsBannedWords(postText)) { showToast('Content violates our guidelines.'); return; }
@@ -32231,10 +32287,14 @@ createPostFromComposer = async function() {
     if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true; }
 
     try {
+        // media_urls carries the whole carousel; media_url stays as the first
+        // item so older cards, grids and share sheets still find something.
+        var composerUrls = tfComposerMediaUrls();
         var insertData = {
             user_id: currentUser?.id,
             text_content: postText,
-            media_url: window._composerMediaUrl || window._composerImageData || null,
+            media_url: composerUrls[0] || window._composerMediaUrl || window._composerImageData || null,
+            media_urls: composerUrls.length ? composerUrls : null,
             media_type: window._composerMediaType || (window._composerImageData ? 'image' : null),
             post_type: postType,
             status: 'published',
@@ -44756,95 +44816,194 @@ async function initiateCall(userId, type) {
     }
 }
 
-    async function handleMediaSelected(input) {
-    var file = input.files && input.files[0];
-    if (!file) return;
+// ============================================================
+// COMPOSER MEDIA — a list, not a single file
+// The composer can hold several photos and videos, which post as one carousel.
+// _composerMediaUrl / _composerMediaType still mirror the first uploaded item,
+// so every older reader (drafts, story reshare, the local post fallback) keeps
+// working without knowing the list exists.
+// ============================================================
+var TF_MAX_COMPOSER_MEDIA = 10;
+var TF_COMPOSER_IMAGE_TYPES = ['image/jpeg','image/png','image/gif','image/webp','image/heic'];
+var TF_COMPOSER_VIDEO_TYPES = ['video/mp4','video/quicktime','video/webm','video/x-m4v'];
+var TF_COMPOSER_EXT = {
+    'image/jpeg':'jpg','image/png':'png','image/gif':'gif',
+    'image/webp':'webp','image/heic':'heic',
+    'video/mp4':'mp4','video/quicktime':'mov',
+    'video/webm':'webm','video/x-m4v':'m4v'
+};
 
-    var ALLOWED_IMAGE_TYPES = ['image/jpeg','image/png','image/gif','image/webp','image/heic'];
-    var ALLOWED_VIDEO_TYPES = ['video/mp4','video/quicktime','video/webm','video/x-m4v'];
-    var ALL_ALLOWED = ALLOWED_IMAGE_TYPES.concat(ALLOWED_VIDEO_TYPES);
-    var isVideo = file.type.startsWith('video/');
+function tfComposerMedia() {
+    if (!Array.isArray(window._composerMedia)) window._composerMedia = [];
+    return window._composerMedia;
+}
 
-    if (ALL_ALLOWED.indexOf(file.type) === -1) {
-        showToast('Unsupported file type. Use JPG, PNG, GIF, WebP, MP4, or MOV.');
-        return;
+// Uploaded URLs in the order the user picked them — what actually gets posted.
+function tfComposerMediaUrls() {
+    return tfComposerMedia()
+        .filter(function(m) { return m.status === 'ready' && m.url; })
+        .map(function(m) { return m.url; });
+}
+
+function tfComposerUploading() {
+    return tfComposerMedia().some(function(m) { return m.status === 'uploading'; });
+}
+
+function _tfSyncComposerMediaLegacy() {
+    var ready = tfComposerMedia().filter(function(m) { return m.status === 'ready' && m.url; });
+    window._composerMediaUrl  = ready.length ? ready[0].url  : null;
+    window._composerMediaType = ready.length ? ready[0].type : null;
+}
+
+function _tfComposerItemHTML(m, i, big) {
+    var src = m.localUrl || m.url || '';
+    var fit = big
+        ? 'width:100%;max-height:420px;object-fit:contain;display:block;border-radius:14px;'
+        : 'width:100%;height:100%;object-fit:cover;display:block;';
+    var media = (m.type === 'video')
+        ? '<video src="' + escapeHtml(src) + '"' + (big ? ' controls' : ' muted') + ' playsinline preload="metadata" style="' + fit + 'background:#000;"></video>'
+        : '<img src="' + escapeHtml(src) + '" style="' + fit + '">';
+    var cover = '';
+    if (m.status === 'uploading') {
+        cover = '<div style="position:absolute;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;border-radius:14px;"><i class="fa-solid fa-spinner fa-spin" style="color:#fff;font-size:18px;"></i></div>';
+    } else if (m.status === 'failed') {
+        cover = '<div onclick="tfRetryComposerMedia(' + i + ')" style="position:absolute;inset:0;background:rgba(0,0,0,0.55);display:flex;flex-direction:column;gap:4px;align-items:center;justify-content:center;border-radius:14px;cursor:pointer;"><i class="fa-solid fa-rotate-right" style="color:#fff;font-size:16px;"></i><small style="color:#fff;font-size:10px;font-weight:700;">Retry</small></div>';
     }
+    var remove = '<div onclick="tfRemoveComposerMedia(' + i + ')" style="position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:3;"><i class="fa-solid fa-xmark" style="color:#fff;font-size:11px;"></i></div>';
+    return '<div class="' + (big ? 'tf-composer-single' : 'tf-composer-thumb') + '">' + media + cover + remove + '</div>';
+}
 
-    var MAX_SIZE = isVideo ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
-    if (file.size > MAX_SIZE) {
-        showToast(isVideo ? 'Video must be under 50MB.' : 'Image must be under 10MB.');
-        return;
-    }
-
-    // Show local preview immediately
-    var localPreview = URL.createObjectURL(file);
-    var previewEl = document.getElementById('composer-media-preview');
-    if (previewEl) {
-        previewEl.style.display = 'block';
-        previewEl.innerHTML = isVideo
-            ? '<div style="position:relative;"><video src="' + localPreview + '" controls playsinline style="width:100%;max-height:480px;border-radius:12px;object-fit:contain;display:block;background:#000;" onloadedmetadata="(function(v){v.style.maxHeight=(v.videoHeight>v.videoWidth)?\'480px\':\'240px\';})(this)"></video><div onclick="clearComposerMedia()" style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2;"><i class="fa-solid fa-xmark" style="color:white;font-size:13px;"></i></div></div>'
-            : '<div style="position:relative;display:inline-block;"><img src="' + localPreview + '" style="width:100%;max-height:480px;border-radius:12px;object-fit:contain;display:block;" onload="(function(img){img.style.maxHeight=(img.naturalHeight>img.naturalWidth)?\'480px\':\'260px\';})(this)"><div onclick="clearComposerMedia()" style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-xmark" style="color:white;font-size:13px;"></i></div></div>';
+function tfRenderComposerMedia() {
+    var host = document.getElementById('composer-media-preview');
+    if (!host) return;
+    var list = tfComposerMedia();
+    if (!list.length) {
+        host.innerHTML = '';
+        host.style.display = 'none';
         updateComposerState();
-        var _ct = document.getElementById('composer-text');
-        if (_ct) _ct.value = '';
+        return;
     }
+    host.style.display = 'block';
 
-    // Upload to Supabase storage
+    var body = (list.length === 1)
+        ? _tfComposerItemHTML(list[0], 0, true)
+        : '<div class="tf-composer-strip">' + list.map(function(m, i) { return _tfComposerItemHTML(m, i, false); }).join('') + '</div>';
+
+    var done   = list.filter(function(m) { return m.status === 'ready'; }).length;
+    var failed = list.filter(function(m) { return m.status === 'failed'; }).length;
+    var note = '';
+    if (tfComposerUploading()) {
+        note = 'Uploading ' + Math.min(done + 1, list.length) + ' of ' + list.length + '…';
+    } else if (failed) {
+        note = failed === 1 ? 'One item did not upload. Tap it to retry, or remove it.'
+                            : failed + ' items did not upload. Tap one to retry, or remove it.';
+    } else if (list.length > 1) {
+        note = list.length + ' items · they post as one swipeable carousel';
+    }
+    if (note) body += '<small style="display:block;margin-top:8px;color:' + (failed ? '#FF3B30' : '#888') + ';font-size:12px;">' + escapeHtml(note) + '</small>';
+
+    host.innerHTML = body;
+    updateComposerState();
+}
+
+function tfRemoveComposerMedia(i) {
+    var list = tfComposerMedia();
+    var m = list[i];
+    if (!m) return;
+    if (m.localUrl) { try { URL.revokeObjectURL(m.localUrl); } catch(e) {} }
+    list.splice(i, 1);
+    _tfSyncComposerMediaLegacy();
+    tfRenderComposerMedia();
+}
+
+async function tfRetryComposerMedia(i) {
+    var m = tfComposerMedia()[i];
+    if (!m || !m.file) return;
+    m.status = 'uploading';
+    tfRenderComposerMedia();
+    var ok = await _tfUploadComposerItem(m);
+    if (!ok) showToast(m.error || 'Upload failed. Check your connection.');
+}
+
+// Returns true on success. The caller reports the failure, so a batch of ten
+// that all fail says so once instead of ten times.
+async function _tfUploadComposerItem(m) {
     var client = window._sb || window.sb;
     if (!client || !currentUser) {
-        showToast('Not connected. Post text only for now.');
+        m.status = 'failed';
+        m.error = 'Not connected. Post text only for now.';
+        tfRenderComposerMedia();
+        return false;
+    }
+    var isVideo = m.type === 'video';
+    var ext = TF_COMPOSER_EXT[m.file.type] || 'bin';
+    var bucket = isVideo ? 'videos' : 'images';
+    // Several files can land in the same millisecond, so the name carries a
+    // suffix as well — otherwise the second upload collides with the first.
+    var path = currentUser.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
+    try {
+        var up = await client.storage.from(bucket).upload(path, m.file, { cacheControl: '3600', upsert: false });
+        if (up.error) throw up.error;
+        var pub = client.storage.from(bucket).getPublicUrl(path);
+        m.url = pub.data && pub.data.publicUrl;
+        m.status = m.url ? 'ready' : 'failed';
+        if (!m.url) m.error = 'Upload failed. Check your connection.';
+    } catch(e) {
+        m.status = 'failed';
+        m.error = 'Upload failed: ' + (e.message || 'Check your connection');
+    }
+    if (tfComposerMedia().indexOf(m) === -1) return true;   // removed while uploading
+    _tfSyncComposerMediaLegacy();
+    tfRenderComposerMedia();
+    return m.status === 'ready';
+}
+
+async function handleMediaSelected(input) {
+    var files = (input && input.files) ? Array.prototype.slice.call(input.files) : [];
+    if (!files.length) return;
+
+    var list = tfComposerMedia();
+    var room = TF_MAX_COMPOSER_MEDIA - list.length;
+    if (room <= 0) {
+        showToast('You can attach up to ' + TF_MAX_COMPOSER_MEDIA + ' photos or videos.');
         return;
     }
 
-    var EXT_MAP = {
-        'image/jpeg':'jpg','image/png':'png','image/gif':'gif',
-        'image/webp':'webp','image/heic':'heic',
-        'video/mp4':'mp4','video/quicktime':'mov',
-        'video/webm':'webm','video/x-m4v':'m4v'
-    };
-    var ext = EXT_MAP[file.type] || 'bin';
-    var bucket = isVideo ? 'videos' : 'images';
-    var path = currentUser.id + '/' + Date.now() + '.' + ext;
-
-    // Show uploading state on preview
-    if (previewEl) {
-        var uploadBar = document.createElement('div');
-        uploadBar.id = 'upload-progress-bar';
-        uploadBar.style.cssText = 'height:3px;background:#007AFF;border-radius:2px;margin-top:6px;animation:uploadPulse 1s ease infinite;';
-        previewEl.appendChild(uploadBar);
+    var allowed = TF_COMPOSER_IMAGE_TYPES.concat(TF_COMPOSER_VIDEO_TYPES);
+    var accepted = [], badType = 0, tooBig = 0;
+    for (var i = 0; i < files.length && accepted.length < room; i++) {
+        var f = files[i];
+        var isVid = f.type.indexOf('video/') === 0;
+        if (allowed.indexOf(f.type) === -1) { badType++; continue; }
+        if (f.size > (isVid ? 50 * 1024 * 1024 : 10 * 1024 * 1024)) { tooBig++; continue; }
+        accepted.push(f);
     }
 
-    try {
-        var uploadResult = await client.storage
-            .from(bucket)
-            .upload(path, file, { cacheControl: '3600', upsert: false });
+    if (badType) showToast('Unsupported file type. Use JPG, PNG, GIF, WebP, MP4, or MOV.');
+    else if (tooBig) showToast('Images must be under 10MB and videos under 50MB.');
+    else if (files.length > room) showToast('You can attach up to ' + TF_MAX_COMPOSER_MEDIA + ' photos or videos.');
+    if (!accepted.length) return;
 
-        var bar = document.getElementById('upload-progress-bar');
-        if (bar) bar.remove();
+    var added = accepted.map(function(f) {
+        return {
+            file: f,
+            localUrl: URL.createObjectURL(f),
+            url: null,
+            type: f.type.indexOf('video/') === 0 ? 'video' : 'image',
+            status: 'uploading'
+        };
+    });
+    added.forEach(function(m) { list.push(m); });
+    tfRenderComposerMedia();
 
-        if (uploadResult.error) throw uploadResult.error;
-
-        var urlResult = client.storage.from(bucket).getPublicUrl(path);
-        var publicUrl = urlResult.data && urlResult.data.publicUrl;
-
-        // Store for createPostFromComposer to use
-        window._composerMediaUrl = publicUrl;
-        window._composerMediaType = isVideo ? 'video' : 'image';
-
-        // Enable post button
-        var postBtn = document.getElementById('composer-post-btn');
-        if (postBtn) {
-            postBtn.style.opacity = '1';
-            postBtn.style.pointerEvents = 'auto';
-        }
-
-    } catch(e) {
-        var bar2 = document.getElementById('upload-progress-bar');
-        if (bar2) bar2.remove();
-        showToast('Upload failed: ' + (e.message || 'Check your connection'));
-        window._composerMediaUrl = null;
-        window._composerMediaType = null;
+    // One at a time: a phone uploading ten files at once stalls on mobile data.
+    var lastError = '';
+    for (var k = 0; k < added.length; k++) {
+        if (tfComposerMedia().indexOf(added[k]) === -1) continue;   // removed already
+        var ok = await _tfUploadComposerItem(added[k]);
+        if (!ok) lastError = added[k].error || 'Upload failed. Check your connection.';
     }
+    if (lastError) showToast(lastError);
 }
 
 function handleChatMediaPick(input) {
@@ -44907,6 +45066,10 @@ async function sendAlbumInChat(files) {
 }
 
 function clearComposerMedia() {
+    tfComposerMedia().forEach(function(m) {
+        if (m.localUrl) { try { URL.revokeObjectURL(m.localUrl); } catch(e) {} }
+    });
+    window._composerMedia = [];
     window._composerMediaUrl = null;
     window._composerMediaType = null;
     window._composerImageData = null;
