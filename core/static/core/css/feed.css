@@ -952,6 +952,66 @@ html, body { background: #000; }
         background 0.2s, box-shadow 0.2s, backdrop-filter 0.2s;
 }
 
+/* Active drag only: turn the selector into a refractive liquid lens.  The
+   untouched .nav-droplet rule above continues to control its resting state. */
+.nav-droplet.dragging {
+    overflow: hidden;
+    isolation: isolate;
+    background:
+        /* concentrated light source, not a broad plastic-looking gloss */
+        radial-gradient(ellipse 19% 15% at 27% 21%, rgba(255,255,255,0.96) 0 13%, rgba(213,246,255,0.46) 31%, transparent 72%),
+        /* caustic light bent through the lower edge of the lens */
+        radial-gradient(ellipse 56% 28% at 72% 98%, rgba(128,229,255,0.70), rgba(56,183,255,0.20) 47%, transparent 76%),
+        /* transparent volume: the content beneath stays visible and blurred */
+        linear-gradient(145deg, rgba(255,255,255,0.20) 0%, rgba(181,233,255,0.05) 35%, rgba(0,109,255,0.09) 67%, rgba(55,196,255,0.28) 100%),
+        rgba(0, 122, 255, 0.44);
+    border: 0.75px solid rgba(222, 249, 255, 0.68);
+    backdrop-filter: blur(13px) saturate(235%) contrast(1.06);
+    -webkit-backdrop-filter: blur(13px) saturate(235%) contrast(1.06);
+    box-shadow:
+        0 10px 23px rgba(0, 113, 255, 0.32),
+        0 3px 6px rgba(0, 21, 55, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.78),
+        inset 0 -6px 10px rgba(71, 198, 255, 0.34),
+        inset 1px 0 1px rgba(255, 255, 255, 0.24),
+        inset -1px 0 1px rgba(73, 198, 255, 0.34);
+}
+
+/* A contained inner reflection and partial chromatic rim provide the liquid
+   refraction visible in the reference without changing size or drag motion. */
+.nav-droplet.dragging::before {
+    content: '';
+    position: absolute;
+    inset: 1px;
+    z-index: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    background:
+        radial-gradient(ellipse 50% 16% at 43% 4%, rgba(255,255,255,0.46), transparent 72%),
+        linear-gradient(118deg, rgba(255,255,255,0.19), transparent 28% 67%, rgba(70,224,255,0.22));
+    mix-blend-mode: screen;
+}
+.nav-droplet.dragging::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    z-index: 1;
+    pointer-events: none;
+    padding: 1.5px;
+    border-radius: inherit;
+    background: conic-gradient(from 214deg,
+        rgba(22,215,255,0) 0deg 35deg,
+        rgba(84,238,255,0.72) 46deg 64deg,
+        rgba(188,113,255,0.56) 69deg 82deg,
+        rgba(255,255,255,0) 95deg 204deg,
+        rgba(160,250,255,0.46) 225deg 244deg,
+        rgba(99,201,255,0.62) 251deg 268deg,
+        rgba(22,215,255,0) 282deg 360deg);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+}
+
 @property --droplet-angle {
     syntax: '<angle>';
     initial-value: 0deg;
