@@ -35095,6 +35095,7 @@ function _tfWireMapSheet() {
                 '<i class="fa-solid fa-magnifying-glass" style="color:rgba(255,255,255,0.4);font-size:14px;"></i>' +
                 '<input type="text" placeholder="Search for friends" style="flex:1;border:none;background:transparent;outline:none;font-size:15px;color:white;caret-color:#007AFF;" oninput="searchFriendsOnMap(this.value)">' +
             '</div>' +
+            '<div id="tfMapSheetResults"></div>' +
             // Hidden until the sheet is dragged up.
             '<div id="tfMapSheetMore" style="max-height:0;overflow:hidden;transition:max-height 0.32s cubic-bezier(0.32,0.72,0,1);">' +
                 '<div style="padding:22px 4px 4px;text-align:center;">' +
@@ -35115,6 +35116,9 @@ function _tfWireMapSheet() {
         if (!mapEl) return;
 
         var tfMap = L.map(mapEl, { zoomControl: false, attributionControl: false }).setView([-29.0, 25.0], 5);
+        // Kept so the search below can fly to a person's pin.
+        window._tfMapInstance = tfMap;
+        window._tfMapPins = {};
 
         L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
             maxZoom: 19,
@@ -35149,14 +35153,27 @@ function _tfWireMapSheet() {
             var fiveDaysAgo = new Date(Date.now() - 5*24*60*60*1000).toISOString();
             var now = new Date().toISOString();
 
-            // 1. Real-time shared locations
+            // 1. Real-time shared locations. user_locations has no profile join
+            // to select through, and the old code bailed on a row.profiles that
+            // was never fetched — so live pins never appeared at all. Read the
+            // rows, then look the people up by id.
             sb.from('user_locations')
                 .select('lat,lng,updated_at,user_id')
                 .then(function(r) {
-                    (r.data || []).forEach(function(row) {
-                        if (!row.lat || !row.lng || !row.profiles) return;
-                        _addFriendPin(tfMap, row.lat, row.lng, row.profiles, 'live', null);
-                    });
+                    var rows = (r.data || []).filter(function(x){ return x.lat && x.lng && x.user_id; });
+                    if (!rows.length) return;
+                    return sb.from('users')
+                        .select('id,full_name,username,avatar_url')
+                        .in('id', rows.map(function(x){ return x.user_id; }))
+                        .then(function(u) {
+                            var byId = {};
+                            (u.data || []).forEach(function(p){ byId[p.id] = p; });
+                            rows.forEach(function(row) {
+                                var p = byId[row.user_id];
+                                if (!p) return;
+                                _addFriendPin(tfMap, row.lat, row.lng, p, 'live', row.updated_at);
+                            });
+                        });
                 }).catch(function(){});
 
             // 2. Post locations (last 5 days)
@@ -35203,6 +35220,16 @@ function _addFriendPin(map, lat, lng, profile, type, createdAt) {
     var icon = L.divIcon({ className:'', html: html, iconSize:[44,44], iconAnchor:[22,22] });
     var marker = L.marker([lat, lng], { icon: icon }).addTo(map);
     marker.bindPopup('<b>' + escapeHtml(name) + '</b><br><small style="color:#888;">' + label + (createdAt ? ' · ' + new Date(createdAt).toLocaleDateString() : '') + '</small>');
+    // Remembered so a search can jump straight to someone. A live pin wins over
+    // a post or story pin for the same person.
+    if (profile && profile.id) {
+        if (!window._tfMapPins) window._tfMapPins = {};
+        var held = window._tfMapPins[profile.id];
+        if (!held || type === 'live') {
+            window._tfMapPins[profile.id] = { marker: marker, lat: lat, lng: lng, type: type };
+        }
+    }
+    return marker;
 }
 
 function toggleMapSharing(pill) {
@@ -35217,10 +35244,71 @@ function toggleMapSharing(pill) {
     showToast(next ? 'Location ON' : 'Location OFF');
 }
 
+// Was a stub that only toasted "Searching for …". It searches people now and
+// flies the map to whoever you pick, or says plainly that they are not sharing
+// a location rather than doing nothing.
+var _tfMapSearchTimer = null;
+
 function searchFriendsOnMap(q) {
-    // stub — wire to Supabase follow-graph query when backend ready
-    if (!q) return;
-    showToast('Searching for ' + q + '...');
+    var box = document.getElementById('tfMapSheetResults');
+    if (!box) return;
+    q = (q || '').trim();
+    if (_tfMapSearchTimer) clearTimeout(_tfMapSearchTimer);
+    if (q.length < 2) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div style="padding:14px 0;text-align:center;color:rgba(255,255,255,0.4);font-size:13px;">Searching…</div>';
+    _tfMapSearchTimer = setTimeout(function() { _tfRunMapSearch(q); }, 280);
+}
+
+async function _tfRunMapSearch(q) {
+    var box = document.getElementById('tfMapSheetResults');
+    if (!box) return;
+    if (!window.sb) {
+        box.innerHTML = '<div style="padding:14px 0;text-align:center;color:rgba(255,255,255,0.4);font-size:13px;">Not connected</div>';
+        return;
+    }
+    var people = [];
+    try {
+        var safe = q.replace(/[,%()]/g, '');
+        var r = await sb.from('users')
+            .select('id,full_name,username,avatar_url')
+            .or('username.ilike.%' + safe + '%,full_name.ilike.%' + safe + '%')
+            .limit(12);
+        people = (r.data || []).filter(function(u){ return !currentUser || u.id !== currentUser.id; });
+    } catch (e) {}
+
+    if (!people.length) {
+        box.innerHTML = '<div style="padding:14px 0;text-align:center;color:rgba(255,255,255,0.4);font-size:13px;">No one found</div>';
+        return;
+    }
+    var pins = window._tfMapPins || {};
+    box.innerHTML = '<div style="max-height:210px;overflow-y:auto;-webkit-overflow-scrolling:touch;">' + people.map(function(u) {
+        var onMap = !!pins[u.id];
+        var av = u.avatar_url
+            ? '<img src="' + escapeHtml(u.avatar_url) + '" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;">'
+            : '<div style="width:40px;height:40px;border-radius:50%;background:#3a3a3c;display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;font-weight:700;flex-shrink:0;">' + escapeHtml((u.full_name || u.username || '?').charAt(0).toUpperCase()) + '</div>';
+        return '<div onclick="tfMapGoToFriend(\'' + escapeHtml(u.id) + '\')" style="display:flex;align-items:center;gap:12px;padding:10px 2px;cursor:pointer;">' +
+            av +
+            '<div style="flex:1;min-width:0;">' +
+                '<b style="color:#fff;font-size:14.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(u.full_name || u.username || 'User') + '</b>' +
+                '<small style="color:rgba(255,255,255,0.45);font-size:12.5px;">@' + escapeHtml(u.username || 'user') + '</small>' +
+            '</div>' +
+            (onMap
+                ? '<span style="color:#34C759;font-size:12px;font-weight:700;flex-shrink:0;"><i class="fa-solid fa-location-dot" style="font-size:11px;"></i> On map</span>'
+                : '<span style="color:rgba(255,255,255,0.3);font-size:12px;flex-shrink:0;">Not sharing</span>') +
+        '</div>';
+    }).join('') + '</div>';
+}
+
+function tfMapGoToFriend(userId) {
+    var pin = (window._tfMapPins || {})[userId];
+    var map = window._tfMapInstance;
+    if (!pin || !map) { showToast('They are not sharing their location'); return; }
+    _tfMapSheetSet(false);          // get the sheet out of the way of the pin
+    try {
+        map.flyTo([pin.lat, pin.lng], 15, { duration: 0.8 });
+        setTimeout(function() { try { pin.marker.openPopup(); } catch (e) {} }, 850);
+    } catch (e) {}
+    triggerHaptic(15);
 }
 
     function toggleGroupAddMenu(btn) {
