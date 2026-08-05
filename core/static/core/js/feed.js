@@ -2734,6 +2734,38 @@ function renderMessageBubble(m, replyMap) {
             '</div>' + timeHtml + '</div>';
     }
 
+    // ── CALL LOG ──────────────────────────────────────────────────────────
+    // A card, not a sentence: round icon with an in/out arrow, the kind of call,
+    // and how long it ran. Same shape as the one in WhatsApp, in our blue.
+    if (msgType === 'call_log') {
+        var _clRaw = m.content || m.ciphertext || 'Voice call';
+        var _clVideo = /video/i.test(_clRaw);
+        var _clSecs = 0;
+        var _clMatch = _clRaw.match(/(\d+):(\d{2})\s*$/);
+        if (_clMatch) _clSecs = (parseInt(_clMatch[1], 10) * 60) + parseInt(_clMatch[2], 10);
+        var _clDur = !_clSecs ? 'No answer'
+            : (_clSecs < 60 ? _clSecs + ' sec'
+                            : Math.floor(_clSecs / 60) + ':' + (_clSecs % 60 < 10 ? '0' : '') + (_clSecs % 60) + ' min');
+        var _clBg    = isSent ? '#007AFF' : 'rgba(0,122,255,0.10)';
+        var _clText  = isSent ? '#ffffff' : 'var(--text-primary,#000)';
+        var _clSub   = isSent ? 'rgba(255,255,255,0.75)' : 'var(--text-secondary,#888)';
+        var _clRing  = isSent ? 'rgba(255,255,255,0.22)' : 'rgba(0,122,255,0.16)';
+        var _clIcon  = isSent ? '#ffffff' : '#007AFF';
+        var _clRadius = isSent ? '20px 20px 4px 20px' : '20px 20px 20px 4px';
+        return '<div style="' + wrapStyle + '">' +
+            '<div' + bubbleAttr + ' style="' + align + 'background:' + _clBg + ';border-radius:' + _clRadius + ';padding:12px 14px;min-width:210px;max-width:78%;display:flex;align-items:center;gap:13px;">' +
+                '<div style="width:44px;height:44px;border-radius:50%;background:' + _clRing + ';display:flex;align-items:center;justify-content:center;flex-shrink:0;position:relative;">' +
+                    '<i class="fa-solid ' + (_clVideo ? 'fa-video' : 'fa-phone') + '" style="color:' + _clIcon + ';font-size:16px;"></i>' +
+                    '<i class="fa-solid ' + (isSent ? 'fa-arrow-up' : 'fa-arrow-down') + '" style="color:' + _clIcon + ';font-size:9px;position:absolute;top:10px;right:9px;transform:rotate(' + (isSent ? '45' : '-45') + 'deg);"></i>' +
+                '</div>' +
+                '<div style="flex:1;min-width:0;">' +
+                    '<b style="display:block;font-size:16px;font-weight:800;color:' + _clText + ';line-height:1.25;">' + (_clVideo ? 'Video call' : 'Voice call') + '</b>' +
+                    '<small style="font-size:14px;color:' + _clSub + ';">' + _clDur + '</small>' +
+                '</div>' +
+                '<small style="font-size:11px;color:' + _clSub + ';align-self:flex-end;flex-shrink:0;">' + time + '</small>' +
+            '</div></div>';
+    }
+
     // ── TEXT ──────────────────────────────────────────────────────────────
     if (msgType === 'text') {
         // A nonce means the row is encrypted. If we have no plaintext by now,
@@ -2994,6 +3026,20 @@ if (handleEl) handleEl.textContent = '@' + userName.toLowerCase().replace(/\s+/g
 
     var chatBody = document.getElementById('chat-body');
     chatBody.innerHTML = '';
+    // Opening a chat from a profile leaves currentConversationId unset until a
+    // round trip resolves it, and the cached-messages lookup below then keys off
+    // "pending" and misses every time — which is why an already-read chat still
+    // showed "Loading messages...". Remembering the id per partner means the
+    // second visit paints from cache straight away.
+    // Only used to find the cached messages — the real id is still resolved
+    // against the server below, so a stale entry here cannot misdirect a send.
+    window._tfCachedConvId = null;
+    if (!currentConversationId && window._currentChatUserId) {
+        try {
+            var _convMap = JSON.parse(localStorage.getItem('tf_conv_by_user') || '{}');
+            window._tfCachedConvId = _convMap[window._currentChatUserId] || null;
+        } catch (e) {}
+    }
     if (!currentConversationId && window._currentChatUserId && window.sb && currentUser) {
         (async function() {
             try {
@@ -3034,7 +3080,26 @@ if (handleEl) handleEl.textContent = '@' + userName.toLowerCase().replace(/\s+/g
                 }
                 // Reload messages now that conversation ID is resolved
                 if (currentConversationId) {
+                    // Remember it so the next visit skips this round trip and
+                    // paints from cache immediately.
+                    try {
+                        var _cmap = JSON.parse(localStorage.getItem('tf_conv_by_user') || '{}');
+                        _cmap[window._currentChatUserId] = currentConversationId;
+                        localStorage.setItem('tf_conv_by_user', JSON.stringify(_cmap));
+                    } catch (e) {}
                     var _body = document.getElementById('chat-body');
+                    // Paint whatever was cached for this conversation while the
+                    // fetch runs, instead of sitting on "Loading messages...".
+                    if (_body && !_body.querySelector('[data-msg-bubble]')) {
+                        try {
+                            var _cm = JSON.parse(localStorage.getItem('tf_msgs_cache_' + currentConversationId) || 'null');
+                            if (_cm && _cm.length) {
+                                var _rmapP = _buildReplyMap(_cm);
+                                _body.innerHTML = _cm.map(function(m){ return renderMessageBubble(m, _rmapP); }).join('');
+                                _body.scrollTop = _body.scrollHeight;
+                            }
+                        } catch (e) {}
+                    }
                     if (_body) {
                         DB.getMessages(currentConversationId).then(function(msgs) {
                             var body = document.getElementById('chat-body');
@@ -3131,7 +3196,7 @@ if (window.sb && window._currentChatUserId) {
         return null;
     }
 
-    var _msgCacheKey = 'tf_msgs_cache_' + (currentConversationId || 'pending');
+    var _msgCacheKey = 'tf_msgs_cache_' + (currentConversationId || window._tfCachedConvId || 'pending');
     var _cachedMsgs = null;
     try { _cachedMsgs = JSON.parse(localStorage.getItem(_msgCacheKey) || 'null'); } catch(e) {}
     if (_cachedMsgs && _cachedMsgs.length) {
@@ -5498,7 +5563,9 @@ function _loadProfileTabCounts() {
         sb.from('posts').select('id', { count: 'exact', head: true }).eq('user_id', uid).eq('status', 'published'),
         sb.from('posts').select('id', { count: 'exact', head: true }).eq('user_id', uid).eq('status', 'published').or('post_type.eq.video,media_type.eq.video'),
         sb.from('reposts').select('id', { count: 'exact', head: true }).eq('user_id', uid),
-        sb.from('posts').select('id', { count: 'exact', head: true }).eq('user_id', uid).eq('status', 'published').eq('post_type', 'image')
+        // Same rule as the Pictures tab itself: photo posts are saved as
+        // post_type 'text' with media_type 'image'.
+        sb.from('posts').select('id', { count: 'exact', head: true }).eq('user_id', uid).eq('status', 'published').or('post_type.eq.image,media_type.eq.image')
     ]).then(function(res) {
         _profileTabCounts = {
             posts: res[0].count || 0,
@@ -5761,18 +5828,27 @@ async function loadProfileReposts(container) {
 function loadProfilePictures(container) {
     container.innerHTML = [0,1,2,3,4,5,6,7,8].map(function(){ return '<div style="aspect-ratio:1;background:var(--skeleton-bg,#e8e8e8);animation:skeletonPulse 1.4s ease-in-out infinite;"></div>'; }).join('');
     if (window.sb && currentUser && currentUser.id) {
+        // The composer saves photo posts as post_type 'text' with media_type
+        // 'image', so filtering on post_type alone left this tab permanently
+        // empty. Match either, then keep only the rows that really have a photo.
         sb.from('posts')
-            .select('id,media_url,thumbnail_url')
+            .select('id,media_url,media_urls,media_type,post_type,thumbnail_url')
             .eq('user_id', currentUser.id)
-            .eq('post_type', 'image')
             .eq('status', 'published')
+            .or('post_type.eq.image,media_type.eq.image')
             .order('created_at', { ascending: false })
             .limit(18)
             .then(function(r) {
                 container.innerHTML = '';
-                if (r.data && r.data.length > 0) {
-                    r.data.forEach(function(p) {
-                        container.innerHTML += '<div style="aspect-ratio:1;overflow:hidden;border:0.5px solid rgba(0,0,0,0.08);cursor:pointer;"><img src="' + escapeHtml(p.media_url || p.thumbnail_url || '') + '" style="width:100%;height:100%;object-fit:cover;"></div>';
+                var pics = (r.data || []).filter(function(p) {
+                    return (p.media_urls && p.media_urls.length) || p.media_url || p.thumbnail_url;
+                });
+                if (pics.length > 0) {
+                    pics.forEach(function(p) {
+                        var src = (p.media_urls && p.media_urls[0]) || p.media_url || p.thumbnail_url || '';
+                        var multi = (p.media_urls && p.media_urls.length > 1)
+                            ? '<i class="fa-solid fa-layer-group" style="position:absolute;top:6px;right:6px;color:#fff;font-size:11px;text-shadow:0 1px 3px rgba(0,0,0,0.5);"></i>' : '';
+                        container.innerHTML += '<div style="aspect-ratio:1;overflow:hidden;border:0.5px solid rgba(0,0,0,0.08);cursor:pointer;position:relative;"><img src="' + escapeHtml(src) + '" loading="lazy" style="width:100%;height:100%;object-fit:cover;">' + multi + '</div>';
                     });
                 } else {
                     container.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#888;font-size:13px;"><i class="fa-solid fa-image" style="font-size:32px;color:#ccc;display:block;margin-bottom:12px;"></i>No photos yet</div>';
@@ -11860,6 +11936,9 @@ function maximizeLive() {
     } else if (_miniLiveMode === 'viewer') {
         var overlay = document.getElementById('live-viewer-overlay');
         if (overlay) overlay.style.display = 'block';
+    } else if (_miniLiveMode === 'browse') {
+        var page = document.getElementById('liveStreamFeedPage');
+        if (page) { page.style.display = 'flex'; page.style.opacity = ''; }
     }
     _miniLiveMode = null;
 }
@@ -11872,6 +11951,9 @@ function closeMiniLive(e) {
         endLive();
     } else if (_miniLiveMode === 'viewer') {
         closeViewerLive();
+    } else if (_miniLiveMode === 'browse') {
+        var page = document.getElementById('liveStreamFeedPage');
+        if (page) page.remove();
     }
     _miniLiveMode = null;
 }
@@ -11907,6 +11989,10 @@ async function openLiveStreamFeed() {
         }
     } catch(e) {}
 
+    var myAvatar = (currentUser && currentUser.avatar_url)
+        ? currentUser.avatar_url
+        : 'https://ui-avatars.com/api/?name=' + encodeURIComponent((currentUser && (currentUser.full_name || currentUser.username)) || 'Me') + '&background=007AFF&color=fff&size=80';
+
     var cards = streams.map(function(s, i) {
         return '<div onclick="openViewerLive(\'' + s.name + '\',\'' + s.avatar + '\',\'' + (s.room || '') + '\')" style="position:relative;border-radius:16px;overflow:hidden;background:#111;aspect-ratio:9/16;cursor:pointer;flex-shrink:0;width:calc(50% - 6px);">' +
             '<div style="position:absolute;inset:0;background:linear-gradient(to bottom,transparent 40%,rgba(0,0,0,0.85) 100%);z-index:1;"></div>' +
@@ -11925,12 +12011,12 @@ async function openLiveStreamFeed() {
         '<div style="position:absolute;top:0;left:0;right:0;z-index:10;padding:max(50px,env(safe-area-inset-top,50px)) 16px 14px;display:flex;align-items:center;justify-content:space-between;background:#000;">' +
             '<div style="display:flex;align-items:center;gap:10px;">' +
                 '<div style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,0.12);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;border:0.5px solid rgba(255,255,255,0.2);overflow:hidden;cursor:pointer;" onclick="startLive()">' +
-                    '<img src="https://ui-avatars.com/api/?name=ME&background=007AFF&color=fff&size=80" style="width:100%;height:100%;object-fit:cover;">' +
+                    '<img src="' + escapeHtml(myAvatar) + '" style="width:100%;height:100%;object-fit:cover;">' +
                 '</div>' +
                 '<button onclick="startLive()" style="background:#FF3B30;color:white;border:none;padding:8px 18px;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;">Go LIVE</button>' +
             '</div>' +
             '<div style="display:flex;gap:10px;">' +
-                '<div onclick="document.getElementById(\'liveStreamFeedPage\').style.opacity=\'0.3\'" style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.12);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;border:0.5px solid rgba(255,255,255,0.2);cursor:pointer;"><i class="fa-solid fa-minus" style="color:white;font-size:14px;"></i></div>' +
+                '<div onclick="minimizeLiveFeedPage()" style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.12);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;border:0.5px solid rgba(255,255,255,0.2);cursor:pointer;"><i class="fa-solid fa-minus" style="color:white;font-size:14px;"></i></div>' +
                 '<div onclick="document.getElementById(\'liveStreamFeedPage\').remove()" style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.12);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;border:0.5px solid rgba(255,255,255,0.2);cursor:pointer;"><i class="fa-solid fa-xmark" style="color:white;font-size:14px;"></i></div>' +
             '</div>' +
         '</div>' +
@@ -11939,11 +12025,35 @@ async function openLiveStreamFeed() {
         // heading cannot ride up under the status bar as you scroll.
         '<div style="position:absolute;left:0;right:0;bottom:0;top:calc(env(safe-area-inset-top,50px) + 74px);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:8px 12px 40px;">' +
             '<h2 style="color:white;font-size:18px;font-weight:800;margin:0 0 14px;">Live Now</h2>' +
-            '<div style="display:flex;flex-wrap:wrap;gap:12px;">' + cards + '</div>' +
+            (streams.length
+                ? '<div style="display:flex;flex-wrap:wrap;gap:12px;">' + cards + '</div>'
+                // Without this the heading sat alone over an empty black screen,
+                // which reads as broken rather than as "nobody is streaming".
+                : '<div style="text-align:center;padding:70px 24px;color:rgba(255,255,255,0.5);">' +
+                      '<i class="fa-solid fa-tower-broadcast" style="font-size:38px;display:block;margin-bottom:14px;opacity:0.5;"></i>' +
+                      '<b style="color:rgba(255,255,255,0.85);display:block;font-size:16px;margin-bottom:6px;">No one is live right now</b>' +
+                      '<p style="font-size:13px;margin:0 0 18px;">When someone starts a stream they show up here.</p>' +
+                      '<button onclick="startLive()" style="background:#FF3B30;color:#fff;border:none;padding:11px 24px;border-radius:22px;font-size:14px;font-weight:700;cursor:pointer;">Start your own</button>' +
+                  '</div>') +
         '</div>';
 
     var app = document.getElementById('app') || document.body;
     app.appendChild(page);
+}
+
+// Minimise used to just fade the page to 30% opacity, which left the header and
+// "Live Now" painted over the feed (and still swallowing taps). Hide it properly
+// and leave the mini player as the way back.
+function minimizeLiveFeedPage() {
+    var page = document.getElementById('liveStreamFeedPage');
+    if (!page) return;
+    page.style.opacity = '';
+    page.style.display = 'none';
+    _miniLiveMode = 'browse';
+    var avatar = (currentUser && currentUser.avatar_url)
+        ? currentUser.avatar_url
+        : 'https://ui-avatars.com/api/?name=Live&background=FF3B30&color=fff&size=80';
+    _showMiniPlayer('Live Now', '0', avatar);
 }
 
 function toggleLiveCamera() {
@@ -11986,7 +12096,10 @@ const channelsData = [
 
 function openChannels() {
     openPage('channels-overlay');
-    renderChannels();
+    // Draw into the Channels page's own list. It used to call setMsgTab, which
+    // writes into the message list underneath — so this page opened blank and
+    // the inbox behind it was replaced at the same time.
+    _tfRenderChannelsInto(document.getElementById('channels-list'), false);
 }
 
 function renderChannels() {
@@ -12085,6 +12198,18 @@ content.innerHTML = [0,1,2,3].map(function(){return '<div style="display:flex;al
         })();
 
     } else if (tabName === 'channels') {
+        _tfRenderChannelsInto(content, true);
+    }
+}
+
+// Renders the channel list into whichever container is asked for. The Channels
+// page has its own container; before this it drew into the message list behind
+// the overlay, so the page itself came up empty and the inbox got replaced.
+// tabGuarded is true only for the messages tab, where the viewer can switch
+// away mid-fetch.
+function _tfRenderChannelsInto(content, tabGuarded) {
+    if (!content) return;
+    {
         // Last render shows instantly; the fetch refreshes it behind the
         // scenes. The skeleton is only for the very first visit.
         content.innerHTML = window._channelsHTML || renderSkeletonHTML('message', 4);
@@ -12151,7 +12276,7 @@ content.innerHTML = [0,1,2,3].map(function(){return '<div style="display:flex;al
             if (window.sb) window._channelsHTML = html;
             // Only paint if the viewer is still on this tab; they may have
             // switched away while the fetch ran.
-            if (window._activeMsgTab === 'channels') content.innerHTML = html;
+            if (!tabGuarded || window._activeMsgTab === 'channels') content.innerHTML = html;
         })();
     }
 }
@@ -18600,6 +18725,10 @@ function _tfIsUuid(v) {
 function _tfRecordView(postId) {
     if (!window.sb || !currentUser || !_tfIsUuid(postId)) return;
     if (_tfSeenPosts.has(postId)) return;
+    // Looking at your own post is not a view. The server ignores it as well,
+    // this just saves the round trip.
+    var _card = document.querySelector('[data-post-id="' + postId + '"]');
+    if (_card && _card.getAttribute('data-user-id') === currentUser.id) return;
     _tfSeenPosts.add(postId);       // optimistic: never queue the same post twice
     sb.from('post_views')
         .insert({ post_id: postId, viewer_id: currentUser.id })
@@ -24733,6 +24862,31 @@ function getTimeAgo(dateStr) {
 // ==========================================================================
 // RENDER REAL POST CARD
 // ==========================================================================
+// A post image that failed to load used to hide its whole media box for good.
+// Opening the app before the network settles made every photo post look like a
+// text post, and it stayed that way until the card was rebuilt. Retry once,
+// then leave a placeholder instead of deleting the picture from the post.
+function tfPostImgError(img) {
+    if (!img || img._tfTried) {
+        if (img) {
+            img.style.display = 'none';
+            var box = img.closest('.tf-car-item') || img.closest('.post-media-box') || img.parentElement;
+            if (box && !box.querySelector('.tf-img-fallback')) {
+                var ph = document.createElement('div');
+                ph.className = 'tf-img-fallback';
+                ph.innerHTML = '<i class="fa-regular fa-image"></i><span>Photo unavailable</span>';
+                box.appendChild(ph);
+            }
+        }
+        return;
+    }
+    img._tfTried = true;
+    var src = img.getAttribute('data-src') || img.src;
+    setTimeout(function() {
+        img.src = src + (src.indexOf('?') > -1 ? '&' : '?') + 'r=' + Date.now();
+    }, 900);
+}
+
 // A post's media. One item renders exactly as it always has; several render as
 // a swipeable carousel with dots and a counter. media_url is still the first
 // item, so posts written before media_urls existed keep working.
@@ -24750,13 +24904,13 @@ function tfPostMediaHTML(post) {
     if (urls.length === 1) {
         return '<div class="post-media-box">' + (isVideoUrl(urls[0], 0) ?
             '<video src="' + escapeHtml(urls[0]) + '"' + (post.thumbnail_url ? ' poster="' + escapeHtml(post.thumbnail_url) + '"' : '') + ' controls playsinline preload="metadata" onloadedmetadata="try{this.currentTime=0.1;}catch(e){}" style="width:100%;max-height:480px;border-radius:12px;object-fit:contain;background:#000;display:block;"></video>' :
-            '<img src="' + escapeHtml(urls[0]) + '" class="post-img" loading="lazy" style="object-fit:contain;max-height:480px;" onerror="this.closest(\'.post-media-box\').style.display=\'none\'">') + '</div>';
+            '<img src="' + escapeHtml(urls[0]) + '" data-src="' + escapeHtml(urls[0]) + '" class="post-img" loading="eager" decoding="async" style="object-fit:contain;max-height:480px;" onerror="tfPostImgError(this)">') + '</div>';
     }
 
     var items = urls.map(function(u, i) {
         var inner = isVideoUrl(u, i)
             ? '<video src="' + escapeHtml(u) + '"' + ((i === 0 && post.thumbnail_url) ? ' poster="' + escapeHtml(post.thumbnail_url) + '"' : '') + ' controls playsinline preload="metadata" style="width:100%;height:100%;object-fit:contain;background:#000;"></video>'
-            : '<img src="' + escapeHtml(u) + '" loading="lazy" style="width:100%;height:100%;object-fit:contain;" onerror="this.style.visibility=\'hidden\'">';
+            : '<img src="' + escapeHtml(u) + '" data-src="' + escapeHtml(u) + '" loading="' + (i === 0 ? 'eager' : 'lazy') + '" decoding="async" style="width:100%;height:100%;object-fit:contain;" onerror="tfPostImgError(this)">';
         return '<div class="tf-car-item">' + inner + '</div>';
     }).join('');
     var dots = urls.map(function(_, i) { return '<span' + (i === 0 ? ' class="active"' : '') + '></span>'; }).join('');
@@ -24907,25 +25061,11 @@ function renderRealPostCard(post) {
 '<div onclick="openShare(\'' + post.id + '\')"><i class="fa-solid fa-share-nodes"></i></div>' +
         '</div>';
 
-    // Track view when post scrolls into viewport — deduplicated per session
-    if (post.id && !String(post.id).startsWith('local_') && window.sb && currentUser) {
-        var _viewedKey = 'tf_viewed_' + currentUser.id;
-        var _viewedSet = JSON.parse(localStorage.getItem(_viewedKey) || '[]');
-        if (_viewedSet.indexOf(post.id) === -1) {
-            var viewObserver = new IntersectionObserver(function(entries, obs) {
-                if (entries[0].isIntersecting) {
-                    obs.disconnect();
-                    var _viewed = JSON.parse(localStorage.getItem(_viewedKey) || '[]');
-                    if (_viewed.indexOf(post.id) !== -1) return; // double-check
-                    _viewed.push(post.id);
-                    if (_viewed.length > 500) _viewed = _viewed.slice(-500); // keep list lean
-                    localStorage.setItem(_viewedKey, JSON.stringify(_viewed));
-                    sb.from('posts').update({ view_count: (post.view_count || 0) + 1 }).eq('id', post.id).then(function(){});
-                }
-            }, { threshold: 0.5 });
-            viewObserver.observe(card);
-        }
-    }
+    // Views are counted from post_views (initViewTracking observes the card and
+    // records one row per person per post). The old counter here bumped
+    // view_count straight from the browser, deduplicated only by a localStorage
+    // list, so clearing site data or opening on a second device counted the
+    // same person again — and the author's own scrolling counted too.
     return card;
 }
 
@@ -44824,14 +44964,55 @@ async function initiateCall(userId, type) {
 // working without knowing the list exists.
 // ============================================================
 var TF_MAX_COMPOSER_MEDIA = 10;
-var TF_COMPOSER_IMAGE_TYPES = ['image/jpeg','image/png','image/gif','image/webp','image/heic'];
+var TF_COMPOSER_IMAGE_TYPES = ['image/jpeg','image/png','image/gif','image/webp','image/heic','image/heif'];
 var TF_COMPOSER_VIDEO_TYPES = ['video/mp4','video/quicktime','video/webm','video/x-m4v'];
 var TF_COMPOSER_EXT = {
     'image/jpeg':'jpg','image/png':'png','image/gif':'gif',
-    'image/webp':'webp','image/heic':'heic',
+    'image/webp':'webp','image/heic':'heic','image/heif':'heic',
     'video/mp4':'mp4','video/quicktime':'mov',
     'video/webm':'webm','video/x-m4v':'m4v'
 };
+
+// iPhones hand over HEIC/HEIF from the camera roll. Storage rejected the type
+// outright (which is why a photo story silently failed while a music story
+// posted), and even when stored, Android browsers cannot display it. iOS can
+// decode HEIC into a canvas, so re-encode to JPEG before anything is uploaded.
+// Anything already web-safe, or that this device cannot decode, passes through
+// untouched.
+function tfNormaliseImageFile(file) {
+    return new Promise(function(resolve) {
+        if (!file || !file.type || file.type.indexOf('image/') !== 0) return resolve(file);
+        if (/^image\/(jpeg|png|gif|webp)$/i.test(file.type)) return resolve(file);
+        var url;
+        try { url = URL.createObjectURL(file); } catch (e) { return resolve(file); }
+        var settled = false;
+        function finish(f) {
+            if (settled) return;
+            settled = true;
+            try { URL.revokeObjectURL(url); } catch (e) {}
+            resolve(f);
+        }
+        var img = new Image();
+        img.onload = function() {
+            try {
+                var max = 2048;
+                var scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+                var c = document.createElement('canvas');
+                c.width = Math.round(img.naturalWidth * scale);
+                c.height = Math.round(img.naturalHeight * scale);
+                c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+                c.toBlob(function(blob) {
+                    if (!blob) return finish(file);
+                    var name = (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg';
+                    finish(new File([blob], name, { type: 'image/jpeg' }));
+                }, 'image/jpeg', 0.9);
+            } catch (e) { finish(file); }
+        };
+        img.onerror = function() { finish(file); };
+        img.src = url;
+        setTimeout(function() { finish(file); }, 6000);   // never hang a post on this
+    });
+}
 
 function tfComposerMedia() {
     if (!Array.isArray(window._composerMedia)) window._composerMedia = [];
@@ -44936,7 +45117,10 @@ async function _tfUploadComposerItem(m) {
         return false;
     }
     var isVideo = m.type === 'video';
-    var ext = TF_COMPOSER_EXT[m.file.type] || 'bin';
+    if (!isVideo) {
+        try { m.file = await tfNormaliseImageFile(m.file); } catch (e) {}
+    }
+    var ext = TF_COMPOSER_EXT[m.file.type] || (isVideo ? 'mp4' : 'jpg');
     var bucket = isVideo ? 'videos' : 'images';
     // Several files can land in the same millisecond, so the name carries a
     // suffix as well — otherwise the second upload collides with the first.
@@ -46313,13 +46497,30 @@ async function submitStoryPost(url, isVideo, audience) {
             if (url.startsWith('blob:')) {
                 var resp = await fetch(url);
                 var blob = await resp.blob();
+                // An iPhone photo is HEIC here, which storage refuses. Convert
+                // before upload rather than posting a story nobody can open.
+                if (!isVideo && typeof tfNormaliseImageFile === 'function') {
+                    try {
+                        blob = await tfNormaliseImageFile(new File([blob], storyId, { type: blob.type || 'image/jpeg' }));
+                    } catch (e) {}
+                }
                 var ext = isVideo ? 'mp4' : 'jpg';
                 var path = currentUser.id + '/' + storyId + '.' + ext;
                 var { data: upData, error: upErr } = await sb.storage
                     .from('stories')
                     .upload(path, blob, { contentType: blob.type, upsert: false });
                 if (upErr) {
+                    // This used to only reach the console, and the story row was
+                    // still written pointing at a blob: URL that dies with the
+                    // page — so the story looked posted and was not.
                     console.error('[Story] Storage upload FAILED:', upErr);
+                    showToast('Story upload failed: ' + (upErr.message || 'try again'));
+                    try {
+                        var sFail = JSON.parse(localStorage.getItem('tf_my_stories') || '[]');
+                        localStorage.setItem('tf_my_stories', JSON.stringify(sFail.filter(function(s){ return s.id !== storyId; })));
+                    } catch (e) {}
+                    if (typeof loadFeedStories === 'function') loadFeedStories();
+                    return;
                 } else if (upData) {
                     var { data: urlData } = sb.storage.from('stories').getPublicUrl(upData.path);
                     finalUrl = urlData.publicUrl;
@@ -46344,7 +46545,10 @@ async function submitStoryPost(url, isVideo, audience) {
                 sound_duration: _sMusic && typeof _sMusic.duration === 'number' ? _sMusic.duration : null,
                 music_style: _sMusic ? (window._spMusicOnly ? 'disc' : 'box') : null
             });
-            if (storyDbErr) console.error('[Story] DB insert FAILED:', storyDbErr);
+            if (storyDbErr) {
+                console.error('[Story] DB insert FAILED:', storyDbErr);
+                showToast('Story not saved: ' + (storyDbErr.message || 'try again'));
+            }
             // Give the template a cover from its first contribution (creator only, RLS-guarded).
             if (_tpl && !storyDbErr) {
                 try { await sb.from('story_templates').update({ cover_url: finalUrl }).eq('id', _tpl.id).is('cover_url', null); } catch(e) {}
@@ -46360,7 +46564,10 @@ async function submitStoryPost(url, isVideo, audience) {
         } catch(e) {}
         if (typeof loadFeedStories === 'function') loadFeedStories();
     } catch(e) {
-        // Keep the blob URL version — works for session at least
+        // The story only lives on this device now, so say so instead of letting
+        // it look posted. Silence here is what hid the failure last time.
+        console.error('[Story] post failed:', e);
+        showToast('Story could not be posted: ' + ((e && e.message) || 'check your connection'));
         try {
             var stories3 = JSON.parse(localStorage.getItem('tf_my_stories') || '[]');
             var idx2 = stories3.findIndex(function(s){ return s.id === storyId; });

@@ -322,10 +322,17 @@ async function lgPostStory() {
     if (typeof closeLgCam === 'function') { try { closeLgCam(); } catch (e) {} }
     try {
         if (!window.sb || !window.currentUser) { showToast('Please sign in'); return; }
+        // An iPhone photo arrives as HEIC, which storage refused and Android
+        // cannot display. Re-encode to JPEG first; videos pass straight through.
+        if (!_lgIsVideo(f) && typeof tfNormaliseImageFile === 'function') {
+            try { f = await tfNormaliseImageFile(f); } catch (e) {}
+        }
         var ext = (f.name && f.name.split('.').pop()) || (_lgIsVideo(f) ? 'mp4' : 'jpg');
         var path = currentUser.id + '/story_' + Date.now() + '.' + ext;
         var up = await sb.storage.from('stories').upload(path, f, { contentType: f.type, upsert: true });
-        if (up.error) { showToast('Could not upload story'); return; }
+        // Say what actually went wrong. The bare "Could not upload story" is why
+        // a rejected file type looked like the feature simply not working.
+        if (up.error) { showToast('Story upload failed: ' + (up.error.message || 'try again')); return; }
         var url = sb.storage.from('stories').getPublicUrl(up.data.path).data.publicUrl;
         var row = {
             user_id: currentUser.id,
@@ -335,10 +342,10 @@ async function lgPostStory() {
         };
         if (_lgSound && _lgSound.name) row.sound_name = _lgSound.name;
         var res = await sb.from('stories').insert(row);
-        if (res.error) { showToast('Could not post story'); return; }
+        if (res.error) { showToast('Could not post story: ' + (res.error.message || 'try again')); return; }
         showToast('Story posted');
         if (typeof triggerHaptic === 'function') triggerHaptic(25);
-    } catch (e) { showToast('Story failed'); }
+    } catch (e) { showToast('Story failed: ' + ((e && e.message) || 'try again')); }
 }
 
 // Next skips the editor and goes to the trustclip composer for the caption step.

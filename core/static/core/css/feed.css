@@ -497,6 +497,14 @@ html, body { background: #000; }
         line-height: 0; }
     .post-img { width: 100%; height: auto; display: block; max-height: 82vh; object-fit: contain; }
 
+    /* Stands in for a photo that would not load. The box used to be hidden
+       outright, so one failed request turned a photo post into a text post
+       until the card was rebuilt. */
+    .tf-img-fallback { display: flex; flex-direction: column; width: 100%; min-height: 180px;
+        align-items: center; justify-content: center; gap: 8px;
+        color: var(--text-tertiary, #999); font-size: 13px; line-height: 1.4; }
+    .tf-img-fallback i { font-size: 26px; opacity: 0.55; }
+
     /* A carousel still needs one shared frame, otherwise every slide would be a
        different height and the track would jump as you swipe. Single images keep
        their own shape; only multi-image posts get a fixed frame. */
@@ -642,20 +650,24 @@ html, body { background: #000; }
    FIX 3 — Comprehensive dark mode + Liquid Glass dark depth
    ============================================================ */
 
-/* Feed panels & app root */
-[data-theme="dark"] body { background: #000; }
-[data-theme="dark"] .app { background: #000 !important; }
-[data-theme="dark"] #feed-panels { background: #000 !important; }
+/* Feed panels & app root.
+   These were pure #000, which read as a black void rather than as our dark
+   theme, and left cards indistinguishable from the page behind them. The
+   surfaces now sit on the shared dark palette, with cards a step lighter than
+   the page so the feed still has depth. */
+[data-theme="dark"] body { background: var(--bg-primary, #14161a); }
+[data-theme="dark"] .app { background: var(--bg-primary, #14161a) !important; }
+[data-theme="dark"] #feed-panels { background: var(--bg-primary, #14161a) !important; }
 
 /* Header */
 [data-theme="dark"] .header-container {
-    background: #1a1a1a !important;
-    border-bottom-color: rgba(255,255,255,0.06) !important;
+    background: var(--bg-secondary, #1c1f24) !important;
+    border-bottom-color: rgba(255,255,255,0.07) !important;
 }
 
 /* White overlays (msg, profile, settings sub-pages) */
 [data-theme="dark"] .white-overlay {
-    background: #111 !important;
+    background: var(--bg-primary, #14161a) !important;
 }
 
 /* Liquid Glass pill — dark: translucent so the feed refracts through, no gloss. */
@@ -674,8 +686,8 @@ html, body { background: #000; }
 
 /* Post cards */
 [data-theme="dark"] .post-card {
-    background: #111 !important;
-    border-bottom-color: #1e1e1e !important;
+    background: var(--card-bg, #1c1f24) !important;
+    border-bottom-color: var(--border-color, #2c3037) !important;
 }
 [data-theme="dark"] .post-content { color: #e5e5e5 !important; }
 [data-theme="dark"] .post-info small { color: #666 !important; }
@@ -694,7 +706,7 @@ html, body { background: #000; }
 }
 
 /* Composer */
-[data-theme="dark"] #composer-overlay { background: #111 !important; }
+[data-theme="dark"] #composer-overlay { background: var(--bg-primary, #14161a) !important; }
 [data-theme="dark"] #composer-text { color: #fff !important; background: transparent !important; }
 
 /* Tabs */
@@ -703,7 +715,7 @@ html, body { background: #000; }
 [data-theme="dark"] .m-tab.active { color: #fff !important; border-bottom-color: #fff !important; }
 
 /* Story container */
-[data-theme="dark"] .story-container { background: #111 !important; border-bottom-color: #1e1e1e !important; }
+[data-theme="dark"] .story-container { background: var(--bg-secondary, #1c1f24) !important; border-bottom-color: var(--border-color, #2c3037) !important; }
 
 /* Bottom bar */
 [data-theme="dark"] .msg-bottom-bar {
@@ -715,14 +727,14 @@ html, body { background: #000; }
 [data-theme="dark"] .activity-item { background: transparent !important; border-bottom-color: #1e1e1e !important; }
 
 /* Settings */
-[data-theme="dark"] #settings-overlay { background: #0a0a0a !important; }
-[data-theme="dark"] .settings-card { background: #161616 !important; border-color: #222 !important; }
-[data-theme="dark"] .settings-row { background: #161616 !important; border-bottom-color: #1e1e1e !important; color: #e5e5e5 !important; }
+[data-theme="dark"] #settings-overlay { background: var(--bg-primary, #14161a) !important; }
+[data-theme="dark"] .settings-card { background: var(--card-bg, #1c1f24) !important; border-color: var(--border-color, #2c3037) !important; }
+[data-theme="dark"] .settings-row { background: var(--card-bg, #1c1f24) !important; border-bottom-color: var(--border-color, #2c3037) !important; color: #e5e5e5 !important; }
 [data-theme="dark"] .settings-section-title { color: #555 !important; }
 /* Manage-group page: match the Settings look — a near-black page with lighter,
    bordered cards, instead of black cards on a grey page (which read as holes). */
 .mg-page { background: var(--bg-secondary, #f2f2f7); }
-[data-theme="dark"] .mg-page { background: #0a0a0a; }
+[data-theme="dark"] .mg-page { background: var(--bg-primary, #14161a); }
 .mg-card { background: #fff; border: 1px solid #ececec; border-radius: 12px; }
 [data-theme="dark"] .mg-card { background: #1a1a1a; border-color: #333; }
 /* Message long-press context menu: smooth spring-in instead of popping. */
@@ -738,15 +750,15 @@ html, body { background: #000; }
 }
 
 /* Repost sheet */
-[data-theme="dark"] .repost-sheet { background: #161616 !important; }
+[data-theme="dark"] .repost-sheet { background: var(--modal-bg, #1c1f24) !important; }
 
 /* Comment overlay */
 /* One surface for the whole sheet. This block and the later dark overrides
    disagreed (#161616 vs #1a1a1a), so the header and the input bar could end up
    a different shade from the list between them. */
-[data-theme="dark"] #comment-overlay { background: #1a1a1a !important; }
-[data-theme="dark"] .comment-input-bar { background: #1a1a1a !important; border-top-color: #2a2a2a !important; }
-[data-theme="dark"] .comment-input-bar input { background: #2a2a2a !important; color: #fff !important; }
+[data-theme="dark"] #comment-overlay { background: var(--modal-bg, #1c1f24) !important; }
+[data-theme="dark"] .comment-input-bar { background: var(--modal-bg, #1c1f24) !important; border-top-color: var(--border-color, #2c3037) !important; }
+[data-theme="dark"] .comment-input-bar input { background: var(--input-bg, #262a30) !important; color: #fff !important; }
 [data-theme="dark"] #chat-bottom-bar {
     background: rgba(18,18,18,0.97) !important;
     border-top-color: rgba(255,255,255,0.07) !important;
@@ -765,7 +777,7 @@ html, body { background: #000; }
     background: rgba(18,18,18,0.97) !important;
     border-bottom-color: rgba(255,255,255,0.07) !important;
 }
-[data-theme="dark"] #chat-body { background: #000 !important; }
+[data-theme="dark"] #chat-body { background: var(--bg-primary, #14161a) !important; }
 [data-theme="dark"] #emoji-picker {
     background: rgba(28,28,30,0.97) !important;
     border: 0.5px solid rgba(255,255,255,0.08) !important;
@@ -1992,18 +2004,22 @@ html, body { background: #000; }
    DARK MODE FIX - Complete Override
    ============================================ */
 [data-theme="dark"] {
-    --bg-primary: #000000;
-    --bg-secondary: #1a1a1a;
-    --bg-tertiary: #2a2a2a;
+    /* Not pure black. A true #000 page made the app look like a hole rather
+       than a dark theme, and every card vanished into the background. These are
+       soft near-blacks with a slight cool cast, each step lighter than the last
+       so page → card → input still reads as layers. */
+    --bg-primary: #14161a;
+    --bg-secondary: #1c1f24;
+    --bg-tertiary: #262a30;
     --text-primary: #ffffff;
-    --text-secondary: #a0a0a0;
-    --text-tertiary: #707070;
-    --border-color: #333333;
-    --card-bg: #1a1a1a;
-    --input-bg: #2a2a2a;
-    --nav-bg: rgba(0, 0, 0, 0.95);
-    --modal-bg: #1a1a1a;
-    --hover-bg: #2a2a2a;
+    --text-secondary: #a0a6ae;
+    --text-tertiary: #757b84;
+    --border-color: #2c3037;
+    --card-bg: #1c1f24;
+    --input-bg: #262a30;
+    --nav-bg: rgba(20, 22, 26, 0.95);
+    --modal-bg: #1c1f24;
+    --hover-bg: #262a30;
     /* Contact Info glass cards/tiles — dark (no white gloss) */
     --cp-card-bg: rgba(30,30,34,0.72);
     --cp-card-border: rgba(255,255,255,0.08);
@@ -2103,8 +2119,8 @@ html, body { background: #000; }
 [data-theme="dark"] #feed-panels { background: #000 !important; }
 [data-theme="dark"] .offline-banner { background: rgba(255,59,48,0.95); }
 [data-theme="dark"] .comment-input-bar { background: #1a1a1a !important; border-color: #2a2a2a !important; }
-[data-theme="dark"] .comment-input-bar input { background: #2a2a2a !important; color: #fff !important; }
-[data-theme="dark"] #comment-overlay { background: #1a1a1a !important; }
+[data-theme="dark"] .comment-input-bar input { background: var(--input-bg, #262a30) !important; color: #fff !important; }
+[data-theme="dark"] #comment-overlay { background: var(--modal-bg, #1c1f24) !important; }
 /* The header divider was a light-mode grey, which read as a hard line. */
 [data-theme="dark"] .comment-header { border-bottom-color: #2a2a2a !important; }
 [data-theme="dark"] .activity-tabs { border-color: #333 !important; }
@@ -3828,7 +3844,7 @@ html, body { background: #000; }
   50% { opacity: 0.4; }
 }
 :root { --skeleton-bg: #e8e8e8; }
-[data-theme="dark"] { --skeleton-bg: #2a2a2a; }
+[data-theme="dark"] { --skeleton-bg: #262a30; }
 
 /* Profile "you're already here" nudge — used when tapping your own username
    while the profile page is already open (paired with haptic feedback). */
