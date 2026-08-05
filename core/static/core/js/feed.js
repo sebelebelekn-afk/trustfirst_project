@@ -11034,6 +11034,16 @@ async function startLive() {
             audio: true
         });
         document.getElementById('live-preview').srcObject = liveStream;
+        // The Live Now browse page sits at z-index 9000 and #live-overlay at
+        // 8700, so going live from that page opened the camera behind it. You
+        // are leaving the list to broadcast, so close it (and its mini player).
+        var _browsePage = document.getElementById('liveStreamFeedPage');
+        if (_browsePage) _browsePage.remove();
+        if (_miniLiveMode === 'browse') {
+            var _mp = document.getElementById('liveMiniPlayer');
+            if (_mp) _mp.style.display = 'none';
+            _miniLiveMode = null;
+        }
         document.getElementById('live-overlay').style.display = 'block';
         _lkStartBroadcast(); // real broadcast via LiveKit (no-op if unconfigured)
         _liveDurationSecs = 0;
@@ -24862,6 +24872,128 @@ function getTimeAgo(dateStr) {
 // ==========================================================================
 // RENDER REAL POST CARD
 // ==========================================================================
+// Posts the feed has rendered, so the photo viewer can look one up by id
+// instead of having the whole row threaded through an inline onclick.
+var _tfPostById = {};
+
+// Tapping a photo on a post card did nothing at all. This is the full-screen
+// viewer: the picture on black, and the post's own actions underneath using the
+// exact icons and handlers the card uses, so a like here is the same like.
+function tfOpenImageViewer(postId, startIdx) {
+    var post = _tfPostById[postId];
+    if (!post) return;
+    var urls = (post.media_urls && post.media_urls.length)
+        ? post.media_urls.filter(Boolean)
+        : (post.media_url ? [post.media_url] : []);
+    if (!urls.length) return;
+
+    var existing = document.getElementById('tfImageViewer');
+    if (existing) existing.remove();
+
+    var user = post.users || {};
+    var idx = Math.min(Math.max(0, startIdx || 0), urls.length - 1);
+    var likedClass = post._liked ? 'fa-solid' : 'fa-regular';
+    var likedColor = post._liked ? 'color:#FF3B30;' : '';
+    var bookmarkClass = post._bookmarked ? 'fa-solid' : 'fa-regular';
+    var bookmarkColor = post._bookmarked ? 'color:#007AFF;' : '';
+    var avatarUrl = user.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user.full_name || 'U') + '&background=007AFF&color=fff';
+
+    var ov = document.createElement('div');
+    ov.id = 'tfImageViewer';
+    ov.style.cssText = 'position:absolute;inset:0;z-index:9950;background:#000;display:flex;flex-direction:column;animation:fadeIn 0.18s ease;';
+
+    var slides = urls.map(function(u) {
+        return '<div class="tf-iv-item"><img src="' + escapeHtml(u) + '" data-src="' + escapeHtml(u) + '" onerror="tfPostImgError(this)" style="max-width:100%;max-height:100%;object-fit:contain;display:block;"></div>';
+    }).join('');
+
+    ov.innerHTML =
+        '<div style="position:absolute;top:0;left:0;right:0;z-index:3;display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 12px;">' +
+            '<div onclick="tfCloseImageViewer()" style="width:40px;height:40px;border-radius:50%;background:rgba(0,0,0,0.5);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+                '<i class="fa-solid fa-arrow-left" style="color:#fff;font-size:16px;"></i></div>' +
+            (urls.length > 1 ? '<span id="tfIvCount" style="color:rgba(255,255,255,0.85);font-size:14px;font-weight:700;">' + (idx + 1) + ' / ' + urls.length + '</span>' : '<span></span>') +
+            '<div onclick="openPostMenu(\'' + escapeHtml(String(post.id)) + '\',\'' + escapeHtml(String(user.id || post.user_id || '')) + '\')" style="width:40px;height:40px;border-radius:50%;background:rgba(0,0,0,0.5);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+                '<i class="fa-solid fa-ellipsis" style="color:#fff;font-size:16px;"></i></div>' +
+        '</div>' +
+
+        '<div id="tfIvTrack" class="tf-iv-track" onscroll="tfIvScrolled(this)">' + slides + '</div>' +
+
+        '<div style="flex-shrink:0;background:#000;padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 14px);border-top:0.5px solid rgba(255,255,255,0.12);">' +
+            '<div style="display:flex;align-items:center;gap:10px;margin-bottom:' + (post.text_content ? '8px' : '12px') + ';">' +
+                '<img src="' + escapeHtml(avatarUrl) + '" onclick="tfCloseImageViewer();viewUserProfile(\'' + escapeHtml(String(user.id || post.user_id || '')) + '\')" style="width:34px;height:34px;border-radius:50%;object-fit:cover;cursor:pointer;flex-shrink:0;">' +
+                '<div style="flex:1;min-width:0;">' +
+                    '<b style="color:#fff;font-size:14.5px;display:flex;align-items:center;gap:4px;">' + escapeHtml(user.full_name || user.username || 'User') +
+                        (user.verified ? '<i class="fa-solid fa-circle-check ' + (user.badge_tier || 'verify-blue') + '" style="font-size:11px;"></i>' : '') + '</b>' +
+                    '<small style="color:rgba(255,255,255,0.5);font-size:12.5px;">@' + escapeHtml(user.username || 'user') + '</small>' +
+                '</div>' +
+            '</div>' +
+            (post.text_content ? '<p style="color:rgba(255,255,255,0.9);font-size:14px;line-height:1.45;margin:0 0 12px;word-break:break-word;">' + escapeHtml(post.text_content) + '</p>' : '') +
+            // Same icons, same handlers as the post card.
+            '<div class="post-icons tf-iv-icons">' +
+                '<div onclick="realToggleLike(this,\'' + post.id + '\')" data-liked="' + (post._liked ? 'true' : 'false') + '">' +
+                    '<i class="' + likedClass + ' fa-heart" style="' + likedColor + '"></i> ' +
+                    '<span style="font-size:13px;color:#888;">' + (post.like_count || 0) + '</span>' +
+                '</div>' +
+                '<div onclick="realOpenComments(\'' + post.id + '\')">' +
+                    '<i class="fa-regular fa-comment"></i>' +
+                    ' <span style="font-size:13px;color:#888;">' + (post.comment_count || 0) + '</span>' +
+                '</div>' +
+                '<div onclick="handleRepost(\'' + post.id + '\')">' +
+                    '<i class="fa-solid fa-retweet"></i>' +
+                    ' <span style="font-size:13px;color:#888;">' + (post.repost_count || 0) + '</span>' +
+                '</div>' +
+                '<div onclick="realToggleBookmark(this,\'' + post.id + '\')" data-bookmarked="' + (post._bookmarked ? 'true' : 'false') + '">' +
+                    '<i class="' + bookmarkClass + ' fa-bookmark" style="' + bookmarkColor + '"></i>' +
+                '</div>' +
+                '<div onclick="openShare(\'' + post.id + '\')"><i class="fa-solid fa-share-nodes"></i></div>' +
+            '</div>' +
+        '</div>';
+
+    (document.getElementById('app') || document.body).appendChild(ov);
+    if (urls.length > 1) {
+        var track = ov.querySelector('#tfIvTrack');
+        // Jump to the picture that was actually tapped, without animating there.
+        requestAnimationFrame(function() { track.scrollLeft = track.clientWidth * idx; });
+    }
+    if (typeof hideNavBar === 'function') hideNavBar();
+}
+
+function tfCloseImageViewer() {
+    var ov = document.getElementById('tfImageViewer');
+    if (ov) ov.remove();
+    if (typeof showNavBar === 'function') showNavBar();
+}
+
+// Post videos open in the clip viewer rather than the device player, so they
+// keep our controls, captions and actions.
+function tfOpenPostVideo(postId, idx) {
+    var post = _tfPostById[postId];
+    if (!post) return;
+    var urls = (post.media_urls && post.media_urls.length)
+        ? post.media_urls.filter(Boolean)
+        : [post.media_url || post.video_url].filter(Boolean);
+    var url = urls[idx || 0] || post.video_url || post.media_url;
+    if (!url) return;
+    if (typeof openContextualVideo === 'function') {
+        openContextualVideo(url, 'feed', 0, [{
+            id: post.id,
+            videoUrl: url,
+            username: post.users ? ('@' + (post.users.username || 'user')) : '@user',
+            caption: post.text_content || '',
+            sound_name: post.sound_name || null,
+            like_count: post.like_count || 0,
+            comment_count: post.comment_count || 0
+        }]);
+    }
+}
+
+function tfIvScrolled(track) {
+    var el = document.getElementById('tfIvCount');
+    if (!el) return;
+    var total = track.children.length;
+    var i = Math.round(track.scrollLeft / (track.clientWidth || 1));
+    el.textContent = (Math.min(Math.max(i, 0), total - 1) + 1) + ' / ' + total;
+}
+
 // A post image that failed to load used to hide its whole media box for good.
 // Opening the app before the network settles made every photo post look like a
 // text post, and it stayed that way until the card was rebuilt. Retry once,
@@ -24901,16 +25033,38 @@ function tfPostMediaHTML(post) {
         return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(u);
     }
 
+    // Remember the row so the photo viewer and the clip viewer can find it.
+    if (post.id) _tfPostById[post.id] = post;
+    var pid = escapeHtml(String(post.id || ''));
+
+    // A video used to render with native controls, so playing it handed the
+    // clip to the device's own player. Tapping now opens our clip viewer, and
+    // the poster frame stands in for the still.
+    function videoTileHTML(u, i, fill) {
+        var poster = (i === 0 && post.thumbnail_url) ? post.thumbnail_url : '';
+        var sizing = fill
+            ? 'width:100%;height:100%;object-fit:contain;'
+            : 'width:100%;max-height:480px;border-radius:12px;object-fit:contain;display:block;';
+        return '<div onclick="tfOpenPostVideo(\'' + pid + '\',' + i + ')" style="position:relative;cursor:pointer;' + (fill ? 'width:100%;height:100%;' : '') + '">' +
+            '<video src="' + escapeHtml(u) + '"' + (poster ? ' poster="' + escapeHtml(poster) + '"' : '') + ' muted playsinline preload="metadata" onloadedmetadata="try{this.currentTime=0.1;}catch(e){}" style="' + sizing + 'background:#000;pointer-events:none;"></video>' +
+            '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">' +
+                '<div style="width:56px;height:56px;border-radius:50%;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;">' +
+                    '<i class="fa-solid fa-play" style="color:#fff;font-size:19px;margin-left:3px;"></i>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+    }
+
     if (urls.length === 1) {
         return '<div class="post-media-box">' + (isVideoUrl(urls[0], 0) ?
-            '<video src="' + escapeHtml(urls[0]) + '"' + (post.thumbnail_url ? ' poster="' + escapeHtml(post.thumbnail_url) + '"' : '') + ' controls playsinline preload="metadata" onloadedmetadata="try{this.currentTime=0.1;}catch(e){}" style="width:100%;max-height:480px;border-radius:12px;object-fit:contain;background:#000;display:block;"></video>' :
-            '<img src="' + escapeHtml(urls[0]) + '" data-src="' + escapeHtml(urls[0]) + '" class="post-img" loading="eager" decoding="async" style="object-fit:contain;max-height:480px;" onerror="tfPostImgError(this)">') + '</div>';
+            videoTileHTML(urls[0], 0, false) :
+            '<img src="' + escapeHtml(urls[0]) + '" data-src="' + escapeHtml(urls[0]) + '" class="post-img" loading="eager" decoding="async" style="object-fit:contain;max-height:480px;cursor:pointer;" onclick="tfOpenImageViewer(\'' + pid + '\',0)" onerror="tfPostImgError(this)">') + '</div>';
     }
 
     var items = urls.map(function(u, i) {
         var inner = isVideoUrl(u, i)
-            ? '<video src="' + escapeHtml(u) + '"' + ((i === 0 && post.thumbnail_url) ? ' poster="' + escapeHtml(post.thumbnail_url) + '"' : '') + ' controls playsinline preload="metadata" style="width:100%;height:100%;object-fit:contain;background:#000;"></video>'
-            : '<img src="' + escapeHtml(u) + '" data-src="' + escapeHtml(u) + '" loading="' + (i === 0 ? 'eager' : 'lazy') + '" decoding="async" style="width:100%;height:100%;object-fit:contain;" onerror="tfPostImgError(this)">';
+            ? videoTileHTML(u, i, true)
+            : '<img src="' + escapeHtml(u) + '" data-src="' + escapeHtml(u) + '" loading="' + (i === 0 ? 'eager' : 'lazy') + '" decoding="async" style="width:100%;height:100%;object-fit:contain;cursor:pointer;" onclick="tfOpenImageViewer(\'' + pid + '\',' + i + ')" onerror="tfPostImgError(this)">';
         return '<div class="tf-car-item">' + inner + '</div>';
     }).join('');
     var dots = urls.map(function(_, i) { return '<span' + (i === 0 ? ' class="active"' : '') + '></span>'; }).join('');
@@ -32876,11 +33030,27 @@ function openTimeManagement() {
 
 function openTrustCircle() {
     var tc = document.getElementById('trustCircleOverlay');
-    if (tc && document.getElementById('story-viewer') && document.getElementById('story-viewer').style.display !== 'none') {
-        tc.style.zIndex = '9800';
-        tc.style.position = 'fixed';
-    }
+    // .settings-sub-overlay pins z-index 8000 with !important, and the story
+    // viewer and live overlay sit at 8700 — so a plain inline z-index lost and
+    // this opened behind whatever was on screen. setProperty with 'important'
+    // is the only way to win, and it is only raised while one of those is up.
     openSub('trustCircleOverlay');
+    // After openSub, not before: it assigns el.style.zIndex itself, and a plain
+    // CSSOM assignment drops the important flag that this needs to outrank the
+    // stylesheet rule.
+    if (tc) {
+        var sv = document.getElementById('story-viewer');
+        var lv = document.getElementById('live-overlay');
+        var overStory = sv && getComputedStyle(sv).display !== 'none';
+        var overLive  = lv && getComputedStyle(lv).display !== 'none';
+        if (overStory || overLive) {
+            tc.style.setProperty('z-index', '9800', 'important');
+            tc.style.position = 'fixed';
+        } else {
+            tc.style.removeProperty('z-index');
+            tc.style.position = '';
+        }
+    }
     loadTrustCircleData();
 }
 function openBlockedList() { openSub('blockedAccountsOverlay'); loadBlockedAccountsData(); }
@@ -34833,6 +35003,58 @@ function renderGroupChatHeader(group) {
     }
 }
 
+// The map sheet only ever showed a search box. It now opens on a swipe up, the
+// same way the sheet in Snap Map does, revealing the invite section. Tapping the
+// grab handle does the same thing for anyone who does not think to drag.
+function _tfMapSheetSet(expanded) {
+    var more = document.getElementById('tfMapSheetMore');
+    var sheet = document.getElementById('tfMapSheet');
+    if (!more || !sheet) return;
+    sheet.setAttribute('data-expanded', expanded ? '1' : '0');
+    more.style.maxHeight = expanded ? (more.scrollHeight + 40) + 'px' : '0px';
+}
+
+function _tfWireMapSheet() {
+    var sheet = document.getElementById('tfMapSheet');
+    if (!sheet || sheet._tfWired) return;
+    sheet._tfWired = true;
+
+    var startY = null, moved = false;
+    function isExpanded() { return sheet.getAttribute('data-expanded') === '1'; }
+
+    function down(e) {
+        // Let the search field and the button behave normally.
+        if (e.target.closest('input, button')) return;
+        startY = (e.touches ? e.touches[0].clientY : e.clientY);
+        moved = false;
+    }
+    function move(e) {
+        if (startY === null) return;
+        var y = (e.touches ? e.touches[0].clientY : e.clientY);
+        var dy = startY - y;                  // positive = dragging up
+        if (Math.abs(dy) > 8) moved = true;
+        if (Math.abs(dy) > 40) {
+            _tfMapSheetSet(dy > 0);
+            startY = null;                    // one snap per gesture
+            if (e.cancelable) e.preventDefault();
+        }
+    }
+    function up(e) {
+        // A tap on the handle toggles, so the gesture is discoverable.
+        if (!moved && startY !== null && e.target.closest('#tfMapSheetGrab')) {
+            _tfMapSheetSet(!isExpanded());
+        }
+        startY = null;
+    }
+
+    sheet.addEventListener('touchstart', down, { passive: true });
+    sheet.addEventListener('touchmove', move, { passive: false });
+    sheet.addEventListener('touchend', up);
+    sheet.addEventListener('mousedown', down);
+    sheet.addEventListener('mousemove', move);
+    sheet.addEventListener('mouseup', up);
+}
+
     function openTrustMap(contactName) {
     var existing = document.getElementById('trustMapOverlay');
     if (existing) { existing.remove(); return; }
@@ -34863,16 +35085,28 @@ function renderGroupChatHeader(group) {
         // Map body — real Leaflet map
         '<div id="tfMapContainer" style="flex:1;position:relative;overflow:hidden;"></div>' +
 
-        // Search for friends bottom sheet
-        '<div style="position:absolute;bottom:0;left:0;right:0;z-index:1000;background:rgba(20,20,24,0.88);backdrop-filter:blur(40px);border-radius:28px 28px 0 0;border-top:0.5px solid rgba(255,255,255,0.1);padding:14px 20px 48px;">' +
-            '<div style="width:36px;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;margin:0 auto 16px;"></div>' +
+        // Search for friends bottom sheet. Drag it up (or tap the handle) and the
+        // invite section underneath comes into view.
+        '<div id="tfMapSheet" style="position:absolute;bottom:0;left:0;right:0;z-index:1000;background:rgba(20,20,24,0.88);backdrop-filter:blur(40px);border-radius:28px 28px 0 0;border-top:0.5px solid rgba(255,255,255,0.1);padding:0 20px max(24px,env(safe-area-inset-bottom,24px));touch-action:none;">' +
+            '<div id="tfMapSheetGrab" style="padding:14px 0 12px;cursor:grab;">' +
+                '<div style="width:36px;height:4px;background:rgba(255,255,255,0.25);border-radius:2px;margin:0 auto;"></div>' +
+            '</div>' +
             '<div style="display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.08);border-radius:30px;padding:12px 18px;border:0.5px solid rgba(255,255,255,0.12);">' +
                 '<i class="fa-solid fa-magnifying-glass" style="color:rgba(255,255,255,0.4);font-size:14px;"></i>' +
                 '<input type="text" placeholder="Search for friends" style="flex:1;border:none;background:transparent;outline:none;font-size:15px;color:white;caret-color:#007AFF;" oninput="searchFriendsOnMap(this.value)">' +
             '</div>' +
+            // Hidden until the sheet is dragged up.
+            '<div id="tfMapSheetMore" style="max-height:0;overflow:hidden;transition:max-height 0.32s cubic-bezier(0.32,0.72,0,1);">' +
+                '<div style="padding:22px 4px 4px;text-align:center;">' +
+                    '<b style="display:block;color:#fff;font-size:17px;font-weight:800;line-height:1.35;margin-bottom:6px;">The map is better with friends</b>' +
+                    '<p style="color:rgba(255,255,255,0.5);font-size:13.5px;line-height:1.45;margin:0 0 18px;">Choose who can see where you are, then invite the people you want on your map.</p>' +
+                    '<button onclick="openLocationSettings()" style="width:100%;padding:16px;border-radius:16px;border:none;background:#007AFF;color:#fff;font-size:16px;font-weight:800;cursor:pointer;">Invite friends</button>' +
+                '</div>' +
+            '</div>' +
         '</div>';
 
     (document.getElementById('app') || document.body).appendChild(overlay);
+    _tfWireMapSheet();
 
     // Boot Leaflet map after DOM is ready
     requestAnimationFrame(function() {
@@ -45295,6 +45529,19 @@ async function savePronoun(val, modal) {
 }
 
     // ── DYNAMIC SECTION LOADERS ──────────────────────────────────────────
+    // The tick used to be an inline onclick that built an <i> tag with double
+    // quotes inside a double-quoted attribute. The browser ended the attribute
+    // at the first inner quote and the rest of the handler spilled into the row
+    // as visible text. Same behaviour, as a function, so nothing has to be
+    // escaped into an attribute.
+    function tcToggleMember(el) {
+        var on = el.classList.toggle('checked');
+        el.innerHTML = on ? '<i class="fa-solid fa-check" style="color:white;font-size:11px;"></i>' : '';
+        var row = el.closest('[data-uid]');
+        if (row) row.setAttribute('data-selected', on ? 'true' : 'false');
+    }
+    window.tcToggleMember = tcToggleMember;
+
     async function loadTrustCircleData() {
         var membersEl = document.getElementById('trustCircleMembersList');
         var suggestedEl = document.getElementById('trustCircleSuggestedList');
@@ -45312,7 +45559,7 @@ async function savePronoun(val, modal) {
             membersEl.innerHTML = '<p style="font-size:12px;font-weight:800;color:#888;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">' + memberIds.length + ' ' + (memberIds.length === 1 ? 'person' : 'people') + '</p><div class="settings-card" style="margin-bottom:20px;">' +
                 (profiles.data || []).map(function(u) {
                     var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff&size=80');
-                    return '<div class="tc-member-row" data-uid="' + u.id + '" data-selected="true"><img src="' + escapeHtml(av) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;"><div style="flex:1;"><b style="font-size:15px;">' + escapeHtml(u.full_name || '') + '</b><br><small style="color:#888;">@' + escapeHtml(u.username || '') + '</small></div><div class="tc-radio checked" onclick="this.classList.toggle(\'checked\');this.closest(\'[data-uid]\').setAttribute(\'data-selected\',this.classList.contains(\'checked\'));"><i class="fa-solid fa-check" style="color:white;font-size:11px;"></i></div></div>';
+                    return '<div class="tc-member-row" data-uid="' + u.id + '" data-selected="true"><img src="' + escapeHtml(av) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;"><div style="flex:1;"><b style="font-size:15px;">' + escapeHtml(u.full_name || '') + '</b><br><small style="color:#888;">@' + escapeHtml(u.username || '') + '</small></div><div class="tc-radio checked" onclick="tcToggleMember(this)"><i class="fa-solid fa-check" style="color:white;font-size:11px;"></i></div></div>';
                 }).join('') + '</div>';
         }
         // Suggested = people you follow who aren't in your circle
@@ -45323,7 +45570,7 @@ async function savePronoun(val, modal) {
         if (suggestedEl && sug.data && sug.data.length) {
             suggestedEl.innerHTML = sug.data.map(function(u) {
                 var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff&size=80');
-                return '<div class="tc-member-row" data-uid="' + u.id + '" data-selected="false"><img src="' + escapeHtml(av) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;"><div style="flex:1;"><b style="font-size:15px;">' + escapeHtml(u.full_name || '') + '</b><br><small style="color:#888;">@' + escapeHtml(u.username || '') + '</small></div><div class="tc-radio" onclick="this.classList.toggle(\'checked\');this.innerHTML=this.classList.contains(\'checked\')? \'<i class=\\\"fa-solid fa-check\\\" style=\\\"color:white;font-size:11px;\\\"></i>\' : \'\';this.closest(\'[data-uid]\').setAttribute(\'data-selected\',this.classList.contains(\'checked\'));"></div></div>';
+                return '<div class="tc-member-row" data-uid="' + u.id + '" data-selected="false"><img src="' + escapeHtml(av) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;"><div style="flex:1;"><b style="font-size:15px;">' + escapeHtml(u.full_name || '') + '</b><br><small style="color:#888;">@' + escapeHtml(u.username || '') + '</small></div><div class="tc-radio" onclick="tcToggleMember(this)"></div></div>';
             }).join('');
         }
     }

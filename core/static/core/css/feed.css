@@ -529,6 +529,19 @@ html, body { background: #000; }
         transition: background 0.2s, transform 0.2s; }
     .tf-car-dots span.active { background: #fff; transform: scale(1.2); }
 
+    /* Full-screen photo viewer opened from a post card. Same snap track as the
+       feed carousel, sized to the screen instead of the card. */
+    .tf-iv-track { flex: 1; min-height: 0; display: flex; overflow-x: auto; overflow-y: hidden;
+        scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+        scrollbar-width: none; -ms-overflow-style: none; }
+    .tf-iv-track::-webkit-scrollbar { display: none; }
+    .tf-iv-item { flex: 0 0 100%; height: 100%; scroll-snap-align: center; scroll-snap-stop: always;
+        display: flex; align-items: center; justify-content: center; padding: 0 4px; }
+    /* The action row is the post card's, on black. */
+    .tf-iv-icons { margin-top: 0 !important; }
+    .tf-iv-icons i { color: #fff; }
+    .tf-iv-icons i.fa-solid.fa-heart { color: #FF3B30 !important; }
+
     /* Composer attachments: one big preview, or a scrollable row of thumbnails. */
     .tf-composer-single { position: relative; }
     .tf-composer-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
