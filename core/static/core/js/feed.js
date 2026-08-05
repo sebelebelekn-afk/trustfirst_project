@@ -5848,7 +5848,9 @@ function loadProfilePictures(container) {
                         var src = (p.media_urls && p.media_urls[0]) || p.media_url || p.thumbnail_url || '';
                         var multi = (p.media_urls && p.media_urls.length > 1)
                             ? '<i class="fa-solid fa-layer-group" style="position:absolute;top:6px;right:6px;color:#fff;font-size:11px;text-shadow:0 1px 3px rgba(0,0,0,0.5);"></i>' : '';
-                        container.innerHTML += '<div style="aspect-ratio:1;overflow:hidden;border:0.5px solid rgba(0,0,0,0.08);cursor:pointer;position:relative;"><img src="' + escapeHtml(src) + '" loading="lazy" style="width:100%;height:100%;object-fit:cover;">' + multi + '</div>';
+                        // The tiles were inert pictures. Opening the post they
+                        // belong to is what the tab is for.
+                        container.innerHTML += '<div onclick="openPostDetail(\'' + escapeHtml(String(p.id)) + '\')" style="aspect-ratio:1;overflow:hidden;border:0.5px solid rgba(0,0,0,0.08);cursor:pointer;position:relative;"><img src="' + escapeHtml(src) + '" loading="lazy" style="width:100%;height:100%;object-fit:cover;">' + multi + '</div>';
                     });
                 } else {
                     container.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#888;font-size:13px;"><i class="fa-solid fa-image" style="font-size:32px;color:#ccc;display:block;margin-bottom:12px;"></i>No photos yet</div>';
@@ -11267,7 +11269,12 @@ async function liveChatJoin(room, commentsElId, heartCountElId, viewerCountElId)
                 if (typeof spawnCreatorGift === 'function') spawnCreatorGift(e);
             })
         .on('presence', { event: 'sync' }, function() {
-            var n = Object.keys(chan.presenceState() || {}).length;
+            // The room is named live_<hostId> and the host joins it too, so the
+            // broadcaster was counting as one of their own viewers.
+            var hostId = room.indexOf('live_') === 0 ? room.slice(5) : null;
+            var n = Object.keys(chan.presenceState() || {}).filter(function(k) {
+                return k !== hostId;
+            }).length;
             _liveChatSetViewers(n);
         })
         .subscribe(function(status) { if (status === 'SUBSCRIBED') chan.track({ at: Date.now() }); });
@@ -12991,6 +12998,51 @@ function setupReelPinchZoom() {
     scroller.addEventListener('touchcancel', release, { passive: false });
 }
 
+// One clip card, used by the TrustClip page and by the viewer a feed video
+// opens. They used to be two separate renderers, which is why a video played
+// from the feed looked nothing like the same video on the clips page.
+function tfReelPageHTML(post, avatarHtml, username, verified, likes) {
+    var src = post.media_url || post.video_url || '';
+    return '' +
+    '<div class="reel-page" data-post-id="' + escapeHtml(String(post.id)) + '">' +
+        '<video src="' + escapeHtml(src) + '" class="reel-video" data-vol="' + (post.volume == null ? 100 : post.volume) + '" autoplay muted loop playsinline preload="auto" style="width:100%;height:100%;object-fit:cover;opacity:1;" onclick="reelTogglePlay(this)"></video>' +
+        '<div class="reel-play-indicator" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:82px;height:82px;border-radius:50%;background:rgba(0,0,0,0.42);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;pointer-events:none;z-index:25;"><i class="fa-solid fa-play" style="color:#fff;font-size:32px;margin-left:4px;"></i></div>' +
+        '<button class="reel-mute-btn" onclick="toggleReelMute(this)" style="position:absolute;top:max(54px,env(safe-area-inset-top,54px));right:14px;width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,0.5);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:30;"><i class="fa-solid fa-volume-xmark" style="color:#fff;font-size:15px;"></i></button>' +
+        '<div class="reel-ui">' +
+            '<div style="flex:1;min-width:0;padding-right:8px;">' +
+                '<div style="display:flex; align-items:center; gap:9px; margin-bottom:9px;">' +
+                    avatarHtml +
+                    '<b style="font-weight:800;font-size:15px;cursor:pointer;" onclick="openProfile(\'' + escapeHtml(String(post.user_id || '')) + '\')">@' + escapeHtml(username) + '</b>' +
+                    verified +
+                    ((currentUser && post.user_id === currentUser.id) ? '' : '<button class="follow-btn" onclick="toggleReelFollow(this)">Follow</button>') +
+                '</div>' +
+                '<p style="margin:0 0 10px; font-size:14px; line-height:1.35; max-width:88%;">' + escapeHtml(post.text_content || '') + '</p>' +
+                '<div class="sound-ticker" onclick="openSoundHub(\'Original Sound\',\'' + escapeHtml(src) + '\')">' +
+                    '<i class="fa-solid fa-music"></i>' +
+                    '<span style="max-width:150px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; display:inline-block;">Original Sound</span>' +
+                '</div>' +
+            '</div>' +
+            '<div class="reel-sidebar">' +
+                '<div class="reel-action" onclick="reelHeartTap(this,\'' + escapeHtml(String(post.id)) + '\')"><i class="fa-regular fa-heart"></i><br><span onclick="event.stopPropagation();openReelLikesModal(\'' + escapeHtml(String(post.id)) + '\',\'' + likes + '\',\'' + (post.view_count || 0) + '\')" style="cursor:pointer;">' + likes + '</span></div>' +
+                '<div class="reel-action" onclick="openComments(\'' + escapeHtml(String(post.id)) + '\')"><i class="fa-solid fa-comment-dots"></i><br>' + (post.comment_count || 0) + '</div>' +
+                '<div class="reel-action" onclick="openShare()"><i class="fa-solid fa-share"></i><br>Share</div>' +
+                '<div class="reel-action" onclick="toggleReelBookmark(this,\'' + escapeHtml(String(post.id)) + '\')"><i class="fa-regular fa-bookmark"></i><br>Save</div>' +
+            '</div>' +
+        '</div>' +
+    '</div>';
+}
+
+// Avatar block for a clip card, so both callers build it the same way.
+function tfReelAvatarHTML(post, profile, hasStory) {
+    var username = profile.username || 'user';
+    var avatar = profile.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(username) + '&background=007AFF&color=fff&size=80');
+    return hasStory
+        ? '<div onclick="openStoryViewer(\'' + escapeHtml(String(post.user_id || '')) + '\')" style="width:42px;height:42px;border-radius:50%;padding:2.5px;background:linear-gradient(135deg,#007AFF,#00C7FF);flex-shrink:0;cursor:pointer;" title="View story">' +
+              '<img src="' + escapeHtml(avatar) + '" style="width:100%;height:100%;border-radius:50%;border:2px solid #000;object-fit:cover;display:block;">' +
+          '</div>'
+        : '<img onclick="openProfile(\'' + escapeHtml(String(post.user_id || '')) + '\')" src="' + escapeHtml(avatar) + '" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0;cursor:pointer;border:1.5px solid rgba(255,255,255,0.45);">';
+}
+
 async function initReels() {
     const c = document.getElementById('reel-scroller');
     setupReelPinchZoom();   // idempotent; binds pinch/zoom once per scroller
@@ -13044,38 +13096,8 @@ async function initReels() {
             var likes = post.like_count > 999 ? (post.like_count/1000).toFixed(1)+'K' : (post.like_count || 0);
             var verified = profile.id_verified ? '<i class="fa-solid fa-circle-check verify-blue" style="font-size:12px;"></i>' : '';
             var hasStory = !!_storyAuthors[post.user_id];
-            var avatarHtml = hasStory
-                ? '<div onclick="openStoryViewer(\'' + post.user_id + '\')" style="width:42px;height:42px;border-radius:50%;padding:2.5px;background:linear-gradient(135deg,#007AFF,#00C7FF);flex-shrink:0;cursor:pointer;" title="View story">' +
-                      '<img src="' + avatar + '" style="width:100%;height:100%;border-radius:50%;border:2px solid #000;object-fit:cover;display:block;">' +
-                  '</div>'
-                : '<img onclick="openProfile(\'' + post.user_id + '\')" src="' + avatar + '" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0;cursor:pointer;border:1.5px solid rgba(255,255,255,0.45);">';
-            c.innerHTML += `
-            <div class="reel-page" data-post-id="${post.id}">
-                <video src="${post.media_url || post.video_url}" class="reel-video" data-vol="${post.volume == null ? 100 : post.volume}" autoplay muted loop playsinline preload="auto" style="width:100%;height:100%;object-fit:cover;opacity:1;" onclick="reelTogglePlay(this)"></video>
-                <div class="reel-play-indicator" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:82px;height:82px;border-radius:50%;background:rgba(0,0,0,0.42);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;pointer-events:none;z-index:25;"><i class="fa-solid fa-play" style="color:#fff;font-size:32px;margin-left:4px;"></i></div>
-                <button class="reel-mute-btn" onclick="toggleReelMute(this)" style="position:absolute;top:max(54px,env(safe-area-inset-top,54px));right:14px;width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,0.5);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:30;"><i class="fa-solid fa-volume-xmark" style="color:#fff;font-size:15px;"></i></button>
-                <div class="reel-ui">
-                    <div style="flex:1;min-width:0;padding-right:8px;">
-                        <div style="display:flex; align-items:center; gap:9px; margin-bottom:9px;">
-                            ${avatarHtml}
-                            <b style="font-weight:800;font-size:15px;cursor:pointer;" onclick="openProfile('${post.user_id}')">@${username}</b>
-                            ${verified}
-                            ${(currentUser && post.user_id === currentUser.id) ? '' : '<button class="follow-btn" onclick="toggleReelFollow(this)">Follow</button>'}
-                        </div>
-                        <p style="margin:0 0 10px; font-size:14px; line-height:1.35; max-width:88%;">${escapeHtml(post.text_content || '')}</p>
-                        <div class="sound-ticker" onclick="openSoundHub('Original Sound','${post.media_url || post.video_url}')">
-                            <i class="fa-solid fa-music"></i>
-                            <span style="max-width:150px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; display:inline-block;">Original Sound</span>
-                        </div>
-                    </div>
-                    <div class="reel-sidebar">
-                        <div class="reel-action" onclick="reelHeartTap(this,'${post.id}')"><i class="fa-regular fa-heart"></i><br><span onclick="event.stopPropagation();openReelLikesModal('${post.id}','${likes}','${post.view_count||0}')" style="cursor:pointer;">${likes}</span></div>
-                        <div class="reel-action" onclick="openComments('${post.id}')"><i class="fa-solid fa-comment-dots"></i><br>${post.comment_count || 0}</div>
-                        <div class="reel-action" onclick="openShare()"><i class="fa-solid fa-share"></i><br>Share</div>
-                        <div class="reel-action" onclick="toggleReelBookmark(this,'${post.id}')"><i class="fa-regular fa-bookmark"></i><br>Save</div>
-                    </div>
-                </div>
-            </div>`;
+            var avatarHtml = tfReelAvatarHTML(post, profile, hasStory);
+            c.innerHTML += tfReelPageHTML(post, avatarHtml, username, verified, likes);
         });
     } catch(e) {
         c.innerHTML = '<div style="color:rgba(255,255,255,0.4);text-align:center;padding:40px;font-size:14px;">Could not load clips.</div>';
@@ -17255,53 +17277,59 @@ var _videoFeedContext = 'feed';
 var _videoFeedList   = [];
 var _videoFeedIdx    = 0;
 
+// Playing a video from the feed used to overwrite #reel-overlay's markup, which
+// destroyed #reel-scroller — the element the TrustClip page renders into. That
+// is why the clips page came up blank after watching a feed video, and it never
+// recovered until a reload. This viewer owns its own element and renders the
+// same clip card the clips page uses, so the two also finally look alike.
 function openContextualVideo(videoUrl, context, startIndex, clipArray) {
     _videoFeedContext = context || 'feed';
     _videoFeedIdx    = startIndex || 0;
 
-    if (clipArray && clipArray.length) {
-        reelsData = clipArray.map(function(c) {
-            return {
-                id:             c.id || '',
-                videoUrl:       c.videoUrl || c.video_url || c.media_url || videoUrl,
-                username:       c.username || (c.users && ('@' + c.users.username)) || '@user',
-                caption:        c.caption  || c.text_content || '',
-                sound:          c.sound    || c.sound_name   || 'Original Audio',
-                likes:          c.likes    || c.like_count   || 0,
-                comments:       c.comments || c.comment_count || 0,
-                liked:          false,
-                bookmarked:     false,
-                isOriginalSound: !c.sound_name
-            };
-        });
-    } else {
-        reelsData = [{
-            id: 'single_' + Date.now(), videoUrl: videoUrl,
-            username: '', caption: '', sound: '', likes: 0, comments: 0,
-            liked: false, bookmarked: false, isOriginalSound: true
-        }];
-    }
-    currentReelIndex = _videoFeedIdx;
+    var items = (clipArray && clipArray.length) ? clipArray : [{ id: 'single_' + Date.now(), media_url: videoUrl }];
+    var idx = Math.min(Math.max(0, _videoFeedIdx), items.length - 1);
+
+    var existing = document.getElementById('tfClipViewer');
+    if (existing) existing.remove();
+
+    var ov = document.createElement('div');
+    ov.id = 'tfClipViewer';
+    ov.style.cssText = 'position:absolute;inset:0;z-index:9400;background:#000;overflow:hidden;';
+
+    var cards = items.map(function(c) {
+        var post = {
+            id: c.id || '',
+            media_url: c.media_url || c.videoUrl || c.video_url || videoUrl,
+            video_url: c.video_url || '',
+            text_content: c.text_content || c.caption || '',
+            user_id: c.user_id || (c.users && c.users.id) || '',
+            comment_count: (c.comment_count != null ? c.comment_count : c.comments) || 0,
+            view_count: c.view_count || 0,
+            volume: c.volume
+        };
+        var profile = c.users || {};
+        if (!profile.username && typeof c.username === 'string') profile.username = c.username.replace(/^@/, '');
+        var rawLikes = (c.like_count != null ? c.like_count : c.likes) || 0;
+        var likes = rawLikes > 999 ? (rawLikes / 1000).toFixed(1) + 'K' : rawLikes;
+        var verified = profile.id_verified || profile.verified ? '<i class="fa-solid fa-circle-check verify-blue" style="font-size:12px;"></i>' : '';
+        return tfReelPageHTML(post, tfReelAvatarHTML(post, profile, false), profile.username || 'user', verified, likes);
+    }).join('');
+
+    ov.innerHTML =
+        '<button onclick="closeReelsPage()" style="position:absolute;top:max(50px,env(safe-area-inset-top,50px));left:16px;z-index:5010;background:rgba(0,0,0,0.3);border:none;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(10px);">' +
+            '<svg width="24" height="24" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>' +
+        '</button>' +
+        '<div id="tfClipScroller">' + cards + '</div>';
 
     var navBar = document.querySelector('.nav-container');
     if (navBar) navBar.style.display = 'none';
-    var screen = document.getElementById('reel-overlay');
-    if (!screen) return;
-    screen.style.display = 'block';
-    screen.innerHTML =
-        '<div id="reelsContainer" style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:5000;background:#000;overflow:hidden;">' +
-            '<button onclick="closeReelsPage()" style="position:absolute;top:50px;left:16px;z-index:5010;background:rgba(0,0,0,0.3);border:none;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(10px);">' +
-                '<svg width="24" height="24" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>' +
-            '</button>' +
-            '<div id="reelsLoading" style="display:none;"></div>' +
-            '<div id="reelsViewport" style="width:100%;height:100%;overflow:hidden;position:relative;"></div>' +
-            '<div id="speedIndicator" style="display:none;"></div>' +
-            '<div id="reelContextMenu" style="display:none;"></div>' +
-        '</div>';
+    (document.getElementById('app') || document.body).appendChild(ov);
 
-    addReelsStyles();
-    renderReel(currentReelIndex);
-    setupReelGestures();
+    var scroller = document.getElementById('tfClipScroller');
+    if (scroller && idx > 0) {
+        requestAnimationFrame(function() { scroller.scrollTop = scroller.clientHeight * idx; });
+    }
+    return;
 }
 
 // Opens profile clips in a lightweight in-profile viewer (not the global TrustClip page)
@@ -17712,8 +17740,10 @@ function renderReel(index) {
 
     viewport.innerHTML = `
         <div class="reel-slide" id="currentReel">
-            <!-- Video or placeholder -->
-            <div style="width:100%; height:100%; background:linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+            <!-- Video or placeholder. Black, not a navy gradient: the gradient
+                 showed through for a frame whenever this re-rendered, which read
+                 as the whole video flashing blue on every like. -->
+            <div style="width:100%; height:100%; background:#000;
                 display:flex; align-items:center; justify-content:center;">
                 <video id="reelVideo" class="reel-video" src="${reel.videoUrl}" loop playsinline
                     style="${reel.videoUrl ? '' : 'display:none;'}"></video>
@@ -18117,6 +18147,12 @@ function toggleFullscreen() {
 }
 
 function closeReelsPage() {
+    // The viewer a feed video opens owns its own element now.
+    var clipViewer = document.getElementById('tfClipViewer');
+    if (clipViewer) {
+        clipViewer.querySelectorAll('video').forEach(function(v){ try { v.pause(); v.src = ''; } catch(e){} });
+        clipViewer.remove();
+    }
     var container = document.getElementById('reelsContainer');
     if (container) {
         container.querySelectorAll('video').forEach(function(v){ try { v.pause(); v.src = ''; } catch(e){} });
@@ -24954,12 +24990,15 @@ function tfOpenImageViewer(postId, startIdx) {
         // Jump to the picture that was actually tapped, without animating there.
         requestAnimationFrame(function() { track.scrollLeft = track.clientWidth * idx; });
     }
+    // Lets the stylesheet lift comments, share and quote above the viewer.
+    document.body.classList.add('tf-iv-open');
     if (typeof hideNavBar === 'function') hideNavBar();
 }
 
 function tfCloseImageViewer() {
     var ov = document.getElementById('tfImageViewer');
     if (ov) ov.remove();
+    document.body.classList.remove('tf-iv-open');
     if (typeof showNavBar === 'function') showNavBar();
 }
 
@@ -27002,11 +27041,13 @@ async function viewUserProfile(userId) {
         : '';
     overlay.innerHTML =
         '<div style="position:relative;">' +
-            (coverUrl ? '<div style="height:150px;background:url(' + escapeHtml(coverUrl) + ') center/cover;"></div>' : '<div style="height:150px;background:linear-gradient(135deg,#007AFF,#5856D6);"></div>') +
-            '<div style="position:absolute;top:10px;left:10px;z-index:2;">' +
+            // The cover and its buttons start below the status bar; they used to
+            // start at the very top, so the back arrow sat on top of the clock.
+            (coverUrl ? '<div style="height:calc(env(safe-area-inset-top, 0px) + 150px);background:url(' + escapeHtml(coverUrl) + ') center/cover;"></div>' : '<div style="height:calc(env(safe-area-inset-top, 0px) + 150px);background:linear-gradient(135deg,#007AFF,#5856D6);"></div>') +
+            '<div style="position:absolute;top:calc(env(safe-area-inset-top, 0px) + 10px);left:10px;z-index:2;">' +
                 '<button onclick="document.getElementById(\'user-profile-overlay\').remove()" style="background:rgba(0,0,0,0.4);color:white;border:none;border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;"><i class="fa-solid fa-arrow-left"></i></button>' +
             '</div>' +
-            '<div style="position:absolute;top:10px;right:10px;z-index:2;display:flex;align-items:center;gap:8px;">' +
+            '<div style="position:absolute;top:calc(env(safe-area-inset-top, 0px) + 10px);right:10px;z-index:2;display:flex;align-items:center;gap:8px;">' +
                 '<button onclick="openUserNotifModal(\'' + escapeHtml(profile.username) + '\',\'' + userId + '\')" title="Notifications" style="background:rgba(0,0,0,0.4);color:white;border:none;border-radius:50%;width:34px;height:34px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-regular fa-bell"></i></button>' +
                 '<button onclick="openUserPostSearch(\'' + escapeHtml(profile.username) + '\')" title="Search posts" style="background:rgba(0,0,0,0.4);color:white;border:none;border-radius:50%;width:34px;height:34px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-magnifying-glass"></i></button>' +
                 '<div style="position:relative;">' +
@@ -29885,26 +29926,76 @@ function switchCPMediaTab(tab) {
 
     var grid = document.getElementById('cp-media-grid');
     if (!grid) return;
-    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#aaa;font-size:13px;"><i class="fa-regular fa-image" style="font-size:32px;display:block;margin-bottom:10px;color:#ddd;"></i>No shared ' + tab + ' yet</div>';
+    var emptyIcon = tab === 'files' ? 'fa-regular fa-file' : tab === 'videos' ? 'fa-solid fa-clapperboard' : 'fa-regular fa-image';
+    function showEmpty(msg) {
+        grid.style.display = 'block';
+        grid.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#aaa;font-size:13px;"><i class="' + emptyIcon + '" style="font-size:32px;display:block;margin-bottom:10px;color:#555;"></i>' + msg + '</div>';
+    }
+    showEmpty('No shared ' + tab + ' yet');
 
-    if (!window.sb || !window.currentChatUserId) return;
+    // These tabs never showed anything: the query filtered on a media_type
+    // column and a receiver_id column that messages does not have, and the
+    // guard read window.currentChatUserId, which is not the name the app uses.
+    // The kind lives in message_type, and the rows have to be scoped to this
+    // conversation rather than to every message the user has ever sent.
+    if (!window.sb || !currentConversationId) return;
 
-    var mediaType = tab === 'photos' ? 'image' : tab === 'videos' ? 'video' : 'file';
+    var kinds = tab === 'photos' ? ['image', 'album']
+              : tab === 'videos' ? ['video']
+              : ['document', 'file'];
+
     window.sb.from('messages')
-        .select('media_url, media_type, id')
-        .or('sender_id.eq.' + (window.currentUser ? window.currentUser.id : '') + ',receiver_id.eq.' + (window.currentUser ? window.currentUser.id : ''))
-        .eq('media_type', mediaType)
-        .not('media_url', 'is', null)
+        .select('id, media_url, media_urls, message_type, file_name, file_size_bytes, created_at')
+        .eq('conversation_id', currentConversationId)
+        .in('message_type', kinds)
+        .neq('is_deleted', true)
         .order('created_at', { ascending: false })
-        .limit(18)
+        .limit(60)
         .then(function(res) {
-            if (!res.data || res.data.length === 0) return;
-            grid.innerHTML = '';
-            res.data.forEach(function(msg) {
-                grid.innerHTML += '<div style="aspect-ratio:1;overflow:hidden;cursor:pointer;" onclick="openImgViewer(\'' + escapeHtml(msg.media_url) + '\')">' +
-                    '<img src="' + escapeHtml(msg.media_url) + '" style="width:100%;height:100%;object-fit:cover;" loading="lazy">' +
-                '</div>';
+            var rows = res.data || [];
+            if (!rows.length) return;
+
+            if (tab === 'files') {
+                grid.style.display = 'block';
+                grid.innerHTML = rows.filter(function(m){ return m.media_url; }).map(function(m) {
+                    var size = m.file_size_bytes ? _formatFileSize(m.file_size_bytes) : '';
+                    return '<div onclick="window.open(\'' + escapeHtml(m.media_url) + '\',\'_blank\')" style="display:flex;align-items:center;gap:12px;padding:11px 6px;border-bottom:0.5px solid var(--border-color,rgba(255,255,255,0.08));cursor:pointer;">' +
+                        '<div style="width:38px;height:38px;border-radius:10px;background:rgba(0,122,255,0.14);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-regular fa-file" style="color:#007AFF;font-size:15px;"></i></div>' +
+                        '<div style="flex:1;min-width:0;">' +
+                            '<b style="font-size:14px;color:var(--text-primary,#000);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(m.file_name || 'File') + '</b>' +
+                            (size ? '<small style="color:var(--text-secondary,#888);font-size:12px;">' + size + '</small>' : '') +
+                        '</div>' +
+                    '</div>';
+                }).join('') || undefined;
+                if (!grid.innerHTML) showEmpty('No shared files yet');
+                return;
+            }
+
+            // An album carries its pictures in media_urls, so one message can
+            // contribute several tiles.
+            var urls = [];
+            rows.forEach(function(m) {
+                if (m.message_type === 'album' && m.media_urls) {
+                    var list = m.media_urls;
+                    if (typeof list === 'string') { try { list = JSON.parse(list); } catch (e) { list = []; } }
+                    (list || []).forEach(function(u){ if (u) urls.push(u); });
+                } else if (m.media_url) {
+                    urls.push(m.media_url);
+                }
             });
+            urls = urls.filter(function(u){ return u.indexOf('blob:') !== 0; }).slice(0, 18);
+            if (!urls.length) return;
+
+            grid.style.display = 'grid';
+            grid.innerHTML = urls.map(function(u) {
+                var isVid = tab === 'videos';
+                return '<div style="aspect-ratio:1;overflow:hidden;cursor:pointer;position:relative;background:#000;" onclick="openImgViewer(\'' + escapeHtml(u) + '\')">' +
+                    (isVid
+                        ? '<video src="' + escapeHtml(u) + '" muted playsinline preload="metadata" style="width:100%;height:100%;object-fit:cover;"></video>' +
+                          '<i class="fa-solid fa-play" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:15px;text-shadow:0 1px 4px rgba(0,0,0,0.6);"></i>'
+                        : '<img src="' + escapeHtml(u) + '" style="width:100%;height:100%;object-fit:cover;" loading="lazy">') +
+                '</div>';
+            }).join('');
         });
 }
 

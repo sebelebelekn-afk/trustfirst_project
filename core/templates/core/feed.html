@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=88">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=89">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -3071,7 +3071,9 @@ function authenticateUser() {
     <!-- Media pill -->
     <div style="margin:0 14px 14px;">
         <p style="font-size:11px;font-weight:800;color:#888;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;padding:0 4px;">Media & Files</p>
-        <div style="background:rgba(255,255,255,0.55);backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid rgba(255,255,255,0.7);border-radius:24px;box-shadow:0 8px 32px rgba(0,0,0,0.08),0 1.5px 0 rgba(255,255,255,0.9) inset;padding:12px;">
+        <!-- The white border and white inset highlight read as a glow around
+             this card on a dark screen; it uses the theme surfaces now. -->
+        <div style="background:var(--card-bg,rgba(255,255,255,0.55));border:0.5px solid var(--border-color,rgba(0,0,0,0.08));border-radius:24px;box-shadow:0 8px 32px rgba(0,0,0,0.18);padding:12px;">
             <div style="display:flex;gap:8px;margin-bottom:12px;">
                 <div id="cp-tab-photos" onclick="switchCPMediaTab('photos')" style="flex:1;text-align:center;padding:9px;border-radius:12px;background:rgba(0,122,255,0.1);cursor:pointer;">
                     <i class="fa-solid fa-image" style="color:#007AFF;font-size:16px;display:block;margin-bottom:3px;"></i>
@@ -4229,7 +4231,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=188"></script>
+<script src="{% static 'core/js/feed.js' %}?v=189"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=75"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

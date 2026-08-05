@@ -537,6 +537,13 @@ html, body { background: #000; }
     .tf-iv-track::-webkit-scrollbar { display: none; }
     .tf-iv-item { flex: 0 0 100%; height: 100%; scroll-snap-align: center; scroll-snap-stop: always;
         display: flex; align-items: center; justify-content: center; padding: 0 4px; }
+    /* Sheets opened from the photo viewer sit above it. The viewer is at 9950
+       and the comment sheet is pinned to 8500 with !important, so tapping
+       comment (or share) from the viewer put the sheet behind the photo. */
+    body.tf-iv-open #comment-overlay,
+    body.tf-iv-open .share-sheet,
+    body.tf-iv-open #quoteRetweetModal { z-index: 9990 !important; }
+
     /* The action row is the post card's, on black. */
     .tf-iv-icons { margin-top: 0 !important; }
     .tf-iv-icons i { color: #fff; }
@@ -668,19 +675,19 @@ html, body { background: #000; }
    theme, and left cards indistinguishable from the page behind them. The
    surfaces now sit on the shared dark palette, with cards a step lighter than
    the page so the feed still has depth. */
-[data-theme="dark"] body { background: var(--bg-primary, #14161a); }
-[data-theme="dark"] .app { background: var(--bg-primary, #14161a) !important; }
-[data-theme="dark"] #feed-panels { background: var(--bg-primary, #14161a) !important; }
+[data-theme="dark"] body { background: var(--bg-primary, #121212); }
+[data-theme="dark"] .app { background: var(--bg-primary, #121212) !important; }
+[data-theme="dark"] #feed-panels { background: var(--bg-primary, #121212) !important; }
 
 /* Header */
 [data-theme="dark"] .header-container {
-    background: var(--bg-secondary, #1c1f24) !important;
+    background: var(--bg-secondary, #1c1c1e) !important;
     border-bottom-color: rgba(255,255,255,0.07) !important;
 }
 
 /* White overlays (msg, profile, settings sub-pages) */
 [data-theme="dark"] .white-overlay {
-    background: var(--bg-primary, #14161a) !important;
+    background: var(--bg-primary, #121212) !important;
 }
 
 /* Liquid Glass pill — dark: translucent so the feed refracts through, no gloss. */
@@ -699,8 +706,8 @@ html, body { background: #000; }
 
 /* Post cards */
 [data-theme="dark"] .post-card {
-    background: var(--card-bg, #1c1f24) !important;
-    border-bottom-color: var(--border-color, #2c3037) !important;
+    background: var(--card-bg, #1c1c1e) !important;
+    border-bottom-color: var(--border-color, #2e2e30) !important;
 }
 [data-theme="dark"] .post-content { color: #e5e5e5 !important; }
 [data-theme="dark"] .post-info small { color: #666 !important; }
@@ -719,7 +726,7 @@ html, body { background: #000; }
 }
 
 /* Composer */
-[data-theme="dark"] #composer-overlay { background: var(--bg-primary, #14161a) !important; }
+[data-theme="dark"] #composer-overlay { background: var(--bg-primary, #121212) !important; }
 [data-theme="dark"] #composer-text { color: #fff !important; background: transparent !important; }
 
 /* Tabs */
@@ -728,7 +735,7 @@ html, body { background: #000; }
 [data-theme="dark"] .m-tab.active { color: #fff !important; border-bottom-color: #fff !important; }
 
 /* Story container */
-[data-theme="dark"] .story-container { background: var(--bg-secondary, #1c1f24) !important; border-bottom-color: var(--border-color, #2c3037) !important; }
+[data-theme="dark"] .story-container { background: var(--bg-secondary, #1c1c1e) !important; border-bottom-color: var(--border-color, #2e2e30) !important; }
 
 /* Bottom bar */
 [data-theme="dark"] .msg-bottom-bar {
@@ -740,14 +747,14 @@ html, body { background: #000; }
 [data-theme="dark"] .activity-item { background: transparent !important; border-bottom-color: #1e1e1e !important; }
 
 /* Settings */
-[data-theme="dark"] #settings-overlay { background: var(--bg-primary, #14161a) !important; }
-[data-theme="dark"] .settings-card { background: var(--card-bg, #1c1f24) !important; border-color: var(--border-color, #2c3037) !important; }
-[data-theme="dark"] .settings-row { background: var(--card-bg, #1c1f24) !important; border-bottom-color: var(--border-color, #2c3037) !important; color: #e5e5e5 !important; }
+[data-theme="dark"] #settings-overlay { background: var(--bg-primary, #121212) !important; }
+[data-theme="dark"] .settings-card { background: var(--card-bg, #1c1c1e) !important; border-color: var(--border-color, #2e2e30) !important; }
+[data-theme="dark"] .settings-row { background: var(--card-bg, #1c1c1e) !important; border-bottom-color: var(--border-color, #2e2e30) !important; color: #e5e5e5 !important; }
 [data-theme="dark"] .settings-section-title { color: #555 !important; }
 /* Manage-group page: match the Settings look — a near-black page with lighter,
    bordered cards, instead of black cards on a grey page (which read as holes). */
 .mg-page { background: var(--bg-secondary, #f2f2f7); }
-[data-theme="dark"] .mg-page { background: var(--bg-primary, #14161a); }
+[data-theme="dark"] .mg-page { background: var(--bg-primary, #121212); }
 .mg-card { background: #fff; border: 1px solid #ececec; border-radius: 12px; }
 [data-theme="dark"] .mg-card { background: #1a1a1a; border-color: #333; }
 /* Message long-press context menu: smooth spring-in instead of popping. */
@@ -763,15 +770,15 @@ html, body { background: #000; }
 }
 
 /* Repost sheet */
-[data-theme="dark"] .repost-sheet { background: var(--modal-bg, #1c1f24) !important; }
+[data-theme="dark"] .repost-sheet { background: var(--modal-bg, #1c1c1e) !important; }
 
 /* Comment overlay */
 /* One surface for the whole sheet. This block and the later dark overrides
    disagreed (#161616 vs #1a1a1a), so the header and the input bar could end up
    a different shade from the list between them. */
-[data-theme="dark"] #comment-overlay { background: var(--modal-bg, #1c1f24) !important; }
-[data-theme="dark"] .comment-input-bar { background: var(--modal-bg, #1c1f24) !important; border-top-color: var(--border-color, #2c3037) !important; }
-[data-theme="dark"] .comment-input-bar input { background: var(--input-bg, #262a30) !important; color: #fff !important; }
+[data-theme="dark"] #comment-overlay { background: var(--modal-bg, #1c1c1e) !important; }
+[data-theme="dark"] .comment-input-bar { background: var(--modal-bg, #1c1c1e) !important; border-top-color: var(--border-color, #2e2e30) !important; }
+[data-theme="dark"] .comment-input-bar input { background: var(--input-bg, #2c2c2e) !important; color: #fff !important; }
 [data-theme="dark"] #chat-bottom-bar {
     background: rgba(18,18,18,0.97) !important;
     border-top-color: rgba(255,255,255,0.07) !important;
@@ -790,7 +797,7 @@ html, body { background: #000; }
     background: rgba(18,18,18,0.97) !important;
     border-bottom-color: rgba(255,255,255,0.07) !important;
 }
-[data-theme="dark"] #chat-body { background: var(--bg-primary, #14161a) !important; }
+[data-theme="dark"] #chat-body { background: var(--bg-primary, #121212) !important; }
 [data-theme="dark"] #emoji-picker {
     background: rgba(28,28,30,0.97) !important;
     border: 0.5px solid rgba(255,255,255,0.08) !important;
@@ -2017,22 +2024,22 @@ html, body { background: #000; }
    DARK MODE FIX - Complete Override
    ============================================ */
 [data-theme="dark"] {
-    /* Not pure black. A true #000 page made the app look like a hole rather
-       than a dark theme, and every card vanished into the background. These are
-       soft near-blacks with a slight cool cast, each step lighter than the last
-       so page → card → input still reads as layers. */
-    --bg-primary: #14161a;
-    --bg-secondary: #1c1f24;
-    --bg-tertiary: #262a30;
+    /* Not pure black, and not tinted either. A true #000 page made the app look
+       like a hole rather than a dark theme; the first pass at fixing that had a
+       cool cast which read as navy sitting on black. These are neutral greys,
+       each step lighter than the last so page → card → input reads as layers. */
+    --bg-primary: #121212;
+    --bg-secondary: #1c1c1e;
+    --bg-tertiary: #2c2c2e;
     --text-primary: #ffffff;
-    --text-secondary: #a0a6ae;
-    --text-tertiary: #757b84;
-    --border-color: #2c3037;
-    --card-bg: #1c1f24;
-    --input-bg: #262a30;
-    --nav-bg: rgba(20, 22, 26, 0.95);
-    --modal-bg: #1c1f24;
-    --hover-bg: #262a30;
+    --text-secondary: #a1a1a6;
+    --text-tertiary: #78787d;
+    --border-color: #2e2e30;
+    --card-bg: #1c1c1e;
+    --input-bg: #2c2c2e;
+    --nav-bg: rgba(18, 18, 18, 0.95);
+    --modal-bg: #1c1c1e;
+    --hover-bg: #2c2c2e;
     /* Contact Info glass cards/tiles — dark (no white gloss) */
     --cp-card-bg: rgba(30,30,34,0.72);
     --cp-card-border: rgba(255,255,255,0.08);
@@ -2132,8 +2139,8 @@ html, body { background: #000; }
 [data-theme="dark"] #feed-panels { background: #000 !important; }
 [data-theme="dark"] .offline-banner { background: rgba(255,59,48,0.95); }
 [data-theme="dark"] .comment-input-bar { background: #1a1a1a !important; border-color: #2a2a2a !important; }
-[data-theme="dark"] .comment-input-bar input { background: var(--input-bg, #262a30) !important; color: #fff !important; }
-[data-theme="dark"] #comment-overlay { background: var(--modal-bg, #1c1f24) !important; }
+[data-theme="dark"] .comment-input-bar input { background: var(--input-bg, #2c2c2e) !important; color: #fff !important; }
+[data-theme="dark"] #comment-overlay { background: var(--modal-bg, #1c1c1e) !important; }
 /* The header divider was a light-mode grey, which read as a hard line. */
 [data-theme="dark"] .comment-header { border-bottom-color: #2a2a2a !important; }
 [data-theme="dark"] .activity-tabs { border-color: #333 !important; }
@@ -2794,13 +2801,16 @@ html, body { background: #000; }
 
     /* Reels scroll fix */
 #reel-overlay { overflow: hidden !important; }
-#reel-scroller {
+/* The viewer a feed video opens uses the same clip card, so it takes the same
+   rules — that is what keeps the two from drifting apart again. */
+#reel-scroller, #tfClipScroller {
     height: 100% !important;
     overflow-y: scroll !important;
     scroll-snap-type: y mandatory !important;
     -webkit-overflow-scrolling: touch !important;
 }
-#reel-scroller .reel-page {
+#tfClipScroller::-webkit-scrollbar { display: none; }
+#reel-scroller .reel-page, #tfClipScroller .reel-page {
     height: 100% !important;
     scroll-snap-align: start !important;
     position: relative !important;
@@ -2809,19 +2819,19 @@ html, body { background: #000; }
 }
 /* Only the full-bleed media image (direct child) fills the page — NOT nested
    UI images like the author avatar, which keep their own sizing. */
-#reel-scroller .reel-page > img {
+#reel-scroller .reel-page > img, #tfClipScroller .reel-page > img {
     width: 100% !important;
     height: 100% !important;
     object-fit: cover !important;
 }
-#reel-scroller .reel-action {
+#reel-scroller .reel-action, #tfClipScroller .reel-action {
     text-align: center;
     font-size: 11px;
     font-weight: bold;
     margin-bottom: 20px;
     cursor: pointer;
 }
-#reel-scroller .reel-action i {
+#reel-scroller .reel-action i, #tfClipScroller .reel-action i {
     font-size: 30px;
     margin-bottom: 5px;
     text-shadow: 0 2px 10px rgba(0,0,0,0.5);
@@ -3857,7 +3867,7 @@ html, body { background: #000; }
   50% { opacity: 0.4; }
 }
 :root { --skeleton-bg: #e8e8e8; }
-[data-theme="dark"] { --skeleton-bg: #262a30; }
+[data-theme="dark"] { --skeleton-bg: #2c2c2e; }
 
 /* Profile "you're already here" nudge — used when tapping your own username
    while the profile page is already open (paired with haptic feedback). */
