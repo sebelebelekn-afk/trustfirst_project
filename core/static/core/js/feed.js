@@ -5629,9 +5629,11 @@ function switchprofiletab(tabName, element) {
             loadProfileReposts(grid);
             break;
         case 'pictures':
-            grid.style.display = 'grid';
-            grid.style.gridTemplateColumns = '1fr 1fr 1fr';
-            grid.style.padding = '2px';
+            // A list of the real posts, like Posts and Reposts — not a grid of
+            // cropped thumbnails.
+            grid.style.display = 'block';
+            grid.style.gridTemplateColumns = '';
+            grid.style.padding = '0';
             loadProfilePictures(grid);
             break;
         case 'tabs':
@@ -5825,41 +5827,46 @@ async function loadProfileReposts(container) {
     container.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#888;"><i class="fa-solid fa-retweet" style="font-size:40px;color:#ccc;display:block;margin-bottom:15px;"></i><b style="display:block;margin-bottom:8px;">No reposts yet</b><p style="font-size:13px;">Content you repost appears here</p></div>';
 }
 
-function loadProfilePictures(container) {
-    container.innerHTML = [0,1,2,3,4,5,6,7,8].map(function(){ return '<div style="aspect-ratio:1;background:var(--skeleton-bg,#e8e8e8);animation:skeletonPulse 1.4s ease-in-out infinite;"></div>'; }).join('');
-    if (window.sb && currentUser && currentUser.id) {
+// Every post of yours that carries a photo, rendered as the post itself —
+// caption, carousel, like and comment counts and all — rather than a wall of
+// cropped squares that only hinted at what the post was.
+async function loadProfilePictures(container) {
+    var myGen = _profileTabGen;
+    container.innerHTML = (typeof renderSkeletonHTML === 'function') ? renderSkeletonHTML('post', 3) : '';
+
+    function empty(msg) {
+        container.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#888;">' +
+            '<i class="fa-regular fa-image" style="font-size:40px;color:#555;display:block;margin-bottom:15px;"></i>' +
+            '<b style="display:block;margin-bottom:8px;color:var(--text-primary,#000);">' + msg + '</b>' +
+            '<p style="font-size:13px;">Posts with photos show up here</p></div>';
+    }
+
+    if (!(window.sb && currentUser && currentUser.id)) { empty('No photos yet'); return; }
+
+    try {
         // The composer saves photo posts as post_type 'text' with media_type
-        // 'image', so filtering on post_type alone left this tab permanently
-        // empty. Match either, then keep only the rows that really have a photo.
-        sb.from('posts')
-            .select('id,media_url,media_urls,media_type,post_type,thumbnail_url')
+        // 'image', so filtering on post_type alone left this tab empty.
+        var r = await sb.from('posts')
+            .select('*, users:user_id(id,full_name,username,avatar_url,badge_tier,verified,ai_label)')
             .eq('user_id', currentUser.id)
             .eq('status', 'published')
             .or('post_type.eq.image,media_type.eq.image')
             .order('created_at', { ascending: false })
-            .limit(18)
-            .then(function(r) {
-                container.innerHTML = '';
-                var pics = (r.data || []).filter(function(p) {
-                    return (p.media_urls && p.media_urls.length) || p.media_url || p.thumbnail_url;
-                });
-                if (pics.length > 0) {
-                    pics.forEach(function(p) {
-                        var src = (p.media_urls && p.media_urls[0]) || p.media_url || p.thumbnail_url || '';
-                        var multi = (p.media_urls && p.media_urls.length > 1)
-                            ? '<i class="fa-solid fa-layer-group" style="position:absolute;top:6px;right:6px;color:#fff;font-size:11px;text-shadow:0 1px 3px rgba(0,0,0,0.5);"></i>' : '';
-                        // The tiles were inert pictures. Opening the post they
-                        // belong to is what the tab is for.
-                        container.innerHTML += '<div onclick="openPostDetail(\'' + escapeHtml(String(p.id)) + '\')" style="aspect-ratio:1;overflow:hidden;border:0.5px solid rgba(0,0,0,0.08);cursor:pointer;position:relative;"><img src="' + escapeHtml(src) + '" loading="lazy" style="width:100%;height:100%;object-fit:cover;">' + multi + '</div>';
-                    });
-                } else {
-                    container.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#888;font-size:13px;"><i class="fa-solid fa-image" style="font-size:32px;color:#ccc;display:block;margin-bottom:12px;"></i>No photos yet</div>';
-                }
-            }).catch(function() {
-                container.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#888;font-size:13px;">Could not load photos</div>';
-            });
-    } else {
-        container.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#888;font-size:13px;"><i class="fa-solid fa-image" style="font-size:32px;color:#ccc;display:block;margin-bottom:12px;"></i>No photos yet</div>';
+            .limit(20);
+        if (_profileTabGen !== myGen) return;   // tab switched while loading
+
+        var pics = (r.data || []).filter(function(p) {
+            return (p.media_urls && p.media_urls.length) || p.media_url || p.thumbnail_url;
+        });
+        if (!pics.length) { empty('No photos yet'); return; }
+
+        container.innerHTML = '';
+        pics.forEach(function(p) {
+            if (typeof renderRealPostCard === 'function') container.appendChild(renderRealPostCard(p));
+        });
+    } catch (e) {
+        if (_profileTabGen !== myGen) return;
+        container.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#888;font-size:13px;">Could not load photos</div>';
     }
 }
 
@@ -27021,8 +27028,8 @@ async function viewUserProfile(userId) {
         postsHtml = '<div style="text-align:center;padding:40px;color:#aaa;">No posts yet</div>';
     } else {
         posts.forEach(function(p) {
-            postsHtml += '<div style="padding:15px 20px;border-bottom:1px solid #f0f0f0;">' +
-                '<p style="font-size:14px;line-height:1.5;">' + escapeHtml(p.text_content) + '</p>' +
+            postsHtml += '<div style="padding:15px 20px;border-bottom:1px solid var(--border-color,#f0f0f0);">' +
+                '<p style="font-size:14px;line-height:1.5;color:var(--text-primary,#000);">' + escapeHtml(p.text_content) + '</p>' +
                 '<div style="display:flex;gap:15px;margin-top:8px;color:#aaa;font-size:12px;">' +
                     '<span><i class="fa-regular fa-heart"></i> ' + (p.like_count || 0) + '</span>' +
                     '<span><i class="fa-regular fa-comment"></i> ' + (p.comment_count || 0) + '</span>' +
@@ -27066,23 +27073,25 @@ async function viewUserProfile(userId) {
         '<div style="padding:50px 20px 15px;">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;">' +
                 '<div>' +
-                    '<h2 style="margin:0;font-size:20px;">' + escapeHtml(profile.full_name || profile.username) +
+                    // These carried no colour at all, so they fell back to a dark
+                    // default and vanished against a dark background.
+                    '<h2 style="margin:0;font-size:20px;color:var(--text-primary,#000);">' + escapeHtml(profile.full_name || profile.username) +
                     (profile.verified ? ' <i class="fa-solid fa-circle-check ' + badgeClass + '"></i>' : '') + '</h2>' +
                     '<p style="color:#888;margin:2px 0;">@' + escapeHtml(profile.username) + '</p>' +
                 '</div>' +
                 '<button onclick="realFollowFromProfile(this,\'' + userId + '\')" style="padding:8px 20px;border-radius:20px;border:none;font-weight:700;font-size:13px;cursor:pointer;' +
                 (isFollowing ? 'background:#f0f0f0;color:#333;">' + 'Following' : 'background:#007AFF;color:white;">' + 'Follow') + '</button>' +
             '</div>' +
-            (profile.bio ? '<p style="margin:10px 0;font-size:14px;line-height:1.5;">' + escapeHtml(profile.bio) + '</p>' : '') +
+            (profile.bio ? '<p style="margin:10px 0;font-size:14px;line-height:1.5;color:var(--text-primary,#000);">' + escapeHtml(profile.bio) + '</p>' : '') +
             channelPillHtml +
-            '<div style="display:flex;gap:20px;margin:15px 0;font-size:14px;">' +
+            '<div style="display:flex;gap:20px;margin:15px 0;font-size:14px;color:var(--text-primary,#000);">' +
                 '<span><b>' + counts.posts + '</b> <span style="color:#888;">Posts</span></span>' +
                 '<span><b>' + counts.followers + '</b> <span style="color:#888;">Followers</span></span>' +
                 '<span><b>' + counts.following + '</b> <span style="color:#888;">Following</span></span>' +
             '</div>' +
         '</div>' +
-        '<div style="border-top:1px solid #f0f0f0;">' +
-            '<div style="padding:12px 20px;font-weight:700;font-size:15px;border-bottom:2px solid #007AFF;display:inline-block;margin-left:20px;">Posts</div>' +
+        '<div style="border-top:1px solid var(--border-color,#f0f0f0);">' +
+            '<div style="padding:12px 20px;font-weight:700;font-size:15px;color:var(--text-primary,#000);border-bottom:2px solid #007AFF;display:inline-block;margin-left:20px;">Posts</div>' +
             postsHtml +
         '</div>';
 
@@ -29041,13 +29050,14 @@ function renderNotifCard(notif) {
     };
     const message = notif.message || messages[notif.type] || 'interacted with you';
 
-    // Swipe a row left to reveal Turn off / Not interested. The foreground is
-    // opaque so it hides the actions until dragged.
+    // Swipe a row left to reveal Turn off / Not interested / Delete. The
+    // foreground is opaque so it hides the actions until dragged.
     return `
         <div class="notif-row" data-nid="${notif.id}" style="position:relative;overflow:hidden;border-bottom:1px solid var(--border-color,#f0f0f0);">
             <div class="notif-actions" style="position:absolute;top:0;right:0;bottom:0;display:flex;align-items:stretch;">
                 <div onclick="notifAction('${notif.id}','off')" style="width:78px;background:#48484a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:#fff;cursor:pointer;"><i class="fa-solid fa-bell-slash" style="font-size:16px;"></i><span style="font-size:11px;">Turn off</span></div>
                 <div onclick="notifAction('${notif.id}','notinterested')" style="width:82px;background:#636366;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:#fff;cursor:pointer;"><i class="fa-solid fa-circle-minus" style="font-size:16px;"></i><span style="font-size:10px;text-align:center;line-height:1.15;">Not<br>interested</span></div>
+                <div onclick="notifAction('${notif.id}','delete')" style="width:78px;background:#FF3B30;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:#fff;cursor:pointer;"><i class="fa-solid fa-trash" style="font-size:16px;"></i><span style="font-size:11px;">Delete</span></div>
             </div>
             <div class="notif-fg" style="position:relative;display:flex;align-items:center;gap:12px;padding:14px 20px;background:var(--bg-primary,#fff);cursor:pointer;transition:transform 0.2s cubic-bezier(0.32,0.72,0,1);" onclick="openNotification('${notif.id}')">
                 <div style="position:relative;flex-shrink:0;">
@@ -29121,7 +29131,21 @@ var _notifMuted = (function () { try { return JSON.parse(localStorage.getItem('t
 function notifAction(nid, action) {
     var row = document.querySelector('.notif-row[data-nid="' + nid + '"]');
     var n = (allNotifications || []).filter(function (x) { return x.id === nid; })[0];
-    if (action === 'notinterested') {
+    if (action === 'delete') {
+        // Just remove this one. "Not interested" also feeds the algorithm;
+        // delete is the plain "get this off my list".
+        if (row) {
+            row.style.transition = 'height 0.2s, opacity 0.2s';
+            row.style.height = row.offsetHeight + 'px';
+            requestAnimationFrame(function () { row.style.height = '0'; row.style.opacity = '0'; row.style.overflow = 'hidden'; });
+            setTimeout(function () { row.remove(); }, 220);
+        }
+        allNotifications = (allNotifications || []).filter(function (x) { return x.id !== nid; });
+        if (window.sb && currentUser && nid) sb.from('notifications').delete().eq('id', nid).then(function () {}).catch(function () {});
+        if (typeof navUpdateBadges === 'function') navUpdateBadges();
+        showToast('Notification deleted');
+        triggerHaptic(15);
+    } else if (action === 'notinterested') {
         if (row) { row.style.transition = 'height 0.2s, opacity 0.2s'; row.style.height = row.offsetHeight + 'px'; requestAnimationFrame(function () { row.style.height = '0'; row.style.opacity = '0'; row.style.overflow = 'hidden'; }); setTimeout(function () { row.remove(); }, 220); }
         allNotifications = (allNotifications || []).filter(function (x) { return x.id !== nid; });
         if (window.sb && currentUser && nid) sb.from('notifications').delete().eq('id', nid).then(function () {}).catch(function () {});
@@ -29142,7 +29166,7 @@ function setupNotifSwipe() {
     if (!area || area._swipeHooked) return;
     area._swipeHooked = true;
     var fg = null, sx = 0, sy = 0, decided = false, horiz = false, startTx = 0;
-    var OPEN = 160;
+    var OPEN = 238;   // Turn off (78) + Not interested (82) + Delete (78)
     function fgFrom(t) { return t && t.closest ? t.closest('.notif-fg') : null; }
     function closeAll(except) { area.querySelectorAll('.notif-fg').forEach(function (el) { if (el !== except) { el.style.transform = ''; el.removeAttribute('data-open'); } }); }
     area.addEventListener('touchstart', function (e) {
