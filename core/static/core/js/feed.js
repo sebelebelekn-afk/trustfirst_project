@@ -31123,6 +31123,16 @@ async function startRealCall(targetUserId, targetUserName, isVideo) {
         rtcRemoteStream = e.streams[0];
         var remoteAudio = document.getElementById('call-remote-audio');
         if (remoteAudio) { remoteAudio.srcObject = rtcRemoteStream; remoteAudio.play().catch(function(){}); }
+        // Only audio was ever attached, so a screen the other side shared (or
+        // their camera) arrived and had nowhere to be drawn.
+        if (rtcRemoteStream.getVideoTracks().length) {
+            var remoteVid = document.getElementById('call-remote-video');
+            if (remoteVid) {
+                remoteVid.srcObject = rtcRemoteStream;
+                remoteVid.style.display = 'block';
+                remoteVid.play().catch(function(){});
+            }
+        }
     };
 
     // Send ICE candidates to Supabase
@@ -31178,6 +31188,22 @@ async function startRealCall(targetUserId, targetUserName, isVideo) {
                     triggerHaptic(30);
                     var callStatus = document.getElementById('call-status-text');
                     if (callStatus) callStatus.textContent = 'Connected';
+                    // Nothing ever called this, so the call never actually
+                    // entered its connected state: no duration timer, and the
+                    // tools had no moment to come alive.
+                    if (typeof _callConnected === 'function') _callConnected();
+                } else if (sig.type === 'offer') {
+                    // A second offer means the other side added or dropped a
+                    // track mid-call (screen share). Answer it in place.
+                    try {
+                        await rtcPeerConn.setRemoteDescription(new RTCSessionDescription(JSON.parse(sig.payload)));
+                        var reAns = await rtcPeerConn.createAnswer();
+                        await rtcPeerConn.setLocalDescription(reAns);
+                        await window.sb.from('call_signals').insert({
+                            call_id: rtcCallId, sender_id: currentUser.id,
+                            type: 'answer', payload: JSON.stringify(reAns)
+                        });
+                    } catch (e) { console.warn('[Call] renegotiation failed', e && e.message); }
                 } else if (sig.type === 'ice') {
                     try { await rtcPeerConn.addIceCandidate(new RTCIceCandidate(JSON.parse(sig.payload))); } catch(e) {}
                 } else if (sig.type === 'end') {
@@ -31211,6 +31237,16 @@ async function acceptIncomingCall(callId, callerId) {
         rtcRemoteStream = e.streams[0];
         var remoteAudio = document.getElementById('call-remote-audio');
         if (remoteAudio) { remoteAudio.srcObject = rtcRemoteStream; remoteAudio.play().catch(function(){}); }
+        // Only audio was ever attached, so a screen the other side shared (or
+        // their camera) arrived and had nowhere to be drawn.
+        if (rtcRemoteStream.getVideoTracks().length) {
+            var remoteVid = document.getElementById('call-remote-video');
+            if (remoteVid) {
+                remoteVid.srcObject = rtcRemoteStream;
+                remoteVid.style.display = 'block';
+                remoteVid.play().catch(function(){});
+            }
+        }
     };
 
     rtcPeerConn.onicecandidate = async function(e) {
@@ -31241,6 +31277,19 @@ async function acceptIncomingCall(callId, callerId) {
                 if (sig.sender_id === currentUser.id) return;
                 if (sig.type === 'ice') {
                     try { await rtcPeerConn.addIceCandidate(new RTCIceCandidate(JSON.parse(sig.payload))); } catch(e) {}
+                } else if (sig.type === 'offer') {
+                    // Caller started or stopped sharing their screen.
+                    try {
+                        await rtcPeerConn.setRemoteDescription(new RTCSessionDescription(JSON.parse(sig.payload)));
+                        var reAns2 = await rtcPeerConn.createAnswer();
+                        await rtcPeerConn.setLocalDescription(reAns2);
+                        await window.sb.from('call_signals').insert({
+                            call_id: callId, sender_id: currentUser.id,
+                            type: 'answer', payload: JSON.stringify(reAns2)
+                        });
+                    } catch (e) { console.warn('[Call] renegotiation failed', e && e.message); }
+                } else if (sig.type === 'answer') {
+                    try { await rtcPeerConn.setRemoteDescription(new RTCSessionDescription(JSON.parse(sig.payload))); } catch (e) {}
                 } else if (sig.type === 'end') {
                     endRealCall();
                 }
@@ -31249,6 +31298,8 @@ async function acceptIncomingCall(callId, callerId) {
 
     var callStatus = document.getElementById('call-status-text');
     if (callStatus) callStatus.textContent = 'Connected';
+    // Answering IS the moment this call is connected.
+    if (typeof _callConnected === 'function') _callConnected();
     triggerHaptic(50);
 }
 
@@ -31343,6 +31394,9 @@ function _showCallOverlay(name, isVideo, direction, avatarUrl, targetId) {
     var _bd = document.getElementById('call-bottom-dock');
     if (_tb) _tb.style.opacity = '1';
     if (_bd) _bd.style.opacity = '1';
+    // Nothing to mute, point a camera at, or share until the other side picks
+    // up, so the tools stay inert while it is still ringing. End stays live.
+    tfSetCallToolsEnabled(false);
 
     // Swipe down to minimize
     var startY = 0;
@@ -31387,6 +31441,7 @@ function _callConnected() {
 
     var ov = document.getElementById('call-overlay');
     if (ov) ov.setAttribute('data-state', 'connected');
+    tfSetCallToolsEnabled(true);   // the line is up: the tools mean something now
 
     // Show timer
     var timerDisplay = document.getElementById('call-timer-display');
@@ -31437,6 +31492,13 @@ function _toggleCallControls() {
 }
 
 function endRealCall() {
+    // Hanging up while sharing left the capture running and the OS bar up.
+    if (_tfScreenStream) {
+        try { _tfScreenStream.getTracks().forEach(function(t) { t.stop(); }); } catch (e) {}
+        _tfScreenStream = null;
+        _tfMarkShareButton(false);
+    }
+    tfSetCallToolsEnabled(false);
     if (_callTimerInterval) { clearInterval(_callTimerInterval); _callTimerInterval = null; }
     if (_callDotsInterval) { clearInterval(_callDotsInterval); _callDotsInterval = null; }
     if (_callNoAnswerTimer) { clearTimeout(_callNoAnswerTimer); _callNoAnswerTimer = null; }
@@ -31580,6 +31642,7 @@ function maximizeCall() {
 }
 
 function toggleCallMic() {
+    if (!tfCallToolsReady()) return;
     _callMicMuted = !_callMicMuted;
     if (rtcLocalStream) {
         rtcLocalStream.getAudioTracks().forEach(function(t) { t.enabled = !_callMicMuted; });
@@ -31600,6 +31663,7 @@ function toggleCallMic() {
 }
 
 function toggleCallCamera() {
+    if (!tfCallToolsReady()) return;
     _callCamOff = !_callCamOff;
     if (rtcLocalStream) {
         rtcLocalStream.getVideoTracks().forEach(function(t) { t.enabled = !_callCamOff; });
@@ -31636,6 +31700,7 @@ function callFlipCamera() {
 }
 
 function toggleCallSpeaker() {
+    if (!tfCallToolsReady()) return;
     _callSpeakerOn = !_callSpeakerOn;
     var btn = document.getElementById('call-speaker-btn');
     if (btn) {
@@ -31665,7 +31730,33 @@ function sendCallReaction(emoji) {
     triggerHaptic(8);
 }
 
+// Video, Speaker, Mute, More and Share only do something once there is another
+// person on the line. While it rings they are dimmed and inert, and saying so
+// beats a button that silently does nothing. End is never gated.
+var TF_CALL_TOOL_IDS = ['call-cam-btn', 'call-speaker-btn', 'call-mic-btn', 'call-more-btn', 'call-share-btn'];
+
+function tfSetCallToolsEnabled(on) {
+    window._tfCallToolsOn = !!on;
+    TF_CALL_TOOL_IDS.forEach(function(id) {
+        var btn = document.getElementById(id);
+        if (!btn) return;
+        btn.disabled = !on;
+        btn.style.opacity = on ? '1' : '0.38';
+        btn.style.cursor = on ? 'pointer' : 'default';
+        var label = btn.parentElement ? btn.parentElement.querySelector('span') : null;
+        if (label) label.style.opacity = on ? '1' : '0.38';
+    });
+}
+
+// Guard for each tool, so tapping a dimmed button explains itself.
+function tfCallToolsReady() {
+    if (window._tfCallToolsOn) return true;
+    showToast('Wait until the call connects');
+    return false;
+}
+
 function openCallMoreMenu() {
+    if (!tfCallToolsReady()) return;
     var m = document.getElementById('call-more-menu');
     if (m) m.style.display = 'flex';
 }
@@ -31674,20 +31765,107 @@ function closeCallMoreMenu() {
     if (m) m.style.display = 'none';
 }
 
+// Screen share. The old version replaced the outgoing video track and then
+// forgot about it: there was no way to stop, the camera never came back, and on
+// a voice call there is no video sender to replace, so it toasted "Sharing
+// screen…" while sending nothing at all.
+var _tfScreenStream = null;
+
 function callShareScreen() {
     closeCallMoreMenu();
+    if (!tfCallToolsReady()) return;
+    if (_tfScreenStream) { tfStopScreenShare(); return; }
+    if (!rtcPeerConn) { showToast('Not connected yet'); return; }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-        showToast('Screen sharing not supported on this device'); return;
+        showToast('Screen sharing is not supported on this device'); return;
     }
-    navigator.mediaDevices.getDisplayMedia({ video: true }).then(function(screenStream) {
+    navigator.mediaDevices.getDisplayMedia({ video: true, audio: false }).then(function(screenStream) {
         var screenTrack = screenStream.getVideoTracks()[0];
-        if (rtcPeerConn) {
-            var sender = rtcPeerConn.getSenders().find(function(s) { return s.track && s.track.kind === 'video'; });
-            if (sender) sender.replaceTrack(screenTrack);
+        if (!screenTrack) { showToast('Screen share cancelled'); return; }
+        _tfScreenStream = screenStream;
+
+        var sender = rtcPeerConn.getSenders().find(function(s) { return s.track && s.track.kind === 'video'; });
+        if (sender) {
+            sender.replaceTrack(screenTrack);
+        } else {
+            // Voice call: there is no video track to swap, so add one and
+            // renegotiate, otherwise the other side never receives the screen.
+            try {
+                rtcPeerConn.addTrack(screenTrack, screenStream);
+                _tfRenegotiateCall();
+            } catch (e) {
+                showToast('Could not start screen share');
+                tfStopScreenShare();
+                return;
+            }
         }
-        screenTrack.onended = function() { showToast('Screen share stopped'); };
-        showToast('Sharing screen…');
-    }).catch(function() { showToast('Screen share cancelled'); });
+
+        // Show yourself what is being shared, in the self preview. A failure
+        // here must not roll back a share that is already on the wire.
+        try {
+            var selfVid = document.getElementById('call-local-video');
+            if (selfVid) selfVid.srcObject = screenStream;
+            var selfPreview = document.getElementById('call-self-preview');
+            if (selfPreview) selfPreview.style.display = 'block';
+        } catch (e) {}
+
+        _tfMarkShareButton(true);
+        // The browser's own "Stop sharing" bar also ends it.
+        screenTrack.onended = function() { tfStopScreenShare(); };
+        showToast('Sharing your screen');
+        triggerHaptic(20);
+    }).catch(function(err) {
+        // Declining the picker is not the same as it going wrong.
+        var name = err && err.name;
+        showToast(name === 'NotAllowedError' || name === 'AbortError'
+            ? 'Screen share cancelled'
+            : 'Could not share your screen');
+    });
+}
+
+function tfStopScreenShare() {
+    if (!_tfScreenStream) return;
+    try { _tfScreenStream.getTracks().forEach(function(t) { t.stop(); }); } catch (e) {}
+    _tfScreenStream = null;
+
+    // Put the camera back on the wire if this call had one.
+    var camTrack = rtcLocalStream ? rtcLocalStream.getVideoTracks()[0] : null;
+    if (rtcPeerConn) {
+        var sender = rtcPeerConn.getSenders().find(function(s) { return s.track && s.track.kind === 'video'; });
+        if (sender) {
+            if (camTrack) sender.replaceTrack(camTrack);
+            else { try { rtcPeerConn.removeTrack(sender); _tfRenegotiateCall(); } catch (e) {} }
+        }
+    }
+    var selfVid = document.getElementById('call-local-video');
+    if (selfVid) selfVid.srcObject = camTrack ? rtcLocalStream : null;
+    var selfPreview = document.getElementById('call-self-preview');
+    if (selfPreview && !camTrack) selfPreview.style.display = 'none';
+
+    _tfMarkShareButton(false);
+    showToast('Screen sharing stopped');
+}
+
+function _tfMarkShareButton(on) {
+    var btn = document.getElementById('call-share-btn');
+    if (!btn) return;
+    btn.style.background = on ? '#007AFF' : 'rgba(255,255,255,0.12)';
+    var label = btn.parentElement ? btn.parentElement.querySelector('span') : null;
+    if (label) label.textContent = on ? 'Stop' : 'Share';
+}
+
+// Adding or removing a track mid-call needs a fresh offer, sent over the same
+// signalling rows the call was set up with.
+function _tfRenegotiateCall() {
+    if (!rtcPeerConn || !rtcCallId || !window.sb || !currentUser) return;
+    rtcPeerConn.createOffer().then(function(offer) {
+        return rtcPeerConn.setLocalDescription(offer).then(function() {
+            return sb.from('call_signals').insert({
+                call_id: rtcCallId, sender_id: currentUser.id,
+                type: 'offer', payload: JSON.stringify(offer)
+            });
+        });
+    }).catch(function(e) { console.warn('[Call] renegotiate failed', e && e.message); });
 }
 
 // Voice message in call

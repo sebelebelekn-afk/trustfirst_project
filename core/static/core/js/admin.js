@@ -15,7 +15,7 @@ function openAdminDashboard() {
             '<b>Admin Dashboard</b>' +
         '</div>' +
         '<div style="display:flex;border-bottom:0.5px solid var(--border-color,#eee);flex-shrink:0;overflow-x:auto;">' +
-            ['applications', 'reports', 'feedback', 'kids'].map(function(t, i) {
+            ['applications', 'reports', 'feedback', 'kids', 'eddie'].map(function(t, i) {
                 return '<button id="adminTab_' + t + '" onclick="adminSwitchTab(\'' + t + '\')" style="flex:1;min-width:90px;padding:13px 8px;background:none;border:none;border-bottom:2px solid ' + (i === 0 ? '#007AFF' : 'transparent') + ';color:' + (i === 0 ? 'var(--text-primary,#000)' : '#888') + ';font-size:13px;font-weight:700;cursor:pointer;text-transform:capitalize;">' + t + '</button>';
             }).join('') +
         '</div>' +
@@ -27,7 +27,7 @@ function openAdminDashboard() {
 }
 
 window.adminSwitchTab = function(tab) {
-    ['applications', 'reports', 'feedback', 'kids'].forEach(function(t) {
+    ['applications', 'reports', 'feedback', 'kids', 'eddie'].forEach(function(t) {
         var b = document.getElementById('adminTab_' + t);
         if (b) { b.style.borderBottomColor = (t === tab) ? '#007AFF' : 'transparent'; b.style.color = (t === tab) ? 'var(--text-primary,#000)' : '#888'; }
     });
@@ -38,6 +38,141 @@ window.adminSwitchTab = function(tab) {
     if (tab === 'kids') return adminLoadApplications(body, 'kids');
     if (tab === 'reports') return adminLoadReports(body);
     if (tab === 'feedback') return adminLoadFeedback(body);
+    if (tab === 'eddie') return adminLoadEddie(body);
+};
+
+// ============================================================
+// EDDIE'S ACCOUNT — admins manage the assistant's profile here.
+// It is a normal user row, so the same RLS that lets an admin edit anyone
+// covers this; no special server route is needed.
+// ============================================================
+var ADMIN_EDDIE_ID = 'edd1e000-0000-4000-8000-000000000001';
+
+// Eddie's face, drawn rather than uploaded so it stays crisp at every size and
+// needs no storage round trip.
+var ADMIN_EDDIE_AVATAR =
+    'data:image/svg+xml;utf8,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">' +
+        '<circle cx="256" cy="256" r="256" fill="#0a0a0a"/>' +
+        '<rect x="150" y="150" width="62" height="128" rx="31" fill="#fff"/>' +
+        '<rect x="300" y="150" width="62" height="128" rx="31" fill="#fff"/>' +
+        '<path d="M170 330 Q256 400 342 330" stroke="#fff" stroke-width="26" ' +
+        'stroke-linecap="round" fill="none"/>' +
+        '</svg>');
+
+async function adminLoadEddie(body) {
+    if (!currentUser || !currentUser.is_admin) { body.innerHTML = _adminEmpty('Admins only'); return; }
+    var u = null;
+    try {
+        var res = await sb.from('users')
+            .select('id,username,full_name,bio,avatar_url,verified,badge_tier')
+            .eq('id', ADMIN_EDDIE_ID).maybeSingle();
+        u = res.data || null;
+    } catch (e) {}
+    if (!u) { body.innerHTML = _adminEmpty('Eddie account not found'); return; }
+
+    var avatar = u.avatar_url || ADMIN_EDDIE_AVATAR;
+    body.innerHTML =
+        _adminCard(
+            '<div style="display:flex;align-items:center;gap:14px;margin-bottom:4px;">' +
+                '<img id="admEddieAv" src="' + escapeHtml(avatar) + '" style="width:64px;height:64px;border-radius:50%;object-fit:cover;background:#0a0a0a;flex-shrink:0;">' +
+                '<div style="min-width:0;">' +
+                    '<div style="font-size:16px;font-weight:800;color:var(--text-primary,#000);">' + escapeHtml(u.full_name || 'Eddie') + '</div>' +
+                    '<div style="font-size:13px;color:#888;">@' + escapeHtml(u.username || 'eddie') + '</div>' +
+                '</div>' +
+            '</div>' +
+            '<p style="font-size:12px;color:#888;margin:10px 0 0;line-height:1.5;">' +
+                'This is Eddie\'s real account. Anything changed here is what everyone sees.</p>'
+        ) +
+        _adminCard(
+            '<label style="display:block;font-size:12px;font-weight:700;color:#888;margin-bottom:6px;">Display name</label>' +
+            '<input id="admEddieName" value="' + escapeHtml(u.full_name || '') + '" style="width:100%;padding:11px 13px;border-radius:11px;border:1px solid var(--border-color,#e5e5e5);background:var(--input-bg,#f7f7f7);color:var(--text-primary,#000);font-size:15px;outline:none;box-sizing:border-box;">' +
+
+            '<label style="display:block;font-size:12px;font-weight:700;color:#888;margin:14px 0 6px;">Username</label>' +
+            '<input id="admEddieUser" value="' + escapeHtml(u.username || '') + '" style="width:100%;padding:11px 13px;border-radius:11px;border:1px solid var(--border-color,#e5e5e5);background:var(--input-bg,#f7f7f7);color:var(--text-primary,#000);font-size:15px;outline:none;box-sizing:border-box;">' +
+
+            '<label style="display:block;font-size:12px;font-weight:700;color:#888;margin:14px 0 6px;">Bio</label>' +
+            '<textarea id="admEddieBio" rows="3" style="width:100%;padding:11px 13px;border-radius:11px;border:1px solid var(--border-color,#e5e5e5);background:var(--input-bg,#f7f7f7);color:var(--text-primary,#000);font-size:15px;outline:none;box-sizing:border-box;resize:none;font-family:inherit;">' + escapeHtml(u.bio || '') + '</textarea>' +
+
+            '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">' +
+                '<button onclick="adminEddiePickAvatar()" style="flex:1;min-width:130px;padding:12px;border-radius:12px;border:1px solid var(--border-color,#e5e5e5);background:var(--bg-secondary,#f0f0f0);color:var(--text-primary,#000);font-size:14px;font-weight:700;cursor:pointer;">Upload picture</button>' +
+                '<button onclick="adminEddieUseDefaultAvatar()" style="flex:1;min-width:130px;padding:12px;border-radius:12px;border:1px solid var(--border-color,#e5e5e5);background:var(--bg-secondary,#f0f0f0);color:var(--text-primary,#000);font-size:14px;font-weight:700;cursor:pointer;">Use Eddie face</button>' +
+            '</div>' +
+            '<button onclick="adminEddieSave()" style="width:100%;padding:13px;border-radius:12px;border:none;background:#007AFF;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-top:10px;">Save profile</button>'
+        ) +
+        _adminCard(
+            '<div style="font-size:14px;font-weight:700;color:var(--text-primary,#000);margin-bottom:8px;">Open Eddie\'s profile</div>' +
+            '<p style="font-size:12px;color:#888;margin:0 0 12px;line-height:1.5;">View the account as anyone else sees it, including its posts and replies.</p>' +
+            '<button onclick="adminOpenEddieProfile()" style="width:100%;padding:12px;border-radius:12px;border:1px solid var(--border-color,#e5e5e5);background:var(--bg-secondary,#f0f0f0);color:var(--text-primary,#000);font-size:14px;font-weight:700;cursor:pointer;">Go to @' + escapeHtml(u.username || 'eddie') + '</button>'
+        );
+    window._admEddiePendingAvatar = null;
+}
+
+// Held in memory until Save, so backing out changes nothing.
+window.adminEddieUseDefaultAvatar = function () {
+    window._admEddiePendingAvatar = ADMIN_EDDIE_AVATAR;
+    var img = document.getElementById('admEddieAv');
+    if (img) img.src = ADMIN_EDDIE_AVATAR;
+    showToast('Tap Save profile to apply');
+};
+
+window.adminEddiePickAvatar = function () {
+    var inp = document.getElementById('_admEddieAvInput');
+    if (!inp) {
+        inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = 'image/*'; inp.id = '_admEddieAvInput';
+        inp.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;';
+        inp.addEventListener('change', async function () {
+            var f = inp.files && inp.files[0];
+            if (!f) return;
+            if (f.size > 5 * 1024 * 1024) { showToast('Image must be under 5MB'); return; }
+            showToast('Uploading...');
+            try {
+                var path = 'eddie/avatar_' + Date.now() + '.jpg';
+                var up = await sb.storage.from('avatars').upload(path, f, { upsert: true, contentType: f.type });
+                if (up.error) { showToast('Upload failed'); return; }
+                var url = sb.storage.from('avatars').getPublicUrl(up.data.path).data.publicUrl;
+                window._admEddiePendingAvatar = url;
+                var img = document.getElementById('admEddieAv');
+                if (img) img.src = url;
+                showToast('Tap Save profile to apply');
+            } catch (e) { showToast('Upload error'); }
+            try { inp.value = ''; } catch (e) {}
+        });
+        document.body.appendChild(inp);
+    }
+    try { inp.value = ''; } catch (e) {}
+    inp.click();
+};
+
+window.adminEddieSave = async function () {
+    if (!currentUser || !currentUser.is_admin) { showToast('Admins only'); return; }
+    var name = (document.getElementById('admEddieName') || {}).value || '';
+    var user = (document.getElementById('admEddieUser') || {}).value || '';
+    var bio  = (document.getElementById('admEddieBio')  || {}).value || '';
+    var patch = {
+        full_name: name.trim() || 'Eddie',
+        username: user.trim().replace(/^@/, '') || 'eddie',
+        bio: bio.trim()
+    };
+    if (window._admEddiePendingAvatar) patch.avatar_url = window._admEddiePendingAvatar;
+    showToast('Saving...');
+    try {
+        var res = await sb.from('users').update(patch).eq('id', ADMIN_EDDIE_ID);
+        if (res.error) { showToast('Could not save: ' + res.error.message); return; }
+        window._admEddiePendingAvatar = null;
+        showToast('Eddie updated');
+        if (typeof triggerHaptic === 'function') triggerHaptic(15);
+        var b = document.getElementById('adminDashBody');
+        if (b) adminLoadEddie(b);
+    } catch (e) { showToast('Save failed'); }
+};
+
+window.adminOpenEddieProfile = function () {
+    var ov = document.getElementById('adminDashOverlay');
+    if (ov) ov.remove();
+    if (typeof viewUserProfile === 'function') viewUserProfile(ADMIN_EDDIE_ID);
+    else showToast('Could not open the profile');
 };
 
 function _adminEmpty(label) {

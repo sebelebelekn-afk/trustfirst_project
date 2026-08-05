@@ -1149,11 +1149,11 @@ function authenticateUser() {
         <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">Mute</span>
       </div>
       <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
-        <button onclick="openCallMoreMenu()" style="width:62px;height:62px;border-radius:50%;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;"><i class="fa-solid fa-ellipsis"></i></button>
+        <button id="call-more-btn" onclick="openCallMoreMenu()" style="width:62px;height:62px;border-radius:50%;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;"><i class="fa-solid fa-ellipsis"></i></button>
         <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">More</span>
       </div>
       <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
-        <button onclick="callShareScreen()" style="width:62px;height:62px;border-radius:50%;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;"><i class="fa-solid fa-desktop"></i></button>
+        <button id="call-share-btn" onclick="callShareScreen()" style="width:62px;height:62px;border-radius:50%;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;"><i class="fa-solid fa-desktop"></i></button>
         <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">Share</span>
       </div>
       <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
@@ -4231,7 +4231,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=189"></script>
+<script src="{% static 'core/js/feed.js' %}?v=191"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=75"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
