@@ -24999,7 +24999,76 @@ function tfOpenImageViewer(postId, startIdx) {
     }
     // Lets the stylesheet lift comments, share and quote above the viewer.
     document.body.classList.add('tf-iv-open');
+    _tfWireImageViewerDismiss(ov, urls.length > 1);
     if (typeof hideNavBar === 'function') hideNavBar();
+}
+
+// Drag the photo to throw it away, the way every other photo viewer works: it
+// follows your finger, dims the backdrop as it goes, and closes if you let go
+// past the threshold. With several photos the horizontal axis belongs to the
+// carousel, so only a vertical drag dismisses.
+function _tfWireImageViewerDismiss(ov, multi) {
+    var track = ov.querySelector('#tfIvTrack');
+    if (!track) return;
+    var sx = 0, sy = 0, dx = 0, dy = 0, decided = false, dragging = false;
+    var CLOSE = 110;
+
+    function paint(x, y) {
+        var dist = Math.sqrt(x * x + y * y);
+        var scale = Math.max(0.82, 1 - dist / 1400);
+        track.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + scale + ')';
+        ov.style.background = 'rgba(0,0,0,' + Math.max(0.35, 1 - dist / 620) + ')';
+    }
+    function reset(animate) {
+        track.style.transition = animate ? 'transform 0.24s cubic-bezier(0.32,0.72,0,1)' : '';
+        ov.style.transition = animate ? 'background 0.24s ease' : '';
+        track.style.transform = '';
+        ov.style.background = '#000';
+        if (animate) setTimeout(function() { track.style.transition = ''; ov.style.transition = ''; }, 260);
+    }
+
+    track.addEventListener('touchstart', function(e) {
+        if (e.touches.length !== 1) return;
+        sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+        dx = dy = 0; decided = false; dragging = false;
+        track.style.transition = ''; ov.style.transition = '';
+    }, { passive: true });
+
+    track.addEventListener('touchmove', function(e) {
+        if (e.touches.length !== 1) return;
+        dx = e.touches[0].clientX - sx;
+        dy = e.touches[0].clientY - sy;
+        if (!decided) {
+            if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+            decided = true;
+            // A single photo can be flung any way. In a carousel, sideways
+            // scrolling has to keep working, so only a clear vertical drag is
+            // treated as a dismiss.
+            dragging = multi ? (Math.abs(dy) > Math.abs(dx) * 1.3) : true;
+        }
+        if (!dragging) return;
+        if (e.cancelable) e.preventDefault();
+        paint(multi ? 0 : dx, dy);
+    }, { passive: false });
+
+    function release() {
+        if (!dragging) return;
+        dragging = false;
+        var dist = multi ? Math.abs(dy) : Math.sqrt(dx * dx + dy * dy);
+        if (dist > CLOSE) {
+            // Carry on in the direction it was thrown, then close.
+            track.style.transition = 'transform 0.2s ease-out, opacity 0.2s ease-out';
+            ov.style.transition = 'background 0.2s ease-out';
+            track.style.transform = 'translate(' + (multi ? 0 : dx * 2.2) + 'px,' + (dy * 2.2) + 'px) scale(0.7)';
+            track.style.opacity = '0';
+            ov.style.background = 'rgba(0,0,0,0)';
+            setTimeout(tfCloseImageViewer, 190);
+        } else {
+            reset(true);
+        }
+    }
+    track.addEventListener('touchend', release);
+    track.addEventListener('touchcancel', release);
 }
 
 function tfCloseImageViewer() {
@@ -27017,26 +27086,15 @@ async function viewUserProfile(userId) {
     overlay.className = 'page-overlay';
     overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg-primary,#fff);z-index:9999;overflow-y:auto;-webkit-overflow-scrolling:touch;';
 
-    var postsHtml = '';
-    if (isLockedOut) {
-        postsHtml = '<div style="padding:54px 28px;text-align:center;">' +
+    // Only the private-account notice is built up front now. Each tab loads its
+    // own posts as real cards, instead of the text-only summary that used to be
+    // pasted straight in here.
+    var postsHtml = !isLockedOut ? '' :
+        '<div style="padding:54px 28px;text-align:center;">' +
             '<div style="width:66px;height:66px;border-radius:50%;background:var(--bg-secondary,#f2f2f7);display:flex;align-items:center;justify-content:center;margin:0 auto 20px;"><i class="fa-solid fa-lock" style="font-size:26px;color:#888;"></i></div>' +
             '<h2 style="font-size:23px;font-weight:800;color:var(--text-primary,#000);margin-bottom:10px;">This account is private</h2>' +
             '<p style="font-size:14px;color:#888;line-height:1.65;max-width:300px;margin:0 auto;">Only confirmed followers can see @' + escapeHtml(profile.username) + '’s posts and complete profile. Tap Follow to send a request.</p>' +
         '</div>';
-    } else if (posts.length === 0) {
-        postsHtml = '<div style="text-align:center;padding:40px;color:#aaa;">No posts yet</div>';
-    } else {
-        posts.forEach(function(p) {
-            postsHtml += '<div style="padding:15px 20px;border-bottom:1px solid var(--border-color,#f0f0f0);">' +
-                '<p style="font-size:14px;line-height:1.5;color:var(--text-primary,#000);">' + escapeHtml(p.text_content) + '</p>' +
-                '<div style="display:flex;gap:15px;margin-top:8px;color:#aaa;font-size:12px;">' +
-                    '<span><i class="fa-regular fa-heart"></i> ' + (p.like_count || 0) + '</span>' +
-                    '<span><i class="fa-regular fa-comment"></i> ' + (p.comment_count || 0) + '</span>' +
-                    '<span>' + getTimeAgo(p.created_at) + '</span>' +
-                '</div></div>';
-        });
-    }
 
     var userChannel = null;
     if (window.sb) { try { var _chRes = await sb.from('channels').select('id,name,emoji,color').eq('owner_id', userId).limit(1).maybeSingle(); userChannel = _chRes.data; } catch (e) {} }
@@ -27090,12 +27148,95 @@ async function viewUserProfile(userId) {
                 '<span><b>' + counts.following + '</b> <span style="color:#888;">Following</span></span>' +
             '</div>' +
         '</div>' +
-        '<div style="border-top:1px solid var(--border-color,#f0f0f0);">' +
-            '<div style="padding:12px 20px;font-weight:700;font-size:15px;color:var(--text-primary,#000);border-bottom:2px solid #007AFF;display:inline-block;margin-left:20px;">Posts</div>' +
-            postsHtml +
-        '</div>';
+        // Someone else's profile only ever had a "Posts" caption, so their clips,
+        // reposts and photos were unreachable. Same tab set as your own profile.
+        (isLockedOut
+            ? '<div style="border-top:1px solid var(--border-color,#f0f0f0);">' + postsHtml + '</div>'
+            : '<div style="border-top:1px solid var(--border-color,#f0f0f0);">' +
+                  '<div id="up-tabs" style="display:flex;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:0 12px;">' +
+                      _upTabHTML('posts',    'Posts',      userId, true) +
+                      _upTabHTML('reels',    'trustclips', userId, false) +
+                      _upTabHTML('reposts',  'reposts',    userId, false) +
+                      _upTabHTML('pictures', 'pictures',   userId, false) +
+                  '</div>' +
+                  '<div id="up-tab-content"></div>' +
+              '</div>') +
+        '';
 
     document.body.appendChild(overlay);
+    if (!isLockedOut) switchUserProfileTab('posts', null, userId);
+}
+
+function _upTabHTML(key, label, userId, active) {
+    return '<div class="up-tab" data-tab="' + key + '" onclick="switchUserProfileTab(\'' + key + '\',this,\'' + escapeHtml(String(userId)) + '\')" ' +
+        'style="flex:0 0 auto;padding:13px 14px;font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap;' +
+        'color:' + (active ? 'var(--text-primary,#000)' : 'var(--text-secondary,#888)') + ';' +
+        'border-bottom:2px solid ' + (active ? '#007AFF' : 'transparent') + ';">' + label + '</div>';
+}
+
+// One generation per switch, so a slow tab cannot paint over a newer one.
+var _upTabGen = 0;
+async function switchUserProfileTab(tab, el, userId) {
+    var bar = document.getElementById('up-tabs');
+    var box = document.getElementById('up-tab-content');
+    if (!box) return;
+    if (bar) {
+        bar.querySelectorAll('.up-tab').forEach(function(t) {
+            var on = el ? (t === el) : (t.getAttribute('data-tab') === tab);
+            t.style.color = on ? 'var(--text-primary,#000)' : 'var(--text-secondary,#888)';
+            t.style.borderBottomColor = on ? '#007AFF' : 'transparent';
+        });
+    }
+    triggerHaptic(10);
+
+    var myGen = ++_upTabGen;
+    box.innerHTML = (typeof renderSkeletonHTML === 'function') ? renderSkeletonHTML('post', 3) : '';
+
+    function empty(icon, msg) {
+        if (_upTabGen !== myGen) return;
+        box.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#888;">' +
+            '<i class="' + icon + '" style="font-size:40px;color:#555;display:block;margin-bottom:15px;"></i>' +
+            '<b style="color:var(--text-primary,#000);">' + msg + '</b></div>';
+    }
+    if (!window.sb) { empty('fa-regular fa-newspaper', 'Nothing here yet'); return; }
+
+    var SEL = '*, users:user_id(id,full_name,username,avatar_url,badge_tier,verified,ai_label)';
+    try {
+        var rows = [];
+        if (tab === 'reposts') {
+            var rp = await sb.from('reposts')
+                .select('post_id, posts:post_id(' + SEL + ')')
+                .eq('user_id', userId).order('created_at', { ascending: false }).limit(20);
+            rows = (rp.data || []).map(function(r) { return r.posts; }).filter(Boolean);
+        } else {
+            var q = sb.from('posts').select(SEL).eq('user_id', userId).eq('status', 'published');
+            if (tab === 'reels')    q = q.or('post_type.eq.video,media_type.eq.video');
+            if (tab === 'pictures') q = q.or('post_type.eq.image,media_type.eq.image');
+            var r = await q.order('created_at', { ascending: false }).limit(20);
+            rows = r.data || [];
+            if (tab === 'pictures') {
+                rows = rows.filter(function(p) {
+                    return (p.media_urls && p.media_urls.length) || p.media_url || p.thumbnail_url;
+                });
+            }
+        }
+        if (_upTabGen !== myGen) return;
+        if (!rows.length) {
+            var blanks = { posts: ['fa-regular fa-newspaper', 'No posts yet'],
+                           reels: ['fa-solid fa-clapperboard', 'No trustclips yet'],
+                           reposts: ['fa-solid fa-retweet', 'No reposts yet'],
+                           pictures: ['fa-regular fa-image', 'No photos yet'] };
+            empty(blanks[tab][0], blanks[tab][1]);
+            return;
+        }
+        box.innerHTML = '';
+        rows.forEach(function(p) {
+            if (typeof renderRealPostCard === 'function') box.appendChild(renderRealPostCard(p));
+        });
+    } catch (e) {
+        if (_upTabGen !== myGen) return;
+        box.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#888;font-size:13px;">Could not load</div>';
+    }
 }
 
 async function realFollowFromProfile(btn, userId) {
