@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=91">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=92">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -1752,7 +1752,7 @@ function authenticateUser() {
     <!-- Poll builder -->
     <div id="poll-builder" style="display:none; padding:0 20px 12px;">
         <div style="background:rgba(0,122,255,0.04); border:1px solid rgba(0,122,255,0.12); border-radius:16px; padding:16px;">
-            <p style="font-size:13px; font-weight:700; color:#007AFF; margin-bottom:12px;">📊 Poll Options</p>
+            <p style="font-size:13px; font-weight:700; color:#007AFF; margin-bottom:12px;"><i class="fa-solid fa-chart-simple" style="margin-right:6px;"></i>Poll Options</p>
             <div id="poll-options-list"></div>
             <button onclick="addPollOption()" style="padding:8px 16px; border-radius:20px; border:1px dashed #007AFF; background:transparent; color:#007AFF; font-size:13px; font-weight:700; cursor:pointer; margin-top:4px;">+ Add Option</button>
             <div style="margin-top:12px; display:flex; align-items:center; gap:10px;">
@@ -1769,7 +1769,7 @@ function authenticateUser() {
     <!-- Quiz builder -->
     <div id="quiz-builder" style="display:none; padding:0 20px 12px;">
         <div style="background:rgba(88,86,214,0.04); border:1px solid rgba(88,86,214,0.12); border-radius:16px; padding:16px;">
-            <p style="font-size:13px; font-weight:700; color:#5856D6; margin-bottom:4px;">🧠 Quiz Options</p>
+            <p style="font-size:13px; font-weight:700; color:#5856D6; margin-bottom:4px;"><i class="fa-solid fa-circle-question" style="margin-right:6px;"></i>Quiz Options</p>
             <p style="font-size:12px; color:#888; margin-bottom:12px;">Tap the circle to mark the correct answer</p>
             <div id="quiz-options-list"></div>
             <button onclick="addQuizOption()" style="padding:8px 16px; border-radius:20px; border:1px dashed #5856D6; background:transparent; color:#5856D6; font-size:13px; font-weight:700; cursor:pointer; margin-top:4px;">+ Add Option</button>
@@ -1779,7 +1779,7 @@ function authenticateUser() {
     <!-- Question sticker preview -->
     <div id="question-builder" style="display:none; padding:0 20px 12px;">
         <div style="background:linear-gradient(135deg, rgba(0,122,255,0.06), rgba(88,86,214,0.06)); border:1px solid rgba(0,122,255,0.15); border-radius:16px; padding:16px; text-align:center;">
-            <p style="font-size:13px; font-weight:700; color:#007AFF; margin-bottom:4px;">❓ Question Sticker</p>
+            <p style="font-size:13px; font-weight:700; color:#007AFF; margin-bottom:4px;"><i class="fa-solid fa-question" style="margin-right:6px;"></i>Question Sticker</p>
             <p style="font-size:12px; color:#888;">Your followers will be able to answer this question. Their answers post as comments.</p>
         </div>
     </div>
@@ -1787,7 +1787,7 @@ function authenticateUser() {
     <!-- Schedule picker -->
     <div id="schedule-picker" style="display:none; padding:0 20px 12px;">
         <div style="background:rgba(52,199,89,0.04); border:1px solid rgba(52,199,89,0.2); border-radius:16px; padding:16px;">
-            <p style="font-size:13px; font-weight:700; color:#34C759; margin-bottom:12px;">📅 Schedule Post</p>
+            <p style="font-size:13px; font-weight:700; color:#34C759; margin-bottom:12px;"><i class="fa-regular fa-calendar" style="margin-right:6px;"></i>Schedule Post</p>
             <div style="display:flex; gap:10px;">
                 <input type="date" id="schedule-date" style="flex:1; padding:10px; border-radius:12px; border:1px solid #eee; font-size:14px; background:var(--input-bg,#f5f5f5); color:var(--text-primary,#000); outline:none;">
                 <input type="time" id="schedule-time" style="flex:1; padding:10px; border-radius:12px; border:1px solid #eee; font-size:14px; background:var(--input-bg,#f5f5f5); color:var(--text-primary,#000); outline:none;">
@@ -4231,7 +4231,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=195"></script>
+<script src="{% static 'core/js/feed.js' %}?v=196"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=75"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

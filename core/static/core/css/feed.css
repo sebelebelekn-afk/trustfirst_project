@@ -577,7 +577,9 @@ html, body { background: #000; }
     .bookmark-active { color: #007AFF !important; animation: popIn 0.3s; }
     .repost-spin { color: #34C759 !important; animation: spinRepost 0.7s cubic-bezier(0.34,1.56,0.64,1); }
 
-    .back-to-top { position: absolute; top: 85px; left: 50%; transform: translateX(-50%); background: #007AFF; color: #fff; padding: 10px 20px; border-radius: 50px; font-size: 12px; font-weight: 900; display: none; z-index: 2000; box-shadow: 0 10px 20px rgba(0,122,255,0.3); cursor: pointer; text-transform: uppercase; letter-spacing: 1px; }
+    /* The blue box-shadow read as a glow bleeding out of the pill on a dark
+       feed. A plain neutral drop shadow lifts it off the page without the halo. */
+    .back-to-top { position: absolute; top: 85px; left: 50%; transform: translateX(-50%); background: #007AFF; color: #fff; padding: 10px 20px; border-radius: 50px; font-size: 12px; font-weight: 900; display: none; z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,0.28); cursor: pointer; text-transform: uppercase; letter-spacing: 1px; }
 
 /* ==========================================================================
    6. LIQUID NAVIGATION — Premium Floating Glass Pill

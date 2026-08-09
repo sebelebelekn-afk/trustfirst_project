@@ -5924,38 +5924,80 @@ function openShare(postId) {
         document.addEventListener('click', outsideClose);
     }, 100);
 }
+// Clipboard write that also works where navigator.clipboard is unavailable
+// (an insecure origin, or an older WebView).
+function tfCopyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function(resolve, reject) {
+        try {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.cssText = 'position:fixed;left:-9999px;opacity:0;';
+            document.body.appendChild(ta);
+            ta.select();
+            ta.setSelectionRange(0, text.length);
+            var ok = document.execCommand('copy');
+            ta.remove();
+            ok ? resolve() : reject(new Error('copy refused'));
+        } catch (e) { reject(e); }
+    });
+}
+
 function shareVia(method) {
-    var postUrl = 'https://trustfirst.app/post/' + Date.now();
+    // This was a timestamp, so every "share" sent a link to a post that never
+    // existed. Use the post the sheet was actually opened for.
+    var base = 'https://trustfirst.app';
+    var postUrl = _activeSharePostId ? (base + '/post/' + _activeSharePostId) : base;
+
+    function openTarget(url) { window.open(url, '_blank', 'noopener'); }
+    function copyThen(msg) {
+        tfCopyText(postUrl).then(function() { showToast(msg); },
+                                 function() { showToast('Could not copy the link'); });
+    }
+
     switch(method) {
         case 'copy':
-            if (navigator.clipboard) {
-                navigator.clipboard.writeText(postUrl).then(function() { showToast('Link copied!'); });
-            }
+            copyThen('Link copied');
             break;
         case 'whatsapp':
-            window.open('https://wa.me/?text=' + encodeURIComponent(postUrl));
+            openTarget('https://wa.me/?text=' + encodeURIComponent(postUrl));
             break;
         case 'twitter':
-            window.open('https://twitter.com/intent/tweet?url=' + encodeURIComponent(postUrl));
+            openTarget('https://twitter.com/intent/tweet?url=' + encodeURIComponent(postUrl));
             break;
         case 'telegram':
-            window.open('https://t.me/share/url?url=' + encodeURIComponent(postUrl));
+            openTarget('https://t.me/share/url?url=' + encodeURIComponent(postUrl));
+            break;
+        case 'facebook':
+            openTarget('https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(postUrl));
             break;
         case 'email':
-            window.location.href = 'mailto:?body=' + encodeURIComponent(postUrl);
+            window.location.href = 'mailto:?subject=' + encodeURIComponent('A post on TrustFirst') +
+                '&body=' + encodeURIComponent(postUrl);
             break;
         case 'sms':
-            window.location.href = 'sms:?body=' + encodeURIComponent(postUrl);
+            window.location.href = 'sms:?&body=' + encodeURIComponent(postUrl);
             break;
-        case 'more':
+        case 'instagram':
+            // Instagram has no web intent for sharing a link, so the only real
+            // routes are the OS share sheet or the clipboard. This used to fall
+            // through to "coming soon", which made a working button look broken.
             if (navigator.share) {
-                navigator.share({ title: 'TrustFirst Post', url: postUrl });
+                navigator.share({ title: 'TrustFirst', url: postUrl }).catch(function() {});
             } else {
-                showToast('Share not supported on this device');
+                copyThen('Link copied, paste it into Instagram');
             }
             break;
+        case 'more':
         default:
-            showToast(method + ' coming soon');
+            if (navigator.share) {
+                navigator.share({ title: 'TrustFirst', url: postUrl }).catch(function() {});
+            } else {
+                copyThen('Link copied');
+            }
     }
     // Dismiss the sheet after picking an option (and release the scroll lock).
     if (typeof closeSharePanel === 'function') closeSharePanel();
@@ -17094,7 +17136,10 @@ function handleShare(type, postId) {
     const url = `https://trustfirst.app/post/${postId}`;
     switch(type) {
         case 'copy link':
-            navigator.clipboard.writeText(url).then(() => showToast('Link copied!'));
+            // Via the shared helper, so it still works where
+            // navigator.clipboard is missing instead of failing silently.
+            tfCopyText(url).then(function() { showToast('Link copied'); },
+                                 function() { showToast('Could not copy the link'); });
             break;
         case 'whatsapp':
             window.open(`https://wa.me/?text=${encodeURIComponent(url)}`);
