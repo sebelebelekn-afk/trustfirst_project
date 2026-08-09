@@ -479,16 +479,29 @@ function _canStartDM() {
 // ==========================================================================
 
 function nextAuthStep(stepId) {
-    document.querySelectorAll('.auth-step').forEach(s => s.classList.remove('active'));
     var step = document.getElementById(stepId);
     if (!step) { console.error('[Auth] Step not found:', stepId); return; }
+    // Every auth step lives inside #splash, and launching the app leaves that
+    // element with splash-fade-out on it — opacity 0 and pointer-events none,
+    // still covering the screen at z-index 9999. Nothing ever took the class
+    // back off, so anything that returned to the auth flow later (a session
+    // that expired while switching accounts, for one) activated its step
+    // inside an invisible, untappable layer: a blank screen.
+    var splash = document.getElementById('splash');
+    if (splash) {
+        splash.classList.remove('splash-fade-out');
+        splash.style.display = 'flex';
+    }
+    document.querySelectorAll('.auth-step').forEach(s => s.classList.remove('active'));
     step.classList.add('active');
     history.pushState({ authStep: stepId }, '', '');
 }
 
 window.addEventListener('popstate', function(e) {
-    var authWrapper = document.getElementById('auth-wrapper');
-    if (!authWrapper || authWrapper.style.display === 'none') return;
+    // Guarded on #auth-wrapper, which does not exist in this template, so going
+    // back inside the auth flow did nothing at all. The steps live in #splash.
+    var splash = document.getElementById('splash');
+    if (!splash || splash.classList.contains('splash-fade-out')) return;
     var stepId = (e.state && e.state.authStep) ? e.state.authStep : 'step-splash';
     document.querySelectorAll('.auth-step').forEach(s => s.classList.remove('active'));
     var step = document.getElementById(stepId);
@@ -20908,10 +20921,33 @@ function openReportViolationsHistory() {
             provider: 'google',
             options: { redirectTo: window.location.origin }
         });
-        if (result.error) showToast('Google sign-in failed');
+        // "Google sign-in failed" hid whether the provider is switched off in
+        // Supabase or the redirect was rejected, which are fixed in different
+        // places. Log the real message and say which of the two it is.
+        if (result.error) {
+            console.error('[Auth] Google OAuth:', result.error.message);
+            showToast(_oauthErrorText('Google', result.error));
+        }
     } catch(e) {
-        showToast('Google sign-in failed');
+        console.error('[Auth] Google OAuth:', e && e.message);
+        showToast(_oauthErrorText('Google', e));
     }
+}
+
+// Note: an "Access blocked" page from Google itself never reaches this code —
+// that is Google refusing the request before any redirect, and it is fixed in
+// the Google Cloud console (authorised redirect URI must be the Supabase
+// callback, and the consent screen must not be in Testing without you as a
+// test user), not here.
+function _oauthErrorText(name, err) {
+    var m = (err && err.message ? err.message : '').toLowerCase();
+    if (m.indexOf('provider is not enabled') > -1 || m.indexOf('not enabled') > -1 || m.indexOf('unsupported provider') > -1) {
+        return name + ' sign-in is not switched on for this app yet.';
+    }
+    if (m.indexOf('redirect') > -1) {
+        return name + ' sign-in rejected the return address. Use email for now.';
+    }
+    return (err && err.message) ? (name + ': ' + err.message) : (name + ' sign-in failed');
 }
 
 async function signInWithApple() {
@@ -20921,9 +20957,13 @@ async function signInWithApple() {
             provider: 'apple',
             options: { redirectTo: window.location.origin }
         });
-        if (result.error) showToast('Apple sign-in failed');
+        if (result.error) {
+            console.error('[Auth] Apple OAuth:', result.error.message);
+            showToast(_oauthErrorText('Apple', result.error));
+        }
     } catch(e) {
-        showToast('Apple sign-in failed');
+        console.error('[Auth] Apple OAuth:', e && e.message);
+        showToast(_oauthErrorText('Apple', e));
     }
 }
 
@@ -21000,7 +21040,11 @@ function _togglePasskey(el) {
     if (el.classList.contains('active')) enablePasskey(el);
     else disablePasskey();
 }
-function signUpWithPhone() { showToast('Phone sign-up is coming soon'); }
+// Phone sign-up is not "coming soon" — it is built (step-signup-phone-num ->
+// _signupSendPhoneCode). It only fails when Supabase has no SMS provider wired
+// up, and _smsErrorText already says so. Kept as an alias so any older cached
+// bundle or shell that still calls this name lands on the real flow.
+function signUpWithPhone() { nextAuthStep('step-signup-phone-num'); }
 // ---- Phone login: password or SMS code, depending on the account ----
 // An account that has a password gets the password screen (with a "use a code
 // instead" escape); one created by phone alone has no password, so a code is
@@ -21669,11 +21713,11 @@ function _signupSendPhoneCode() {
     if (!window.sb) { showToast('Loading… try again'); return; }
     showToast('Sending code…');
     sb.auth.signInWithOtp({ phone: full }).then(function(r) {
-        if (r.error) { showToast(_smsErrorText(r.error)); return; }
+        if (r.error) { console.warn('[Auth] phone OTP:', r.error.message); showToast(_smsErrorText(r.error)); return; }
         var lbl = document.getElementById('signup-code-email'); if (lbl) lbl.textContent = full;
         nextAuthStep('step-signup-code');
         setTimeout(function() { _otpClear(); _signupStartCodeTimer(300); }, 120);
-    }, function() { showToast('Phone sign-up isn\'t available yet'); });
+    }, function(e) { console.warn('[Auth] phone OTP:', e && e.message); showToast(_smsErrorText(e)); });
 }
 
 // ==========================================================================
@@ -27144,20 +27188,18 @@ async function viewUserProfile(userId) {
             channelPillHtml +
             '<div style="display:flex;gap:20px;margin:15px 0;font-size:14px;color:var(--text-primary,#000);">' +
                 '<span><b>' + counts.posts + '</b> <span style="color:#888;">Posts</span></span>' +
-                '<span><b>' + counts.followers + '</b> <span style="color:#888;">Followers</span></span>' +
-                '<span><b>' + counts.following + '</b> <span style="color:#888;">Following</span></span>' +
+                '<span onclick="openFollowersScreen(\'' + escapeHtml(String(userId)) + '\',\'followers\')" style="cursor:pointer;"><b>' + counts.followers + '</b> <span style="color:#888;">Followers</span></span>' +
+                '<span onclick="openFollowersScreen(\'' + escapeHtml(String(userId)) + '\',\'following\')" style="cursor:pointer;"><b>' + counts.following + '</b> <span style="color:#888;">Following</span></span>' +
             '</div>' +
         '</div>' +
-        // Someone else's profile only ever had a "Posts" caption, so their clips,
-        // reposts and photos were unreachable. Same tab set as your own profile.
+        // Public profiles use the same configurable tab set and order as your profile.
         (isLockedOut
             ? '<div style="border-top:1px solid var(--border-color,#f0f0f0);">' + postsHtml + '</div>'
             : '<div style="border-top:1px solid var(--border-color,#f0f0f0);">' +
-                  '<div id="up-tabs" style="display:flex;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:0 12px;">' +
-                      _upTabHTML('posts',    'Posts',      userId, true) +
-                      _upTabHTML('reels',    'trustclips', userId, false) +
-                      _upTabHTML('reposts',  'reposts',    userId, false) +
-                      _upTabHTML('pictures', 'pictures',   userId, false) +
+                  '<div id="up-tabs" class="profile-tabs">' +
+                      _getProfileTabOrder().map(function(tabId) {
+                          return _upTabHTML(tabId, PROFILE_TAB_DEFS[tabId].label, userId, tabId === 'posts');
+                      }).join('') +
                   '</div>' +
                   '<div id="up-tab-content"></div>' +
               '</div>') +
@@ -27168,10 +27210,7 @@ async function viewUserProfile(userId) {
 }
 
 function _upTabHTML(key, label, userId, active) {
-    return '<div class="up-tab" data-tab="' + key + '" onclick="switchUserProfileTab(\'' + key + '\',this,\'' + escapeHtml(String(userId)) + '\')" ' +
-        'style="flex:0 0 auto;padding:13px 14px;font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap;' +
-        'color:' + (active ? 'var(--text-primary,#000)' : 'var(--text-secondary,#888)') + ';' +
-        'border-bottom:2px solid ' + (active ? '#007AFF' : 'transparent') + ';">' + label + '</div>';
+    return '<div class="p-tab up-tab' + (active ? ' active' : '') + '" data-tab="' + key + '" onclick="switchUserProfileTab(\'' + key + '\',this,\'' + escapeHtml(String(userId)) + '\')">' + label + '</div>';
 }
 
 // One generation per switch, so a slow tab cannot paint over a newer one.
@@ -27183,8 +27222,7 @@ async function switchUserProfileTab(tab, el, userId) {
     if (bar) {
         bar.querySelectorAll('.up-tab').forEach(function(t) {
             var on = el ? (t === el) : (t.getAttribute('data-tab') === tab);
-            t.style.color = on ? 'var(--text-primary,#000)' : 'var(--text-secondary,#888)';
-            t.style.borderBottomColor = on ? '#007AFF' : 'transparent';
+            t.classList.toggle('active', on);
         });
     }
     triggerHaptic(10);
@@ -27208,6 +27246,11 @@ async function switchUserProfileTab(tab, el, userId) {
                 .select('post_id, posts:post_id(' + SEL + ')')
                 .eq('user_id', userId).order('created_at', { ascending: false }).limit(20);
             rows = (rp.data || []).map(function(r) { return r.posts; }).filter(Boolean);
+        } else if (tab === 'tabs') {
+            var tags = await sb.from('post_tags')
+                .select('post_id, posts:post_id(' + SEL + ')')
+                .eq('tagged_user_id', userId).order('created_at', { ascending: false }).limit(20);
+            rows = (tags.data || []).map(function(row) { return row.posts; }).filter(Boolean);
         } else {
             var q = sb.from('posts').select(SEL).eq('user_id', userId).eq('status', 'published');
             if (tab === 'reels')    q = q.or('post_type.eq.video,media_type.eq.video');
@@ -27225,7 +27268,8 @@ async function switchUserProfileTab(tab, el, userId) {
             var blanks = { posts: ['fa-regular fa-newspaper', 'No posts yet'],
                            reels: ['fa-solid fa-clapperboard', 'No trustclips yet'],
                            reposts: ['fa-solid fa-retweet', 'No reposts yet'],
-                           pictures: ['fa-regular fa-image', 'No photos yet'] };
+                           pictures: ['fa-regular fa-image', 'No photos yet'],
+                           tabs: ['fa-solid fa-at', 'No tags yet'] };
             empty(blanks[tab][0], blanks[tab][1]);
             return;
         }
@@ -42914,11 +42958,57 @@ async function loadDiscoverPeople() {
 
 var _fsData = { followers: [], following: [] };
 var _fsTab = 'followers';
-function openFollowersScreen() {
+var _fsTargetUserId = null;
+var _fsRequestGen = 0;
+
+async function openFollowersScreen(userId, initialTab) {
+    var targetUserId = userId || (currentUser && currentUser.id);
+    if (!targetUserId) { showToast('Sign in to see followers'); return; }
+    _fsTargetUserId = targetUserId;
+    _fsTab = initialTab === 'following' ? 'following' : 'followers';
     openPage('followers-screen');
     var titleEl = document.getElementById('fs-title');
-    if (titleEl && currentUser) titleEl.textContent = currentUser.name || 'Followers';
-    renderFsList();
+    if (titleEl) titleEl.textContent = (currentUser && currentUser.id === targetUserId && currentUser.name) || 'Followers';
+    var searchInput = document.getElementById('fs-search-input');
+    if (searchInput) searchInput.value = '';
+    document.getElementById('fs-tab-followers').classList.toggle('active', _fsTab === 'followers');
+    document.getElementById('fs-tab-following').classList.toggle('active', _fsTab === 'following');
+    var list = document.getElementById('fs-list-content');
+    if (list) list.innerHTML = '<div style="text-align:center;padding:50px 20px;color:#888;font-size:14px;">Loading users…</div>';
+    if (!window.sb) return;
+
+    var requestGen = ++_fsRequestGen;
+    var viewerId = currentUser && currentUser.id;
+    var userCols = 'id,full_name,display_name,username,avatar_url,bio,verified';
+    try {
+        var results = await Promise.all([
+            sb.from('follows').select('follower_id, users:follower_id(' + userCols + ')').eq('following_id', targetUserId).limit(100),
+            sb.from('follows').select('following_id, users:following_id(' + userCols + ')').eq('follower_id', targetUserId).limit(100),
+            viewerId ? sb.from('follows').select('following_id').eq('follower_id', viewerId).limit(500) : Promise.resolve({ data: [] }),
+            DB.getUserProfile(targetUserId).catch(function() { return null; })
+        ]);
+        if (requestGen !== _fsRequestGen || targetUserId !== _fsTargetUserId) return;
+        var followedIds = new Set((results[2].data || []).map(function(row) { return row.following_id; }));
+        function mapUser(row) {
+            var user = row.users;
+            if (!user) return null;
+            var name = user.full_name || user.display_name || user.username || 'User';
+            return {
+                id: user.id, name: name, handle: user.username || '', bio: user.bio || '', verified: !!user.verified,
+                avatar: user.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=007AFF&color=fff&size=80'),
+                state: followedIds.has(user.id) ? 'Following' : 'Follow'
+            };
+        }
+        _fsData = {
+            followers: (results[0].data || []).map(mapUser).filter(Boolean),
+            following: (results[1].data || []).map(mapUser).filter(Boolean)
+        };
+        var profile = results[3];
+        if (titleEl && profile) titleEl.textContent = profile.full_name || profile.display_name || profile.username || 'Followers';
+        renderFsList();
+    } catch (error) {
+        if (requestGen === _fsRequestGen && list) list.innerHTML = '<div style="text-align:center;padding:50px 20px;color:#888;font-size:14px;">Could not load users</div>';
+    }
 }
 function switchFsTab(tab) {
     _fsTab = tab;
@@ -42949,26 +43039,28 @@ function renderFsList(filter) {
                 '<div class="fs-handle"><span>@'+u.handle+'</span>'+(u.followsYou ? '<span class="fs-follows-badge">Follows you</span>' : '')+'</div>' +
                 (u.bio ? '<div class="fs-bio">'+u.bio+'</div>' : '') +
             '</div>' +
-            '<button class="'+btnCls+'" onclick="toggleFsFollow('+u.id+',this)">'+u.state+'</button>' +
+            '<button class="'+btnCls+'" onclick="toggleFsFollow(\'' + escapeHtml(String(u.id)) + '\',this)">'+u.state+'</button>' +
         '</div>';
     }).join('');
 }
 function filterFsList(val) { renderFsList(val); }
-function toggleFsFollow(id, btn) {
+async function toggleFsFollow(id, btn) {
     var all = [].concat(_fsData.followers, _fsData.following);
     var user = all.find(function(u) { return u.id === id; });
     if (!user) return;
-    if (user.state === 'Following') {
-        user.state = _fsTab === 'followers' ? 'Follow back' : 'Follow';
-        btn.textContent = user.state;
-        btn.classList.remove('following-state');
-    } else {
-        user.state = 'Following';
-        btn.textContent = 'Following';
-        btn.classList.add('following-state');
-        btn.style.animation = 'popIn 0.25s ease';
+    if (!currentUser || currentUser.id === id) return;
+    if (btn) btn.disabled = true;
+    try {
+        var isFollowing = await RealData.toggleFollow(id);
+        if (typeof isFollowing !== 'boolean') return;
+        all.forEach(function(item) { if (item.id === id) item.state = isFollowing ? 'Following' : 'Follow'; });
+        renderFsList(document.getElementById('fs-search-input').value);
+        if (typeof triggerHaptic === 'function') triggerHaptic(10);
+    } catch (error) {
+        showToast('Could not update follow status');
+    } finally {
+        if (btn) btn.disabled = false;
     }
-    if (typeof triggerHaptic === 'function') triggerHaptic(10);
 }
 
 // ============================================================
