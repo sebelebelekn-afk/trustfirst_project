@@ -25610,7 +25610,12 @@ async function _fetchCommentThread(postId) {
     var results = await Promise.all([
         RealData.getComments(postId),
         (async function () {
-            try { var r = await sb.from('posts').select('user_id').eq('id', postId).single(); return (r.data && r.data.user_id) || null; }
+            // comment_policy comes back on the same trip as the owner id, so
+            // knowing the creator switched comments off costs nothing extra.
+            try {
+                var r = await sb.from('posts').select('user_id, comment_policy').eq('id', postId).single();
+                return r.data || null;
+            }
             catch (e) { return null; }
         })()
     ]);
@@ -25618,7 +25623,9 @@ async function _fetchCommentThread(postId) {
     if (currentCommentPostId !== postId) return false;   // viewer moved on mid-fetch
     var likeCountMap = {}, userLikedSet = new Set(), creatorLikedSet = new Set();
     var reactionMap = {}, myReactionMap = {};
-    var _ownerId = results[1];
+    var _postMeta = results[1] || {};
+    var _ownerId = _postMeta.user_id || null;
+    var _policy = _postMeta.comment_policy || 'everyone';
     if (window.sb && currentUser && comments.length) {
         try {
             var cIds = comments.map(function (c) { return c.id; });
@@ -25640,7 +25647,8 @@ async function _fetchCommentThread(postId) {
         } catch (e) { /* non-critical */ }
     }
     window._cmt = { postId: postId, comments: comments, likes: likeCountMap,
-                    liked: userLikedSet, ownerId: results[1], creatorLiked: creatorLikedSet,
+                    liked: userLikedSet, ownerId: _ownerId, creatorLiked: creatorLikedSet,
+                    policy: _policy,
                     reactions: reactionMap, myReaction: myReactionMap,
                     expanded: (window._cmt && window._cmt.postId === postId && window._cmt.expanded) || new Set() };
     return true;
@@ -25726,11 +25734,46 @@ function setCommentSort(mode) {
 // logic (reactions, likes, replies, long-press) serves both, one at a time.
 function _cList() { return window._activeCommentList || document.getElementById('comment-list'); }
 
+// True when the creator switched comments off and you are not that creator.
+// The creator still sees the thread, so they can moderate what is already there.
+function _tfCommentsClosed(st) {
+    if (!st || st.policy !== 'off') return false;
+    return !(currentUser && st.ownerId && currentUser.id === st.ownerId);
+}
+
+// Hide the "Add a comment" bar on whichever surface is showing the thread, so
+// there is no box to type into for a post that cannot take comments.
+function _tfSetCommentBar(visible) {
+    var bars = [document.querySelector('#comment-overlay .comment-input-bar'),
+                document.querySelector('.post-detail-overlay .comment-input-bar')];
+    bars.forEach(function (b) { if (b) b.style.display = visible ? '' : 'none'; });
+}
+
 function _renderCommentList() {
     var list = _cList();
     var st = window._cmt;
     if (!list || !st) return;
     var mode = window._commentSort || 'newest';
+
+    // Turning comments off was only enforced when posting; a viewer still got
+    // the thread and an input box. Say so instead, on both the sheet and the
+    // post's own page, which share this renderer.
+    if (_tfCommentsClosed(st)) {
+        _setCommentSheetCount(0);
+        _tfSetCommentBar(false);
+        // Nothing to sort, so the sort control goes too.
+        var sortBtn = document.getElementById('commentSortBtn');
+        if (sortBtn) sortBtn.style.display = 'none';
+        list.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+            'min-height:220px;padding:40px 24px;text-align:center;">' +
+            '<i class="fa-solid fa-comment-slash" style="font-size:30px;color:var(--text-tertiary,#888);margin-bottom:14px;"></i>' +
+            '<p style="font-size:17px;color:var(--text-secondary,#888);margin:0;">This creator turned off comments</p>' +
+            '</div>';
+        return;
+    }
+    _tfSetCommentBar(true);
+    var _sortBtn = document.getElementById('commentSortBtn');
+    if (_sortBtn) _sortBtn.style.display = '';
 
     _setCommentSheetCount(st.comments.length);
 
@@ -26094,6 +26137,14 @@ postComment = async function() {
         else { if (_originalPostComment) _originalPostComment(); return; }
     }
     if (!canPerformAction('comment')) return;
+    // Switching comments off was never enforced on the way in, only shown in the
+    // creator's own settings. The bar is hidden for a closed post, so this only
+    // catches a stale surface.
+    if (typeof _tfCommentsClosed === 'function' && _tfCommentsClosed(window._cmt) &&
+        window._cmt && window._cmt.postId === currentCommentPostId) {
+        showToast('This creator turned off comments');
+        return;
+    }
 
     var input = window._activeCommentInput || document.getElementById('comment-input');
     if (!input) return;
