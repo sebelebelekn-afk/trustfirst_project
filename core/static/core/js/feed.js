@@ -494,6 +494,11 @@ function nextAuthStep(stepId) {
     }
     document.querySelectorAll('.auth-step').forEach(s => s.classList.remove('active'));
     step.classList.add('active');
+    // Belt and braces: if a loader is still up, its inline display:none on this
+    // step would outrank .active and leave the screen blank.
+    step.style.removeProperty('display');
+    var _al = document.getElementById('auth-loader');
+    if (_al) _al.style.display = 'none';
     history.pushState({ authStep: stepId }, '', '');
 }
 
@@ -674,7 +679,14 @@ function showAuthLoader() {
 }
 
 function hideAuthLoader() {
-    document.getElementById('auth-loader').style.display = 'none';
+    var l = document.getElementById('auth-loader');
+    if (l) l.style.display = 'none';
+    // showAuthLoader stamps an inline display:none on every step, and an inline
+    // style beats the stylesheet's .auth-step.active { display: block }. Leaving
+    // them stamped meant nextAuthStep could add .active all it liked and the
+    // step stayed invisible: a black page after verifying a signup code, or
+    // after a saved account's session turned out to be expired.
+    document.querySelectorAll('.auth-step').forEach(function(s) { s.style.removeProperty('display'); });
 }
 
 function showAuthError(message, returnStep) {
