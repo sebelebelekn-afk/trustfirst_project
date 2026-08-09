@@ -1503,6 +1503,47 @@ function launchApp() {
     if (isChildAccount()) {
         startChildMonitoring();
     }
+
+    // A shared link lands here with the post or clip in the path.
+    tfOpenDeepLink();
+}
+
+// Shared links (/post/<id>, /clip/<id>, /profile/<name>) all serve the same
+// single page, so the path is the only thing carrying what was shared. A video
+// opens in the clip viewer and anything else opens the post itself, which is
+// what the link promised. The path is then swapped back to / so a refresh does
+// not reopen it, and so back leaves the post rather than the app.
+function tfOpenDeepLink() {
+    var m = (location.pathname || '').match(/^\/(post|clip|profile)\/([^\/?#]+)\/?$/);
+    if (!m) return;
+    var kind = m[1], value = decodeURIComponent(m[2]);
+    try { history.replaceState({}, '', '/'); } catch (e) {}
+
+    setTimeout(function() {
+        if (kind === 'profile') {
+            if (!window.sb) return;
+            sb.from('users').select('id').ilike('username', value).limit(1).maybeSingle()
+              .then(function(r) {
+                  if (r.data && r.data.id && typeof viewUserProfile === 'function') viewUserProfile(r.data.id);
+                  else showToast('That profile could not be found');
+              }, function() {});
+            return;
+        }
+        if (!window.sb) return;
+        sb.from('posts')
+          .select('id, media_url, video_url, media_type, post_type, text_content, user_id, like_count, comment_count, view_count, users:user_id(id,username,avatar_url,id_verified)')
+          .eq('id', value).maybeSingle()
+          .then(function(r) {
+              var p = r.data;
+              if (!p) { showToast('That post is no longer available'); return; }
+              var isClip = kind === 'clip' || p.media_type === 'video' || p.post_type === 'video' || p.post_type === 'trustclip';
+              if (isClip && typeof openContextualVideo === 'function') {
+                  openContextualVideo(p.media_url || p.video_url || '', 'feed', 0, [p]);
+              } else if (typeof openPostDetail === 'function') {
+                  openPostDetail(p.id);
+              }
+          }, function() { showToast('Could not open that link'); });
+    }, 400);   // let the feed paint first, so closing the post reveals it
 }
 
 // ============================================
@@ -5752,6 +5793,10 @@ async function loadProfilePosts(container) {
 }
 
 function loadProfileReels(container) {
+    // Every other tab loader carries this; without it a slower request from the
+    // tab you just left painted over the clips, which is why the trustclips tab
+    // could end up showing ordinary posts.
+    var myGen = _profileTabGen;
     container.innerHTML = '';
     var tcDrafts = [];
     try { tcDrafts = JSON.parse(localStorage.getItem('tf_tc_drafts') || '[]'); } catch(e) {}
@@ -5782,19 +5827,28 @@ function loadProfileReels(container) {
             .order('created_at', { ascending: false })
             .limit(18)
             .then(function(r) {
+                if (_profileTabGen !== myGen) return;   // tab switched, discard
                 if (r.data && r.data.length > 0) {
                     window._profileClips = r.data.map(function(c){ return { id: c.id, videoUrl: c.media_url, media_url: c.media_url, thumbnail_url: c.thumbnail_url, view_count: c.view_count, username: '@' + (currentUser && currentUser.username || 'me') }; });
                     r.data.forEach(function(clip, clipIdx) {
                         var thumb = clip.thumbnail_url || '';
         var videoUrl = clip.media_url || '';
+        // No stored thumbnail: seek a hair past the start so the video paints a
+        // frame. It used to set currentTime on loadeddata, which never fires for
+        // preload="metadata", so every clip without a thumbnail was a black box.
+        // #t=0.1 asks for that frame up front, and the seek is a belt-and-braces
+        // fallback for browsers that ignore the fragment.
         container.innerHTML += '<div onclick="openProfileClipViewer('+clipIdx+')" style="aspect-ratio:9/16;background:#111;overflow:hidden;position:relative;cursor:pointer;border-radius:3px;">' +
-            (thumb ? '<img src="' + escapeHtml(thumb) + '" style="width:100%;height:100%;object-fit:cover;opacity:0.85;">' : '<video src="'+escapeHtml(videoUrl)+'" style="width:100%;height:100%;object-fit:cover;opacity:0.85;" muted playsinline preload="metadata" onloadeddata="this.currentTime=0"></video>') +
+            (thumb
+                ? '<img src="' + escapeHtml(thumb) + '" style="width:100%;height:100%;object-fit:cover;opacity:0.85;">'
+                : '<video src="' + escapeHtml(videoUrl) + '#t=0.1" style="width:100%;height:100%;object-fit:cover;opacity:0.85;" muted playsinline preload="metadata" onloadedmetadata="try{this.currentTime=0.1;}catch(e){}"></video>') +
                             '<div style="position:absolute;bottom:6px;left:6px;color:white;font-size:10px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,0.9);"><i class="fa-solid fa-play"></i> ' + (clip.view_count || 0) + '</div></div>';
                     });
                 } else if (!totalDraftCount) {
                     container.innerHTML += '<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#888;font-size:13px;"><i class="fa-solid fa-film" style="font-size:32px;color:#ccc;display:block;margin-bottom:12px;"></i>No clips yet</div>';
                 }
             }).catch(function() {
+                if (_profileTabGen !== myGen) return;
                 if (!totalDraftCount) container.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#888;font-size:13px;">Could not load clips</div>';
             });
     } else if (!totalDraftCount) {
@@ -5946,11 +6000,108 @@ function tfCopyText(text) {
     });
 }
 
+// A story-shaped card of the post, drawn on a canvas so it can be handed to
+// Instagram as a file. Instagram has no web intent for a link, so a picture is
+// the only thing it will actually accept.
+function tfBuildPostStoryCard(post) {
+    return new Promise(function(resolve, reject) {
+        try {
+            var W = 1080, H = 1920;
+            var c = document.createElement('canvas');
+            c.width = W; c.height = H;
+            var x = c.getContext('2d');
+
+            // Backdrop
+            var g = x.createLinearGradient(0, 0, W, H);
+            g.addColorStop(0, '#0c0c0e'); g.addColorStop(1, '#1a1a1f');
+            x.fillStyle = g; x.fillRect(0, 0, W, H);
+
+            // Card
+            var cardX = 70, cardW = W - 140, cardY = 560, pad = 56;
+            var user = post.users || {};
+            var name = user.full_name || user.username || 'TrustFirst';
+            var handle = '@' + (user.username || 'trustfirst');
+            var text = (post.text_content || '').slice(0, 240);
+
+            // Wrap the body to measure the card height before drawing it.
+            x.font = '400 42px -apple-system, "Segoe UI", Roboto, sans-serif';
+            var words = text.split(/\s+/).filter(Boolean), lines = [], line = '';
+            words.forEach(function(w) {
+                var t = line ? line + ' ' + w : w;
+                if (x.measureText(t).width > cardW - pad * 2) { if (line) lines.push(line); line = w; }
+                else line = t;
+            });
+            if (line) lines.push(line);
+            lines = lines.slice(0, 8);
+            var cardH = pad * 2 + 96 + (lines.length * 58);
+
+            function roundRect(rx, ry, rw, rh, r) {
+                x.beginPath();
+                x.moveTo(rx + r, ry);
+                x.arcTo(rx + rw, ry, rx + rw, ry + rh, r);
+                x.arcTo(rx + rw, ry + rh, rx, ry + rh, r);
+                x.arcTo(rx, ry + rh, rx, ry, r);
+                x.arcTo(rx, ry, rx + rw, ry, r);
+                x.closePath();
+            }
+            x.fillStyle = '#ffffff';
+            roundRect(cardX, cardY, cardW, cardH, 40); x.fill();
+
+            // Author initial, name, handle
+            x.fillStyle = '#007AFF';
+            x.beginPath(); x.arc(cardX + pad + 34, cardY + pad + 34, 34, 0, Math.PI * 2); x.fill();
+            x.fillStyle = '#ffffff';
+            x.font = '700 34px -apple-system, "Segoe UI", Roboto, sans-serif';
+            x.textAlign = 'center'; x.textBaseline = 'middle';
+            x.fillText(name.charAt(0).toUpperCase(), cardX + pad + 34, cardY + pad + 36);
+            x.textAlign = 'left'; x.textBaseline = 'alphabetic';
+            x.fillStyle = '#0b0b0c';
+            x.font = '700 38px -apple-system, "Segoe UI", Roboto, sans-serif';
+            x.fillText(name, cardX + pad + 90, cardY + pad + 30);
+            x.fillStyle = '#8a8a8f';
+            x.font = '400 32px -apple-system, "Segoe UI", Roboto, sans-serif';
+            x.fillText(handle, cardX + pad + 90, cardY + pad + 74);
+
+            // Body
+            x.fillStyle = '#0b0b0c';
+            x.font = '400 42px -apple-system, "Segoe UI", Roboto, sans-serif';
+            lines.forEach(function(l, i) { x.fillText(l, cardX + pad, cardY + pad + 150 + (i * 58)); });
+
+            // Wordmark under the card, so a reshare says where it came from
+            x.fillStyle = 'rgba(255,255,255,0.92)';
+            x.font = '800 44px -apple-system, "Segoe UI", Roboto, sans-serif';
+            x.textAlign = 'center';
+            x.fillText('TrustFirst', W / 2, cardY + cardH + 96);
+            x.fillStyle = 'rgba(255,255,255,0.45)';
+            x.font = '400 30px -apple-system, "Segoe UI", Roboto, sans-serif';
+            x.fillText('trustfirst.app', W / 2, cardY + cardH + 146);
+
+            c.toBlob(function(b) { b ? resolve(b) : reject(new Error('no blob')); }, 'image/png');
+        } catch (e) { reject(e); }
+    });
+}
+
+async function tfShareStoryCard(postUrl) {
+    var post = (typeof _tfPostById !== 'undefined' && _activeSharePostId) ? _tfPostById[_activeSharePostId] : null;
+    // Sharing a file needs Web Share level 2. Without it, the link is the best
+    // that can be handed over.
+    if (!post || !navigator.canShare || !window.File) return false;
+    try {
+        var blob = await tfBuildPostStoryCard(post);
+        var file = new File([blob], 'trustfirst-post.png', { type: 'image/png' });
+        if (!navigator.canShare({ files: [file] })) return false;
+        await navigator.share({ files: [file], text: postUrl });
+        return true;
+    } catch (e) { return false; }
+}
+
 function shareVia(method) {
     // This was a timestamp, so every "share" sent a link to a post that never
     // existed. Use the post the sheet was actually opened for.
     var base = 'https://trustfirst.app';
     var postUrl = _activeSharePostId ? (base + '/post/' + _activeSharePostId) : base;
+    var post = (typeof _tfPostById !== 'undefined' && _activeSharePostId) ? _tfPostById[_activeSharePostId] : null;
+    var author = (post && post.users && (post.users.full_name || post.users.username)) || '';
 
     function openTarget(url) { window.open(url, '_blank', 'noopener'); }
     function copyThen(msg) {
@@ -5975,21 +6126,22 @@ function shareVia(method) {
             openTarget('https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(postUrl));
             break;
         case 'email':
-            window.location.href = 'mailto:?subject=' + encodeURIComponent('A post on TrustFirst') +
+            // Named like the share X sends: "Post by <name> on TrustFirst".
+            window.location.href = 'mailto:?subject=' +
+                encodeURIComponent(author ? ('Post by ' + author + ' on TrustFirst') : 'A post on TrustFirst') +
                 '&body=' + encodeURIComponent(postUrl);
             break;
         case 'sms':
             window.location.href = 'sms:?&body=' + encodeURIComponent(postUrl);
             break;
         case 'instagram':
-            // Instagram has no web intent for sharing a link, so the only real
-            // routes are the OS share sheet or the clipboard. This used to fall
-            // through to "coming soon", which made a working button look broken.
-            if (navigator.share) {
-                navigator.share({ title: 'TrustFirst', url: postUrl }).catch(function() {});
-            } else {
-                copyThen('Link copied, paste it into Instagram');
-            }
+            // Instagram takes a picture, not a link, so hand it a story card of
+            // the post. Where files cannot be shared, fall back to the link.
+            tfShareStoryCard(postUrl).then(function(done) {
+                if (done) return;
+                if (navigator.share) navigator.share({ title: 'TrustFirst', url: postUrl }).catch(function() {});
+                else copyThen('Link copied, paste it into Instagram');
+            });
             break;
         case 'more':
         default:
@@ -27987,7 +28139,7 @@ renderRealPostCard = function(post) {
                     ${qp.text_content ? `<p style="font-size:14px;color:var(--text-primary,#000);margin:0 0 ${(qp.thumbnail_url||qp.media_url)?'10px':'0'};line-height:1.45;word-break:break-word;">${escapeHtml(qp.text_content)}</p>` : (!qp.thumbnail_url && !qp.media_url ? '<p style="font-size:13px;color:var(--text-tertiary,#888);margin:0;font-style:italic;">View post &#8594;</p>' : '')}
                 </div>
                 <!-- Quoted media: prefer thumbnail (safe for video), add play icon if video -->
-                ${(qp.thumbnail_url || qp.media_url) ? `<div style="position:relative;">${(qp.post_type==='video'||qp.media_type==='video') ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:1;"><div style="width:32px;height:32px;background:rgba(0,0,0,0.5);border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-play" style="color:white;font-size:11px;margin-left:2px;"></i></div></div>` : ''}${((qp.post_type==='video'||qp.media_type==='video')&&!qp.thumbnail_url) ? `<video src="${escapeHtml(qp.media_url)}" style="width:100%;display:block;max-height:240px;object-fit:cover;" muted playsinline preload="metadata" onloadeddata="try{this.currentTime=0.1;}catch(e){}"></video>` : `<img src="${qp.thumbnail_url||qp.media_url}" style="width:100%;display:block;max-height:240px;object-fit:cover;" onerror="this.style.display='none'">`}</div>` : ''}
+                ${(qp.thumbnail_url || qp.media_url) ? `<div style="position:relative;">${(qp.post_type==='video'||qp.media_type==='video') ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:1;"><div style="width:32px;height:32px;background:rgba(0,0,0,0.5);border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-play" style="color:white;font-size:11px;margin-left:2px;"></i></div></div>` : ''}${((qp.post_type==='video'||qp.media_type==='video')&&!qp.thumbnail_url) ? `<video src="${escapeHtml(qp.media_url)}#t=0.1" style="width:100%;display:block;max-height:240px;object-fit:cover;" muted playsinline preload="metadata" onloadedmetadata="try{this.currentTime=0.1;}catch(e){}"></video>` : `<img src="${qp.thumbnail_url||qp.media_url}" style="width:100%;display:block;max-height:240px;object-fit:cover;" onerror="this.style.display='none'">`}</div>` : ''}
             `;
             const iconsDiv = card.querySelector('.post-icons');
             if (iconsDiv) {
@@ -33207,8 +33359,12 @@ requires_approval: (document.getElementById('groupApprovalToggle')?.classList.co
                         feed.insertBefore(newCard, feed.firstChild);
                         newCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     }
+                    // Only refresh the grid when Posts is the tab on screen.
+                    // It used to reload posts whatever tab you were on, dropping
+                    // a list of posts into the clips or pictures grid.
                     var profileGrid = document.getElementById('profile-grid');
-                    if (profileGrid && profileGrid.offsetParent !== null) {
+                    if (profileGrid && profileGrid.offsetParent !== null &&
+                        (profileGrid.dataset.tab || 'posts') === 'posts') {
                         loadProfilePosts(profileGrid);
                     }
                     _eddieAnswerMention('post', result.data.id, postText, result.data.id);

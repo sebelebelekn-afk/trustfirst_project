@@ -38,4 +38,11 @@ urlpatterns = [
     path('manifest.json', views.manifest, name='manifest'),
 path('api/giphy/search/', api_views.giphy_search, name='api_giphy'),
     path('api/music/search/', api_views.music_search, name='api_music'),
+
+    # Shared links. The app is a single page, so these all serve the same
+    # template and the client reads the path on boot to open what was shared.
+    # Without them a copied link 404'd instead of opening the post.
+    path('post/<str:target_id>/', views.feed, name='post_permalink'),
+    path('clip/<str:target_id>/', views.feed, name='clip_permalink'),
+    path('profile/<str:username>/', views.feed, name='profile_permalink'),
 ]

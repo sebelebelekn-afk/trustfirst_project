@@ -2,7 +2,14 @@ from django.conf import settings
 from django.http import FileResponse
 from django.shortcuts import render
 
-def feed(request):
+def feed(request, **kwargs):
+    """The whole app is this one page.
+
+    Shared links (/post/<id>, /clip/<id>, /profile/<name>) route here too and
+    capture an id in the path; the client reads location.pathname on boot to open
+    what was shared. The captures are swallowed here rather than being handed to
+    the template, which is why this takes **kwargs.
+    """
     return render(request, 'core/feed.html')
 
 
