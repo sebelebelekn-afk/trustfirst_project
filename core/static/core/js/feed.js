@@ -13330,6 +13330,7 @@ async function initReels() {
             var avatarHtml = tfReelAvatarHTML(post, profile, hasStory);
             c.innerHTML += tfReelPageHTML(post, avatarHtml, username, verified, likes);
         });
+        if (typeof _tfObserveNewPosts === 'function') _tfObserveNewPosts();
     } catch(e) {
         c.innerHTML = '<div style="color:rgba(255,255,255,0.4);text-align:center;padding:40px;font-size:14px;">Could not load clips.</div>';
     }
@@ -17563,6 +17564,10 @@ function openContextualVideo(videoUrl, context, startIndex, clipArray) {
     if (scroller && idx > 0) {
         requestAnimationFrame(function() { scroller.scrollTop = scroller.clientHeight * idx; });
     }
+    // Views were only ever recorded for cards inside the feed, so watching a
+    // clip counted for nothing. The observer picks up any [data-post-id]; it
+    // just needed telling that new ones exist.
+    if (typeof _tfObserveNewPosts === 'function') _tfObserveNewPosts();
     return;
 }
 
@@ -28126,6 +28131,7 @@ async function openPostDetail(postId) {
         currentCommentPostId = postId;
         window._activeCommentList = cl;
         window._activeCommentInput = document.getElementById('_pdCommentInput');
+        if (typeof _tfObserveNewPosts === 'function') _tfObserveNewPosts();
         var ok = await _fetchCommentThread(postId);
         if (ok) _renderCommentList();
     } catch (e) {
@@ -47083,8 +47089,8 @@ function openReelLikesModal(postId, likes, views) {
                 '<b style="color:white;font-size:16px;">Likes and views</b>' +
             '</div>' +
             '<div style="display:flex;justify-content:center;gap:40px;padding:20px 0;border-bottom:0.5px solid rgba(255,255,255,0.1);flex-shrink:0;">' +
-                '<div style="text-align:center;"><i class="fa-regular fa-heart" style="color:white;font-size:18px;"></i><div style="color:white;font-size:18px;font-weight:800;margin-top:4px;">' + likes + '</div></div>' +
-                '<div style="text-align:center;"><i class="fa-regular fa-eye" style="color:white;font-size:18px;"></i><div style="color:white;font-size:18px;font-weight:800;margin-top:4px;">' + (parseInt(views)>999?(parseInt(views)/1000).toFixed(1)+'K':views||0) + '</div></div>' +
+                '<div style="text-align:center;"><i class="fa-regular fa-heart" style="color:white;font-size:18px;"></i><div id="reelLikesNum" style="color:white;font-size:18px;font-weight:800;margin-top:4px;">' + (likes || 0) + '</div></div>' +
+                '<div style="text-align:center;"><i class="fa-regular fa-eye" style="color:white;font-size:18px;"></i><div id="reelViewsNum" style="color:white;font-size:18px;font-weight:800;margin-top:4px;">' + (parseInt(views)>999?(parseInt(views)/1000).toFixed(1)+'K':views||0) + '</div></div>' +
             '</div>' +
             '<div style="padding:16px 20px 8px;flex-shrink:0;"><b style="color:white;font-size:15px;">Liked by</b></div>' +
             '<div style="overflow-y:auto;flex:1;padding:0 16px;" id="reelLikersList"><div style="text-align:center;padding:30px;color:rgba(255,255,255,0.4);font-size:14px;">Loading…</div></div>' +
@@ -47092,14 +47098,29 @@ function openReelLikesModal(postId, likes, views) {
     modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
     (document.getElementById('reel-overlay') || document.getElementById('app') || document.body).appendChild(modal);
     triggerHaptic(10);
-    // Load likers from Supabase
+    // Load likers from Supabase.
     if (window.sb) {
-        window.sb.from('likes').select('user_id,profiles(username,avatar_url)').eq('post_id',postId).limit(20).then(function(r){
+        // The counts passed in were read off the card when it rendered, so they
+        // were stale the moment you liked. Read them back instead.
+        window.sb.from('posts').select('like_count, view_count').eq('id', postId).maybeSingle()
+            .then(function(pr) {
+                if (!pr.data) return;
+                var lv = document.getElementById('reelLikesNum');
+                var vv = document.getElementById('reelViewsNum');
+                var lc = pr.data.like_count || 0, vc = pr.data.view_count || 0;
+                if (lv) lv.textContent = lc > 999 ? (lc / 1000).toFixed(1) + 'K' : lc;
+                if (vv) vv.textContent = vc > 999 ? (vc / 1000).toFixed(1) + 'K' : vc;
+            }, function() {});
+        // likes.user_id points at users, not profiles. Asking for profiles(...)
+        // made PostgREST error, data came back null, and the sheet said "No
+        // likes yet" on a post that did have likes.
+        window.sb.from('likes').select('user_id,users:user_id(username,full_name,avatar_url)').eq('post_id',postId).limit(20).then(function(r){
             var list = document.getElementById('reelLikersList');
             if (!list) return;
+            if (r.error) { console.warn('[Likes] ' + r.error.message); }
             if (!r.data || !r.data.length) { list.innerHTML = '<div style="text-align:center;padding:30px;color:rgba(255,255,255,0.4);font-size:14px;">No likes yet</div>'; return; }
             list.innerHTML = r.data.map(function(row){
-                var p = row.profiles || {}; var av = p.avatar_url || ('https://ui-avatars.com/api/?name='+(p.username||'U')+'&background=007AFF&color=fff&size=60');
+                var p = row.users || {}; var av = p.avatar_url || ('https://ui-avatars.com/api/?name='+encodeURIComponent(p.username||'U')+'&background=007AFF&color=fff&size=60');
                 return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:0.5px solid rgba(255,255,255,0.07);cursor:pointer;" onclick="var _m=document.getElementById(\'reelLikesModal\');if(_m)_m.remove();openProfile(\''+escapeHtml(row.user_id||'')+'\')">' +
                     '<img src="'+escapeHtml(av)+'" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">' +
                     '<div><div style="color:white;font-size:14px;font-weight:700;">'+escapeHtml(p.display_name||p.username||'User')+'</div>' +
