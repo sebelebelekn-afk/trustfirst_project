@@ -253,12 +253,12 @@ function authenticateUser() {
         <h2 class="auth-x-title">We sent you a code</h2>
         <p class="auth-sub-left">Enter the code sent to <b id="signup-code-email">your email</b>.</p>
         <div class="otp-row" id="signup-otp-row">
-            <input class="otp-box" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="1" oninput="_otpInput(this,0)" onkeydown="_otpKey(event,this,0)" onpaste="_otpPaste(event)" onfocus="this.select()">
-            <input class="otp-box" type="text" inputmode="numeric" maxlength="1" oninput="_otpInput(this,1)" onkeydown="_otpKey(event,this,1)" onpaste="_otpPaste(event)" onfocus="this.select()">
-            <input class="otp-box" type="text" inputmode="numeric" maxlength="1" oninput="_otpInput(this,2)" onkeydown="_otpKey(event,this,2)" onpaste="_otpPaste(event)" onfocus="this.select()">
-            <input class="otp-box" type="text" inputmode="numeric" maxlength="1" oninput="_otpInput(this,3)" onkeydown="_otpKey(event,this,3)" onpaste="_otpPaste(event)" onfocus="this.select()">
-            <input class="otp-box" type="text" inputmode="numeric" maxlength="1" oninput="_otpInput(this,4)" onkeydown="_otpKey(event,this,4)" onpaste="_otpPaste(event)" onfocus="this.select()">
-            <input class="otp-box" type="text" inputmode="numeric" maxlength="1" oninput="_otpInput(this,5)" onkeydown="_otpKey(event,this,5)" onpaste="_otpPaste(event)" onfocus="this.select()">
+            <input class="otp-box" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" oninput="_otpInput(this,0)" onkeydown="_otpKey(event,this,0)" onpaste="_otpPaste(event)" onfocus="this.select()">
+            <input class="otp-box" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" oninput="_otpInput(this,1)" onkeydown="_otpKey(event,this,1)" onpaste="_otpPaste(event)" onfocus="this.select()">
+            <input class="otp-box" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" oninput="_otpInput(this,2)" onkeydown="_otpKey(event,this,2)" onpaste="_otpPaste(event)" onfocus="this.select()">
+            <input class="otp-box" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" oninput="_otpInput(this,3)" onkeydown="_otpKey(event,this,3)" onpaste="_otpPaste(event)" onfocus="this.select()">
+            <input class="otp-box" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" oninput="_otpInput(this,4)" onkeydown="_otpKey(event,this,4)" onpaste="_otpPaste(event)" onfocus="this.select()">
+            <input class="otp-box" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" oninput="_otpInput(this,5)" onkeydown="_otpKey(event,this,5)" onpaste="_otpPaste(event)" onfocus="this.select()">
         </div>
         <input type="hidden" id="signup-code-in">
         <p class="auth-sub-left" style="margin-top:16px;font-size:13px;color:#888;">Code expires in <b id="signup-code-timer" style="color:#007AFF;">5:00</b></p>
@@ -4231,7 +4231,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=198"></script>
+<script src="{% static 'core/js/feed.js' %}?v=199"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=75"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

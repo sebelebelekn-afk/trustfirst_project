@@ -480,7 +480,12 @@ function _canStartDM() {
 
 function nextAuthStep(stepId) {
     var step = document.getElementById(stepId);
-    if (!step) { console.error('[Auth] Step not found:', stepId); return; }
+    if (!step) {
+        // Never leave the viewer on a blank screen because of a bad step name.
+        console.error('[Auth] Step not found:', stepId);
+        step = document.getElementById('step-login') || document.getElementById('step-splash');
+        if (!step) return;
+    }
     // Every auth step lives inside #splash, and launching the app leaves that
     // element with splash-fade-out on it — opacity 0 and pointer-events none,
     // still covering the screen at z-index 9999. Nothing ever took the class
@@ -21658,7 +21663,21 @@ function _otpSync() {
     return v;
 }
 function _otpInput(el, idx) {
-    el.value = (el.value || '').replace(/\D/g, '').slice(-1);
+    var digits = (el.value || '').replace(/\D/g, '');
+    // The keyboard's "from Messages" suggestion, and a paste onto a box, both
+    // drop the whole code into one field. This kept only the last digit and
+    // threw the rest away, so autofill looked broken and you had to type it in
+    // by hand. Spread the digits across the boxes from here on instead.
+    if (digits.length > 1) {
+        var boxes = _otpBoxes();
+        for (var j = 0; j < boxes.length; j++) boxes[j].value = digits.charAt(j) || '';
+        var last = Math.min(digits.length, boxes.length) - 1;
+        if (boxes[last]) { try { boxes[last].focus(); } catch (e) {} }
+        var vAll = _otpSync();
+        if (vAll.length === 6 && !window._otpBusy) _signupVerifyCode();
+        return;
+    }
+    el.value = digits.slice(-1);
     var v = _otpSync();
     if (el.value && idx < 5) { var next = _otpBoxes()[idx + 1]; if (next) next.focus(); }
     if (v.length === 6 && !window._otpBusy) _signupVerifyCode();
