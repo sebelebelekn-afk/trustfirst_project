@@ -1435,9 +1435,11 @@ html, body { background: #000; }
     .avatar-overlap { width: 95px; height: 95px; border-radius: 50%; border: 4px solid #fff; position: absolute; bottom: -45px; left: 20px; background: #eee; z-index: 5; }
     .profile-btn-row { display: flex; justify-content: flex-end; gap: 10px; padding: 10px 20px; margin-top: 5px; }
     .action-btn { padding: 8px 20px; border-radius: 20px; border: 1px solid #ddd; background: #fff; font-weight: bold; font-size: 13px; cursor: pointer; }
-    .profile-tabs { display: flex; margin-top: 20px; border-bottom: 1px solid #eee; }
+    .profile-tabs { display: flex; margin-top: 20px; border-bottom: 1px solid var(--border-color, #eee); }
     .p-tab { flex: 1; text-align: center; padding: 12px; font-weight: 600; color: #888; cursor: pointer; border-bottom: 2px solid transparent; }
-    .p-tab.active { color: #000; border-bottom: 2px solid #000; }
+    /* The selected tab and its underline were literal black, so in dark mode the
+       one tab you had picked was the only one you could not read. */
+    .p-tab.active { color: var(--text-primary, #000); border-bottom: 2px solid var(--text-primary, #000); }
 
     /* ==========================================================================
        14. MISC (Sheets, Thoughts, Offline)

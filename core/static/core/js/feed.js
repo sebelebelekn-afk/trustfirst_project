@@ -1193,8 +1193,10 @@ async function logOut() {
     sheet.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:99999;background:rgba(0,0,0,0.5);top:0;display:flex;align-items:flex-end;justify-content:center;';
     sheet.innerHTML =
         '<div style="background:var(--card-bg,#fff);border-radius:24px 24px 0 0;padding:28px 20px 36px;width:100%;max-width:430px;text-align:center;">' +
-        '<div style="width:36px;height:4px;background:rgba(0,0,0,0.15);border-radius:2px;margin:0 auto 24px;"></div>' +
-        '<p style="font-size:17px;font-weight:700;margin-bottom:8px;">Log out?</p>' +
+        // The sheet hangs off document.body, outside the themed app container, so
+        // the heading inherited the plain black default and vanished in dark mode.
+        '<div style="width:36px;height:4px;background:var(--border-color,rgba(0,0,0,0.15));border-radius:2px;margin:0 auto 24px;"></div>' +
+        '<p style="font-size:17px;font-weight:700;margin-bottom:8px;color:var(--text-primary,#000);">Log out?</p>' +
         '<p style="font-size:14px;color:#888;margin-bottom:24px;">You\'ll need to sign back in to access your account.</p>' +
         '<button id="confirmLogoutBtn" style="width:100%;padding:16px;background:#FF3B30;color:#fff;border:none;border-radius:16px;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:10px;">Log Out</button>' +
         '<button onclick="this.closest(\'div[style*=z-index\\:99999]\').remove()" style="width:100%;padding:16px;background:var(--bg-secondary,#f2f2f7);color:var(--text-primary,#000);border:none;border-radius:16px;font-size:16px;font-weight:600;cursor:pointer;">Cancel</button>' +
@@ -8448,16 +8450,24 @@ function simulateRealtimeSearch() {
                 var usersPlaceholder = '<div class="search-result-section"><h4>Users</h4><div id="searchUsersGrid"><div style="text-align:center;padding:20px;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;"></i></div></div></div>';
                 area.innerHTML += usersPlaceholder;
                 if (window.sb) {
+                    // The users table has display_name and full_name; there is no
+                    // "name". Selecting and filtering on it made PostgREST reject the
+                    // whole request, so every search reported no users at all.
+                    // Commas and brackets are how or() separates its filters, so a
+                    // query containing them has to be stripped or the request 400s.
+                    var safeTerm = searchTerm.replace(/[,()\\]/g, ' ').trim();
                     sb.from('users')
-                      .select('id,name,username,avatar_url,verified')
-.or('name.ilike.%'+searchTerm+'%,username.ilike.%'+searchTerm+'%')
+                      .select('id,display_name,full_name,username,avatar_url,verified')
+                      .or('display_name.ilike.%'+safeTerm+'%,full_name.ilike.%'+safeTerm+'%,username.ilike.%'+safeTerm+'%')
                       .limit(8)
                       .then(function(r) {
                           var el = document.getElementById('searchUsersGrid'); if (!el) return;
+                          if (r.error) { console.warn('[search] users query failed', r.error); }
                           if (r.data && r.data.length) {
                               el.innerHTML = r.data.map(function(u) {
-                                  var av = u.avatar_url ? '<img src="'+escapeHtml(u.avatar_url)+'" style="width:44px;height:44px;border-radius:50%;object-fit:cover;">' : '<div style="width:44px;height:44px;border-radius:50%;background:#007AFF;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;">'+(u.display_name||'?')[0].toUpperCase()+'</div>';
-                                  return '<div class="msg-row" style="padding:12px 0;border-bottom:1px solid var(--border-color,#f5f5f5);cursor:pointer;" onclick="viewUserProfile(\''+u.id+'\')">'+av+'<div style="flex:1;margin-left:12px;"><b style="color:var(--text-primary,#000);">'+escapeHtml(u.display_name||u.username||'')+'</b>'+(u.identity_verified?'<i class="fa-solid fa-circle-check verify-blue" style="font-size:10px;margin-left:4px;"></i>':'')+'<br><small style="color:#888;">@'+escapeHtml(u.username||'')+'</small></div></div>';
+                                  var label = u.display_name || u.full_name || u.username || '';
+                                  var av = u.avatar_url ? '<img src="'+escapeHtml(u.avatar_url)+'" style="width:44px;height:44px;border-radius:50%;object-fit:cover;">' : '<div style="width:44px;height:44px;border-radius:50%;background:#007AFF;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;">'+escapeHtml((label||'?').charAt(0).toUpperCase())+'</div>';
+                                  return '<div class="msg-row" style="padding:12px 0;border-bottom:1px solid var(--border-color,#f5f5f5);cursor:pointer;" onclick="viewUserProfile(\''+u.id+'\')">'+av+'<div style="flex:1;margin-left:12px;"><b style="color:var(--text-primary,#000);">'+escapeHtml(label)+'</b>'+(u.verified?'<i class="fa-solid fa-circle-check verify-blue" style="font-size:10px;margin-left:4px;"></i>':'')+'<br><small style="color:#888;">@'+escapeHtml(u.username||'')+'</small></div></div>';
                               }).join('');
                           } else {
                               el.innerHTML = '<div style="text-align:center;padding:20px;color:#888;font-size:13px;">No users found</div>';
@@ -12245,17 +12255,9 @@ function _callPipMakeDraggable(el) {
 }
 
 // ===== MINI-PLAYER STATE =====
-var _miniLiveMode = null; // 'creator' | 'viewer'
-
-function minimizeLive() {
-    var overlay = document.getElementById('live-overlay');
-    if (overlay) overlay.style.display = 'none';
-    _miniLiveMode = 'creator';
-    var title = (document.getElementById('liveTitle') && document.getElementById('liveTitle').value) || 'Live Stream';
-    var viewers = document.getElementById('live-viewer-count') ? document.getElementById('live-viewer-count').textContent : '0';
-    var avatar = (currentUser && currentUser.avatar_url) ? currentUser.avatar_url : ('https://ui-avatars.com/api/?name='+(currentUser ? encodeURIComponent(currentUser.full_name||'Me') : 'Me')+'&background=007AFF&color=fff&size=80');
-    _showMiniPlayer(title, viewers, avatar);
-}
+// 'viewer' (watching someone) or 'browse' (the live feed page). Broadcasting is
+// deliberately not minimisable, so there is no 'creator' mode any more.
+var _miniLiveMode = null;
 
 function minimizeViewerLive() {
     var overlay = document.getElementById('live-viewer-overlay');
@@ -12287,10 +12289,7 @@ function _showMiniPlayer(title, viewers, avatar) {
 function maximizeLive() {
     var mp = document.getElementById('liveMiniPlayer');
     if (mp) mp.style.display = 'none';
-    if (_miniLiveMode === 'creator') {
-        var overlay = document.getElementById('live-overlay');
-        if (overlay) overlay.style.display = 'block';
-    } else if (_miniLiveMode === 'viewer') {
+    if (_miniLiveMode === 'viewer') {
         var overlay = document.getElementById('live-viewer-overlay');
         if (overlay) overlay.style.display = 'block';
     } else if (_miniLiveMode === 'browse') {
@@ -12304,9 +12303,7 @@ function closeMiniLive(e) {
     if (e) e.stopPropagation();
     var mp = document.getElementById('liveMiniPlayer');
     if (mp) mp.style.display = 'none';
-    if (_miniLiveMode === 'creator') {
-        endLive();
-    } else if (_miniLiveMode === 'viewer') {
+    if (_miniLiveMode === 'viewer') {
         closeViewerLive();
     } else if (_miniLiveMode === 'browse') {
         var page = document.getElementById('liveStreamFeedPage');
@@ -28414,6 +28411,9 @@ async function openGroup(groupId) {
     const isAdmin = currentUser && group.admin_id === currentUser.id;
     const cover = group.cover_url || _gsPresetCover(0);
     const privacyLabel = (group.privacy || 'Public') + ' group';
+    // Only the admin sees the setup checklist, so only the admin pays for the
+    // two counts it is judged on.
+    const setupProgress = (isAdmin && !group.setup_dismissed) ? await _groupSetupProgress(groupId) : null;
 
     if (header) {
         header.innerHTML =
@@ -28456,24 +28456,50 @@ async function openGroup(groupId) {
                     }).join('') +
                 '</div>' +
             '</div>' +
-            (isAdmin && !group.setup_dismissed ? _groupSetupCard(group, memberCount) : '');
+            (setupProgress ? _groupSetupCard(group, memberCount, setupProgress) : '');
     }
 
     switchGroupTab('posts');
 }
 
+// The two things the checklist cannot read off the group row: how many people
+// have been invited, and whether anything has been posted yet.
+async function _groupSetupProgress(groupId) {
+    var out = { invites: 0, posts: 0 };
+    if (!window.sb) return out;
+    try {
+        var inv = await sb.from('group_invites')
+            .select('id', { count: 'exact', head: true }).eq('group_id', groupId);
+        out.invites = inv.count || 0;
+    } catch (e) {}
+    try {
+        var po = await sb.from('posts')
+            .select('id', { count: 'exact', head: true })
+            .eq('group_id', groupId).eq('status', 'published');
+        out.posts = po.count || 0;
+    } catch (e) {}
+    return out;
+}
+
 // The "Finish setting up your group" checklist, admin-only and dismissible.
-function _groupSetupCard(group, memberCount) {
+// `progress` comes from _groupSetupProgress and holds the counts the steps are
+// actually judged on; without it the invite and post steps could only guess.
+function _groupSetupCard(group, memberCount, progress) {
+    progress = progress || { invites: 0, posts: 0 };
+    var reached = memberCount + progress.invites;   // invited counts, joining is up to them
     var items = [
-        { icon: 'fa-envelope-open-text', title: 'Invite people to join', sub: 'Invite at least 15 people.',
-          done: memberCount >= 15, fn: "gsOpenInvite('" + group.id + "')" },
+        { icon: 'fa-envelope-open-text', title: 'Invite people to join',
+          sub: reached > 0 ? reached + ' of 15 invited or joined.' : 'Invite at least 15 people.',
+          done: reached >= 15, fn: "gsOpenInvite('" + group.id + "')" },
         { icon: 'fa-image', title: 'Add a Cover Photo', sub: 'Show what your group is all about.',
           done: !!group.cover_url, fn: "gsOpenCoverFor('" + group.id + "')" },
         { icon: 'fa-pencil', title: 'Add a Description', sub: 'Tell people what they can expect.',
           done: !!group.description, fn: "gsEditDescription('" + group.id + "')" },
         { icon: 'fa-pen-to-square', title: 'Create a Post', sub: 'Share why you created your group.',
-          done: false, fn: "postToGroup('" + group.id + "')" }
+          done: progress.posts > 0, fn: "postToGroup('" + group.id + "')" }
     ];
+    // Everything ticked: the card has nothing left to ask for.
+    if (items.every(function (it) { return it.done; })) return '';
     return '<div style="border-top:8px solid var(--input-bg,#f0f0f0);padding:18px 18px 8px;">' +
         '<div style="display:flex;align-items:flex-start;gap:12px;">' +
             '<div style="flex:1;min-width:0;">' +
@@ -28953,6 +28979,11 @@ async function gsOpenInvite(groupId) {
     gsLoadPeople();
 }
 
+// Who has already been invited to, or already joined, the group being set up.
+// Without this the same person could be offered over and over with no sign that
+// an invitation was already sent.
+var _gsInvited = {};
+
 async function gsLoadPeople() {
     var box = document.getElementById('gsPeople');
     if (!box || !window.sb || !currentUser) return;
@@ -28961,6 +28992,17 @@ async function gsLoadPeople() {
             .select('id,username,full_name,avatar_url')
             .neq('id', currentUser.id).limit(25);
         window._gsPeople = r.data || [];
+
+        _gsInvited = {};
+        if (_gsetup.groupId) {
+            var inv = await sb.from('group_invites').select('invited_user_id')
+                .eq('group_id', _gsetup.groupId);
+            (inv.data || []).forEach(function (i) { _gsInvited[i.invited_user_id] = true; });
+            var mem = await sb.from('group_members').select('user_id')
+                .eq('group_id', _gsetup.groupId);
+            (mem.data || []).forEach(function (m) { _gsInvited[m.user_id] = 'member'; });
+        }
+
         gsRenderPeople(window._gsPeople);
     } catch (e) {
         box.innerHTML = '<p style="text-align:center;padding:24px;color:#999;font-size:14px;">Could not load people</p>';
@@ -28975,19 +29017,31 @@ function gsRenderPeople(list) {
         return;
     }
     box.innerHTML = list.map(function (u) {
+        var already = _gsInvited && _gsInvited[u.id];
         var on = !!_gsetup.picked[u.id];
         var name = u.full_name || u.username || 'User';
         var av = u.avatar_url
             ? '<img src="' + escapeHtml(u.avatar_url) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;">'
             : '<div style="width:44px;height:44px;border-radius:50%;background:#c9c9cf;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;">' + escapeHtml(name.charAt(0).toUpperCase()) + '</div>';
-        return '<div onclick="gsTogglePerson(\'' + u.id + '\')" style="display:flex;align-items:center;gap:13px;padding:9px 18px;cursor:pointer;">' +
+
+        // Already invited, or already in the group: say so instead of offering a
+        // checkbox that would send the same invitation twice.
+        var right = already
+            ? '<span style="flex-shrink:0;font-size:15px;font-weight:600;color:#8a8a8e;">' +
+                  (already === 'member' ? 'Member' : 'Invited') + '</span>'
+            : '<div style="width:24px;height:24px;border-radius:5px;flex-shrink:0;' +
+                  (on ? 'background:#0A84FF;border:2px solid #0A84FF;display:flex;align-items:center;justify-content:center;'
+                      : 'border:2px solid #b7b7bd;') + '">' +
+                  (on ? '<i class="fa-solid fa-check" style="color:#fff;font-size:12px;"></i>' : '') +
+              '</div>';
+
+        return '<div ' + (already ? '' : 'onclick="gsTogglePerson(\'' + u.id + '\')" ') +
+            'style="display:flex;align-items:center;gap:13px;padding:9px 18px;' +
+            (already ? 'opacity:0.55;' : 'cursor:pointer;') + '">' +
             av +
             '<div style="flex:1;min-width:0;font-size:17px;color:var(--text-primary,#000);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(name) + '</div>' +
-            '<div style="width:24px;height:24px;border-radius:5px;flex-shrink:0;' +
-                (on ? 'background:#0A84FF;border:2px solid #0A84FF;display:flex;align-items:center;justify-content:center;'
-                    : 'border:2px solid #b7b7bd;') + '">' +
-                (on ? '<i class="fa-solid fa-check" style="color:#fff;font-size:12px;"></i>' : '') +
-            '</div></div>';
+            right +
+            '</div>';
     }).join('');
 }
 
@@ -29009,13 +29063,15 @@ function gsTogglePerson(id) {
 }
 
 function gsSelectAll() {
-    var list = window._gsFiltered || window._gsPeople || [];
+    var list = (window._gsFiltered || window._gsPeople || []).filter(function (u) {
+        return !(_gsInvited && _gsInvited[u.id]);   // nobody gets invited twice
+    });
     // If everything shown is already picked, the button clears them instead.
     var allOn = list.length > 0 && list.every(function (u) { return _gsetup.picked[u.id]; });
     list.forEach(function (u) {
         if (allOn) delete _gsetup.picked[u.id]; else _gsetup.picked[u.id] = true;
     });
-    gsRenderPeople(list);
+    gsRenderPeople(window._gsFiltered || window._gsPeople || []);
     _gsRefreshSendBtn();
 }
 
@@ -29205,15 +29261,38 @@ async function gsSendInvites() {
     if (!ids.length || !window.sb) return;
     var b = document.getElementById('gsSendInvite');
     if (b) { b.disabled = true; b.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+
+    // Re-inviting someone must not fail the whole batch, hence the upsert on the
+    // (group, invitee) pair. The error is surfaced rather than swallowed, since a
+    // silent failure here is exactly what made invites look like they worked.
+    var ok = false;
     try {
-        await sb.from('group_invites').insert(ids.map(function (id) {
-            return { group_id: _gsetup.groupId, invited_user_id: id, invited_by: currentUser.id };
-        }));
-        showToast('Invitations sent');
+        var res = await sb.from('group_invites').upsert(ids.map(function (id) {
+            return { group_id: _gsetup.groupId, invited_user_id: id, invited_by: currentUser.id, status: 'pending' };
+        }), { onConflict: 'group_id,invited_user_id', ignoreDuplicates: true });
+        if (res.error) throw res.error;
+        ok = true;
+        _gsInvited = _gsInvited || {};
+        ids.forEach(function (id) { _gsInvited[id] = true; });
     } catch (e) {
-        // The invites table may not exist yet; do not block setup on it.
-        showToast('Invitations could not be sent');
+        console.warn('[group] invites failed', e);
+        showToast(e && e.message ? 'Invitations failed: ' + e.message : 'Invitations could not be sent');
     }
+
+    if (ok) {
+        // Tell the people invited. The group name is looked up once for the copy.
+        var gname = (window._currentGroup && window._currentGroup.name) || 'a group';
+        try {
+            await sb.from('notifications').insert(ids.map(function (id) {
+                return {
+                    user_id: id, actor_id: currentUser.id, type: 'system',
+                    message: 'invited you to join ' + gname
+                };
+            }));
+        } catch (e) { console.warn('[group] invite notifications failed', e); }
+        showToast(ids.length === 1 ? 'Invitation sent' : ids.length + ' invitations sent');
+    }
+
     _gsetup.picked = {};
     gsOpenCover();
 }
