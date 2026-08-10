@@ -385,6 +385,26 @@ function isVerified() {
     return currentUser && currentUser.verified === true;
 }
 
+// Who you follow, cached in localStorage. Every follow button in the app reads
+// this list, but nothing ever filled it from the server: it was only written by
+// taps on this device. So on a fresh install, or for anyone you followed
+// elsewhere, every button rendered "Follow" no matter the truth. Fill it once
+// on launch and the feed, the clips and the profiles all agree.
+function tfFollowedSet() {
+    try { return JSON.parse(localStorage.getItem('tf-followed-users') || '[]'); } catch (e) { return []; }
+}
+function tfIsFollowing(userId) {
+    return !!userId && tfFollowedSet().indexOf(userId) > -1;
+}
+async function tfHydrateFollowCache() {
+    if (!window.sb || !currentUser || !currentUser.id) return;
+    try {
+        var r = await sb.from('follows').select('following_id').eq('follower_id', currentUser.id);
+        if (r.error || !r.data) return;
+        localStorage.setItem('tf-followed-users', JSON.stringify(r.data.map(function(f){ return f.following_id; })));
+    } catch (e) { /* keep whatever is cached */ }
+}
+
 function isAdultContent(text) {
     if (!text) return false;
     const lower = text.toLowerCase();
@@ -1496,18 +1516,26 @@ function launchApp() {
 
     isAdmin = currentUser && currentUser.is_admin === true;
 
+    // Both banners sit above the sticky header, so they are what the status bar
+    // overlaps. They had no safe-area padding, which is why the orange strip ran
+    // under the clock. Tapping it opens the place you go to fix it.
+    var _bannerPad = 'padding:calc(env(safe-area-inset-top, 0px) + 8px) 20px 8px;';
+
     if (isChildAccount()) {
         const banner = document.createElement('div');
         banner.className = 'child-safe-banner';
         banner.style.display = 'block';
+        banner.style.cssText += _bannerPad;
         banner.innerHTML = '<i class="fa-solid fa-shield-halved"></i> TrustFirst Kids: Safe Mode Active';
         app.insertBefore(banner, app.querySelector('.header-container'));
     }
 
     if (!isVerified()) {
         const banner = document.createElement('div');
-        banner.style.cssText = 'background:#FF9500; color:white; padding:8px 20px; font-size:12px; font-weight:700; text-align:center;';
+        banner.style.cssText = 'background:#FF9500; color:white; ' + _bannerPad +
+            ' font-size:12px; font-weight:700; text-align:center; cursor:pointer;';
         banner.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Unverified, verify to post, comment and start chats';
+        banner.onclick = function() { if (typeof openGetVerified === 'function') openGetVerified(); };
         app.insertBefore(banner, app.querySelector('.header-container'));
     }
 
@@ -1523,6 +1551,9 @@ function launchApp() {
     if (isChildAccount()) {
         startChildMonitoring();
     }
+
+    // Fill the follow cache from the server before the buttons are judged.
+    tfHydrateFollowCache();
 
     // A shared link lands here with the post or clip in the path.
     tfOpenDeepLink();
@@ -13248,7 +13279,12 @@ function tfReelPageHTML(post, avatarHtml, username, verified, likes) {
                     avatarHtml +
                     '<b style="font-weight:800;font-size:15px;cursor:pointer;" onclick="openProfile(\'' + escapeHtml(String(post.user_id || '')) + '\')">@' + escapeHtml(username) + '</b>' +
                     verified +
-                    ((currentUser && post.user_id === currentUser.id) ? '' : '<button class="follow-btn" onclick="toggleReelFollow(this)">Follow</button>') +
+                    // toggleReelFollow only flipped a class and some text, so a
+                    // follow from a clip was never saved and the button never
+                    // reflected a follow made anywhere else. Real handler, real
+                    // state.
+                    ((currentUser && post.user_id === currentUser.id) ? ''
+                        : '<button class="follow-btn' + (tfIsFollowing(post.user_id) ? ' following' : '') + '" onclick="event.stopPropagation();realToggleFollow(this,\'' + escapeHtml(String(post.user_id || '')) + '\')">' + (tfIsFollowing(post.user_id) ? 'Following' : 'Follow') + '</button>') +
                 '</div>' +
                 '<p style="margin:0 0 10px; font-size:14px; line-height:1.35; max-width:88%;">' + escapeHtml(post.text_content || '') + '</p>' +
                 '<div class="sound-ticker" onclick="openSoundHub(\'Original Sound\',\'' + escapeHtml(src) + '\')">' +
@@ -13428,6 +13464,15 @@ setTimeout(function() {
         if (vids[idx+2]) { vids[idx+2].preload = 'auto'; vids[idx+2].load(); }
         if (vids[idx+3]) { vids[idx+3].preload = 'auto'; vids[idx+3].load(); }
         if (vids[idx+4]) { vids[idx+4].preload = 'auto'; vids[idx+4].load(); }
+        // Reaching the last clip used to just stop dead with no explanation.
+        // Say so once, and only again after they scroll back up.
+        var atEnd = (scroller.scrollTop + scroller.clientHeight) >= (scroller.scrollHeight - 40);
+        if (atEnd && !scroller._endToldAt) {
+            scroller._endToldAt = Date.now();
+            showToast('No more clips for now');
+        } else if (!atEnd && scroller._endToldAt && Date.now() - scroller._endToldAt > 1200) {
+            scroller._endToldAt = 0;
+        }
     }, { passive: true });
 }, 400);
 
@@ -27434,10 +27479,16 @@ async function viewUserProfile(userId) {
     var counts = await RealData.getCounts(userId);
     var posts = await RealData.getUserPosts(userId);
 
-    var isFollowing = false;
+    var isFollowing = false, followsMe = false;
     if (session) {
         var check = await sb.from('follows').select('id').eq('follower_id', session.user.id).eq('following_id', userId).maybeSingle();
         isFollowing = !!check.data;
+        // Do they follow me? If so, and I have not followed back, the button
+        // should say so rather than a bare "Follow".
+        try {
+            var back = await sb.from('follows').select('id').eq('follower_id', userId).eq('following_id', session.user.id).maybeSingle();
+            followsMe = !!back.data;
+        } catch (e) {}
     }
 
     // Private account gate: non-followers only see a "protected" notice, not the posts.
@@ -27506,7 +27557,8 @@ async function viewUserProfile(userId) {
                     '<p style="color:#888;margin:2px 0;">@' + escapeHtml(profile.username) + '</p>' +
                 '</div>' +
                 '<button onclick="realFollowFromProfile(this,\'' + userId + '\')" style="padding:8px 20px;border-radius:20px;border:none;font-weight:700;font-size:13px;cursor:pointer;' +
-                (isFollowing ? 'background:#f0f0f0;color:#333;">' + 'Following' : 'background:#007AFF;color:white;">' + 'Follow') + '</button>' +
+                (isFollowing ? 'background:#f0f0f0;color:#333;">Following'
+                             : 'background:#007AFF;color:white;">' + (followsMe ? 'Follow back' : 'Follow')) + '</button>' +
             '</div>' +
             (profile.bio ? '<p style="margin:10px 0;font-size:14px;line-height:1.5;color:var(--text-primary,#000);">' + escapeHtml(profile.bio) + '</p>' : '') +
             channelPillHtml +
