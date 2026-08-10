@@ -4138,8 +4138,8 @@ function openChatCamera() {
                 style="color:rgba(255,255,255,0.5);font-size:13px;font-weight:600;
                 letter-spacing:0.8px;cursor:pointer;padding-bottom:2px;">VIDEO</span>
             <span id="chatCamTabPhoto" onclick="setChatCamMode('photo')"
-                style="color:#FFB300;font-size:13px;font-weight:700;letter-spacing:0.8px;
-                cursor:pointer;border-bottom:2px solid #FFB300;padding-bottom:2px;">PHOTO</span>
+                style="color:#0A84FF;font-size:13px;font-weight:700;letter-spacing:0.8px;
+                cursor:pointer;border-bottom:2px solid #0A84FF;padding-bottom:2px;">PHOTO</span>
             <span id="chatCamTabNote" onclick="setChatCamMode('note')"
                 style="color:rgba(255,255,255,0.5);font-size:13px;font-weight:600;
                 letter-spacing:0.8px;cursor:pointer;padding-bottom:2px;">VIDEO NOTE</span>
@@ -4156,18 +4156,39 @@ function openChatCamera() {
 }
 
 function _startChatCamStream() {
+    // No forced 1080x1920. A phone's front camera is not 9:16, so asking for it
+    // made the browser crop the sensor down to that shape, and object-fit:cover
+    // then cropped what was left again to fill a taller-than-16:9 screen. Two
+    // crops stacked up is why an arm's length away looked like a close-up. Take
+    // whatever frame the camera actually gives and fit the whole thing on screen.
     navigator.mediaDevices.getUserMedia({
-        video: { facingMode: window._chatCamFront ? 'user' : 'environment',
-                 width: { ideal: 1080 }, height: { ideal: 1920 } },
+        video: { facingMode: window._chatCamFront ? 'user' : 'environment' },
         audio: true
     }).then(function(stream) {
         window._chatCamStream = stream;
         var vid = document.getElementById('chatCamPreview');
         if (vid) {
             vid.srcObject = stream;
-            vid.style.transform = window._chatCamFront ? 'scaleX(-1)' : '';
+            _chatCamApplyPreviewLayout();
         }
     }).catch(function() { showToast('Camera permission needed'); });
+}
+
+// Photo and video show the full frame; a video note is round, so there the
+// video element *is* the circle rather than a full-screen frame with a ring
+// drawn over it, which is what let a face spill outside the ring.
+function _chatCamApplyPreviewLayout() {
+    var vid = document.getElementById('chatCamPreview');
+    if (!vid) return;
+    var mirror = window._chatCamFront ? ' scaleX(-1)' : '';
+    if (window._chatCamMode === 'note') {
+        vid.style.cssText = 'position:absolute;left:50%;top:42%;width:82%;aspect-ratio:1;' +
+            'border-radius:50%;object-fit:cover;background:#000;' +
+            'transform:translate(-50%,-50%)' + mirror + ';';
+    } else {
+        vid.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;' +
+            'object-fit:contain;transform:' + (mirror || 'none') + ';';
+    }
 }
 
 function closeChatCamera() {
@@ -4206,51 +4227,43 @@ function toggleChatCamFlash() {
     }
 }
 
-// Video notes are round, so everything outside the circle is blurred and dimmed
-// and only what lands inside stays sharp. The mask punches a hole in the blur
-// layer, which is what keeps the middle clear rather than blurring the whole
-// frame.
+// Video notes are round. The preview itself is clipped to the circle now (see
+// _chatCamApplyPreviewLayout), so all this adds is the ring that marks the edge
+// of it. The old blur-with-a-hole layer is gone: there is nothing outside the
+// circle left to blur.
 function _chatCamSyncNoteMask(on) {
     var page = document.getElementById('chatCameraPage');
     if (!page) return;
-    var mask = document.getElementById('chatCamNoteMask');
+    var oldMask = document.getElementById('chatCamNoteMask');
+    if (oldMask) oldMask.remove();
+    var ring = document.getElementById('chatCamNoteRing');
     if (!on) {
-        if (mask) mask.remove();
-        var oldRing = document.getElementById('chatCamNoteRing');
-        if (oldRing) oldRing.remove();   // the ring is a sibling, remove it too
+        if (ring) ring.remove();
         return;
     }
-    if (!mask) {
-        mask = document.createElement('div');
-        mask.id = 'chatCamNoteMask';
-        var hole = 'radial-gradient(circle at 50% 42%, transparent 0 41%, #000 41.6%)';
-        mask.style.cssText =
-            'position:absolute;inset:0;z-index:3;pointer-events:none;' +
-            'backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);' +
-            'background:rgba(0,0,0,0.45);' +
-            '-webkit-mask-image:' + hole + ';mask-image:' + hole + ';';
-        page.appendChild(mask);
-        // The ring itself, so the recording area is obvious.
-        var ring = document.createElement('div');
+    if (!ring) {
+        ring = document.createElement('div');
         ring.id = 'chatCamNoteRing';
         ring.style.cssText =
             'position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);' +
             'width:82%;aspect-ratio:1;border-radius:50%;' +
             'border:2px solid rgba(255,255,255,0.85);z-index:4;pointer-events:none;';
-        mask.after(ring);
+        page.appendChild(ring);
     }
 }
 
 function setChatCamMode(mode) {
     window._chatCamMode = mode;
     _chatCamSyncNoteMask(mode === 'note');
+    _chatCamApplyPreviewLayout();
     var tabs = { video: 'chatCamTabVid', photo: 'chatCamTabPhoto', note: 'chatCamTabNote' };
     Object.keys(tabs).forEach(function(m) {
         var el = document.getElementById(tabs[m]);
         if (!el) return;
         var active = m === mode;
-        el.style.color = active ? '#FFB300' : 'rgba(255,255,255,0.5)';
-        el.style.borderBottom = active ? '2px solid #FFB300' : 'none';
+        // The app's blue, not the amber this used to be.
+        el.style.color = active ? '#0A84FF' : 'rgba(255,255,255,0.5)';
+        el.style.borderBottom = active ? '2px solid #0A84FF' : 'none';
         el.style.fontWeight = active ? '700' : '600';
     });
     var inner = document.getElementById('chatCamShutterInner');
@@ -5459,7 +5472,7 @@ async function saveEditProfile() {
             var file = avatarInput.files[0];
             var compressed = typeof compressImage === 'function' ? await compressImage(file, 500, 0.85) : file;
             var fileName = currentUser.id + '/avatar_' + Date.now() + '.jpg';
-            var uploadResult = await sb.storage.from('avatars').upload(fileName, compressed, { cacheControl: '3600', upsert: true });
+            var uploadResult = await sb.storage.from('avatars').upload(fileName, compressed, { cacheControl: TF_MEDIA_CACHE_SECONDS, upsert: true });
             if (!uploadResult.error) {
                 var publicUrl = sb.storage.from('avatars').getPublicUrl(fileName).data.publicUrl;
                 await sb.from('users').update({ avatar_url: publicUrl, updated_at: new Date().toISOString() }).eq('id', currentUser.id);
@@ -14049,6 +14062,32 @@ var GeoIP = {
     }
 };
 
+// Every upload in the app lands on a path that carries a timestamp, so no object
+// is ever replaced at the same URL, yet they were all stored with a one hour
+// Cache-Control. That means a phone re-downloads the same video, avatar and
+// story every hour, and the bill for that is egress, which is the quota that
+// actually ran out. Twenty-odd call sites would each need the option, so it is
+// stamped here once for all of them. Anything that passes its own value keeps it.
+var TF_MEDIA_CACHE_SECONDS = '31536000';   // a year
+function _tfLongCacheUploads(client) {
+    if (!client || !client.storage || client.storage.__tfCachePatched) return;
+    var origFrom = client.storage.from.bind(client.storage);
+    client.storage.from = function(bucket) {
+        var api = origFrom(bucket);
+        if (api && !api.__tfCachePatched) {
+            var origUpload = api.upload.bind(api);
+            api.upload = function(path, body, opts) {
+                opts = opts || {};
+                if (!opts.cacheControl) opts.cacheControl = TF_MEDIA_CACHE_SECONDS;
+                return origUpload(path, body, opts);
+            };
+            api.__tfCachePatched = true;
+        }
+        return api;
+    };
+    client.storage.__tfCachePatched = true;
+}
+
 function initSupabase() {
     // Supabase JS is loaded via CDN in the <head>; keys come from /api/config/
     // This function is called after loadConfig() resolves
@@ -14059,6 +14098,7 @@ function initSupabase() {
     }
     try {
         window._sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        _tfLongCacheUploads(window._sb);
         window.sb = window._sb;
         sb = window._sb;
         initRealtimeSubscriptions();
@@ -18892,14 +18932,17 @@ function openClipCamera(preSelectedAudio) {
 
 async function startCamera() {
     try {
+        // Same as the chat camera: asking for 9:16 makes the browser crop the
+        // sensor to that shape, which narrows the field of view and reads as
+        // zoom. The preview is object-fit:contain, so the native frame fits.
         cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: isFrontCamera ? 'user' : 'environment', width: { ideal: 1080 }, height: { ideal: 1920 } },
+            video: { facingMode: isFrontCamera ? 'user' : 'environment' },
             audio: true
         });
         const preview = document.getElementById('cameraPreview');
         if (preview) {
             preview.srcObject = cameraStream;
-            if (isFrontCamera) preview.style.transform = 'scaleX(-1)';
+            preview.style.transform = isFrontCamera ? 'scaleX(-1)' : 'none';
         }
     } catch (err) {
         showToast('Camera permission needed');
@@ -20882,7 +20925,7 @@ function changeProfilePicture() {
                 var uploadResult = await sb.storage
                     .from('avatars')
                     .upload(fileName, compressed, {
-                        cacheControl: '3600',
+                        cacheControl: TF_MEDIA_CACHE_SECONDS,
                         upsert: true
                     });
 
@@ -28535,15 +28578,58 @@ function gsOpenCoverFor(groupId) {
     gsOpenCover();
 }
 
-async function gsEditDescription(groupId) {
+// A description is a paragraph, and a browser prompt() is a single line in a
+// system dialog that does not belong to the app, cannot be styled, and on iOS
+// standalone PWAs sometimes does not appear at all. This is a real page.
+function gsEditDescription(groupId) {
     var current = (window._currentGroup && window._currentGroup.description) || '';
-    var text = prompt('Tell people what they can expect in this group:', current);
-    if (text === null) return;
+    var existing = document.getElementById('gsDescPage');
+    if (existing) existing.remove();
+    var p = _gsPage('gsDescPage',
+        '<div style="display:flex;align-items:center;padding:14px 18px;flex-shrink:0;">' +
+            '<span onclick="document.getElementById(\'gsDescPage\').remove();showNavBar&&showNavBar();" ' +
+                'style="width:70px;color:#0A84FF;font-size:17px;cursor:pointer;">Cancel</span>' +
+            '<b style="flex:1;text-align:center;font-size:19px;color:var(--text-primary,#000);">Description</b>' +
+            '<span id="gsDescSave" onclick="gsSaveDescription(\'' + groupId + '\')" ' +
+                'style="width:70px;text-align:right;color:#0A84FF;font-size:17px;font-weight:600;cursor:pointer;">Save</span>' +
+        '</div>' +
+        '<div style="flex:1;overflow-y:auto;padding:8px 20px 20px;">' +
+            '<div style="font-size:17px;color:#6b6b6b;line-height:1.4;margin-bottom:14px;">' +
+                'Tell people what they can expect in this group.</div>' +
+            '<textarea id="gsDescInput" maxlength="500" rows="7" placeholder="What is this group about?" ' +
+                'oninput="var c=document.getElementById(\'gsDescCount\');if(c)c.textContent=this.value.length+\'/500\';" ' +
+                'style="width:100%;padding:15px;border-radius:14px;border:1px solid var(--border-color,#ddd);' +
+                'background:var(--input-bg,#f7f7f7);font-size:17px;line-height:1.45;color:var(--text-primary,#000);' +
+                'font-family:inherit;outline:none;resize:none;box-sizing:border-box;"></textarea>' +
+            '<div id="gsDescCount" style="text-align:right;font-size:13px;color:#8a8a8e;margin-top:8px;">0/500</div>' +
+        '</div>');
+    var ta = p.querySelector('#gsDescInput');
+    if (ta) {
+        ta.value = current;
+        document.getElementById('gsDescCount').textContent = current.length + '/500';
+        setTimeout(function () { ta.focus(); }, 120);
+    }
+}
+
+async function gsSaveDescription(groupId) {
+    var ta = document.getElementById('gsDescInput');
+    if (!ta) return;
+    var text = ta.value.trim();
+    var btn = document.getElementById('gsDescSave');
+    if (btn) { btn.textContent = 'Saving…'; btn.style.pointerEvents = 'none'; }
     try {
-        await sb.from('groups').update({ description: text.trim() || null }).eq('id', groupId);
-        showToast('Description saved');
+        var res = await sb.from('groups').update({ description: text || null }).eq('id', groupId);
+        if (res.error) throw res.error;
+        if (window._currentGroup) window._currentGroup.description = text || null;
+        var page = document.getElementById('gsDescPage');
+        if (page) page.remove();
+        showNavBar && showNavBar();
+        showToast(text ? 'Description saved' : 'Description cleared');
         openGroup(groupId);
-    } catch (e) { showToast('Could not save the description'); }
+    } catch (e) {
+        if (btn) { btn.textContent = 'Save'; btn.style.pointerEvents = ''; }
+        showToast(e && e.message ? 'Could not save: ' + e.message : 'Could not save the description');
+    }
 }
 
 function switchGroupTab(tab) {
@@ -30630,7 +30716,7 @@ function chooseCoverPhoto() {
             try {
                 var compressed = typeof compressImage === 'function' ? await compressImage(file, 1280, 0.85) : file;
                 var path = currentUser.id + '/cover_' + Date.now() + '.jpg';
-                var up = await sb.storage.from('avatars').upload(path, compressed, { cacheControl: '3600', upsert: true });
+                var up = await sb.storage.from('avatars').upload(path, compressed, { cacheControl: TF_MEDIA_CACHE_SECONDS, upsert: true });
                 if (!up.error) {
                     var url = sb.storage.from('avatars').getPublicUrl(path).data.publicUrl;
                     var r = await sb.from('users').update({ cover_url: url, updated_at: new Date().toISOString() }).eq('id', currentUser.id);
@@ -36209,12 +36295,19 @@ function openCircularVideoRecorder() {
 
 async function _cvrStartStream() {
     if (_cvrStream) _cvrStream.getTracks().forEach(function(t){ t.stop(); });
+    // A phone camera has no square mode, so demanding 480x480 made it crop the
+    // middle out of the sensor before the circle even got to crop it. The circle
+    // already does that job with object-fit:cover, so take the native frame.
     _cvrStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: _cvrFront ? 'user' : 'environment', width: 480, height: 480 },
+        video: { facingMode: _cvrFront ? 'user' : 'environment' },
         audio: true
     });
     var vid = document.getElementById('cvrVideo');
-    if (vid) vid.srcObject = _cvrStream;
+    if (vid) {
+        vid.srcObject = _cvrStream;
+        // Mirror the selfie view only; the rear camera stayed flipped before.
+        vid.style.transform = _cvrFront ? 'scaleX(-1)' : 'none';
+    }
     // auto-start recording
     _cvrChunks = []; _cvrSecs = 0;
     _cvrRecorder = new MediaRecorder(_cvrStream, { mimeType: 'video/webm' });
@@ -44934,21 +45027,60 @@ window.openTagUserSearch = function() {
     (document.getElementById('tagPeoplePage')||document.getElementById('app')||document.body).appendChild(inp);
     setTimeout(function(){ var i=inp.querySelector('input');if(i)i.focus(); },100);
 };
-window.renderTagSearchResults = function(q) {
+// One user lookup for both the tag picker and the collaborator picker. Both used
+// to filter a hardcoded list of made-up names (Alex M., Jordan K., ...), so they
+// could only ever find people who do not exist.
+async function _clipUserSearch(q) {
+    if (!window.sb) return [];
+    var safe = String(q || '').replace(/[,()\\]/g, ' ').trim();
+    if (!safe) return [];
+    try {
+        var r = await sb.from('users')
+            .select('id,username,display_name,full_name,avatar_url,verified')
+            .or('display_name.ilike.%'+safe+'%,full_name.ilike.%'+safe+'%,username.ilike.%'+safe+'%')
+            .limit(15);
+        if (r.error) { console.warn('[clip] user search failed', r.error); return []; }
+        return (r.data || []).filter(function(u) {
+            return !(currentUser && u.id === currentUser.id);   // you are not a collaborator on your own clip
+        });
+    } catch (e) { return []; }
+}
+
+function _clipUserRow(u, actionHTML, onclick) {
+    var label = u.display_name || u.full_name || u.username || 'User';
+    var av = u.avatar_url
+        ? '<img src="'+escapeHtml(u.avatar_url)+'" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;">'
+        : '<div style="width:40px;height:40px;border-radius:50%;background:#5856D6;display:flex;align-items:center;justify-content:center;color:white;font-size:16px;font-weight:700;flex-shrink:0;">'+escapeHtml(label.charAt(0).toUpperCase())+'</div>';
+    return '<div ' + (onclick ? 'onclick="'+onclick+'" ' : '') +
+        'style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:0.5px solid var(--border-color,#f0f0f0);' +
+        (onclick ? 'cursor:pointer;' : '') + '">' + av +
+        '<div style="flex:1;min-width:0;">' +
+            '<div style="font-size:15px;font-weight:600;color:var(--text-primary,#000);">' + escapeHtml(label) +
+                (u.verified ? ' <i class="fa-solid fa-circle-check verify-blue" style="font-size:10px;"></i>' : '') + '</div>' +
+            '<div style="font-size:13px;color:#888;">@' + escapeHtml(u.username || '') + '</div>' +
+        '</div>' + (actionHTML || '') + '</div>';
+}
+
+// Each keystroke gets a token; a slow response for an older token is dropped so
+// results cannot arrive out of order.
+var _clipSearchToken = 0;
+
+window.renderTagSearchResults = async function(q) {
     var container = document.getElementById('tagSearchResults');
     if (!container) return;
-    if (!q.trim()) { container.innerHTML=''; return; }
-    var names = ['Alex M.','Jordan K.','Priya S.','Tyler B.','Nomsa D.','Kai L.','Sofia R.','Marcus T.'];
-    var results = names.filter(function(n){ return n.toLowerCase().includes(q.toLowerCase()); });
-    container.innerHTML = results.map(function(n){
-        return '<div onclick="tagUser(\''+n+'\')" style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:0.5px solid var(--border-color,#f0f0f0);cursor:pointer;">' +
-            '<div style="width:40px;height:40px;border-radius:50%;background:#007AFF;display:flex;align-items:center;justify-content:center;color:white;font-size:16px;font-weight:700;">'+escapeHtml((n||'U').charAt(0).toUpperCase())+'</div>' +
-            '<div><div style="font-size:15px;font-weight:600;color:var(--text-primary,#000);">'+n+'</div><div style="font-size:13px;color:#888;">@'+n.toLowerCase().replace(/[. ]/g,'_')+'</div></div>' +
-            '</div>';
+    if (!String(q || '').trim()) { container.innerHTML=''; return; }
+    var mine = ++_clipSearchToken;
+    container.innerHTML = '<div style="padding:24px;text-align:center;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;"></i></div>';
+    var users = await _clipUserSearch(q);
+    if (mine !== _clipSearchToken) return;
+    container = document.getElementById('tagSearchResults');
+    if (!container) return;
+    container.innerHTML = users.map(function(u) {
+        return _clipUserRow(u, '', 'tagUser(\''+escapeHtml(u.username || '')+'\')');
     }).join('') || '<div style="padding:30px;text-align:center;color:#888;font-size:14px;">No users found</div>';
 };
-window.tagUser = function(name) {
-    showToast('@'+name+' tagged ✅');
+window.tagUser = function(username) {
+    showToast('@'+username+' tagged');
     var inp = document.getElementById('tagPeopleSearch');
     if (inp) inp.remove();
     triggerHaptic(12);
@@ -44973,30 +45105,49 @@ function openInviteCollabSearch() {
                 '<input autofocus id="collabSearchInput" placeholder="Search for a person" style="flex:1;background:none;border:none;outline:none;font-size:15px;color:var(--text-primary,#000);font-family:inherit;" oninput="renderCollabSearchResults(this.value)">' +
             '</div>' +
         '</div>' +
-        '<div style="padding:12px 16px 4px;"><p style="font-size:12px;color:#888;line-height:1.5;">When they accept, this video will post on both accounts simultaneously.</p></div>' +
+        // Says what actually happens. Co-posting on accept is not built, and
+        // promising it here was the reason the invite felt broken.
+        '<div style="padding:12px 16px 4px;"><p style="font-size:12px;color:#888;line-height:1.5;">' +
+            'They will be notified that you invited them to collaborate on this clip.</p></div>' +
         '<div id="collabSearchResults" style="flex:1;overflow-y:auto;padding:0 16px;"></div>';
     (document.getElementById('tagPeoplePage') || document.getElementById('app') || document.body).appendChild(page);
     setTimeout(function(){ var i=page.querySelector('#collabSearchInput');if(i)i.focus(); },100);
 }
-window.renderCollabSearchResults = function(q) {
+window.renderCollabSearchResults = async function(q) {
     var container = document.getElementById('collabSearchResults');
     if (!container) return;
-    if (!q.trim()) { container.innerHTML = ''; return; }
-    var names = ['Alex M.','Jordan K.','Priya S.','Tyler B.','Nomsa D.','Kai L.','Sofia R.','Marcus T.'];
-    var results = names.filter(function(n){ return n.toLowerCase().includes(q.toLowerCase()); });
-    container.innerHTML = results.map(function(n){
-        var handle = '@'+n.toLowerCase().replace(/[. ]/g,'_');
-        return '<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:0.5px solid var(--border-color,#f0f0f0);">' +
-            '<div style="width:40px;height:40px;border-radius:50%;background:#5856D6;display:flex;align-items:center;justify-content:center;color:white;font-size:16px;font-weight:700;">'+escapeHtml((n||'U').charAt(0).toUpperCase())+'</div>' +
-            '<div style="flex:1;"><div style="font-size:15px;font-weight:600;color:var(--text-primary,#000);">'+escapeHtml(n)+'</div><div style="font-size:13px;color:#888;">'+escapeHtml(handle)+'</div></div>' +
-            '<button onclick="sendCollabInvite(\''+escapeHtml(n)+'\')" style="padding:8px 16px;border-radius:20px;background:#007AFF;border:none;color:white;font-size:13px;font-weight:700;cursor:pointer;">Invite</button>' +
-        '</div>';
+    if (!String(q || '').trim()) { container.innerHTML = ''; return; }
+    var mine = ++_clipSearchToken;
+    container.innerHTML = '<div style="padding:24px;text-align:center;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;"></i></div>';
+    var users = await _clipUserSearch(q);
+    if (mine !== _clipSearchToken) return;
+    container = document.getElementById('collabSearchResults');
+    if (!container) return;
+    container.innerHTML = users.map(function(u) {
+        var btn = '<button onclick="sendCollabInvite(\''+escapeHtml(u.id)+'\',\''+escapeHtml(u.username || '')+'\')" ' +
+            'style="padding:8px 16px;border-radius:20px;background:#007AFF;border:none;color:white;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;">Invite</button>';
+        return _clipUserRow(u, btn, null);
     }).join('') || '<div style="padding:30px;text-align:center;color:#888;font-size:14px;">No users found</div>';
 };
-window.sendCollabInvite = function(name) {
-    showToast('@'+name.toLowerCase().replace(/[. ]/g,'_')+' invited, they will accept or decline');
+window.sendCollabInvite = async function(userId, username) {
     triggerHaptic(15);
-    document.getElementById('inviteCollabPage').remove();
+    // Remembered so the publish step knows who was invited on this clip.
+    window._clipCollabInvites = window._clipCollabInvites || [];
+    if (window._clipCollabInvites.indexOf(userId) < 0) window._clipCollabInvites.push(userId);
+    var page = document.getElementById('inviteCollabPage');
+    if (page) page.remove();
+    if (!window.sb || !currentUser) { showToast('Sign in to invite'); return; }
+    try {
+        var res = await sb.from('notifications').insert({
+            user_id: userId, actor_id: currentUser.id, type: 'system',
+            message: 'invited you to collaborate on a clip'
+        });
+        if (res.error) throw res.error;
+        showToast('@' + username + ' invited');
+    } catch (e) {
+        console.warn('[clip] collab invite failed', e);
+        showToast('Could not send that invite');
+    }
 };
 
 /* --- LOCATION PICKER (real GPS + nearby places) --- */
@@ -46286,7 +46437,7 @@ async function _tfUploadComposerItem(m) {
     // suffix as well — otherwise the second upload collides with the first.
     var path = currentUser.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
     try {
-        var up = await client.storage.from(bucket).upload(path, m.file, { cacheControl: '3600', upsert: false });
+        var up = await client.storage.from(bucket).upload(path, m.file, { cacheControl: TF_MEDIA_CACHE_SECONDS, upsert: false });
         if (up.error) throw up.error;
         var pub = client.storage.from(bucket).getPublicUrl(path);
         m.url = pub.data && pub.data.publicUrl;
@@ -46908,7 +47059,7 @@ async function sendMediaInChat(file, caption) {
         var progEl = document.getElementById('upload-prog-' + msgId);
 
         // Upload with XHR for progress
-        var { data, error } = await window.sb.storage.from(bucket).upload(path, file, { cacheControl: '3600', upsert: false });
+        var { data, error } = await window.sb.storage.from(bucket).upload(path, file, { cacheControl: TF_MEDIA_CACHE_SECONDS, upsert: false });
         if (error) throw error;
 
         var urlResult = window.sb.storage.from(bucket).getPublicUrl(path);
