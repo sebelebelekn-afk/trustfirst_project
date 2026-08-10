@@ -779,8 +779,11 @@ try {
         verified: false,
         badge_tier: null,
         trust_score: 20,
-        parent_id: finalAccountType === 'child' ? (parentLink.parent_id || null) : null,
-        parent_link_status: finalAccountType === 'child' ? 'pending' : null
+        // No parent_link_status here: users has no such column, so sending it
+        // made PostgREST reject the whole insert and signup could not finish.
+        // Whether a parent has approved lives in parent_link_requests.status,
+        // which is what the waiting screen actually reads.
+        parent_id: finalAccountType === 'child' ? (parentLink.parent_id || null) : null
     });
 } catch(profileErr) {
     console.error('[Profile Create Error]', profileErr);
@@ -21874,8 +21877,13 @@ async function _signupFinish(skip) {
             account_type: isKid ? 'child' : 'personal', is_kid: isKid,
             verified: false, badge_tier: null, trust_score: 20,
             bio: bio || '', avatar_url: avatarUrl,
-            parent_id: isKid ? (s.parentId || null) : null,
-            parent_link_status: isKid ? 'pending' : null
+            // The wizard asks for a date of birth two steps earlier and then
+            // dropped it on the floor. It is what the age gate reads.
+            birth_date: s.birthDate || null,
+            // See the note on the other createUserProfile call: users has no
+            // parent_link_status column, and parent_link_requests.status is the
+            // value the waiting screen checks.
+            parent_id: isKid ? (s.parentId || null) : null
         });
         currentUser = { id: uid, name: fullName, email: s.email, handle: '@' + s.username, username: s.username, type: isKid ? 'child' : 'personal', tier: null, verified: false, avatar_url: avatarUrl, bio: bio };
         secureSave('current_user', currentUser);
