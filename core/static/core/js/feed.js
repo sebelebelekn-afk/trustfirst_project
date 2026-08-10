@@ -385,6 +385,54 @@ function isVerified() {
     return currentUser && currentUser.verified === true;
 }
 
+// ==========================================================================
+// PER-ACCOUNT CACHE ISOLATION
+// Almost everything this app caches lives under a plain device-wide key:
+// messages, the feed, the inbox, stories, the cover photo, drafts. None of it
+// was scoped to a user, so signing in as somebody else on the same device
+// painted the previous account's data first and only replaced it once the real
+// fetch landed. That is what "my messages flash in their account" was, and why a
+// brand new account showed the previous owner's cover photo.
+//
+// Rather than namespace 118 keys and hope none are missed, anything that is not
+// explicitly device-level is wiped the moment the signed-in account changes.
+// An unknown key is treated as personal, which is the safe default here.
+// ==========================================================================
+var TF_DEVICE_KEYS = [
+    'tf_cache_owner',        // this bookkeeping itself
+    'tf_saved_accounts',     // the account switcher, deliberately multi-account
+    'tf_show_login',
+    'trustfirst-theme', 'tf-lang', 'tf-external-browser', 'tf_data_saver',
+    'tf-caption-pref', 'tf_auto_translate', 'trustfirst-reels-tutorial',
+    'tf_voice_translation_seen'
+];
+
+function tfWipeAccountScopedCache() {
+    var doomed = [];
+    try {
+        for (var i = 0; i < localStorage.length; i++) {
+            var k = localStorage.key(i);
+            if (k && TF_DEVICE_KEYS.indexOf(k) === -1) doomed.push(k);
+        }
+        doomed.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {} });
+    } catch (e) {}
+    try { sessionStorage.clear(); } catch (e) {}
+    console.debug('[Cache] cleared ' + doomed.length + ' keys from the previous account');
+    return doomed.length;
+}
+
+// Call as soon as the signed-in id is known, and before anything paints from a
+// cache. Returns true when a different account's data was cleared.
+function tfClaimCacheOwner(userId) {
+    if (!userId) return false;
+    var prev = null;
+    try { prev = localStorage.getItem('tf_cache_owner'); } catch (e) {}
+    var switched = !!prev && prev !== userId;
+    if (switched) tfWipeAccountScopedCache();
+    try { localStorage.setItem('tf_cache_owner', userId); } catch (e) {}
+    return switched;
+}
+
 // Who you follow, cached in localStorage. Every follow button in the app reads
 // this list, but nothing ever filled it from the server: it was only written by
 // taps on this device. So on a fresh install, or for anyone you followed
@@ -855,6 +903,9 @@ try {
             is_kid: finalAccountType === 'child',
             parent_id: finalAccountType === 'child' ? (parentLink.parent_id || null) : null
         };
+        // A brand new account must not inherit the previous one's cached
+        // messages, feed, stories or cover photo from this device.
+        tfClaimCacheOwner(authData.user.id);
         secureSave('current_user', currentUser);
         try { if (typeof _saveAccountToSwitcher === 'function') _saveAccountToSwitcher(currentUser); } catch (e) {}
 
@@ -1074,6 +1125,10 @@ async function restoreSession() {
         const session = await DB.getSession();
         if (!session) return false;
 
+        // First thing, before a single cached byte is read or painted: if this
+        // device last held a different account, drop everything it cached.
+        tfClaimCacheOwner(session.user.id);
+
         let profile;
         try {
             profile = await DB.getUserProfile(session.user.id);
@@ -1161,9 +1216,10 @@ async function logOut() {
             }
         } catch(e) {}
         try { await DB.signOut(); } catch(e) {}
-        localStorage.removeItem('tf_current_user');
-        localStorage.removeItem('tf_failed_logins');
-        localStorage.removeItem('tf_lockout_until');
+        // Logging out used to leave the messages, feed, inbox, stories and cover
+        // photo behind, so the next person to sign in on this device saw them
+        // flash up before their own data loaded. Leave nothing personal behind.
+        tfWipeAccountScopedCache();
         localStorage.setItem('tf_show_login', '1'); // land on the login page after reload
         currentUser = null;
         location.reload();
@@ -1521,6 +1577,11 @@ function launchApp() {
     // under the clock. Tapping it opens the place you go to fix it.
     var _bannerPad = 'padding:calc(env(safe-area-inset-top, 0px) + 8px) 20px 8px;';
 
+    // launchApp runs again on an account switch, and each run used to append
+    // another strip, which is why two orange bars stacked up. Clear any previous
+    // pair first so there is only ever one of each.
+    app.querySelectorAll('.child-safe-banner, .tf-unverified-banner').forEach(function (b) { b.remove(); });
+
     if (isChildAccount()) {
         const banner = document.createElement('div');
         banner.className = 'child-safe-banner';
@@ -1532,6 +1593,7 @@ function launchApp() {
 
     if (!isVerified()) {
         const banner = document.createElement('div');
+        banner.className = 'tf-unverified-banner';
         banner.style.cssText = 'background:#FF9500; color:white; ' + _bannerPad +
             ' font-size:12px; font-weight:700; text-align:center; cursor:pointer;';
         banner.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Unverified, verify to post, comment and start chats';
@@ -5454,9 +5516,16 @@ function renderProfileMeta() {
             } else { row.style.display = 'none'; row.innerHTML = ''; }
         }
     }
-    // Apply the saved cover photo (from cache, then the DB below).
+    // Apply the saved cover photo (from cache, then the DB below). The cached
+    // fallback is only ever read when the cache belongs to this account, or a
+    // new signer-in on this device inherits the last owner's cover.
     if (typeof _applyCoverPhoto === 'function') {
-        var _cachedCover = currentUser.cover_url; try { if (!_cachedCover) _cachedCover = localStorage.getItem('trustfirst-cover'); } catch (e) {}
+        var _cachedCover = currentUser.cover_url;
+        try {
+            if (!_cachedCover && localStorage.getItem('tf_cache_owner') === currentUser.id) {
+                _cachedCover = localStorage.getItem('trustfirst-cover');
+            }
+        } catch (e) {}
         if (_cachedCover) _applyCoverPhoto(_cachedCover);
     }
     apply();
@@ -5527,8 +5596,14 @@ function loadMyProfile() {
         var _ph = document.getElementById('profile-avatar-placeholder');
         var _url = currentUser.avatar_url;
         if (_url) {
-            // Reveal the photo and hide the silhouette placeholder.
-            avatarEl.src = _url;
+            // Reveal the photo and hide the silhouette placeholder. Only touch
+            // src when the URL actually changed: reassigning the same one makes
+            // the browser drop the decoded image and fetch it again, which is
+            // the white flash and reload on every profile open.
+            if (avatarEl.dataset.src !== _url) {
+                avatarEl.dataset.src = _url;
+                avatarEl.src = _url;
+            }
             avatarEl.style.display = 'block';
             if (_ph) _ph.style.display = 'none';
             avatarEl.onerror = function() { this.style.display = 'none'; if (_ph) _ph.style.display = 'flex'; };
@@ -21931,6 +22006,8 @@ async function _signupFinish(skip) {
             parent_id: isKid ? (s.parentId || null) : null
         });
         currentUser = { id: uid, name: fullName, email: s.email, handle: '@' + s.username, username: s.username, type: isKid ? 'child' : 'personal', tier: null, verified: false, avatar_url: avatarUrl, bio: bio };
+        // Same here: this device may still hold the previous account's caches.
+        tfClaimCacheOwner(uid);
         secureSave('current_user', currentUser);
         if (isKid) {
             // Send the parent a link request; the kid can't enter until they approve.
@@ -30743,8 +30820,13 @@ function deleteCoverPhoto() {
     showToast('Cover photo removed');
 }
 
-// Restore saved cover photo on profile open
+// Restore saved cover photo on profile open. Only ever the signed-in account's
+// own: this ran at load with whatever the device had cached, which is how a new
+// account ended up wearing the previous owner's cover photo.
 (function restoreCoverPhoto() {
+    var owner = null;
+    try { owner = localStorage.getItem('tf_cache_owner'); } catch (e) {}
+    if (!owner || !currentUser || currentUser.id !== owner) return;
     var saved = localStorage.getItem('trustfirst-cover');
     if (saved) {
         var cover = document.getElementById('profile-cover-img');
