@@ -43641,9 +43641,12 @@ function renderFsList(filter) {
     list.innerHTML = items.map(function(u, i) {
         var btnCls = u.state === 'Following' ? 'fs-follow-btn following-state' : 'fs-follow-btn';
         var delay = (i * 0.05) + 's';
+        // The avatar and the name open the profile. Only the Follow button was
+        // ever clickable here, so tapping a person did nothing at all.
+        var open = 'onclick="viewUserProfile(\'' + escapeHtml(String(u.id)) + '\')" style="cursor:pointer;"';
         return '<div class="fs-user-row" style="animation-delay:'+delay+';">' +
-            '<img class="fs-avatar" src="'+u.avatar+'" onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=888&color=fff&size=80\'">' +
-            '<div class="fs-user-info">' +
+            '<img class="fs-avatar" ' + open + ' src="'+u.avatar+'" onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=888&color=fff&size=80\'">' +
+            '<div class="fs-user-info" ' + open + '>' +
                 '<div class="fs-name">'+u.name+(u.verified ? ' <i class="fa-solid fa-circle-check" style="color:#007AFF;font-size:13px;"></i>' : '')+'</div>' +
                 '<div class="fs-handle"><span>@'+u.handle+'</span>'+(u.followsYou ? '<span class="fs-follows-badge">Follows you</span>' : '')+'</div>' +
                 (u.bio ? '<div class="fs-bio">'+u.bio+'</div>' : '') +
@@ -43850,9 +43853,11 @@ function _dsBuildPeopleRows(container, people) {
         var handle = escapeHtml(u.username || 'user');
         var avatar = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=random&color=fff&size=80');
         var bio = u.bio ? '<div style="font-size:13px;color:var(--text-secondary,#888);margin-top:2px;line-height:1.4;">' + escapeHtml(u.bio.substring(0,80)) + '</div>' : '';
+        // Avatar and name open the profile; only Follow used to do anything.
+        var open = 'onclick="viewUserProfile(\'' + escapeHtml(String(u.id)) + '\')"';
         return '<div class="ds-user-row" style="animation-delay:' + (i*0.06) + 's">' +
-            '<img src="' + avatar + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=random&color=fff&size=80\'">' +
-            '<div style="flex:1;min-width:0;">' +
+            '<img ' + open + ' src="' + avatar + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;flex-shrink:0;cursor:pointer;" onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=random&color=fff&size=80\'">' +
+            '<div ' + open + ' style="flex:1;min-width:0;cursor:pointer;">' +
                 '<div style="font-size:15px;font-weight:700;color:var(--text-primary,#000);">@' + handle + '</div>' +
                 '<div style="font-size:13px;color:var(--text-secondary,#888);">' + name + '</div>' +
                 bio +
@@ -43905,9 +43910,11 @@ function _dsRenderSuggested() {
                 var handle = escapeHtml(u.username || 'user');
                 var avatar = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=random&color=fff&size=80');
                 var bio = u.bio ? '<div style="font-size:13px;color:var(--text-secondary,#888);margin-top:3px;line-height:1.4;">' + escapeHtml(u.bio.substring(0,80)) + '</div>' : '';
+                // Avatar and name open the profile; only Follow used to do anything.
+                var open = 'onclick="viewUserProfile(\'' + escapeHtml(String(u.id)) + '\')"';
                 return '<div class="ds-user-row" style="animation-delay:' + (i*0.05) + 's">' +
-                    '<img src="' + avatar + '" style="width:48px;height:48px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=random&color=fff&size=80\'">' +
-                    '<div style="flex:1;min-width:0;">' +
+                    '<img ' + open + ' src="' + avatar + '" style="width:48px;height:48px;border-radius:50%;object-fit:cover;flex-shrink:0;cursor:pointer;" onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=random&color=fff&size=80\'">' +
+                    '<div ' + open + ' style="flex:1;min-width:0;cursor:pointer;">' +
                         '<div style="font-size:15px;font-weight:700;color:var(--text-primary,#000);">@' + handle + '</div>' +
                         '<div style="font-size:13px;color:var(--text-secondary,#888);">' + name + '</div>' +
                         bio +
