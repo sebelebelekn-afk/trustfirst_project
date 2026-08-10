@@ -858,32 +858,41 @@ try {
     return showAuthError('Account created but profile setup failed: ' + profileErr.message, 'step-register');
 }
 
-        // Register this device as trusted
-        const geo = await GeoIP.lookup();
-        await DB.registerDevice({
-            user_id: authData.user.id,
-            ...deviceInfo,
-            ip_address: geo.ip,
-            location_city: geo.city,
-            location_country: geo.country,
-            is_trusted: true,
-            is_current: true
-        });
-
-        // Log the login activity
-        await DB.logLoginActivity({
-            user_id: authData.user.id,
-            ip_address: geo.ip,
-            location_city: geo.city,
-            location_country: geo.country,
-            user_agent: navigator.userAgent,
-            login_method: 'password',
-            status: 'success'
-        });
-
-        // Generate and publish E2E encryption keys
-        await E2E.init();
-        await E2E.publishKeyBundle(authData.user.id);
+        // Everything below this line is bookkeeping: the device record, the login
+        // log, the geo lookup behind both, and the E2E key bundle. None of it
+        // decides whether the account exists, yet each was awaited in turn, so a
+        // new user sat on a spinner through five more round trips (one of them to
+        // a third-party IP service) after their account was already created.
+        // Fired off in the background instead, and failures are logged rather
+        // than blocking a signup that has otherwise succeeded.
+        (async function _signupBookkeeping(userId) {
+            try {
+                const geo = await GeoIP.lookup();
+                await Promise.all([
+                    DB.registerDevice({
+                        user_id: userId,
+                        ...deviceInfo,
+                        ip_address: geo.ip,
+                        location_city: geo.city,
+                        location_country: geo.country,
+                        is_trusted: true,
+                        is_current: true
+                    }),
+                    DB.logLoginActivity({
+                        user_id: userId,
+                        ip_address: geo.ip,
+                        location_city: geo.city,
+                        location_country: geo.country,
+                        user_agent: navigator.userAgent,
+                        login_method: 'password',
+                        status: 'success'
+                    })
+                ]);
+            } catch (e) { console.warn('[Registration] device/login log skipped:', e && e.message); }
+            // Keys are needed for encrypted chat, not for the first screen.
+            try { await E2E.init(); await E2E.publishKeyBundle(userId); }
+            catch (e) { console.warn('[Registration] E2E key publish skipped:', e && e.message); }
+        })(authData.user.id);
 
         // Set local state
         var phoneVal = (document.getElementById('reg-phone') || {}).value || '';
@@ -909,9 +918,10 @@ try {
         secureSave('current_user', currentUser);
         try { if (typeof _saveAccountToSwitcher === 'function') _saveAccountToSwitcher(currentUser); } catch (e) {}
 
-        // Launch
+        // Launch. 600ms of fade on top of the round trips was more waiting on top
+        // of waiting; the fade itself still runs, we just stop blocking on it.
         document.getElementById('splash').classList.add('splash-fade-out');
-        setTimeout(() => launchApp(), 600);
+        setTimeout(() => launchApp(), 250);
 
     } catch (error) {
         console.error('[Registration]', error);
@@ -1032,37 +1042,41 @@ localStorage.setItem('tf_burst', JSON.stringify(burstAttempts));
             );
         }
 
-        // Register/update device
-        const deviceInfo = await DeviceFingerprint.getDeviceInfo();
-        const geo = await GeoIP.lookup();
-
-        await DB.registerDevice({
-            user_id: authData.user.id,
-            ...deviceInfo,
-            ip_address: geo.ip,
-            location_city: geo.city,
-            location_country: geo.country,
-            is_trusted: true,
-            is_current: true
-        });
-
-        // Log login activity
-        await DB.logLoginActivity({
-            user_id: authData.user.id,
-            ip_address: geo.ip,
-            location_city: geo.city,
-            location_country: geo.country,
-            user_agent: navigator.userAgent,
-            login_method: 'password',
-            status: 'success'
-        });
-
-        // Make sure E2E keys exist
-        await E2E.init();
-        const existingKeys = await DB.getKeyBundle(authData.user.id);
-        if (!existingKeys) {
-            await E2E.publishKeyBundle(authData.user.id);
-        }
+        // The device record, the login log and the E2E key check are the same
+        // bookkeeping sign-up does, and just as with sign-up none of it decides
+        // whether the login succeeded. Off the critical path, so the app opens as
+        // soon as the profile is in hand.
+        (async function _loginBookkeeping(userId) {
+            try {
+                const deviceInfo = await DeviceFingerprint.getDeviceInfo();
+                const geo = await GeoIP.lookup();
+                await Promise.all([
+                    DB.registerDevice({
+                        user_id: userId,
+                        ...deviceInfo,
+                        ip_address: geo.ip,
+                        location_city: geo.city,
+                        location_country: geo.country,
+                        is_trusted: true,
+                        is_current: true
+                    }),
+                    DB.logLoginActivity({
+                        user_id: userId,
+                        ip_address: geo.ip,
+                        location_city: geo.city,
+                        location_country: geo.country,
+                        user_agent: navigator.userAgent,
+                        login_method: 'password',
+                        status: 'success'
+                    })
+                ]);
+            } catch (e) { console.warn('[Login] device/activity log skipped:', e && e.message); }
+            try {
+                await E2E.init();
+                const existingKeys = await DB.getKeyBundle(userId);
+                if (!existingKeys) await E2E.publishKeyBundle(userId);
+            } catch (e) { console.warn('[Login] E2E check skipped:', e && e.message); }
+        })(authData.user.id);
 
         trackLogin(true, false);
         // Set local state
@@ -1084,9 +1098,10 @@ localStorage.setItem('tf_burst', JSON.stringify(burstAttempts));
         secureSave('current_user', currentUser);
         try { if (typeof _saveAccountToSwitcher === 'function') _saveAccountToSwitcher(currentUser); } catch (e) {}
 
-        // Launch
+        // Launch. 600ms of fade on top of the round trips was more waiting on top
+        // of waiting; the fade itself still runs, we just stop blocking on it.
         document.getElementById('splash').classList.add('splash-fade-out');
-        setTimeout(() => launchApp(), 600);
+        setTimeout(() => launchApp(), 250);
 
     } catch (error) {
     hideAuthLoader();
@@ -5353,7 +5368,9 @@ function epHandleAvatar(input) {
         var profileImg = document.getElementById('profile-avatar-img');
         if (profileImg) profileImg.src = e.target.result;
         epMarkDirty();
-        showToast('Photo updated');
+        // Nothing has been uploaded yet, and saying "updated" here is why a
+        // failed save still looked like it had worked.
+        showToast('Photo selected, tap Save');
     };
     reader.readAsDataURL(file);
 }
@@ -5415,6 +5432,32 @@ function epCopyUrl() {
 }
 
 async function saveEditProfile() {
+    // Saving used to run several round trips with no sign anything was happening
+    // and no way to tell success from failure, so a slow upload read as "nothing
+    // happened" and Save could be tapped again on top of itself.
+    var _saveBtn = document.getElementById('epSaveBtn');
+    if (_saveBtn) {
+        if (_saveBtn.dataset.busy === '1') return;
+        _saveBtn.dataset.busy = '1';
+        _saveBtn.textContent = 'Saving…';
+        _saveBtn.style.opacity = '0.6';
+        _saveBtn.style.pointerEvents = 'none';
+    }
+    function _saveDone(ok, msg) {
+        if (_saveBtn) {
+            _saveBtn.dataset.busy = '';
+            _saveBtn.textContent = 'Save';
+            _saveBtn.style.opacity = '';
+            _saveBtn.style.pointerEvents = '';
+        }
+        if (ok) {
+            var ov = document.getElementById('editProfileOverlay');
+            if (ov) ov.remove();
+            triggerHaptic(20);
+        }
+        showToast(msg);
+    }
+
     var nameEl = document.getElementById('epNameInput');
     var usernameEl = document.getElementById('epUsernameInput');
     var bioEl = document.getElementById('epBioInput');
@@ -5436,23 +5479,24 @@ async function saveEditProfile() {
     var bioDisplay = document.getElementById('profile-bio');
     if (bioDisplay) bioDisplay.textContent = bio;
 
-    // Persist the "AI content label" toggle.
+    // Persist the "AI content label" toggle. It rides along in the single users
+    // update below rather than costing its own round trip.
     var _aiOn = !!(document.getElementById('epAiToggle') && document.getElementById('epAiToggle').classList.contains('active'));
     if (currentUser) currentUser.ai_label = _aiOn;
     try { localStorage.setItem('tf_ai_label', _aiOn ? '1' : ''); } catch(e) {}
-    if (window.sb && currentUser) { try { await sb.from('users').update({ ai_label: _aiOn }).eq('id', currentUser.id); } catch(e) {} }
 
     // Persist name + username to the DB — previously only saved to localStorage,
     // so they reverted on reload.
-    if (window.sb && currentUser && (name || username)) {
-        var _upd = { updated_at: new Date().toISOString() };
+    var _unameChanged = false;
+    if (window.sb && currentUser) {
+        var _upd = { updated_at: new Date().toISOString(), ai_label: _aiOn };
         if (name) _upd.full_name = name;
-        var _unameChanged = username && username !== (currentUser.username || '');
+        _unameChanged = !!(username && username !== (currentUser.username || ''));
         if (username) _upd.username = username;
         var _r = await sb.from('users').update(_upd).eq('id', currentUser.id);
         if (_r && _r.error) {
             console.warn('[saveEditProfile]', _r.error.message);
-            showToast(/duplicate|unique/i.test(_r.error.message) ? 'That username is already taken' : 'Could not save name/username');
+            _saveDone(false, /duplicate|unique/i.test(_r.error.message) ? 'That username is already taken' : 'Could not save name/username');
             return;
         }
         if (name) { currentUser.name = name; currentUser.full_name = name; }
@@ -5468,17 +5512,29 @@ async function saveEditProfile() {
     }
     var avatarInput = document.getElementById('epAvatarInput');
     if (avatarInput && avatarInput.files && avatarInput.files.length && window.sb && currentUser) {
+        if (_saveBtn) _saveBtn.textContent = 'Uploading…';
         try {
             var file = avatarInput.files[0];
             var compressed = typeof compressImage === 'function' ? await compressImage(file, 500, 0.85) : file;
             var fileName = currentUser.id + '/avatar_' + Date.now() + '.jpg';
             var uploadResult = await sb.storage.from('avatars').upload(fileName, compressed, { cacheControl: TF_MEDIA_CACHE_SECONDS, upsert: true });
-            if (!uploadResult.error) {
-                var publicUrl = sb.storage.from('avatars').getPublicUrl(fileName).data.publicUrl;
-                await sb.from('users').update({ avatar_url: publicUrl, updated_at: new Date().toISOString() }).eq('id', currentUser.id);
-                updateAvatarsOnPage(publicUrl);
-            }
-        } catch(e) { console.warn('[saveEditProfile avatar]', e); }
+            if (uploadResult.error) throw uploadResult.error;
+            var publicUrl = sb.storage.from('avatars').getPublicUrl(fileName).data.publicUrl;
+            var _av = await sb.from('users').update({ avatar_url: publicUrl, updated_at: new Date().toISOString() }).eq('id', currentUser.id);
+            if (_av && _av.error) throw _av.error;
+            // The new URL has to land on currentUser and in the cached session as
+            // well as in the DOM. Without this the next profile render read the
+            // old avatar_url back off currentUser and put the previous picture
+            // straight back, which is why it only appeared after a restart.
+            currentUser.avatar_url = publicUrl;
+            try { secureSave('current_user', currentUser); } catch (e) {}
+            try { secureSave('user_avatar', publicUrl); } catch (e) {}
+            updateAvatarsOnPage(publicUrl);
+        } catch(e) {
+            console.warn('[saveEditProfile avatar]', e);
+            _saveDone(false, e && e.message ? 'Picture not saved: ' + e.message : 'Could not upload that picture');
+            return;
+        }
     }
     // Persist the profile tab order from the drag-to-reorder list.
     var orderRows = document.querySelectorAll('#epOrderList .ep-order-row');
@@ -5486,10 +5542,7 @@ async function saveEditProfile() {
         var newOrder = Array.prototype.map.call(orderRows, function(r){ return r.getAttribute('data-id'); }).filter(Boolean);
         if (newOrder.length) saveProfileTabOrder(newOrder);
     }
-    var ov = document.getElementById('editProfileOverlay');
-    if (ov) ov.remove();
-    showToast('Profile saved');
-    triggerHaptic(20);
+    _saveDone(true, 'Profile saved');
 }
 
 // Summary of the user's links for the Edit Profile row.
@@ -5938,7 +5991,13 @@ function loadProfileReels(container) {
     // tab you just left painted over the clips, which is why the trustclips tab
     // could end up showing ordinary posts.
     var myGen = _profileTabGen;
-    container.innerHTML = '';
+    // Tiles arrive one request later, so the tab used to sit empty and black
+    // until they did. A grid of placeholders in their shape covers the gap.
+    container.innerHTML = (typeof renderSkeletonHTML === 'function') ? renderSkeletonHTML('grid3', 9) : '';
+    var _tcFirstPaint = true;
+    function _tcClearSkeleton() {
+        if (_tcFirstPaint) { container.innerHTML = ''; _tcFirstPaint = false; }
+    }
     var tcDrafts = [];
     try { tcDrafts = JSON.parse(localStorage.getItem('tf_tc_drafts') || '[]'); } catch(e) {}
     var totalDraftCount = tcDrafts.length;
@@ -5946,6 +6005,7 @@ function loadProfileReels(container) {
     var latestThumb = totalDraftCount > 0 ? tcDrafts[0].videoThumbnail : '';
 
     if (totalDraftCount > 0) {
+        _tcClearSkeleton();
         container.innerHTML +=
             '<div onclick="openTrustclipDraftsScreen()" style="aspect-ratio:9/16;background:#111;overflow:hidden;position:relative;cursor:pointer;border-radius:3px;">' +
                 '<img src="' + latestThumb + '" style="width:100%;height:100%;object-fit:cover;opacity:0.55;">' +
@@ -5969,6 +6029,7 @@ function loadProfileReels(container) {
             .limit(18)
             .then(function(r) {
                 if (_profileTabGen !== myGen) return;   // tab switched, discard
+                _tcClearSkeleton();
                 if (r.data && r.data.length > 0) {
                     window._profileClips = r.data.map(function(c){ return { id: c.id, videoUrl: c.media_url, media_url: c.media_url, thumbnail_url: c.thumbnail_url, view_count: c.view_count, username: '@' + (currentUser && currentUser.username || 'me') }; });
                     r.data.forEach(function(clip, clipIdx) {
@@ -5993,6 +6054,7 @@ function loadProfileReels(container) {
                 if (!totalDraftCount) container.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#888;font-size:13px;">Could not load clips</div>';
             });
     } else if (!totalDraftCount) {
+        _tcClearSkeleton();
         container.innerHTML += '<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#888;font-size:13px;"><i class="fa-solid fa-film" style="font-size:32px;color:#ccc;display:block;margin-bottom:12px;"></i>No clips yet</div>';
     }
 }
@@ -8412,14 +8474,57 @@ function showHistoryForDate(dateStr) {
 // ==========================================================================
 let currentSearchTab = 'all';
 
-const hashtagData = [
-    { tag: '#TrustFirst', posts: '12.5K', trending: true },
-    { tag: '#LiquidGlass', posts: '8.2K', trending: true },
-    { tag: '#SafeSpace', posts: '5.1K', trending: false },
-    { tag: '#SouthAfrica', posts: '45K', trending: true },
-    { tag: '#Verified', posts: '22K', trending: false },
-    { tag: '#TrustClips', posts: '9.8K', trending: true },
-];
+// Real hashtags, counted from what people have actually posted. Tags live both
+// in posts.tags and inline in the text, so both are read and merged.
+async function _searchRealHashtags(term) {
+    var box = document.getElementById('searchTagsList');
+    if (!box) return;
+    if (!window.sb) { box.innerHTML = ''; return; }
+    var counts = {};
+    try {
+        var r = await sb.from('posts')
+            .select('text_content,tags')
+            .eq('status', 'published').eq('is_hidden', false)
+            .or('text_content.ilike.%23' + term + '%,tags.cs.{' + term + '}')
+            .limit(200);
+        if (r.error) throw r.error;
+        (r.data || []).forEach(function (p) {
+            (p.tags || []).forEach(function (t) {
+                t = String(t || '').replace(/^#/, '');
+                if (t && t.toLowerCase().indexOf(term.toLowerCase()) >= 0) counts[t] = (counts[t] || 0) + 1;
+            });
+            var inline = String(p.text_content || '').match(/#[\w]+/g) || [];
+            inline.forEach(function (t) {
+                t = t.slice(1);
+                if (t && t.toLowerCase().indexOf(term.toLowerCase()) >= 0) counts[t] = (counts[t] || 0) + 1;
+            });
+        });
+    } catch (e) {
+        console.warn('[search] hashtags failed', e);
+    }
+    box = document.getElementById('searchTagsList');
+    if (!box) return;
+    var tags = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 8);
+    if (!tags.length) {
+        box.innerHTML = '<div style="text-align:center;padding:20px;color:#888;font-size:13px;">No hashtags found</div>';
+        return;
+    }
+    box.innerHTML = tags.map(function (t) {
+        return '<div class="hashtag-result" onclick="_searchByHashtag(\'' + escapeHtml(t) + '\')" style="cursor:pointer;">' +
+            '<div class="hashtag-icon">#</div>' +
+            '<div style="flex:1;"><b>#' + escapeHtml(t) + '</b><br><small style="color:#888;">' +
+            counts[t] + ' post' + (counts[t] === 1 ? '' : 's') + '</small></div></div>';
+    }).join('');
+}
+
+// Tapping a hashtag searches for it.
+function _searchByHashtag(tag) {
+    var box = document.getElementById('s-input');
+    if (!box) return;
+    box.value = '#' + tag;
+    currentSearchTab = 'posts';
+    simulateRealtimeSearch();
+}
 
 function simulateRealtimeSearch() {
     const searchBox = document.getElementById('s-input');
@@ -8489,21 +8594,14 @@ function simulateRealtimeSearch() {
                 }
             }
 
-            // Hashtags
+            // Hashtags — counted off real posts. This used to filter a fixed list
+            // of invented tags with invented totals (#TrustFirst 12.5K posts and
+            // so on), so search advertised hashtags that do not exist.
             if (currentSearchTab === 'all' || currentSearchTab === 'hashtags') {
-                const matchedTags = hashtagData.filter(h => h.tag.toLowerCase().includes(searchTerm.replace('#','')));
-if (matchedTags.length > 0) {
-    const tagsToShow = matchedTags;
-                    let html = '<div class="search-result-section"><h4>Hashtags</h4>';
-                    tagsToShow.forEach(h => {
-                        html += `<div class="hashtag-result">
-                            <div class="hashtag-icon">#</div>
-                            <div style="flex:1;"><b>${escapeHtml(h.tag)}</b><br><small style="color:#888;">${h.posts} posts${h.trending ? ' • Trending' : ''}</small></div>
-                        </div>`;
-                    });
-                    html += '</div>';
-                    area.innerHTML += html;
-                }
+                area.innerHTML += '<div class="search-result-section"><h4>Hashtags</h4>' +
+                    '<div id="searchTagsList"><div style="text-align:center;padding:20px;">' +
+                    '<i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;"></i></div></div></div>';
+                _searchRealHashtags(searchTerm.replace(/^#/, ''));
             }
 
             // Posts
@@ -8527,10 +8625,14 @@ if (matchedTags.length > 0) {
             if (currentSearchTab === 'all' || currentSearchTab === 'clips') {
                 area.innerHTML += '<div class="search-result-section"><h4>Clips</h4><div id="searchClipsGrid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;"><div style="grid-column:1/-1;text-align:center;padding:20px;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;"></i></div></div></div>';
                 if (window.sb) {
-                    sb.from('posts').select('id,media_url,thumbnail_url,view_count,text_content').eq('post_type','video').eq('status','published').eq('is_hidden',false).or('text_content.ilike.%'+searchTerm+'%,tags.cs.{'+searchTerm+'}').limit(9)
+                    // Clips live in trustclips. This searched posts for
+                    // post_type='video', a shape clips are never saved as, so the
+                    // Clips tab could only ever say it found nothing.
+                    sb.from('trustclips').select('id,video_url,thumbnail_url,view_count,caption').eq('is_hidden',false).ilike('caption','%'+searchTerm+'%').limit(9)
                     .then(function(r){
                         var el=document.getElementById('searchClipsGrid'); if(!el)return;
-                        el.innerHTML = (r.data&&r.data.length) ? r.data.map(function(p){var t=p.thumbnail_url||p.media_url||'';return '<div style="aspect-ratio:9/16;background:#111;border-radius:8px;position:relative;overflow:hidden;">'+(t?'<img src="'+escapeHtml(t)+'" style="width:100%;height:100%;object-fit:cover;opacity:0.8;">':'<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-play" style="color:rgba(255,255,255,0.3);font-size:20px;"></i></div>')+'<div style="position:absolute;bottom:6px;left:6px;color:white;font-size:11px;font-weight:700;"><i class="fa-solid fa-play"></i> '+(p.view_count||0)+'</div></div>';}).join('') : '<div style="grid-column:1/-1;text-align:center;padding:20px;color:#888;font-size:13px;">No clips found</div>';
+                        if (r.error) console.warn('[search] clips query failed', r.error);
+                        el.innerHTML = (r.data&&r.data.length) ? r.data.map(function(p){var t=p.thumbnail_url||'';return '<div onclick="openClipById&&openClipById(\''+escapeHtml(p.id)+'\')" style="aspect-ratio:9/16;background:#111;border-radius:8px;position:relative;overflow:hidden;cursor:pointer;">'+(t?'<img src="'+escapeHtml(t)+'" style="width:100%;height:100%;object-fit:cover;">':'<video src="'+escapeHtml(p.video_url||'')+'" muted playsinline preload="metadata" style="width:100%;height:100%;object-fit:cover;"></video>')+'<div style="position:absolute;bottom:6px;left:6px;color:white;font-size:11px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,0.6);"><i class="fa-solid fa-play"></i> '+(p.view_count||0)+'</div></div>';}).join('') : '<div style="grid-column:1/-1;text-align:center;padding:20px;color:#888;font-size:13px;">No clips found</div>';
                     });
                 }
             }
@@ -14048,8 +14150,17 @@ var sb = null; // alias for window._sb, assigned in initSupabase()
 
 var GeoIP = {
     lookup: async function() {
+        // ipapi.co is a third party that rate-limits and can stall. This had no
+        // timeout, so a slow answer held up whatever was awaiting it — sign-up,
+        // among other things. City and country are nice to have, never worth a
+        // hang, so give it three seconds and move on without them.
+        var ctrl = null, timer = null;
         try {
-            var r = await fetch('https://ipapi.co/json/');
+            if (typeof AbortController === 'function') {
+                ctrl = new AbortController();
+                timer = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, 3000);
+            }
+            var r = await fetch('https://ipapi.co/json/', ctrl ? { signal: ctrl.signal } : undefined);
             var d = await r.json();
             return {
                 ip: d.ip || 'unknown',
@@ -14058,6 +14169,8 @@ var GeoIP = {
             };
         } catch(e) {
             return { ip: null, city: 'Unknown', country: 'Unknown' };
+        } finally {
+            if (timer) clearTimeout(timer);
         }
     }
 };
@@ -16885,17 +16998,20 @@ const OneAccountPolicy = {
     async validateRegistration(email, username, deviceFingerprint) {
         const errors = [];
 
-        const emailAvailable = await this.checkEmailAvailable(email);
+        // Three independent lookups. Awaiting them one after another made signup
+        // pay for three round trips where one is enough.
+        const [emailAvailable, usernameAvailable, deviceCheck] = await Promise.all([
+            this.checkEmailAvailable(email),
+            this.checkUsernameAvailable(username),
+            this.checkDeviceAccountLimit(deviceFingerprint)
+        ]);
+
         if (!emailAvailable) {
             errors.push('This email is already registered. One account per person.');
         }
-
-        const usernameAvailable = await this.checkUsernameAvailable(username);
         if (!usernameAvailable) {
             errors.push('This username is taken. Choose another.');
         }
-
-        const deviceCheck = await this.checkDeviceAccountLimit(deviceFingerprint);
         if (!deviceCheck.allowed) {
             errors.push('Too many accounts created from this device. One human = one account.');
         }
@@ -27336,14 +27452,42 @@ function _openOwnProfilePage() {
     else { openPage('profile-overlay'); if (typeof loadMyProfile === 'function') loadMyProfile(); }
 }
 
+// A skeleton in the shape of the profile page, shown the instant a username is
+// tapped. Tapping used to wait on seven requests in a row before anything
+// appeared at all, which is why it felt like nothing had happened.
+function _userProfileSkeleton() {
+    var ov = document.getElementById('user-profile-overlay');
+    if (ov) ov.remove();
+    ov = document.createElement('div');
+    ov.id = 'user-profile-overlay';
+    ov.className = 'page-overlay';
+    ov.dataset.skeleton = '1';
+    ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg-primary,#fff);z-index:9999;overflow-y:auto;-webkit-overflow-scrolling:touch;';
+    ov.innerHTML =
+        '<div style="height:150px;background:var(--skeleton-bg,#e8e8e8);animation:skeletonPulse 1.4s ease-in-out infinite;"></div>' +
+        '<div style="padding:0 18px;">' +
+            '<div style="width:92px;height:92px;border-radius:50%;background:var(--skeleton-bg,#e8e8e8);margin-top:-46px;border:4px solid var(--bg-primary,#fff);animation:skeletonPulse 1.4s ease-in-out infinite;"></div>' +
+            '<div style="height:20px;width:45%;border-radius:7px;background:var(--skeleton-bg,#e8e8e8);margin-top:14px;animation:skeletonPulse 1.4s ease-in-out infinite;"></div>' +
+            '<div style="height:14px;width:28%;border-radius:7px;background:var(--skeleton-bg,#e8e8e8);margin-top:9px;animation:skeletonPulse 1.4s ease-in-out infinite;"></div>' +
+            '<div style="height:14px;width:70%;border-radius:7px;background:var(--skeleton-bg,#e8e8e8);margin-top:16px;animation:skeletonPulse 1.4s ease-in-out infinite;"></div>' +
+            '<div style="display:flex;gap:10px;margin-top:18px;">' +
+                '<div style="flex:1;height:38px;border-radius:10px;background:var(--skeleton-bg,#e8e8e8);animation:skeletonPulse 1.4s ease-in-out infinite;"></div>' +
+                '<div style="flex:1;height:38px;border-radius:10px;background:var(--skeleton-bg,#e8e8e8);animation:skeletonPulse 1.4s ease-in-out infinite;"></div>' +
+            '</div>' +
+        '</div>' +
+        // A back button that works while the data is still on its way, so a slow
+        // network can never trap you on a blank page.
+        '<div onclick="document.getElementById(\'user-profile-overlay\').remove()" ' +
+            'style="position:fixed;top:calc(env(safe-area-inset-top,0px) + 14px);left:16px;width:36px;height:36px;' +
+            'border-radius:50%;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+            '<i class="fa-solid fa-chevron-left" style="color:#fff;font-size:16px;"></i></div>';
+    document.body.appendChild(ov);
+    return ov;
+}
+
 async function viewUserProfile(userId) {
     // Own profile — check both session and currentUser
     if (currentUser && currentUser.id === userId) {
-        _openOwnProfilePage();
-        return;
-    }
-    var session = await DB.getSession().catch(function(){ return null; });
-    if (session && session.user && session.user.id === userId) {
         _openOwnProfilePage();
         return;
     }
@@ -27353,23 +27497,42 @@ async function viewUserProfile(userId) {
         return;
     }
 
+    // On screen before the first request goes out.
+    var _skel = _userProfileSkeleton();
+    var _skelGen = (window._upOpenGen = (window._upOpenGen || 0) + 1);
+
+    var session = await DB.getSession().catch(function(){ return null; });
+    if (_skelGen !== window._upOpenGen) return;
+    if (session && session.user && session.user.id === userId) {
+        if (_skel) _skel.remove();
+        _openOwnProfilePage();
+        return;
+    }
+
     var profile = await DB.getUserProfile(userId).catch(function(){ return null; });
-    if (!profile) { showToast('User not found'); return; }
+    if (_skelGen !== window._upOpenGen) return;
+    if (!profile) {
+        if (_skel) _skel.remove();
+        showToast('User not found');
+        return;
+    }
 
-    var counts = await RealData.getCounts(userId);
-    var posts = await RealData.getUserPosts(userId);
-
-    var isFollowing = false, followsMe = false;
-    if (session) {
-        var check = await sb.from('follows').select('id').eq('follower_id', session.user.id).eq('following_id', userId).maybeSingle();
-        isFollowing = !!check.data;
+    // These four are independent of each other. Awaited one at a time they cost
+    // four round trips on top of the two above; together they cost one.
+    var myId = session && session.user && session.user.id;
+    var _batch = await Promise.all([
+        RealData.getCounts(userId),
+        RealData.getUserPosts(userId),
+        myId ? sb.from('follows').select('id').eq('follower_id', myId).eq('following_id', userId).maybeSingle().then(function(r){ return !!(r && r.data); }, function(){ return false; }) : false,
         // Do they follow me? If so, and I have not followed back, the button
         // should say so rather than a bare "Follow".
-        try {
-            var back = await sb.from('follows').select('id').eq('follower_id', userId).eq('following_id', session.user.id).maybeSingle();
-            followsMe = !!back.data;
-        } catch (e) {}
-    }
+        myId ? sb.from('follows').select('id').eq('follower_id', userId).eq('following_id', myId).maybeSingle().then(function(r){ return !!(r && r.data); }, function(){ return false; }) : false,
+        window.sb ? sb.from('channels').select('id,name,emoji,color').eq('owner_id', userId).limit(1).maybeSingle().then(function(r){ return r.data; }, function(){ return null; }) : null
+    ]);
+    if (_skelGen !== window._upOpenGen) return;
+    var counts = _batch[0], posts = _batch[1];
+    var isFollowing = _batch[2], followsMe = _batch[3];
+    var _prefetchedChannel = _batch[4];
 
     // Private account gate: non-followers only see a "protected" notice, not the posts.
     var isPrivate = !!(profile.privacy_settings && profile.privacy_settings.private_account);
@@ -27380,9 +27543,12 @@ async function viewUserProfile(userId) {
     var coverUrl = profile.cover_url || '';
     var badgeClass = profile.badge_tier || 'verify-blue';
 
-    var overlay = document.createElement('div');
+    // Fill the skeleton that is already on screen rather than building a second
+    // overlay and swapping it in, which would flash.
+    var overlay = _skel || document.createElement('div');
     overlay.id = 'user-profile-overlay';
     overlay.className = 'page-overlay';
+    delete overlay.dataset.skeleton;
     overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg-primary,#fff);z-index:9999;overflow-y:auto;-webkit-overflow-scrolling:touch;';
 
     // Only the private-account notice is built up front now. Each tab loads its
@@ -27395,8 +27561,7 @@ async function viewUserProfile(userId) {
             '<p style="font-size:14px;color:#888;line-height:1.65;max-width:300px;margin:0 auto;">Only confirmed followers can see @' + escapeHtml(profile.username) + '’s posts and complete profile. Tap Follow to send a request.</p>' +
         '</div>';
 
-    var userChannel = null;
-    if (window.sb) { try { var _chRes = await sb.from('channels').select('id,name,emoji,color').eq('owner_id', userId).limit(1).maybeSingle(); userChannel = _chRes.data; } catch (e) {} }
+    var userChannel = _prefetchedChannel || null;   // came back with the batch above
     var channelMenuItem = userChannel
         ? '<div onclick="document.getElementById(\'user-profile-overlay\').remove();openChannelBroadcast(\'' + userChannel.id + '\')" style="padding:14px 16px;font-size:15px;font-weight:600;color:var(--text-primary,#000);cursor:pointer;display:flex;align-items:center;gap:12px;border-bottom:0.5px solid var(--border-color,#f0f0f0);" onmouseover="this.style.background=\'rgba(0,0,0,0.04)\'" onmouseout="this.style.background=\'\'"><i class="fa-solid fa-tower-broadcast" style="width:16px;color:#007AFF;"></i>View channel</div>'
         : '';
@@ -27461,7 +27626,8 @@ async function viewUserProfile(userId) {
               '</div>') +
         '';
 
-    document.body.appendChild(overlay);
+    // Already in the document when it is the skeleton being filled in.
+    if (!overlay.parentNode) document.body.appendChild(overlay);
     if (!isLockedOut) switchUserProfileTab('posts', null, userId);
 }
 
@@ -27484,10 +27650,21 @@ async function switchUserProfileTab(tab, el, userId) {
     triggerHaptic(10);
 
     var myGen = ++_upTabGen;
-    box.innerHTML = (typeof renderSkeletonHTML === 'function') ? renderSkeletonHTML('post', 3) : '';
+    // Clips are a grid of tiles, like they are on your own profile. Every tab
+    // here rendered full post cards, so someone else's TrustClips tab came out as
+    // a column of posts instead. The skeleton has to match the shape too.
+    var isGridTab = (tab === 'reels');
+    box.style.display = isGridTab ? 'grid' : 'block';
+    box.style.gridTemplateColumns = isGridTab ? '1fr 1fr 1fr' : '';
+    box.style.gap = isGridTab ? '3px' : '';
+    box.style.padding = isGridTab ? '3px' : '';
+    box.innerHTML = (typeof renderSkeletonHTML === 'function')
+        ? renderSkeletonHTML(isGridTab ? 'grid3' : 'post', isGridTab ? 9 : 3) : '';
 
     function empty(icon, msg) {
         if (_upTabGen !== myGen) return;
+        box.style.display = 'block';
+        box.style.gridTemplateColumns = ''; box.style.gap = ''; box.style.padding = '';
         box.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#888;">' +
             '<i class="' + icon + '" style="font-size:40px;color:#555;display:block;margin-bottom:15px;"></i>' +
             '<b style="color:var(--text-primary,#000);">' + msg + '</b></div>';
@@ -27529,6 +27706,26 @@ async function switchUserProfileTab(tab, el, userId) {
             empty(blanks[tab][0], blanks[tab][1]);
             return;
         }
+        if (isGridTab) {
+            // Tiles, tapped to open the viewer. A clip with no stored thumbnail
+            // gets #t=0.1 so the browser paints a frame instead of a black box.
+            window._upClips = rows.map(function (c) {
+                return { id: c.id, videoUrl: c.media_url, media_url: c.media_url,
+                         thumbnail_url: c.thumbnail_url, view_count: c.view_count,
+                         username: '@' + ((c.users && c.users.username) || '') };
+            });
+            box.innerHTML = rows.map(function (clip, idx) {
+                var thumb = clip.thumbnail_url || '';
+                var videoUrl = clip.media_url || '';
+                return '<div onclick="openUserClipViewer(' + idx + ')" style="aspect-ratio:9/16;background:#111;overflow:hidden;position:relative;cursor:pointer;border-radius:3px;">' +
+                    (thumb
+                        ? '<img src="' + escapeHtml(thumb) + '" style="width:100%;height:100%;object-fit:cover;opacity:0.85;">'
+                        : '<video src="' + escapeHtml(videoUrl) + '#t=0.1" style="width:100%;height:100%;object-fit:cover;opacity:0.85;" muted playsinline preload="metadata" onloadedmetadata="try{this.currentTime=0.1;}catch(e){}"></video>') +
+                    '<div style="position:absolute;bottom:6px;left:6px;color:white;font-size:10px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,0.9);">' +
+                    '<i class="fa-solid fa-play"></i> ' + (clip.view_count || 0) + '</div></div>';
+            }).join('');
+            return;
+        }
         box.innerHTML = '';
         rows.forEach(function(p) {
             if (typeof renderRealPostCard === 'function') box.appendChild(renderRealPostCard(p));
@@ -27537,6 +27734,13 @@ async function switchUserProfileTab(tab, el, userId) {
         if (_upTabGen !== myGen) return;
         box.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#888;font-size:13px;">Could not load</div>';
     }
+}
+
+// Someone else's clip grid reuses the viewer your own profile uses; it reads the
+// list off window._profileClips, so point that at the public set first.
+function openUserClipViewer(idx) {
+    window._profileClips = window._upClips || [];
+    if (typeof openProfileClipViewer === 'function') openProfileClipViewer(idx || 0);
 }
 
 async function realFollowFromProfile(btn, userId) {
@@ -48965,7 +49169,9 @@ function _eddieTurnHTML(t, i) {
         actions = '<div style="display:flex;gap:2px;margin-top:6px;margin-left:4px;">' +
             '<button class="eddie-act" title="Copy" onclick="eddieCopy(' + i + ')"><i class="fa-regular fa-copy"></i></button>' +
             '<button class="eddie-act" title="Share" onclick="eddieShare(' + i + ')"><i class="fa-solid fa-arrow-up-from-bracket"></i></button>' +
-            '<button class="eddie-act" title="Read aloud" onclick="eddiePlay(' + i + ')"><i class="fa-solid fa-volume-high"></i></button>' +
+            // data-eddie-play so the speaking state can be shown on this one row
+            // rather than on every read-aloud button at once.
+            '<button class="eddie-act" data-eddie-play="' + i + '" title="Read aloud" onclick="eddiePlay(' + i + ')"><i class="fa-solid fa-volume-high"></i></button>' +
             '<button class="eddie-act" title="Retry" onclick="eddieRetry(' + i + ')"><i class="fa-solid fa-rotate-right"></i></button>' +
             '<button class="eddie-act' + (t.rating === 1 ? ' on' : '') + '" title="Good answer" onclick="eddieRate(' + i + ',1)"><i class="fa-regular fa-thumbs-up"></i></button>' +
             '<button class="eddie-act' + (t.rating === -1 ? ' on' : '') + '" title="Bad answer" onclick="eddieRate(' + i + ',-1)"><i class="fa-regular fa-thumbs-down"></i></button>' +
@@ -49456,11 +49662,30 @@ function _eddieChunks(text, max) {
     return out;
 }
 
-function _eddieSpeakIcon(on) {
-    document.querySelectorAll('.eddie-act i.fa-volume-high, .eddie-act i.fa-stop')
-        .forEach(function (ic) {
-            ic.className = on ? 'fa-solid fa-stop' : 'fa-solid fa-volume-high';
-        });
+// Only the message being read shows a stop icon. This used to flip every
+// read-aloud button in the thread, so there was no way to tell which message was
+// actually talking.
+function _eddieSpeakIcon(on, idx) {
+    document.querySelectorAll('[data-eddie-play]').forEach(function (btn) {
+        var ic = btn.querySelector('i');
+        if (!ic) return;
+        var mine = on && idx != null && String(idx) === btn.getAttribute('data-eddie-play');
+        ic.className = mine ? 'fa-solid fa-stop' : 'fa-solid fa-volume-high';
+    });
+}
+
+// Read-aloud is one voice at a time. Every start takes a token; a stop, or
+// another start, invalidates it, so a request that was already in flight when
+// the user tapped again is thrown away instead of arriving late and playing over
+// the top. Without this, the gap between the tap and the audio URL coming back
+// was wide open: a second tap saw nothing playing yet, started its own request,
+// and both ended up speaking.
+var _eddieSpeakGen = 0;
+function _eddieIsSpeaking() {
+    return !!window._eddieSpeakPending ||
+           (window._eddieAudio && !window._eddieAudio.paused) ||
+           ('speechSynthesis' in window &&
+            (window.speechSynthesis.speaking || window.speechSynthesis.pending));
 }
 
 // Server-side neural voice. Returns true if it played, false to fall back.
@@ -49476,29 +49701,33 @@ function _eddieVoiceCooldown() {
 // `audio` is created by the caller inside the tap handler. Playback permission
 // is tied to that gesture, and awaiting the fetch first can lose it, so the
 // element has to exist before any await.
-async function _eddieSpeakServer(text, audio) {
+async function _eddieSpeakServer(text, audio, gen, idx) {
     if (Date.now() < (window._eddieVoiceColdUntil || 0)) return false;
     try {
         var token = await _eddieToken();
+        if (gen !== _eddieSpeakGen) return true;   // superseded: nothing to play, nothing to fall back to
         var r = await fetch('/api/eddie/speak/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json',
                        'Authorization': 'Bearer ' + token },
             body: JSON.stringify({ text: text.slice(0, 1200) })
         });
+        if (gen !== _eddieSpeakGen) return true;
         if (!r.ok) { _eddieVoiceCooldown(); return false; }
 
         // The server returns a URL, not bytes, so a replay is a CDN hit that
         // costs no synthesis quota. The browser caches it too.
         var j = await r.json().catch(function () { return {}; });
+        if (gen !== _eddieSpeakGen) return true;
         if (!j.url) { _eddieVoiceCooldown(); return false; }
 
         audio.src = j.url;
         window._eddieAudio = audio;
-        audio.onended = function () { _eddieSpeakIcon(false); };
-        audio.onerror = function () { _eddieSpeakIcon(false); };
+        audio.onended = function () { if (gen === _eddieSpeakGen) { window._eddieSpeakPending = false; _eddieSpeakIcon(false); } };
+        audio.onerror = function () { if (gen === _eddieSpeakGen) { window._eddieSpeakPending = false; _eddieSpeakIcon(false); } };
         try {
             await audio.play();
+            if (gen !== _eddieSpeakGen) { try { audio.pause(); } catch (e) {} return true; }
             return true;
         } catch (playErr) {
             // The audio is fine, the browser just refused to start it (autoplay
@@ -49513,6 +49742,9 @@ async function _eddieSpeakServer(text, audio) {
 }
 
 function _eddieStopSpeech() {
+    _eddieSpeakGen++;                    // abandons anything still in flight
+    window._eddieSpeakPending = false;
+    window._eddieSpeakingIdx = null;
     try { window.speechSynthesis.cancel(); } catch (e) {}
     if (window._eddieAudio) {
         try { window._eddieAudio.pause(); } catch (e) {}
@@ -49525,29 +49757,38 @@ async function eddiePlay(i) {
     var text = _eddieSpeakable(_eddieTurnText(i));
     if (!text) return;
 
-    var speaking = (window._eddieAudio && !window._eddieAudio.paused) ||
-                   ('speechSynthesis' in window &&
-                    (window.speechSynthesis.speaking || window.speechSynthesis.pending));
-    if (speaking) { _eddieStopSpeech(); return; }
+    // Tapping the message that is talking stops it. Tapping a different one
+    // switches to it rather than layering a second voice on top.
+    var wasSameMessage = _eddieIsSpeaking() && window._eddieSpeakingIdx === i;
+    _eddieStopSpeech();
+    if (wasSameMessage) return;
 
-    _eddieSpeakIcon(true);
+    var gen = ++_eddieSpeakGen;
+    window._eddieSpeakPending = true;
+    window._eddieSpeakingIdx = i;
+    _eddieSpeakIcon(true, i);
 
     // Created here, inside the tap, so the browser keeps playback permission
     // for it; the src arrives once the server answers.
     var audio = new Audio();
 
     // Natural voice first; the browser's own synth is the safety net.
-    if (await _eddieSpeakServer(text, audio)) return;
+    if (await _eddieSpeakServer(text, audio, gen, i)) return;
+    if (gen !== _eddieSpeakGen) return;
 
     if (!('speechSynthesis' in window)) {
+        window._eddieSpeakPending = false;
         _eddieSpeakIcon(false);
         showToast('Read aloud is not available here');
         return;
     }
     try {
         var voice = await _eddiePickVoice();
+        // Picking a voice can wait on the voices list, another gap in which the
+        // user may have tapped something else.
+        if (gen !== _eddieSpeakGen) return;
         var chunks = _eddieChunks(text, 200);
-        _eddieSpeakIcon(true);
+        _eddieSpeakIcon(true, i);
 
         chunks.forEach(function (chunk, idx) {
             var u = new SpeechSynthesisUtterance(chunk);
@@ -49557,12 +49798,13 @@ async function eddiePlay(i) {
             u.pitch = 1.0;
             u.volume = 1.0;
             if (idx === chunks.length - 1) {
-                u.onend = function () { _eddieSpeakIcon(false); };
-                u.onerror = function () { _eddieSpeakIcon(false); };
+                u.onend = function () { if (gen === _eddieSpeakGen) { window._eddieSpeakPending = false; _eddieSpeakIcon(false); } };
+                u.onerror = function () { if (gen === _eddieSpeakGen) { window._eddieSpeakPending = false; _eddieSpeakIcon(false); } };
             }
             window.speechSynthesis.speak(u);
         });
     } catch (e) {
+        window._eddieSpeakPending = false;
         _eddieSpeakIcon(false);
         showToast('Read aloud is not available here');
     }
