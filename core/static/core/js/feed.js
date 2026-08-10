@@ -21731,13 +21731,45 @@ function _signupStartCodeTimer(seconds) {
     tick();
     _signupCodeTimer = setInterval(tick, 1000);
 }
+// Supabase refuses a second code inside 60 seconds and answers 429, which the
+// screen then shows as "you can only request this after 58 seconds". Tapping
+// resend the moment nothing arrives is the natural thing to do, so hold the link
+// for a minute and count it down rather than letting it burn an attempt.
+var _signupResendReadyAt = 0;
 function _signupResendCode() {
+    var waitMs = _signupResendReadyAt - Date.now();
+    if (waitMs > 0) {
+        showToast('You can ask for another code in ' + Math.ceil(waitMs / 1000) + 's');
+        return;
+    }
+    _signupResendReadyAt = Date.now() + 60000;
+    _signupResendCountdown();
     _otpClear();
     _signupStartCodeTimer(300);
     // Shared code screen: resend has to go back to whichever flow sent it.
     if (window._loginOtp && window._loginOtp.phone) _loginSendPhoneCode(true);
     else if (window._signup && window._signup.method === 'phone') _signupSendPhoneCode();
     else _signupSendCode(true);
+}
+
+function _signupResendCountdown() {
+    var link = document.getElementById('signup-resend');
+    if (!link) return;
+    if (_signupResendCountdown._t) clearInterval(_signupResendCountdown._t);
+    function tick() {
+        var left = Math.ceil((_signupResendReadyAt - Date.now()) / 1000);
+        if (left > 0) {
+            link.textContent = 'Resend code in ' + left + 's';
+            link.style.opacity = '0.5';
+        } else {
+            link.textContent = "Didn't get it? Resend code";
+            link.style.opacity = '1';
+            clearInterval(_signupResendCountdown._t);
+            _signupResendCountdown._t = null;
+        }
+    }
+    tick();
+    _signupResendCountdown._t = setInterval(tick, 1000);
 }
 
 function _signupSetPassword() {
@@ -47114,18 +47146,39 @@ function openReelLikesModal(postId, likes, views) {
         // likes.user_id points at users, not profiles. Asking for profiles(...)
         // made PostgREST error, data came back null, and the sheet said "No
         // likes yet" on a post that did have likes.
-        window.sb.from('likes').select('user_id,users:user_id(username,full_name,avatar_url)').eq('post_id',postId).limit(20).then(function(r){
+        window.sb.from('likes').select('user_id,users:user_id(username,full_name,avatar_url)').eq('post_id',postId).limit(20).then(async function(r){
             var list = document.getElementById('reelLikersList');
             if (!list) return;
             if (r.error) { console.warn('[Likes] ' + r.error.message); }
             if (!r.data || !r.data.length) { list.innerHTML = '<div style="text-align:center;padding:30px;color:rgba(255,255,255,0.4);font-size:14px;">No likes yet</div>'; return; }
+
+            // Every row used to get the same dead "Follow" button, including your
+            // own: you cannot follow yourself, and you should not be asked to
+            // follow someone you already follow. Work out which is which first.
+            var following = {};
+            try { (JSON.parse(localStorage.getItem('tf-followed-users') || '[]')).forEach(function(id){ following[id] = true; }); } catch (e) {}
+            var ids = r.data.map(function(row){ return row.user_id; }).filter(Boolean);
+            if (currentUser && currentUser.id && ids.length) {
+                try {
+                    var fr = await window.sb.from('follows').select('following_id')
+                        .eq('follower_id', currentUser.id).in('following_id', ids);
+                    (fr.data || []).forEach(function(f){ following[f.following_id] = true; });
+                } catch (e) {}
+                if (!document.getElementById('reelLikersList')) return;   // sheet closed
+            }
+
             list.innerHTML = r.data.map(function(row){
                 var p = row.users || {}; var av = p.avatar_url || ('https://ui-avatars.com/api/?name='+encodeURIComponent(p.username||'U')+'&background=007AFF&color=fff&size=60');
-                return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:0.5px solid rgba(255,255,255,0.07);cursor:pointer;" onclick="var _m=document.getElementById(\'reelLikesModal\');if(_m)_m.remove();openProfile(\''+escapeHtml(row.user_id||'')+'\')">' +
-                    '<img src="'+escapeHtml(av)+'" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">' +
-                    '<div><div style="color:white;font-size:14px;font-weight:700;">'+escapeHtml(p.display_name||p.username||'User')+'</div>' +
+                var uid = row.user_id || '';
+                var isMe = !!(currentUser && currentUser.id && uid === currentUser.id);
+                var isFollowing = !!following[uid];
+                var btn = isMe ? '' :
+                    '<button onclick="event.stopPropagation();realToggleFollow(this,\'' + escapeHtml(uid) + '\')" style="margin-left:auto;flex-shrink:0;padding:7px 16px;border-radius:20px;border:1.5px solid ' + (isFollowing ? 'transparent' : 'rgba(255,255,255,0.3)') + ';background:' + (isFollowing ? 'rgba(255,255,255,0.14)' : 'transparent') + ';color:white;font-size:13px;font-weight:600;cursor:pointer;">' + (isFollowing ? 'Following' : 'Follow') + '</button>';
+                return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:0.5px solid rgba(255,255,255,0.07);cursor:pointer;" onclick="var _m=document.getElementById(\'reelLikesModal\');if(_m)_m.remove();openProfile(\''+escapeHtml(uid)+'\')">' +
+                    '<img src="'+escapeHtml(av)+'" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
+                    '<div style="min-width:0;"><div style="color:white;font-size:14px;font-weight:700;">'+escapeHtml(p.full_name||p.username||'User')+(isMe ? ' <span style="color:rgba(255,255,255,0.4);font-weight:600;">You</span>' : '')+'</div>' +
                     '<div style="color:rgba(255,255,255,0.5);font-size:13px;">@'+escapeHtml(p.username||'')+'</div></div>' +
-                    '<button style="margin-left:auto;padding:7px 16px;border-radius:20px;border:1.5px solid rgba(255,255,255,0.3);background:transparent;color:white;font-size:13px;font-weight:600;cursor:pointer;">Follow</button>' +
+                    btn +
                 '</div>';
             }).join('');
         });
