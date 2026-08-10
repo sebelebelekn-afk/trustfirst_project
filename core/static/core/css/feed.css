@@ -549,6 +549,19 @@ html, body { background: #000; }
     .tf-iv-icons i { color: #fff; }
     .tf-iv-icons i.fa-solid.fa-heart { color: #FF3B30 !important; }
 
+    /* Frosted dropdown (the Groups "+ New" sheet). Themed rather than hardcoded
+       white, which is what made it a bright slab in dark mode. */
+    .tf-glass-menu {
+        background: rgba(255, 255, 255, 0.72);
+        border: 0.5px solid rgba(255, 255, 255, 0.8);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18), 0 1.5px 0 rgba(255, 255, 255, 0.9) inset;
+    }
+    [data-theme="dark"] .tf-glass-menu {
+        background: rgba(38, 38, 42, 0.88);
+        border-color: rgba(255, 255, 255, 0.10);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6), 0 1.5px 0 rgba(255, 255, 255, 0.06) inset;
+    }
+
     /* Composer attachments: one big preview, or a scrollable row of thumbnails. */
     .tf-composer-single { position: relative; }
     .tf-composer-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;

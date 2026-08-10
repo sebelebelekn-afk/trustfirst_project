@@ -22508,12 +22508,8 @@ function openIdentityVerification() {
     ov.innerHTML =
         '<div class="header-container"><div class="liquid-glass-btn" onclick="document.getElementById(\'identityVerifyOverlay\').remove()"><i class="fa-solid fa-chevron-left"></i></div><b>Verify your identity</b><div style="width:42px;"></div></div>' +
         '<div style="padding:16px 20px 40px;">' +
-            '<p style="color:#888;font-size:14px;margin:0 0 20px;line-height:1.5;">Prove you\'re a real person to get your blue badge. Choose a method:</p>' +
-            '<div onclick="document.getElementById(\'identityVerifyOverlay\').remove();startFaceVerification();" style="background:var(--card-bg,#fff);border:1.5px solid var(--border-color,#eee);border-radius:18px;padding:18px;margin-bottom:14px;cursor:pointer;display:flex;align-items:center;gap:14px;">' +
-                '<div style="width:50px;height:50px;border-radius:50%;background:rgba(0,122,255,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-face-smile" style="color:#007AFF;font-size:22px;"></i></div>' +
-                '<div style="flex:1;min-width:0;"><b style="font-size:15px;color:var(--text-primary,#000);">Face Verification</b><p style="color:#888;font-size:13px;margin:3px 0 0;line-height:1.4;">Use your camera, look left, right, smile. No ID needed.</p></div>' +
-                '<i class="fa-solid fa-chevron-right" style="color:#ccc;flex-shrink:0;"></i>' +
-            '</div>' +
+            // The camera liveness check is gone; ID review is the route now.
+            '<p style="color:#888;font-size:14px;margin:0 0 20px;line-height:1.5;">Prove you\'re a real person to get your blue badge:</p>' +
             '<div onclick="document.getElementById(\'identityVerifyOverlay\').remove();if(typeof applyForBadge===\'function\')applyForBadge(\'blue\');" style="background:var(--card-bg,#fff);border:1.5px solid var(--border-color,#eee);border-radius:18px;padding:18px;cursor:pointer;display:flex;align-items:center;gap:14px;">' +
                 '<div style="width:50px;height:50px;border-radius:50%;background:rgba(0,122,255,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-id-card" style="color:#007AFF;font-size:22px;"></i></div>' +
                 '<div style="flex:1;min-width:0;"><b style="font-size:15px;color:var(--text-primary,#000);">ID Document</b><p style="color:#888;font-size:13px;margin:3px 0 0;line-height:1.4;">Reviewed by our team, then deleted. Cover your ID number first.</p></div>' +
@@ -22651,242 +22647,9 @@ function renderSavedAccounts() {
     }
 })();
 
-    // ============================================
-// FACE LIVENESS VERIFICATION
-// Camera-based "look left/right" proof of life
-// ============================================
-let livenessStream = null;
-var livenessStep = 0;
-let livenessChecks = [];
-const LIVENESS_STEPS = [
-    { instruction: 'Look straight at the camera', icon: 'fa-face-meh', direction: 'center' },
-    { instruction: 'Slowly turn your head LEFT', icon: 'fa-arrow-left', direction: 'left' },
-    { instruction: 'Slowly turn your head RIGHT', icon: 'fa-arrow-right', direction: 'right' },
-    { instruction: 'Smile for the camera', icon: 'fa-face-smile', direction: 'smile' },
-    { instruction: 'Blink twice slowly', icon: 'fa-eye', direction: 'blink' }
-];
-
-function startFaceVerification() {
-    livenessStep = 0;
-    livenessChecks = [];
-
-    var overlay = document.createElement('div');
-    overlay.id = 'faceVerifyOverlay';
-    // absolute + mounted in #app so it stays inside the phone frame; safe-area
-    // insets so the controls clear the notch / home indicator.
-    overlay.style.cssText =
-        'position:absolute; inset:0; z-index:100000;' +
-        'background:#000; display:flex; flex-direction:column; align-items:center;';
-
-    overlay.innerHTML =
-        '<div style="position:absolute; top:calc(env(safe-area-inset-top,0px) + 16px); left:16px; right:16px; z-index:10;' +
-        'display:flex; justify-content:space-between; align-items:center;">' +
-        '<button onclick="cancelFaceVerify()" style="background:rgba(255,255,255,0.2);' +
-        'border:none; border-radius:50%; width:40px; height:40px; display:flex;' +
-        'align-items:center; justify-content:center; cursor:pointer; backdrop-filter:blur(10px);">' +
-        '<i class="fa-solid fa-xmark" style="color:white; font-size:20px;"></i></button>' +
-        '<div style="background:rgba(255,255,255,0.15); backdrop-filter:blur(10px);' +
-        'border-radius:20px; padding:6px 14px;">' +
-        '<span style="color:white; font-size:12px; font-weight:700;" id="livenessProgress">Step 1 of 5</span>' +
-        '</div></div>' +
-
-        // cover so it fills the screen, paired with a portrait constraint on the
-        // stream itself (see startLivenessCamera). contain letterboxed a landscape
-        // webcam feed into a thin band that did not line up with the oval at all.
-        '<video id="livenessVideo" autoplay playsinline muted style="' +
-        'width:100%; height:100%; object-fit:cover; background:#000; transform:scaleX(-1);"></video>' +
-
-        // The huge spread shadow darkens everything outside the oval, so the
-        // cut-out is obvious and you can see whether your face is actually in it.
-        '<div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);' +
-        'width:260px; height:340px; border:3px solid rgba(255,255,255,0.85);' +
-        'border-radius:50%; pointer-events:none; box-shadow:0 0 0 9999px rgba(0,0,0,0.7);" id="faceGuide"></div>' +
-
-        '<div id="livenessInstructionBox" style="position:absolute; bottom:calc(env(safe-area-inset-bottom,0px) + 130px);' +
-        'left:50%; transform:translateX(-50%); text-align:center; z-index:10; width:88%;">' +
-        '<div id="livenessEmoji" style="font-size:50px; margin-bottom:12px;"><i class="fa-solid fa-face-meh" style="color:#007AFF;"></i></div>' +
-        '<p id="livenessInstruction" style="color:white; font-size:18px; font-weight:700;' +
-        'text-shadow:0 2px 10px rgba(0,0,0,0.5);">Look straight at the camera</p>' +
-        '<p style="color:rgba(255,255,255,0.5); font-size:13px; margin-top:8px;">Position your face inside the oval</p></div>' +
-
-        '<div style="position:absolute; bottom:calc(env(safe-area-inset-bottom,0px) + 44px); left:50%; transform:translateX(-50%); z-index:10;">' +
-        '<button id="livenessConfirmBtn" onclick="confirmLivenessStep()" style="' +
-        'padding:16px 48px; border-radius:30px; border:none;' +
-        'background:linear-gradient(135deg, #007AFF, #00C7FF);' +
-        'color:white; font-size:16px; font-weight:700; cursor:pointer;' +
-        'box-shadow:0 4px 20px rgba(0,122,255,0.4);">I\'m Ready</button></div>' +
-
-        '<div id="livenessSuccess" style="display:none; position:absolute; top:0; left:0;' +
-        'right:0; bottom:0; background:rgba(0,0,0,0.9); z-index:20;' +
-        'display:none; flex-direction:column; align-items:center; justify-content:center;">' +
-        '<div style="width:100px; height:100px; border-radius:50%;' +
-        'background:rgba(52,199,89,0.2); display:flex; align-items:center;' +
-        'justify-content:center; margin-bottom:20px;">' +
-        '<i class="fa-solid fa-check" style="font-size:50px; color:#34C759;"></i></div>' +
-        '<h2 style="color:white; font-size:24px; font-weight:800; margin-bottom:8px;">You\'re Real!</h2>' +
-        '<p style="color:rgba(255,255,255,0.6); font-size:14px; margin-bottom:30px;">Face verification complete</p>' +
-        '<button onclick="completeFaceVerify()" style="padding:16px 40px; border-radius:30px;' +
-        'border:none; background:#34C759; color:white; font-size:16px; font-weight:700;' +
-        'cursor:pointer;">Continue</button></div>';
-
-    (document.getElementById('app') || document.body).appendChild(overlay);
-    startLivenessCamera();
-}
-
-async function startLivenessCamera() {
-    try {
-        // Ask for a portrait frame. Without this the camera hands back a
-        // landscape feed, which then has to be cropped hard to fill a tall phone
-        // screen, and that crop is what looked like extreme zoom.
-        livenessStream = await navigator.mediaDevices.getUserMedia({
-            video: {
-                facingMode: 'user',
-                width: { ideal: 1080 }, height: { ideal: 1920 },
-                aspectRatio: { ideal: 0.5625 }
-            },
-            audio: false
-        });
-        var video = document.getElementById('livenessVideo');
-        if (video) video.srcObject = livenessStream;
-    } catch(e) {
-        showToast('Camera permission needed for face verification');
-        cancelFaceVerify();
-    }
-}
-
-async function confirmLivenessStep() {
-    var btn = document.getElementById('livenessConfirmBtn');
-    var guide = document.getElementById('faceGuide');
-    var video = document.getElementById('livenessVideo');
-    if (!btn || !video) return;
-    var direction = LIVENESS_STEPS[livenessStep].direction;
-
-    // Capture an UN-mirrored frame so the server reads true head-pose angles.
-    var canvas = document.createElement('canvas');
-    canvas.width = 320; canvas.height = 420;
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-    var imageB64 = (canvas.toDataURL('image/jpeg', 0.6).split(',')[1]) || '';
-
-    // Loading state while the server (Google Vision) checks the real face/pose.
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:8px;"></i> Checking…';
-
-    var token = '';
-    try { token = (await window.sb.auth.getSession()).data.session?.access_token || ''; } catch(e) {}
-    if (!token || !currentUser) {
-        btn.disabled = false; btn.innerHTML = "I'm Ready";
-        showToast('Please sign in to verify');
-        return;
-    }
-
-    var data = null;
-    try {
-        var resp = await fetch('/api/liveness/submit/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-            body: JSON.stringify({ user_id: currentUser.id, image_b64: imageB64, direction: direction })
-        });
-        data = await resp.json();
-    } catch(e) {}
-
-    // No real verifier configured → fall back to the Didit biometric KYC flow.
-    if (!data || data.reason === 'vision_unavailable') {
-        btn.disabled = false; btn.innerHTML = "I'm Ready";
-        cancelFaceVerify();
-        if (typeof startIdVerification === 'function') {
-            showToast('Switching to secure ID verification…');
-            startIdVerification();
-        } else {
-            showToast('Verification temporarily unavailable');
-        }
-        return;
-    }
-
-    // Step did not pass the real check — let the user retry the same step.
-    if (!data.step_ok) {
-        guide.style.borderColor = '#FF3B30';
-        guide.style.boxShadow = '0 0 30px rgba(255,59,48,0.4)';
-        var msgs = {
-            no_face: 'No face detected, center your face in the oval',
-            spoof: 'Use a live camera, not a photo of a photo',
-            low_confidence: 'Move into better light and try again'
-        };
-        showToast(msgs[data.reason] || 'Couldn\'t verify that move, try again');
-        setTimeout(function() {
-            guide.style.borderColor = 'rgba(255,255,255,0.4)';
-            guide.style.boxShadow = 'none';
-            btn.disabled = false;
-            btn.innerHTML = "I'm Ready";
-            btn.style.background = 'linear-gradient(135deg, #007AFF, #00C7FF)';
-        }, 1400);
-        return;
-    }
-
-    // Step passed — green confirmation.
-    livenessChecks.push({ step: livenessStep, direction: direction, timestamp: Date.now() });
-    guide.style.borderColor = '#34C759';
-    guide.style.boxShadow = '0 0 30px rgba(52,199,89,0.5)';
-    btn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:8px;"></i> Done';
-    btn.style.background = '#34C759';
-
-    if (data.verified) { setTimeout(showLivenessSuccess, 500); return; }
-
-    setTimeout(function() {
-        livenessStep++;
-        if (livenessStep >= LIVENESS_STEPS.length) { showLivenessSuccess(); return; }
-        var step = LIVENESS_STEPS[livenessStep];
-        document.getElementById('livenessEmoji').innerHTML = '<i class="fa-solid ' + step.icon + '" style="color:#007AFF;"></i>';
-        document.getElementById('livenessInstruction').textContent = step.instruction;
-        document.getElementById('livenessProgress').textContent = 'Step ' + (livenessStep + 1) + ' of ' + LIVENESS_STEPS.length;
-        guide.style.borderColor = 'rgba(255,255,255,0.4)';
-        guide.style.boxShadow = 'none';
-        btn.disabled = false;
-        btn.innerHTML = "I'm Ready";
-        btn.style.background = 'linear-gradient(135deg, #007AFF, #00C7FF)';
-    }, 800);
-}
-
-function showLivenessSuccess() {
-    var successDiv = document.getElementById('livenessSuccess');
-    if (successDiv) {
-        successDiv.style.display = 'flex';
-    }
-    if (navigator.vibrate) navigator.vibrate([50, 100, 50]);
-}
-
-function completeFaceVerify() {
-    if (livenessStream) {
-        livenessStream.getTracks().forEach(function(t) { t.stop(); });
-    }
-    var overlay = document.getElementById('faceVerifyOverlay');
-    if (overlay) overlay.remove();
-
-    // The server already flipped users.liveness_verified=true after the final
-    // step passed the real Google Vision check — nothing to re-submit here.
-    secureSave('face_verified_pending', { timestamp: Date.now() });
-
-    // If this was during registration, continue
-    var scanBox = document.getElementById('scan-box');
-    if (scanBox) {
-        scanBox.innerHTML = '<i class="fa-solid fa-circle-check" style="color:#34C759; font-size:40px;"></i>' +
-            '<p style="color:#34C759; margin-top:10px; font-weight:bold;">Face Verified</p>';
-        var verifyBtn = document.getElementById('verify-btn');
-        if (verifyBtn) {
-            verifyBtn.style.opacity = '1';
-            verifyBtn.style.pointerEvents = 'all';
-        }
-    }
-
-    showToast('Face verification complete');
-}
-
-function cancelFaceVerify() {
-    if (livenessStream) {
-        livenessStream.getTracks().forEach(function(t) { t.stop(); });
-    }
-    var overlay = document.getElementById('faceVerifyOverlay');
-    if (overlay) overlay.remove();
-}
+// The camera liveness check (look left / right / smile, scored by Google
+// Vision) has been removed. A blue badge comes from ID review instead, so the
+// whole client flow and its LIVENESS_STEPS went with it.
 
     // ============================================
 // REAL CONTENT FLAG / REPORT SYSTEM
@@ -28657,8 +28420,10 @@ async function openGroup(groupId) {
             // Cover hero
             '<div style="position:relative;">' +
                 '<img src="' + escapeHtml(cover) + '" style="width:100%;display:block;aspect-ratio:15/8;object-fit:cover;">' +
-                '<div style="position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:14px 16px;">' +
-                    '<div onclick="closePage(\'group-page-overlay\')" style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+                // The row sits over the cover at the very top of the screen, so the
+                // notch pushes it down rather than sitting on top of it.
+                '<div style="position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px;">' +
+                    '<div onclick="closePage(\'group-page-overlay\');showNavBar&&showNavBar()" style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
                         '<i class="fa-solid fa-chevron-left" style="color:#fff;font-size:16px;"></i></div>' +
                     '<div style="display:flex;gap:10px;">' +
                         '<div onclick="showToast(\'Search in this group is coming soon\')" style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
@@ -28875,7 +28640,8 @@ function showCreateGroupModal() {
 
     var p = document.createElement('div');
     p.id = 'createGroupPage';
-    p.style.cssText = 'position:absolute;inset:0;z-index:8000;background:var(--bg-primary,#fff);display:flex;flex-direction:column;';
+    p.style.cssText = 'position:absolute;inset:0;z-index:8000;background:var(--bg-primary,#fff);' +
+        'display:flex;flex-direction:column;padding-top:env(safe-area-inset-top, 0px);';
     p.innerHTML =
         '<div style="display:flex;align-items:center;padding:14px 18px;flex-shrink:0;border-bottom:0.5px solid var(--border-color,#e8e8e8);">' +
             '<button onclick="closeCreateGroup()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-primary,#000);padding:0;width:32px;text-align:left;">✕</button>' +
@@ -29129,7 +28895,10 @@ function _gsPage(id, innerHTML) {
     if (old) old.remove();
     var p = document.createElement('div');
     p.id = id;
-    p.style.cssText = 'position:absolute;inset:0;z-index:8000;background:var(--bg-primary,#fff);display:flex;flex-direction:column;';
+    // Every page in the group-setup flow starts at the very top of the screen,
+    // so its header row ran under the status bar. One inset here covers them all.
+    p.style.cssText = 'position:absolute;inset:0;z-index:8000;background:var(--bg-primary,#fff);' +
+        'display:flex;flex-direction:column;padding-top:env(safe-area-inset-top, 0px);';
     p.innerHTML = innerHTML;
     (document.getElementById('app') || document.body).appendChild(p);
     hideNavBar && hideNavBar();
@@ -36261,12 +36030,13 @@ function tfMapGoToFriend(userId) {
 
     var menu = document.createElement('div');
     menu.id = 'groupAddDropdown';
+    // The surface and the border were hardcoded white with a white inset
+    // highlight, so in dark mode this sheet came out as a bright grey slab. Both
+    // now come from the theme, with the highlight only where it belongs.
+    menu.className = 'tf-glass-menu';
     menu.style.cssText = 'position:absolute;top:' + (rect.bottom - appRect.top + 8) + 'px;' +
-        'right:16px;width:220px;z-index:9999;' +
-        'background:rgba(255,255,255,0.72);backdrop-filter:blur(60px) saturate(200%);' +
-        '-webkit-backdrop-filter:blur(60px) saturate(200%);' +
-        'border:0.5px solid rgba(255,255,255,0.8);border-radius:20px;' +
-        'box-shadow:0 12px 40px rgba(0,0,0,0.18),0 1.5px 0 rgba(255,255,255,0.9) inset;' +
+        'right:16px;width:220px;z-index:9999;border-radius:20px;' +
+        'backdrop-filter:blur(60px) saturate(180%);-webkit-backdrop-filter:blur(60px) saturate(180%);' +
         'overflow:hidden;animation:jellyPop 0.28s cubic-bezier(0.68,-0.55,0.27,1.55);';
 
     [
@@ -36275,8 +36045,8 @@ function tfMapGoToFriend(userId) {
     ].forEach(function(item, i) {
         var row = document.createElement('div');
         row.style.cssText = 'display:flex;align-items:center;gap:12px;padding:16px;cursor:pointer;' +
-            (i===0?'border-bottom:0.5px solid rgba(0,0,0,0.06);':'');
-        row.onmouseover = function(){ this.style.background='rgba(0,0,0,0.04)'; };
+            (i===0?'border-bottom:0.5px solid var(--border-color,rgba(0,0,0,0.06));':'');
+        row.onmouseover = function(){ this.style.background='var(--hover-bg,rgba(0,0,0,0.04))'; };
         row.onmouseout  = function(){ this.style.background=''; };
         row.onclick     = (function(fn){ return function(){ menu.remove(); if(fn==='showCreateGroupModal()') showCreateGroupModal(); else if(fn==='openGroupPostPicker()') openGroupPostPicker(); }; })(item.fn);
         row.innerHTML =

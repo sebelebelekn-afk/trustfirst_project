@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=92">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=93">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -386,23 +386,11 @@ function authenticateUser() {
         <div class="auth-step" id="step-verify" style="text-align: center;">
         <i class="fa-solid fa-user-shield" style="font-size: 50px; color: #007AFF; margin-bottom: 20px;"></i>
         <h3>Verify Your Identity</h3>
-        <p style="color: #888; font-size: 13px; margin-bottom: 10px;">Choose a verification method to prove you're a real person.</p>
+        <p style="color: #888; font-size: 13px; margin-bottom: 10px;">Scan your ID to prove you're a real person.</p>
         <p style="color: #34C759; font-size: 12px; margin-bottom: 25px;"><i class="fa-solid fa-circle-check"></i> Verified members get full access, posting, commenting, and messaging.</p>
 
-        <div onclick="startFaceVerification()" style="background:#1a1a1a; padding:20px; border-radius:18px; border:2px solid #333; cursor:pointer; margin-bottom:12px; text-align:left; transition:0.3s;" onmouseover="this.style.borderColor='#007AFF'" onmouseout="this.style.borderColor='#333'">
-            <div style="display:flex; align-items:center; gap:14px;">
-                <div style="width:50px; height:50px; border-radius:50%; background:rgba(0,122,255,0.15); display:flex; align-items:center; justify-content:center;">
-                    <i class="fa-solid fa-face-smile" style="color:#007AFF; font-size:24px;"></i>
-                </div>
-                <div>
-                    <b style="font-size:15px; display:block;">Face Verification</b>
-                    <small style="color:#888; font-size:12px;">Use your camera, look left, right, smile</small>
-                </div>
-            </div>
-            <div style="margin-top:10px; padding:6px 12px; background:rgba(0,122,255,0.08); border-radius:8px; display:inline-block;">
-                <small style="color:#007AFF; font-weight:700; font-size:11px;"><i class="fa-solid fa-bolt"></i> Recommended, No ID needed</small>
-            </div>
-        </div>
+        <!-- The camera liveness check (look left, right, smile) has been removed.
+             ID review is the route to a blue badge. -->
 
         <div style="background:#1a1a1a; padding:20px; border-radius:18px; border:2px solid #333; cursor:pointer; margin-bottom:12px; text-align:left; transition:0.3s;" onmouseover="this.style.borderColor='#007AFF'" onmouseout="this.style.borderColor='#333'">
             <div style="display:flex; align-items:center; gap:14px;">
@@ -2224,7 +2212,7 @@ function authenticateUser() {
   </ul>
   <p style="font-weight:700; margin-bottom:6px;">4.2 With Service Providers</p>
   <ul style="padding-left:20px; margin-bottom:14px;">
-    <li>Google Cloud Vision (automated safety checks on images and face liveness)</li>
+    <li>Google Cloud Vision (automated safety checks on images)</li>
     <li>LiveKit (live video streaming)</li>
     <li>Hosting and cloud providers (Supabase, Render)</li>
     <li>Security and anti-fraud systems</li>
@@ -2943,9 +2931,9 @@ function authenticateUser() {
 
 <!-- ===== GROUP PAGE OVERLAY ===== -->
 <div id="group-page-overlay" class="white-overlay" style="z-index:6000; display:none; flex-direction:column;">
-    <div style="position:absolute; top:calc(env(safe-area-inset-top,0px) + 16px); left:20px; z-index:10;">
-        <div class="liquid-glass-btn" onclick="closePage('group-page-overlay');showNavBar&&showNavBar()"><i class="fa-solid fa-chevron-left" style="color:white;"></i></div>
-    </div>
+    <!-- The back button lives in the cover hero that openGroup draws, next to
+         search and manage. A floating one here as well meant two back buttons
+         stacked on top of each other. -->
     <div id="group-page-header"></div>
 
     <!-- Tabs -->
@@ -4231,7 +4219,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=206"></script>
+<script src="{% static 'core/js/feed.js' %}?v=207"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=75"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
