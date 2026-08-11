@@ -1631,8 +1631,10 @@ function launchApp() {
         startChildMonitoring();
     }
 
-    // Fill the follow cache from the server before the buttons are judged.
+    // Fill the follow cache from the server before the buttons are judged, and
+    // the block/mute lists so they hold on a device that did not make them.
     tfHydrateFollowCache();
+    tfHydrateBlockMuteCache();
 
     // A shared link lands here with the post or clip in the path.
     tfOpenDeepLink();
@@ -21248,23 +21250,24 @@ function rpCheckSendReady() {
     sendBtn.style.pointerEvents = hasText ? 'auto' : 'none';
 }
 
-function rpAttachScreenshot() {
-    // Capture current visible state as a data note since canvas cross-origin blocks full capture
-    showToast('Screenshot captured');
-    var placeholder = 'screenshot_' + Date.now();
-    _rpScreenshots.push({ type: 'screenshot', name: placeholder });
-    rpRenderScreenshots();
-}
+// rpAttachScreenshot is gone with its button. A page cannot screenshot the screen
+// it runs in, so all it did was push a nameless placeholder and toast
+// "Screenshot captured" — the attachment was never an image at all.
 
 function rpHandleUpload(input) {
-    if (!input.files || !input.files[0]) return;
-    var file = input.files[0];
-    var reader = new FileReader();
-    reader.onload = function(e) {
-        _rpScreenshots.push({ type: 'upload', url: e.target.result, name: file.name });
-        rpRenderScreenshots();
-    };
-    reader.readAsDataURL(file);
+    if (!input.files || !input.files.length) return;
+    var files = Array.prototype.slice.call(input.files, 0, 3 - _rpScreenshots.length);
+    if (!files.length) { showToast('Three images is the limit'); input.value = ''; return; }
+    files.forEach(function (file) {
+        if (file.size > 5 * 1024 * 1024) { showToast(file.name + ' is over 5MB'); return; }
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            // The file is kept, not just its data URL: submitting uploads it.
+            _rpScreenshots.push({ type: 'upload', url: e.target.result, name: file.name, file: file });
+            rpRenderScreenshots();
+        };
+        reader.readAsDataURL(file);
+    });
     input.value = '';
 }
 
@@ -21295,30 +21298,63 @@ async function submitReportProblem() {
     var sendBtn = document.getElementById('rp-send-btn');
     if (sendBtn) { sendBtn.textContent = '…'; sendBtn.style.pointerEvents = 'none'; }
 
-    var report = {
-        description: text,
-        include_logs: _rpIncludeLogs,
-        screenshot_count: _rpScreenshots.length,
-        user_id: currentUser ? currentUser.id : null,
-        username: currentUser ? currentUser.username : null,
-        app_version: '1.0',
-        device: navigator.userAgent,
-        timestamp: new Date().toISOString(),
-        url: window.location.href
-    };
-
-    try {
-        if (window.sb && window.sb.from) {
-            await window.sb.from('bug_reports').insert([report]);
-        }
-        // Also store locally
-        var history = JSON.parse(localStorage.getItem('tf_report_history') || '[]');
-        history.unshift(report);
-        localStorage.setItem('tf_report_history', JSON.stringify(history.slice(0, 50)));
-    } catch(e) {
-        console.warn('[Report] Could not save to DB, stored locally only');
+    // This inserted into bug_reports, a table that does not exist, and only ever
+    // recorded screenshot_count — a number — so the images people attached were
+    // thrown away. It goes into public.reports with the rest of them, which is what
+    // the admin dashboard and the Support Requests screen read, and the images are
+    // uploaded and their URLs stored.
+    if (!window.sb || !currentUser) {
+        if (sendBtn) { sendBtn.textContent = 'Send'; sendBtn.style.pointerEvents = ''; }
+        showToast('Sign in to send a report');
+        return;
     }
 
+    var attachments = [];
+    try {
+        var files = _rpScreenshots.filter(function (s) { return s && s.file; });
+        for (var i = 0; i < files.length; i++) {
+            if (sendBtn) sendBtn.textContent = 'Uploading ' + (i + 1) + '/' + files.length + '…';
+            var f = files[i].file;
+            var ext = (f.name.split('.').pop() || 'jpg').toLowerCase();
+            var path = currentUser.id + '/report_' + Date.now() + '_' + i + '.' + ext;
+            var up = await sb.storage.from('images').upload(path, f, { contentType: f.type, upsert: false });
+            if (up.error) throw up.error;
+            var pub = sb.storage.from('images').getPublicUrl(path);
+            if (pub && pub.data && pub.data.publicUrl) attachments.push(pub.data.publicUrl);
+        }
+    } catch (e) {
+        console.warn('[Report] attachment upload failed', e);
+        showToast('Could not upload the image, sending the report without it');
+    }
+
+    if (sendBtn) sendBtn.textContent = 'Sending…';
+
+    // Device and page go in the details so a bug report can actually be chased,
+    // since reports has no column of its own for them.
+    var details = text +
+        '\n\n---\nPage: ' + window.location.pathname +
+        '\nDevice: ' + navigator.userAgent +
+        (_rpIncludeLogs ? '\nLogs and diagnostics: included by the reporter' : '\nLogs and diagnostics: not included');
+
+    try {
+        var res = await sb.from('reports').insert({
+            reporter_id: currentUser.id,
+            target_type: 'app',
+            target_id: null,
+            reason: 'Technical problem',
+            details: details,
+            status: 'open',
+            attachments: attachments.length ? attachments : null
+        });
+        if (res.error) throw res.error;
+    } catch(e) {
+        console.warn('[Report] save failed', e);
+        if (sendBtn) { sendBtn.textContent = 'Send'; sendBtn.style.pointerEvents = ''; }
+        showToast(e && e.message ? 'Could not send: ' + e.message : 'Could not send that report');
+        return;
+    }
+
+    _rpScreenshots = [];
     closeReportProblem();
     showToast('Report sent. Thank you for helping us improve TrustFirst.');
 }
@@ -21376,29 +21412,87 @@ async function submitReportProblem() {
 // ============================================================
 // REPORTS & VIOLATIONS HISTORY
 // ============================================================
+// The Support Requests screen was static markup that always read "No reports
+// submitted yet": nothing ever filled it. Worse, this function wrote into a
+// #violations-list element that does not exist in the template, and read a
+// localStorage history rather than the reports table, so a report submitted on
+// one device would never show up anyway. It loads from the database now.
 function openReportViolationsHistory() {
     var el = document.getElementById('reportViolationsOverlay');
     if (!el) return;
-    var list = document.getElementById('violations-list');
-    if (list) {
-        var history = JSON.parse(localStorage.getItem('tf_report_history') || '[]');
-        if (history.length === 0) {
-            list.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#888;font-size:14px;">' +
-                '<i class="fa-solid fa-flag" style="font-size:36px;color:#ccc;display:block;margin-bottom:14px;"></i>' +
-                'You haven\'t submitted any reports yet.</div>';
-        } else {
-            list.innerHTML = history.map(function(r) {
-                var ago = r.timestamp ? timeAgo(r.timestamp) : 'Recently';
-                return '<div style="background:var(--card-bg,#fff);border-radius:14px;padding:16px;margin:0 0 10px;border:0.5px solid var(--border-color,#eee);">' +
-                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
-                    '<span style="font-size:12px;font-weight:700;color:#007AFF;background:rgba(0,122,255,0.08);padding:3px 8px;border-radius:6px;">Technical Report</span>' +
-                    '<span style="font-size:12px;color:#888;">' + ago + '</span></div>' +
-                    '<p style="font-size:14px;color:var(--text-primary,#000);margin:0;line-height:1.5;">' + escapeHtml(r.description || '').substring(0, 120) + (r.description && r.description.length > 120 ? '…' : '') + '</p>' +
-                    '<p style="font-size:12px;color:#888;margin:8px 0 0;"><i class="fa-solid fa-circle-check" style="color:#34C759;"></i> Submitted</p></div>';
-            }).join('');
-        }
-    }
     openSub('reportViolationsOverlay');
+    _loadSupportRequests();
+}
+
+function _srEmpty(icon, text) {
+    return '<div style="padding:28px 20px;text-align:center;">' +
+        '<i class="' + icon + '" style="font-size:30px;color:#ccc;display:block;margin-bottom:10px;"></i>' +
+        '<p style="font-size:14px;color:#888;margin:0;line-height:1.5;">' + text + '</p></div>';
+}
+
+function _srStatusChip(status) {
+    var map = {
+        open:      ['Under review', '#FF9500'],
+        reviewing: ['Under review', '#FF9500'],
+        resolved:  ['Action taken', '#34C759'],
+        dismissed: ['No action taken', '#8a8a8e']
+    };
+    var s = map[status] || map.open;
+    return '<span style="font-size:11px;font-weight:700;color:' + s[1] + ';background:' + s[1] +
+        '1a;padding:3px 8px;border-radius:6px;white-space:nowrap;">' + s[0] + '</span>';
+}
+
+function _srRow(r) {
+    var kind = { post: 'Post', comment: 'Comment', user: 'Account', clip: 'Clip', app: 'Technical problem' }[r.target_type] || 'Report';
+    var when = r.created_at ? (typeof getTimeAgo === 'function' ? getTimeAgo(r.created_at) : '') : '';
+    var body = (r.details || r.reason || '').toString();
+    return '<div style="padding:14px 16px;border-bottom:0.5px solid var(--border-color,#eee);">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">' +
+            '<b style="font-size:14px;color:var(--text-primary,#000);">' + kind + ' · ' + escapeHtml(String(r.reason || '')) + '</b>' +
+            _srStatusChip(r.status) +
+        '</div>' +
+        (body && body !== r.reason
+            ? '<p style="font-size:13px;color:var(--text-secondary,#888);margin:0 0 6px;line-height:1.5;">' +
+                  escapeHtml(body.substring(0, 140)) + (body.length > 140 ? '…' : '') + '</p>'
+            : '') +
+        '<span style="font-size:12px;color:#8a8a8e;">' + escapeHtml(when) + '</span>' +
+    '</div>';
+}
+
+async function _loadSupportRequests() {
+    var mine = document.getElementById('supportReportsList');
+    var viol = document.getElementById('supportViolationsList');
+    if (mine) mine.innerHTML = '<div style="padding:26px;text-align:center;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;"></i></div>';
+    if (!window.sb || !currentUser) {
+        if (mine) mine.innerHTML = _srEmpty('fa-regular fa-flag', 'Sign in to see your reports.');
+        return;
+    }
+    try {
+        var res = await Promise.all([
+            sb.from('reports').select('id,target_type,reason,details,status,created_at')
+              .eq('reporter_id', currentUser.id).order('created_at', { ascending: false }).limit(30),
+            // Reports made against this account that a moderator acted on.
+            sb.from('reports').select('id,target_type,reason,details,status,created_at')
+              .eq('reported_user_id', currentUser.id).eq('status', 'resolved')
+              .order('created_at', { ascending: false }).limit(30)
+        ]);
+        if (res[0].error) throw res[0].error;
+        var rows = res[0].data || [];
+        if (mine) {
+            mine.innerHTML = rows.length
+                ? rows.map(_srRow).join('')
+                : _srEmpty('fa-regular fa-flag', 'No reports submitted yet.<br>When you report content, it will appear here.');
+        }
+        var vrows = (res[1] && !res[1].error && res[1].data) || [];
+        if (viol) {
+            viol.innerHTML = vrows.length
+                ? vrows.map(_srRow).join('')
+                : _srEmpty('fa-solid fa-triangle-exclamation', 'No violations on your account.');
+        }
+    } catch (e) {
+        console.warn('[support] could not load reports', e);
+        if (mine) mine.innerHTML = _srEmpty('fa-regular fa-flag', 'Could not load your reports right now.');
+    }
 }
 
     function closeReelOverlay() {
@@ -22927,29 +23021,52 @@ async function finalizeReport(contentId, contentType, reasonId) {
     var details = (document.getElementById('reportDetails') || {}).value || '';
     var alsoBlock = (document.getElementById('reportBlock') || {}).checked || false;
 
+    // This wrote to content_reports, a table nothing reads: the admin dashboard
+    // and the user's own Support Requests both read public.reports. It also sent a
+    // "timestamp" column that does not exist, so PostgREST rejected the row
+    // outright and the failure was swallowed by a console warning while the screen
+    // said Report Submitted. Both halves of that are why reports vanished.
     var reportData = {
-        content_id: contentId,
-        content_type: contentType,
+        reporter_id: currentUser ? currentUser.id : null,
+        target_type: contentType || 'post',
+        target_id: contentId ? String(contentId) : null,
         reason: reasonId,
         details: details.trim(),
-        reporter_id: currentUser ? currentUser.id : 'anonymous',
-        timestamp: new Date().toISOString(),
-        status: 'pending'
+        status: 'open'
     };
 
-    // Save to Supabase if available
+    var saved = false, failure = '';
     try {
         if (window.sb && currentUser) {
-            await sb.from('content_reports').insert(reportData);
+            var res = await sb.from('reports').insert(reportData);
+            if (res.error) throw res.error;
+            saved = true;
+        } else {
+            failure = 'You need to be signed in to report';
         }
     } catch(e) {
-        console.warn('[Report] DB save failed, saving locally');
+        console.warn('[Report] save failed', e);
+        failure = (e && e.message) ? e.message : 'Could not send that report';
     }
 
-    // Always save locally as backup
-    var reports = JSON.parse(localStorage.getItem('trustfirst-reports') || '[]');
-    reports.push(reportData);
-    localStorage.setItem('trustfirst-reports', JSON.stringify(reports));
+    if (!saved) {
+        showToast(failure || 'Could not send that report');
+        var _sheetFail = document.getElementById('reportSheet');
+        if (_sheetFail) closeReportMenu();
+        return;
+    }
+
+    // Reporting and blocking in one go, when that box was ticked.
+    if (alsoBlock && window.sb && currentUser) {
+        try {
+            var _target = await sb.from('posts').select('user_id').eq('id', contentId).maybeSingle();
+            var _blockId = _target && _target.data && _target.data.user_id;
+            if (_blockId && String(_blockId) !== String(currentUser.id)) {
+                await sb.from('user_blocks').insert({ blocker_id: currentUser.id, blocked_id: _blockId });
+                if (typeof tfHydrateBlockMuteCache === 'function') tfHydrateBlockMuteCache();
+            }
+        } catch (e) { console.warn('[Report] block alongside report failed', e && e.message); }
+    }
 
     // Show thank you
     var sheet = document.getElementById('reportSheet');
@@ -25247,13 +25364,17 @@ var userId = session.user.id;
     async reportContent(contentId, contentType, reason, details) {
         var session = await DB.getSession();
         if (!session) return false;
-        var { error } = await sb.from('content_reports').insert({
+        // public.reports, the one table the admin dashboard and Support Requests
+        // both read. content_reports was a dead end.
+        var { error } = await sb.from('reports').insert({
             reporter_id: session.user.id,
-            content_id: contentId,
-            content_type: contentType,
+            target_type: contentType || 'post',
+            target_id: contentId ? String(contentId) : null,
             reason: reason,
-            details: details || ''
+            details: details || '',
+            status: 'open'
         });
+        if (error) console.warn('[reportContent]', error.message);
         return !error;
     }
 };
@@ -26914,7 +27035,13 @@ function openPostMenu(postId, postUserId) {
     if (existing) { existing.remove(); return; }
 
     DB.getSession().then(function(session) {
-        var isOwn = session && session.user && session.user.id === postUserId;
+        // currentUser is the fallback. Relying on the session alone meant that if
+        // it had not resolved, or came back null, your own post was treated as
+        // somebody else's and you were offered the option to follow, mute and
+        // block yourself. If the author cannot be established at all, treat it as
+        // your own so those options stay hidden rather than pointing at nobody.
+        var myId = (session && session.user && session.user.id) || (currentUser && currentUser.id) || null;
+        var isOwn = !postUserId || (!!myId && String(myId) === String(postUserId));
 
         var overlay = document.createElement('div');
         overlay.id = 'lgPostMenuOverlay';
@@ -27095,16 +27222,42 @@ async function setCommentPolicy(postId, policy) {
     var sheet = document.getElementById('commentPolicySheet'); if (sheet) sheet.remove();
 }
 
-function lgOpenUserSubMenu() {
+async function lgOpenUserSubMenu() {
     var overlay = document.getElementById('lgPostMenuOverlay');
     var sheet = document.getElementById('lgPostMenuSheet');
     if (!sheet) return;
 
     var userId = _activePostUserId;
-    var followedUsers = JSON.parse(localStorage.getItem('tf-followed-users') || '[]');
-    var isFollowing = followedUsers.indexOf(userId) > -1;
-    var mutedUsers = JSON.parse(localStorage.getItem('tf-muted-users') || '[]');
-    var isMuted = mutedUsers.indexOf(userId) > -1;
+    if (!userId) { showToast('Could not tell who posted this'); return; }
+
+    // Who this actually is. The header used to build a handle out of the first six
+    // characters of the user id — @user_7a805c — next to a generic grey avatar, so
+    // the sheet named a person who does not exist.
+    var handle = 'user', avatarUrl = '', isFollowing = false, isMuted = false;
+    try {
+        var _who = await sb.from('users').select('username,display_name,full_name,avatar_url').eq('id', userId).maybeSingle();
+        if (_who && _who.data) {
+            handle = _who.data.username || 'user';
+            avatarUrl = _who.data.avatar_url || '';
+        }
+    } catch (e) {}
+    if (!avatarUrl) {
+        avatarUrl = 'https://ui-avatars.com/api/?name=' + encodeURIComponent(handle) + '&background=007AFF&color=fff&size=80';
+    }
+
+    // Follow and mute state come from the database, not from a device-local list
+    // that any other device would disagree with.
+    try {
+        var _me = (currentUser && currentUser.id) || null;
+        if (_me) {
+            var _st = await Promise.all([
+                sb.from('follows').select('id').eq('follower_id', _me).eq('following_id', userId).maybeSingle(),
+                sb.from('user_mutes').select('id').eq('muter_id', _me).eq('muted_id', userId).maybeSingle()
+            ]);
+            isFollowing = !!(_st[0] && _st[0].data);
+            isMuted = !!(_st[1] && _st[1].data);
+        }
+    } catch (e) {}
 
     sheet.style.transition = 'transform 0.28s cubic-bezier(0.32,0.72,0,1), opacity 0.2s';
     sheet.style.transform = 'translateX(-30px)';
@@ -27117,8 +27270,8 @@ function lgOpenUserSubMenu() {
                 <!-- Handle header -->
                 <div style="display:flex;align-items:center;gap:10px;padding:14px 20px;border-bottom:0.5px solid rgba(0,0,0,0.07);">
                     <i class="fa-solid fa-chevron-left" onclick="lgRestorePostMenu()" style="color:#007AFF;font-size:15px;cursor:pointer;padding:4px;"></i>
-                    <img src="https://ui-avatars.com/api/?name=User&background=007AFF&color=fff&size=60" style="width:34px;height:34px;border-radius:50%;object-fit:cover;">
-                    <span style="font-size:14px;font-weight:700;color:var(--text-primary,#000);">@user_${String(userId).substring(0,6)}</span>
+                    <img src="${escapeHtml(avatarUrl)}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;">
+                    <span onclick="document.getElementById('lgPostMenuOverlay').remove();viewUserProfile('${userId}')" style="font-size:14px;font-weight:700;color:var(--text-primary,#000);cursor:pointer;">@${escapeHtml(handle)}</span>
                 </div>
 
                 <div onclick="lgUserAction('follow','${userId}')" style="display:flex;align-items:center;justify-content:space-between;padding:17px 20px;border-bottom:0.5px solid rgba(0,0,0,0.07);cursor:pointer;" onmouseover="this.style.background='rgba(0,0,0,0.04)'" onmouseout="this.style.background=''">
@@ -27151,43 +27304,113 @@ function lgRestorePostMenu() {
     openPostMenu(_activePostMenuId, _activePostUserId);
 }
 
-function lgUserAction(action, userId) {
-    document.getElementById('lgPostMenuOverlay').remove();
-    var followedUsers = JSON.parse(localStorage.getItem('tf-followed-users') || '[]');
-    var mutedUsers = JSON.parse(localStorage.getItem('tf-muted-users') || '[]');
-    switch(action) {
-        case 'follow':
-            if (followedUsers.indexOf(userId) > -1) {
-                localStorage.setItem('tf-followed-users', JSON.stringify(followedUsers.filter(function(u){ return u !== userId; })));
+// Follow, mute and block from the post menu. All three only ever touched
+// localStorage, so they did nothing the server or any other device knew about:
+// a "block" was forgotten on reinstall and the blocked person was never blocked.
+// Each writes to its own table now, with the local list kept in step so the rest
+// of the app's cached checks still agree.
+async function lgUserAction(action, userId) {
+    var ov = document.getElementById('lgPostMenuOverlay');
+    if (ov) ov.remove();
+    if (!userId) return;
+    var me = (currentUser && currentUser.id) || null;
+    if (!me || !window.sb) { showToast('Sign in first'); return; }
+    if (String(userId) === String(me)) { showToast('That is your own account'); return; }
 
-            } else {
-                followedUsers.push(userId);
-                localStorage.setItem('tf-followed-users', JSON.stringify(followedUsers));
+    function _localList(key) { try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch (e) { return []; } }
+    function _localSet(key, arr) { try { localStorage.setItem(key, JSON.stringify(arr)); } catch (e) {} }
+    function _localToggle(key, id, on) {
+        var arr = _localList(key).filter(function (u) { return u !== id; });
+        if (on) arr.push(id);
+        _localSet(key, arr);
+    }
 
-                        triggerHaptic(30);
-            }
-            // Update follower count on screen
-var followerCountEl = document.querySelector('[data-follower-count="'+userId+'"]');
-if (followerCountEl) {
-    var count = parseInt(followerCountEl.textContent) || 0;
-    followerCountEl.textContent = followedUsers.indexOf(userId) > -1 ? count + 1 : Math.max(0, count - 1);
-}
-            break;
-        case 'mute':
-            if (mutedUsers.indexOf(userId) > -1) {
-                localStorage.setItem('tf-muted-users', JSON.stringify(mutedUsers.filter(function(u){ return u !== userId; })));
+    try {
+        if (action === 'follow') {
+            // RealData.toggleFollow owns the follows table, the counters and the
+            // notification, so this does not reimplement any of it.
+            var nowFollowing = await RealData.toggleFollow(userId);
+            _localToggle('tf-followed-users', userId, !!nowFollowing);
+            triggerHaptic(30);
+            showToast(nowFollowing ? 'Following' : 'Unfollowed');
+            return;
+        }
+
+        if (action === 'mute') {
+            var m = await sb.from('user_mutes').select('id').eq('muter_id', me).eq('muted_id', userId).maybeSingle();
+            if (m && m.data) {
+                var du = await sb.from('user_mutes').delete().eq('id', m.data.id);
+                if (du.error) throw du.error;
+                _localToggle('tf-muted-users', userId, false);
                 showToast('Unmuted');
             } else {
-                mutedUsers.push(userId);
-                localStorage.setItem('tf-muted-users', JSON.stringify(mutedUsers));
+                var im = await sb.from('user_mutes').insert({ muter_id: me, muted_id: userId });
+                if (im.error) throw im.error;
+                _localToggle('tf-muted-users', userId, true);
                 showToast('Muted, you won\'t see their posts');
             }
-            break;
-        case 'block':
-            confirmBlock(userId, { closest: function(){ return { parentElement: { parentElement: { remove: function(){} } } }; } });
-            showToast('User blocked');
-            break;
+            if (typeof tfApplyBlocksAndMutes === 'function') tfApplyBlocksAndMutes();
+            return;
+        }
+
+        if (action === 'block') {
+            var b = await sb.from('user_blocks').select('id').eq('blocker_id', me).eq('blocked_id', userId).maybeSingle();
+            if (b && b.data) {
+                var db = await sb.from('user_blocks').delete().eq('id', b.data.id);
+                if (db.error) throw db.error;
+                _localToggle('tf-blocked-users', userId, false);
+                showToast('Unblocked');
+            } else {
+                var ib = await sb.from('user_blocks').insert({ blocker_id: me, blocked_id: userId });
+                if (ib.error) throw ib.error;
+                _localToggle('tf-blocked-users', userId, true);
+                // Blocking someone you follow drops the follow as well, which is
+                // what every other app does and what people expect.
+                try { await sb.from('follows').delete().eq('follower_id', me).eq('following_id', userId); } catch (e) {}
+                _localToggle('tf-followed-users', userId, false);
+                showToast('Blocked');
+            }
+            if (typeof tfApplyBlocksAndMutes === 'function') tfApplyBlocksAndMutes();
+            triggerHaptic(30);
+            return;
+        }
+    } catch (e) {
+        console.warn('[lgUserAction] ' + action + ' failed', e);
+        showToast(e && e.message ? 'Could not ' + action + ': ' + e.message : 'Could not ' + action);
     }
+}
+
+// Blocked and muted people should disappear from what is already on screen, not
+// only from the next fetch. Posts carry their author's id, so the rows can just
+// be pulled out.
+function tfApplyBlocksAndMutes() {
+    var hidden = [];
+    try {
+        hidden = JSON.parse(localStorage.getItem('tf-blocked-users') || '[]')
+            .concat(JSON.parse(localStorage.getItem('tf-muted-users') || '[]'));
+    } catch (e) { return; }
+    if (!hidden.length) return;
+    hidden.forEach(function (id) {
+        if (!id) return;
+        // Post cards already carry their author, so the row can be identified
+        // without touching how they are built.
+        document.querySelectorAll('.post-card[data-user-id="' + id + '"]').forEach(function (el) { el.remove(); });
+    });
+}
+
+// Pull the two lists from the database into localStorage on boot, so a fresh
+// install or another device honours blocks and mutes made elsewhere.
+async function tfHydrateBlockMuteCache() {
+    if (!window.sb || !currentUser) return;
+    try {
+        var r = await Promise.all([
+            sb.from('user_blocks').select('blocked_id').eq('blocker_id', currentUser.id),
+            sb.from('user_mutes').select('muted_id').eq('muter_id', currentUser.id)
+        ]);
+        localStorage.setItem('tf-blocked-users', JSON.stringify((r[0].data || []).map(function (x) { return x.blocked_id; })));
+        localStorage.setItem('tf-muted-users', JSON.stringify((r[1].data || []).map(function (x) { return x.muted_id; })));
+        tfApplyBlocksAndMutes();
+    } catch (e) { console.warn('[blocks] hydrate skipped', e && e.message); }
 }
 
 async function showPostInteractions(postId) {
@@ -27856,7 +28079,17 @@ function reportUser(userId, atHandle) {
 function submitUserReport(userId, reason) {
     document.getElementById('reportUserModal')?.remove();
     if (window.sb && currentUser) {
-        sb.from('reports').insert({ reporter_id: currentUser.id, reported_user_id: userId, reason: reason, type: 'user' }).then(function(){});
+        // The old insert named a "type" column that does not exist and left
+        // target_type, which is NOT NULL, empty — so every report of a user was
+        // rejected and the .then() had no error handler to notice.
+        sb.from('reports').insert({
+            reporter_id: currentUser.id,
+            target_type: 'user',
+            target_id: String(userId),
+            reported_user_id: userId,
+            reason: reason,
+            status: 'open'
+        }).then(function(r){ if (r && r.error) { console.warn('[submitUserReport]', r.error.message); showToast('Could not send that report'); } });
     }
     _inlineConfirm('Report submitted. Thank you.');
 }

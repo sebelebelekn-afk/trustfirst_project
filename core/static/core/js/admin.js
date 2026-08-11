@@ -272,21 +272,51 @@ window.adminViewDoc = async function(path) {
 
 async function adminLoadReports(body) {
     try {
-        var res = await sb.from('reports').select('*').neq('status', 'resolved').neq('status', 'dismissed').order('created_at', { ascending: false }).limit(50);
+        var res = await sb.from('reports').select('*')
+            .neq('status', 'resolved').neq('status', 'dismissed')
+            .order('created_at', { ascending: false }).limit(50);
+        if (res.error) throw res.error;
         var rows = res.data || [];
         if (!rows.length) { body.innerHTML = _adminEmpty('No open reports'); return; }
+
+        // Reporter names come in a second query. reports.reporter_id has its
+        // foreign key to auth.users, which PostgREST cannot embed from the public
+        // schema, so asking for reporter:reporter_id(...) fails the whole request.
+        var names = {};
+        try {
+            var ids = rows.map(function (r) { return r.reporter_id; }).filter(Boolean);
+            if (ids.length) {
+                var who = await sb.from('users').select('id,username,full_name').in('id', ids);
+                (who.data || []).forEach(function (u) { names[u.id] = u.username || u.full_name; });
+            }
+        } catch (e) { /* names are a nicety, the report still shows */ }
+
         body.innerHTML = rows.map(function(r) {
+            var who = names[r.reporter_id] || 'unknown';
+            var when = r.created_at ? new Date(r.created_at).toLocaleString('en-ZA') : '';
+            var shots = (r.attachments || []).map(function (u) {
+                return '<img src="' + escapeHtml(u) + '" onclick="window.open(\'' + escapeHtml(u) + '\',\'_blank\')" ' +
+                    'style="width:64px;height:64px;border-radius:8px;object-fit:cover;cursor:pointer;border:1px solid var(--border-color,#eee);">';
+            }).join('');
             return _adminCard(
-                '<div style="font-size:14px;font-weight:700;color:var(--text-primary,#000);text-transform:capitalize;">' + escapeHtml(r.target_type) + ' report</div>' +
-                '<div style="font-size:13px;color:var(--text-secondary,#555);margin:6px 0;">Reason: ' + escapeHtml(r.reason) + '</div>' +
-                (r.details ? '<div style="font-size:12px;color:#888;margin-bottom:10px;">' + escapeHtml(r.details) + '</div>' : '') +
+                '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
+                    '<div style="font-size:14px;font-weight:700;color:var(--text-primary,#000);text-transform:capitalize;">' + escapeHtml(r.target_type || 'report') + ' report</div>' +
+                    '<span style="font-size:11px;color:#888;white-space:nowrap;">' + escapeHtml(when) + '</span>' +
+                '</div>' +
+                '<div style="font-size:12px;color:#888;margin:4px 0 6px;">from @' + escapeHtml(who) + (r.target_id ? ' · target ' + escapeHtml(String(r.target_id)) : '') + '</div>' +
+                '<div style="font-size:13px;color:var(--text-secondary,#555);margin:6px 0;">Reason: ' + escapeHtml(r.reason || '') + '</div>' +
+                (r.details ? '<div style="font-size:12px;color:#888;margin-bottom:10px;white-space:pre-wrap;">' + escapeHtml(r.details) + '</div>' : '') +
+                (shots ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">' + shots + '</div>' : '') +
                 '<div style="display:flex;gap:8px;margin-top:10px;">' +
                     '<button onclick="adminResolveReport(\'' + r.id + '\',\'resolved\')" style="flex:1;padding:11px;border-radius:11px;border:none;background:#34C759;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Resolve</button>' +
                     '<button onclick="adminResolveReport(\'' + r.id + '\',\'dismissed\')" style="flex:1;padding:11px;border-radius:11px;border:none;background:var(--bg-secondary,#eee);color:#888;font-size:13px;font-weight:700;cursor:pointer;">Dismiss</button>' +
                 '</div>'
             );
         }).join('');
-    } catch (e) { body.innerHTML = _adminEmpty('Could not load'); }
+    } catch (e) {
+        console.warn('[admin] reports failed', e);
+        body.innerHTML = _adminEmpty('Could not load: ' + (e && e.message ? e.message : 'unknown error'));
+    }
 }
 
 window.adminResolveReport = async function(id, status) {

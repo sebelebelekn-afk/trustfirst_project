@@ -4027,11 +4027,12 @@ function authenticateUser() {
       </div>
       <div style="padding:0 20px 16px;">
         <div id="rp-screenshots" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;"></div>
-        <div style="display:flex;gap:12px;">
-          <button onclick="rpAttachScreenshot()" style="flex:1;padding:13px;background:var(--card-bg,#f2f2f7);border:none;border-radius:12px;color:var(--text-primary,#000);font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><i class="fa-solid fa-camera" style="font-size:15px;"></i> Screenshot</button>
-          <button onclick="document.getElementById('rp-file-input').click()" style="flex:1;padding:13px;background:var(--card-bg,#f2f2f7);border:none;border-radius:12px;color:var(--text-primary,#000);font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><i class="fa-regular fa-image" style="font-size:15px;"></i> Upload</button>
-        </div>
-        <input type="file" id="rp-file-input" accept="image/*" hidden onchange="rpHandleUpload(this)">
+        <!-- The Screenshot button is gone. A web page cannot capture the screen it
+             is running in, so it only ever attached an empty placeholder. Picking a
+             screenshot you already took does the same job, for real. -->
+        <button onclick="document.getElementById('rp-file-input').click()" style="width:100%;padding:13px;background:var(--card-bg,#f2f2f7);border:none;border-radius:12px;color:var(--text-primary,#000);font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><i class="fa-regular fa-image" style="font-size:15px;"></i> Attach a screenshot</button>
+        <p style="font-size:12px;color:#8a8a8e;margin:10px 0 0;text-align:center;line-height:1.5;">Up to 3 images, 5MB each.</p>
+        <input type="file" id="rp-file-input" accept="image/*" multiple hidden onchange="rpHandleUpload(this)">
       </div>
     </div>
 
@@ -4221,11 +4222,11 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=211"></script>
+<script src="{% static 'core/js/feed.js' %}?v=212"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=75"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
-<script src="{% static 'core/js/admin.js' %}?v=76"></script>
+<script src="{% static 'core/js/admin.js' %}?v=77"></script>
 <!-- Native shell bridge. No-ops in the browser, so the PWA is unaffected.
      Must load after feed.js because it wraps the media pickers defined there. -->
 <script src="{% static 'core/js/native.js' %}?v=5"></script>
