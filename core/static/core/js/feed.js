@@ -27354,24 +27354,16 @@ async function lgUserAction(action, userId) {
         }
 
         if (action === 'block') {
-            var b = await sb.from('user_blocks').select('id').eq('blocker_id', me).eq('blocked_id', userId).maybeSingle();
-            if (b && b.data) {
-                var db = await sb.from('user_blocks').delete().eq('id', b.data.id);
-                if (db.error) throw db.error;
-                _localToggle('tf-blocked-users', userId, false);
-                showToast('Unblocked');
-            } else {
-                var ib = await sb.from('user_blocks').insert({ blocker_id: me, blocked_id: userId });
-                if (ib.error) throw ib.error;
-                _localToggle('tf-blocked-users', userId, true);
-                // Blocking someone you follow drops the follow as well, which is
-                // what every other app does and what people expect.
-                try { await sb.from('follows').delete().eq('follower_id', me).eq('following_id', userId); } catch (e) {}
+            // tfSetBlocked is the single writer: it drops the follow both ways and
+            // keeps every local copy of the list in step.
+            var already = await sb.from('user_blocks').select('id').eq('blocker_id', me).eq('blocked_id', userId).maybeSingle();
+            var wasBlocked = !!(already && already.data);
+            var ok = await tfSetBlocked(userId, !wasBlocked);
+            if (ok) {
                 _localToggle('tf-followed-users', userId, false);
-                showToast('Blocked');
+                showToast(wasBlocked ? 'Unblocked' : 'Blocked');
+                triggerHaptic(30);
             }
-            if (typeof tfApplyBlocksAndMutes === 'function') tfApplyBlocksAndMutes();
-            triggerHaptic(30);
             return;
         }
     } catch (e) {
@@ -27407,8 +27399,12 @@ async function tfHydrateBlockMuteCache() {
             sb.from('user_blocks').select('blocked_id').eq('blocker_id', currentUser.id),
             sb.from('user_mutes').select('muted_id').eq('muter_id', currentUser.id)
         ]);
-        localStorage.setItem('tf-blocked-users', JSON.stringify((r[0].data || []).map(function (x) { return x.blocked_id; })));
+        var blocked = (r[0].data || []).map(function (x) { return x.blocked_id; });
+        localStorage.setItem('tf-blocked-users', JSON.stringify(blocked));
         localStorage.setItem('tf-muted-users', JSON.stringify((r[1].data || []).map(function (x) { return x.muted_id; })));
+        // cpBlockedUsers was read from localStorage once at load, so it has to be
+        // replaced too or the contact profile keeps judging by a stale list.
+        if (typeof cpBlockedUsers !== 'undefined') cpBlockedUsers = blocked;
         tfApplyBlocksAndMutes();
     } catch (e) { console.warn('[blocks] hydrate skipped', e && e.message); }
 }
@@ -28042,15 +28038,15 @@ function toggleUserMenu(userId) {
     }
 }
 
-function blockUser(userId, atHandle) {
+async function blockUser(userId, atHandle) {
     document.querySelectorAll('[id^="upm_"]').forEach(function(m){ m.style.display='none'; });
-    if (!confirm('Block ' + atHandle + '? They will not be able to see your profile or posts.')) return;
-    if (window.sb && currentUser) {
-        sb.from('blocks').insert({ blocker_id: currentUser.id, blocked_id: userId }).then(function(){
-            var ov = document.getElementById('user-profile-overlay');
-            if (ov) ov.remove();
-        });
-    }
+    if (!confirm('Block ' + atHandle + '? They will not be able to see your posts or interact with you.')) return;
+    // Was inserting into "blocks", a table that does not exist, and then confirming
+    // success regardless.
+    var ok = await tfSetBlocked(userId, true);
+    if (!ok) return;
+    var ov = document.getElementById('user-profile-overlay');
+    if (ov) ov.remove();
     _inlineConfirm(atHandle + ' blocked.');
 }
 
@@ -33079,18 +33075,24 @@ function getCurrentChatUserKey() {
 }
 
 // --- BLOCK ---
+// This used the person's display name as the key while every other block check
+// uses their id, so the same list held a mix of both and nothing ever matched.
+// Both paths go through tfSetBlocked now, which writes to user_blocks.
 function showBlockConfirm() {
     var userName = getCurrentChatUserKey();
-    var isBlocked = cpBlockedUsers.indexOf(userName) > -1;
+    var userId = window._currentChatUserId || null;
+    if (!userId) { showToast('Could not tell who this is'); return; }
+    var isBlocked = cpBlockedUsers.indexOf(userId) > -1;
     var label = document.getElementById('block-btn-label');
 
     if (isBlocked) {
         if (!confirm('Unblock ' + userName + '?')) return;
-        cpBlockedUsers = cpBlockedUsers.filter(function(u) { return u !== userName; });
-        localStorage.setItem('tf-blocked-users', JSON.stringify(cpBlockedUsers));
-        if (label) label.textContent = 'Block';
-        showToast(userName + ' unblocked');
-        triggerHaptic(20);
+        tfSetBlocked(userId, false).then(function (ok) {
+            if (!ok) return;
+            if (label) label.textContent = 'Block';
+            showToast(userName + ' unblocked');
+            triggerHaptic(20);
+        });
         return;
     }
 
@@ -33104,20 +33106,57 @@ function showBlockConfirm() {
         '<p style="font-size:13px;color:#888;line-height:1.6;margin-bottom:24px;">They won\'t be able to find your profile, send you messages, or see your posts.</p>' +
         '<div style="display:flex;gap:10px;">' +
         '<button onclick="this.closest(\'div\').parentElement.parentElement.remove()" style="flex:1;padding:13px;border-radius:14px;border:none;background:var(--bg-secondary,#f0f0f0);color:var(--text-primary,#000);font-size:15px;font-weight:600;cursor:pointer;">Cancel</button>' +
-        '<button onclick="confirmBlock(\'' + escapeHtml(userName) + '\',this)" style="flex:1;padding:13px;border-radius:14px;border:none;background:#FF3B30;color:white;font-size:15px;font-weight:700;cursor:pointer;">Block</button>' +
+        '<button onclick="confirmBlock(\'' + escapeHtml(userId) + '\',this,\'' + escapeHtml(userName) + '\')" style="flex:1;padding:13px;border-radius:14px;border:none;background:#FF3B30;color:white;font-size:15px;font-weight:700;cursor:pointer;">Block</button>' +
         '</div></div>';
     modal.addEventListener('click', function(e) { if (e.target === modal) modal.remove(); });
     document.body.appendChild(modal);
 }
 
-function confirmBlock(userName, btn) {
-    cpBlockedUsers.push(userName);
-    localStorage.setItem('tf-blocked-users', JSON.stringify(cpBlockedUsers));
-    btn.closest('div').parentElement.parentElement.remove();
+async function confirmBlock(userId, btn, userName) {
+    if (btn) { btn.textContent = '…'; btn.style.pointerEvents = 'none'; }
+    var ok = await tfSetBlocked(userId, true);
+    var modal = btn && btn.closest('div') && btn.closest('div').parentElement;
+    if (modal && modal.parentElement) modal.parentElement.remove();
+    if (!ok) return;
     var label = document.getElementById('block-btn-label');
     if (label) label.textContent = 'Unblock';
-    showToast(userName + ' has been blocked');
+    showToast((userName || 'They') + ' has been blocked');
     triggerHaptic(30);
+}
+
+// The one place a block is written. The server enforces it from here on: a blocked
+// person cannot read your posts, clips or stories, and cannot like, comment,
+// follow, repost, bookmark, view, message, call or notify you. The local list is
+// only so the app can grey out a button without asking the server first.
+async function tfSetBlocked(userId, on) {
+    if (!window.sb || !currentUser) { showToast('Sign in first'); return false; }
+    if (!userId || String(userId) === String(currentUser.id)) { showToast('That is your own account'); return false; }
+    try {
+        if (on) {
+            var ins = await sb.from('user_blocks').insert({ blocker_id: currentUser.id, blocked_id: userId });
+            // A second block of the same person is not an error worth showing.
+            if (ins.error && !/duplicate|unique/i.test(ins.error.message)) throw ins.error;
+            // Blocking severs the follow in both directions.
+            try {
+                await sb.from('follows').delete().eq('follower_id', currentUser.id).eq('following_id', userId);
+                await sb.from('follows').delete().eq('follower_id', userId).eq('following_id', currentUser.id);
+            } catch (e) {}
+        } else {
+            var del = await sb.from('user_blocks').delete()
+                .eq('blocker_id', currentUser.id).eq('blocked_id', userId);
+            if (del.error) throw del.error;
+        }
+    } catch (e) {
+        console.warn('[block] ' + (on ? 'block' : 'unblock') + ' failed', e);
+        showToast(e && e.message ? 'Could not save that: ' + e.message : 'Could not save that');
+        return false;
+    }
+    // Keep every local copy of the list in step, including cpBlockedUsers.
+    cpBlockedUsers = cpBlockedUsers.filter(function (u) { return u !== userId; });
+    if (on) cpBlockedUsers.push(userId);
+    try { localStorage.setItem('tf-blocked-users', JSON.stringify(cpBlockedUsers)); } catch (e) {}
+    if (typeof tfApplyBlocksAndMutes === 'function') tfApplyBlocksAndMutes();
+    return true;
 }
 
 // --- RESTRICT (Liquid Glass sheet) ---
@@ -34623,19 +34662,21 @@ async function renderBlockSearch(query) {
 }
 
 async function blockUserById(userId, displayName, btn) {
-    if (!window.sb || !currentUser) return;
+    // This wrote to a table called "blocks", which has never existed, so the
+    // Block button in Settings silently did nothing at all. One shared writer now.
     var alreadyBlocked = (typeof cpBlockedUsers !== 'undefined' && cpBlockedUsers.indexOf(userId) > -1);
+    if (btn) { btn.textContent = '…'; btn.style.pointerEvents = 'none'; }
+    var ok = await tfSetBlocked(userId, !alreadyBlocked);
+    if (btn) btn.style.pointerEvents = '';
+    if (!ok) {
+        if (btn) btn.textContent = alreadyBlocked ? 'Unblock' : 'Block';
+        return;
+    }
     if (alreadyBlocked) {
-        await window.sb.from('blocks').delete().match({ blocker_id: currentUser.id, blocked_id: userId });
-        cpBlockedUsers = cpBlockedUsers.filter(function(id) { return id !== userId; });
-        localStorage.setItem('tf-blocked-users', JSON.stringify(cpBlockedUsers));
-        btn.textContent = 'Block'; btn.style.color = '#FF3B30'; btn.style.borderColor = '#FF3B30';
+        if (btn) { btn.textContent = 'Block'; btn.style.color = '#FF3B30'; btn.style.borderColor = '#FF3B30'; }
         showToast(displayName + ' unblocked');
     } else {
-        await window.sb.from('blocks').insert({ blocker_id: currentUser.id, blocked_id: userId });
-        if (typeof cpBlockedUsers !== 'undefined') cpBlockedUsers.push(userId);
-        localStorage.setItem('tf-blocked-users', JSON.stringify(cpBlockedUsers));
-        btn.textContent = 'Blocked'; btn.style.color = '#888'; btn.style.borderColor = '#eee';
+        if (btn) { btn.textContent = 'Unblock'; btn.style.color = '#888'; btn.style.borderColor = '#eee'; }
         showToast(displayName + ' blocked');
     }
 }
@@ -47100,10 +47141,15 @@ async function savePronoun(val, modal) {
         var el = document.getElementById('blockedAccountsList');
         if (!el) return;
         if (!window.sb || !currentUser) { el.innerHTML = '<p style="text-align:center;color:#aaa;padding:24px 0;font-size:14px;">Sign in to view blocked accounts.</p>'; return; }
-        var { data, error } = await sb.from('blocks').select('blocked_id, profiles:blocked_id(id,full_name,username,avatar_url)').eq('blocker_id', currentUser.id);
+        // "blocks" does not exist and neither does a "profiles" relation on it, so
+        // this list was always empty no matter how many people you had blocked.
+        var { data, error } = await sb.from('user_blocks')
+            .select('blocked_id, users:blocked_id(id,full_name,username,avatar_url)')
+            .eq('blocker_id', currentUser.id);
+        if (error) { console.warn('[blocked list]', error.message); }
         if (error || !data || !data.length) { el.innerHTML = '<p style="text-align:center;color:#aaa;padding:24px 0;font-size:14px;">You haven\'t blocked anyone.</p>'; return; }
         el.innerHTML = '<div class="settings-card">' + data.map(function(b) {
-            var u = b.profiles || {};
+            var u = b.users || {};
             var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=FF3B30&color=fff&size=80');
             return '<div class="blocked-row" data-uid="' + u.id + '"><img src="' + escapeHtml(av) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;"><div style="flex:1;"><b style="font-size:15px;">@' + escapeHtml(u.username || '') + '</b><p style="font-size:11px;color:#888;margin:2px 0 0;">Includes other accounts they may have or create.</p></div><button onclick="realUnblock(this)" style="padding:8px 16px;border-radius:20px;border:1px solid #FF3B30;background:transparent;color:#FF3B30;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">Unblock</button></div>';
         }).join('') + '</div>';
@@ -47126,8 +47172,8 @@ async function savePronoun(val, modal) {
         var uid = btn.closest('[data-uid]')?.getAttribute('data-uid');
         if (!uid || !window.sb) return;
         btn.disabled = true;
-        var { error } = await sb.from('blocks').delete().eq('blocker_id', currentUser.id).eq('blocked_id', uid);
-        if (error) { showToast('Failed. Try again.'); btn.disabled = false; return; }
+        var ok = await tfSetBlocked(uid, false);
+        if (!ok) { btn.disabled = false; return; }
         btn.closest('[data-uid]')?.remove();
         showToast('Unblocked');
     }
