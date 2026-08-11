@@ -1657,6 +1657,9 @@ function tfOpenDeepLink() {
             sb.from('users').select('id').ilike('username', value).limit(1).maybeSingle()
               .then(function(r) {
                   if (r.data && r.data.id && typeof viewUserProfile === 'function') viewUserProfile(r.data.id);
+                  // A shared link to an account that has blocked you finds nothing,
+                  // and gets the same page as any other dead link.
+                  else if (typeof _renderPageUnavailable === 'function') _renderPageUnavailable();
                   else showToast('That profile could not be found');
               }, function() {});
             return;
@@ -27704,6 +27707,46 @@ function _userProfileSkeleton() {
     return ov;
 }
 
+// What a blocked person gets when they go looking for the account that blocked
+// them. Says nothing about why, because "you have been blocked" is itself
+// information the blocker did not agree to share. The same screen covers a
+// deleted account and a genuine fetch failure, which is what makes it safe.
+function _renderPageUnavailable(existingOverlay) {
+    var ov = existingOverlay || document.getElementById('user-profile-overlay');
+    if (!ov) {
+        ov = document.createElement('div');
+        ov.id = 'user-profile-overlay';
+        ov.className = 'page-overlay';
+        document.body.appendChild(ov);
+    }
+    delete ov.dataset.skeleton;
+    ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg-primary,#fff);z-index:9999;display:flex;flex-direction:column;overflow-y:auto;';
+    ov.innerHTML =
+        '<div style="flex-shrink:0;display:flex;align-items:center;padding:calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px;border-bottom:0.5px solid var(--border-color,#eee);">' +
+            '<i class="fa-solid fa-chevron-left" onclick="document.getElementById(\'user-profile-overlay\').remove()" ' +
+                'style="font-size:20px;color:var(--text-primary,#000);cursor:pointer;padding:4px 8px;"></i>' +
+        '</div>' +
+        '<div style="flex:1;display:flex;flex-direction:column;align-items:center;padding:70px 34px 0;text-align:center;">' +
+            // Two gears, drawn inline so there is nothing to download.
+            '<svg width="132" height="112" viewBox="0 0 132 112" style="margin-bottom:26px;" aria-hidden="true">' +
+                '<defs><linearGradient id="tfUnavailG" x1="0" y1="0" x2="1" y2="1">' +
+                    '<stop offset="0" stop-color="#2E9BFF"/><stop offset="1" stop-color="#5B5BE0"/>' +
+                '</linearGradient></defs>' +
+                '<path fill="url(#tfUnavailG)" d="M95 8l3.6 8.2 8.9 1.1 1.1 8.9 8.2 3.6-3.4 8.3 4.6 7.7-6.6 6.1.6 8.9-8.8 1.7-4.2 7.9-8.1-3.8-8.1 3.8-4.2-7.9-8.8-1.7.6-8.9-6.6-6.1 4.6-7.7-3.4-8.3 8.2-3.6 1.1-8.9 8.9-1.1L86 8l4.5 2.1z"/>' +
+                '<circle cx="90.5" cy="40" r="10.5" fill="var(--bg-primary,#fff)"/>' +
+                '<path fill="url(#tfUnavailG)" d="M44 34l4.2 9.6 10.4 1.3 1.3 10.4 9.6 4.2-4 9.7 5.4 9-7.7 7.1.7 10.4-10.3 2-4.9 9.2-9.5-4.4-9.5 4.4-4.9-9.2-10.3-2 .7-10.4-7.7-7.1 5.4-9-4-9.7 9.6-4.2 1.3-10.4 10.4-1.3L39.7 34l4.3 2.5z"/>' +
+                '<circle cx="39.5" cy="72.5" r="12.5" fill="var(--bg-primary,#fff)"/>' +
+            '</svg>' +
+            '<h2 style="font-size:27px;font-weight:800;color:var(--text-secondary,#5a5a5e);line-height:1.25;margin:0 0 14px;">' +
+                'This page isn\'t available at the moment</h2>' +
+            '<p style="font-size:17px;color:var(--text-secondary,#7a7a7e);line-height:1.45;margin:0;">' +
+                'There may be a technical problem. Refresh to try again.</p>' +
+        '</div>';
+    if (!ov.parentNode) document.body.appendChild(ov);
+    hideNavBar && hideNavBar();
+    return ov;
+}
+
 async function viewUserProfile(userId) {
     // Own profile — check both session and currentUser
     if (currentUser && currentUser.id === userId) {
@@ -27731,8 +27774,11 @@ async function viewUserProfile(userId) {
     var profile = await DB.getUserProfile(userId).catch(function(){ return null; });
     if (_skelGen !== window._upOpenGen) return;
     if (!profile) {
-        if (_skel) _skel.remove();
-        showToast('User not found');
+        // No row came back. Either the account is gone, or the person looking has
+        // been blocked by it, in which case the database hides it and there is
+        // nothing to say beyond this. Deliberately the same screen for both, so a
+        // block cannot be told apart from an ordinary failure.
+        _renderPageUnavailable(_skel);
         return;
     }
 
