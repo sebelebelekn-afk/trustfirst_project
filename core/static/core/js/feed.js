@@ -27727,15 +27727,23 @@ function _renderPageUnavailable(existingOverlay) {
                 'style="font-size:20px;color:var(--text-primary,#000);cursor:pointer;padding:4px 8px;"></i>' +
         '</div>' +
         '<div style="flex:1;display:flex;flex-direction:column;align-items:center;padding:70px 34px 0;text-align:center;">' +
-            // Two gears, drawn inline so there is nothing to download.
-            '<svg width="132" height="112" viewBox="0 0 132 112" style="margin-bottom:26px;" aria-hidden="true">' +
-                '<defs><linearGradient id="tfUnavailG" x1="0" y1="0" x2="1" y2="1">' +
-                    '<stop offset="0" stop-color="#2E9BFF"/><stop offset="1" stop-color="#5B5BE0"/>' +
-                '</linearGradient></defs>' +
-                '<path fill="url(#tfUnavailG)" d="M95 8l3.6 8.2 8.9 1.1 1.1 8.9 8.2 3.6-3.4 8.3 4.6 7.7-6.6 6.1.6 8.9-8.8 1.7-4.2 7.9-8.1-3.8-8.1 3.8-4.2-7.9-8.8-1.7.6-8.9-6.6-6.1 4.6-7.7-3.4-8.3 8.2-3.6 1.1-8.9 8.9-1.1L86 8l4.5 2.1z"/>' +
-                '<circle cx="90.5" cy="40" r="10.5" fill="var(--bg-primary,#fff)"/>' +
-                '<path fill="url(#tfUnavailG)" d="M44 34l4.2 9.6 10.4 1.3 1.3 10.4 9.6 4.2-4 9.7 5.4 9-7.7 7.1.7 10.4-10.3 2-4.9 9.2-9.5-4.4-9.5 4.4-4.9-9.2-10.3-2 .7-10.4-7.7-7.1 5.4-9-4-9.7 9.6-4.2 1.3-10.4 10.4-1.3L39.7 34l4.3 2.5z"/>' +
-                '<circle cx="39.5" cy="72.5" r="12.5" fill="var(--bg-primary,#fff)"/>' +
+            // A sad robot, line art, drawn inline so there is nothing to download.
+            '<svg width="150" height="132" viewBox="0 0 240 210" fill="none" ' +
+                'stroke="var(--text-primary,#111)" stroke-width="7.5" stroke-linecap="round" ' +
+                'stroke-linejoin="round" style="margin-bottom:26px;" aria-hidden="true">' +
+                // antenna
+                '<path d="M120 46V25"/>' +
+                '<circle cx="120" cy="16" r="8.5"/>' +
+                // ears: drawn first so the head covers where they meet it
+                '<path d="M58 88H45a11 11 0 0 0-11 11v22a11 11 0 0 0 11 11h13"/>' +
+                '<path d="M182 88h13a11 11 0 0 1 11 11v22a11 11 0 0 1-11 11h-13"/>' +
+                // head
+                '<rect x="58" y="46" width="124" height="116" rx="26" fill="var(--bg-primary,#fff)"/>' +
+                // eyes
+                '<circle cx="94" cy="99" r="8.5"/>' +
+                '<circle cx="146" cy="99" r="8.5"/>' +
+                // frown: the corners sit lower than the middle
+                '<path d="M93 140q27-23 54 0"/>' +
             '</svg>' +
             '<h2 style="font-size:27px;font-weight:800;color:var(--text-secondary,#5a5a5e);line-height:1.25;margin:0 0 14px;">' +
                 'This page isn\'t available at the moment</h2>' +
