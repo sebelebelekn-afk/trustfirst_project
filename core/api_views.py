@@ -87,6 +87,11 @@ def get_config(request):
         "supabase_url": settings.SUPABASE_URL,
         "supabase_anon_key": settings.SUPABASE_ANON_KEY,
         "stripe_publishable_key": settings.STRIPE_PUBLISHABLE_KEY,
+        # A Sentry DSN is a public identifier by design: it says where to send
+        # events, and carries no permission to read anything back. Empty turns
+        # browser monitoring off, which is what happens locally.
+        "sentry_dsn": getattr(settings, "SENTRY_DSN_PUBLIC", ""),
+        "sentry_environment": getattr(settings, "SENTRY_ENVIRONMENT", "production"),
     })
 
 

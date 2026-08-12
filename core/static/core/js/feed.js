@@ -1688,6 +1688,8 @@ function launchApp() {
     // when there is finally an account to ask about.
     if (typeof navRefreshBadges === 'function') navRefreshBadges();
     tfStopSlowWatch();
+    // So a reported error can be traced to an account without carrying a name.
+    if (typeof tfSentryIdentify === 'function') tfSentryIdentify();
 
     // A shared link lands here with the post or clip in the path.
     tfOpenDeepLink();
@@ -13517,7 +13519,9 @@ function tfReelPageHTML(post, avatarHtml, username, verified, likes) {
     '<div class="reel-page" data-post-id="' + escapeHtml(String(post.id)) + '">' +
         // data-edl carries the editor's cuts; _tfEdlAttach honours them on play and
         // takes over looping. Absent on any clip that was never edited.
-        '<video src="' + escapeHtml(src) + '" class="reel-video" data-vol="' + (post.volume == null ? 100 : post.volume) + '"' + _tfEdlAttr(post) + ' autoplay muted loop playsinline preload="auto" style="width:100%;height:100%;object-fit:cover;opacity:1;" onclick="reelTogglePlay(this)"></video>' +
+        '<video src="' + escapeHtml(src) + '" class="reel-video" data-vol="' + (post.volume == null ? 100 : post.volume) + '"' + _tfEdlAttr(post) +
+            (post.voice_effect && post.voice_effect !== 'none' ? ' data-voice="' + escapeHtml(post.voice_effect) + '"' : '') +
+            ' autoplay muted loop playsinline preload="auto" style="width:100%;height:100%;object-fit:cover;opacity:1;" onclick="reelTogglePlay(this)"></video>' +
         '<div class="reel-play-indicator" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:82px;height:82px;border-radius:50%;background:rgba(0,0,0,0.42);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;pointer-events:none;z-index:25;"><i class="fa-solid fa-play" style="color:#fff;font-size:32px;margin-left:4px;"></i></div>' +
         '<button class="reel-mute-btn" onclick="toggleReelMute(this)" style="position:absolute;top:max(54px,env(safe-area-inset-top,54px));right:14px;width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,0.5);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:30;"><i class="fa-solid fa-volume-xmark" style="color:#fff;font-size:15px;"></i></button>' +
         '<div class="reel-ui">' +
@@ -14202,11 +14206,137 @@ var sb = null; // alias for window._sb, assigned in initSupabase()
         STRIPE_PUBLISHABLE_KEY = cfg.stripe_publishable_key || '';
         GIPHY_KEY_FROM_SERVER = cfg.giphy_api_key || '';
         initSupabase();
+        if (cfg.sentry_dsn) tfInitSentry(cfg.sentry_dsn, cfg.sentry_environment);
     } catch(e) {
         console.error('[Config] Failed to load config from server:', e);
         showToast('Could not connect to server. Please refresh.');
     }
 })();
+
+// ==========================================================================
+// ERROR MONITORING
+// Loaded on demand, after the config says there is somewhere to send to, so a
+// local machine and a misconfigured deploy both simply do not report.
+//
+// This app carries private messages, identity documents and location. The
+// default SDK behaviour would send far too much of that, so:
+//   - no Session Replay. It records the screen, which here means recording
+//     people's DMs. It is not enabled and should not be.
+//   - no performance tracing: it would exhaust a free quota in days.
+//   - message text, tokens and long free text are stripped before sending.
+//   - the user is identified by id only, never email, name or handle.
+// ==========================================================================
+function tfInitSentry(dsn, environment) {
+    if (window._tfSentryLoading || window.Sentry) return;
+    window._tfSentryLoading = true;
+
+    var s = document.createElement('script');
+    // Served from our own static files rather than a CDN. jsdelivr does not carry
+    // this bundle at all (it 404s as text/plain, which the browser then refuses on
+    // MIME grounds), Sentry's own CDN would need adding to script-src, and a
+    // vendored copy also works inside the native wrap with no network dependency.
+    s.src = '/static/core/js/sentry.min.js';
+    s.onerror = function () { window._tfSentryLoading = false; console.warn('[Sentry] SDK failed to load'); };
+    s.onload = function () {
+        try {
+            if (!window.Sentry || !Sentry.init) return;
+            Sentry.init({
+                dsn: dsn,
+                environment: environment || 'production',
+                // The asset version doubles as the release, so a stack trace can be
+                // tied to the exact feed.js that produced it. Read off the script
+                // tag rather than duplicated in the template, where it would drift.
+                release: 'trustfirst@' + (function () {
+                    try {
+                        var el = Array.prototype.slice.call(document.scripts).filter(function (x) {
+                            return /\/feed\.js/.test(x.src || '');
+                        })[0];
+                        var m = el && (el.src || '').match(/[?&]v=(\d+)/);
+                        return m ? m[1] : 'dev';
+                    } catch (e) { return 'dev'; }
+                })(),
+                // Errors only.
+                tracesSampleRate: 0,
+                // Breadcrumbs are useful, but the console ones in this app print
+                // error objects that can carry message text.
+                integrations: function (defaults) {
+                    return defaults.filter(function (i) {
+                        return i.name !== 'Breadcrumbs' && i.name !== 'Replay';
+                    }).concat(
+                        Sentry.breadcrumbsIntegration
+                            ? [Sentry.breadcrumbsIntegration({ console: false, dom: true, fetch: true, history: true, xhr: true })]
+                            : []
+                    );
+                },
+                // Noise that says nothing about our code.
+                ignoreErrors: [
+                    'ResizeObserver loop',
+                    'AbortError',
+                    'The play() request was interrupted',
+                    'The operation was aborted',
+                    'Load failed',
+                    'Failed to fetch',
+                    'NetworkError',
+                    'Non-Error promise rejection captured'
+                ],
+                denyUrls: [/extensions\//i, /^chrome:\/\//i, /^safari-extension:/i],
+                beforeSend: function (event) {
+                    try { return _tfScrubEvent(event); } catch (e) { return null; }
+                },
+                beforeBreadcrumb: function (crumb) {
+                    // A URL can carry a search term someone typed.
+                    if (crumb && crumb.data && crumb.data.url) {
+                        crumb.data.url = String(crumb.data.url).split('?')[0];
+                    }
+                    return crumb;
+                }
+            });
+            if (typeof currentUser !== 'undefined' && currentUser && currentUser.id) {
+                Sentry.setUser({ id: currentUser.id });
+            }
+        } catch (e) { console.warn('[Sentry] init failed', e); }
+    };
+    document.head.appendChild(s);
+}
+
+// Anything that could carry a person's words or a credential comes out before the
+// event leaves the device.
+var _TF_SECRET_RE = /(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)|(sk_(?:live|test)_[A-Za-z0-9]+)|(Bearer\s+[A-Za-z0-9._-]+)/g;
+function _tfScrubString(v) {
+    if (typeof v !== 'string') return v;
+    var out = v.replace(_TF_SECRET_RE, '[redacted]');
+    // A long run of prose in an error message is far more likely to be somebody's
+    // message than anything diagnostic.
+    if (out.length > 500) out = out.slice(0, 500) + '…[trimmed]';
+    return out;
+}
+function _tfScrubEvent(event) {
+    if (!event) return null;
+    if (event.request) {
+        delete event.request.cookies;
+        delete event.request.data;
+        if (event.request.url) event.request.url = String(event.request.url).split('?')[0];
+        if (event.request.headers) delete event.request.headers.Authorization;
+    }
+    if (event.message) event.message = _tfScrubString(event.message);
+    if (event.exception && event.exception.values) {
+        event.exception.values.forEach(function (ex) {
+            if (ex.value) ex.value = _tfScrubString(ex.value);
+        });
+    }
+    // Never send anything but the id.
+    if (event.user) event.user = event.user.id ? { id: event.user.id } : undefined;
+    return event;
+}
+
+// Tell Sentry who this is, once there is an account. Called from launchApp.
+function tfSentryIdentify() {
+    try {
+        if (window.Sentry && Sentry.setUser && typeof currentUser !== 'undefined' && currentUser && currentUser.id) {
+            Sentry.setUser({ id: currentUser.id });
+        }
+    } catch (e) {}
+}
 
 var GeoIP = {
     lookup: async function() {
@@ -17920,7 +18050,8 @@ function openContextualVideo(videoUrl, context, startIndex, clipArray) {
             comment_count: (c.comment_count != null ? c.comment_count : c.comments) || 0,
             view_count: c.view_count || 0,
             volume: c.volume,
-            segments: c.segments || null   // the editor's cuts, honoured at playback
+            segments: c.segments || null,        // the editor's cuts, honoured at playback
+            voice_effect: c.voice_effect || null // and its voice effect, likewise
         };
         var profile = c.users || {};
         if (!profile.username && typeof c.username === 'string') profile.username = c.username.replace(/^@/, '');
@@ -18337,7 +18468,14 @@ function _applyClipVolume(v) {
     if (!isFinite(pct)) return;
     try { v.volume = Math.max(0, Math.min(pct / 100, 1)); } catch (e) {}
 }
-document.addEventListener('play', function (e) { _applyClipVolume(e.target); _tfEdlAttach(e.target); }, true);
+document.addEventListener('play', function (e) {
+    _applyClipVolume(e.target);
+    _tfEdlAttach(e.target);
+    // The effect needs a running AudioContext, and browsers only allow that off a
+    // user gesture. Play is a gesture, so this is the right moment.
+    var fx = e.target && e.target.getAttribute && e.target.getAttribute('data-voice');
+    if (fx && fx !== 'none') _tfVoiceAttach(e.target, fx);
+}, true);
 document.addEventListener('volumechange', function (e) {
     // Re-assert after an unmute (toggleReelMute resets volume implicitly on some browsers)
     var v = e.target;
@@ -18345,6 +18483,146 @@ document.addEventListener('volumechange', function (e) {
         v._volApplied = true; _applyClipVolume(v); v._volApplied = false;
     }
 }, true);
+
+// ==========================================================================
+// VOICE EFFECTS AT PLAYBACK
+// Same principle as volume and the segment list: the file is never re-encoded,
+// the effect is stored on the clip and applied while it plays. Here that means
+// routing the <video>'s audio through a Web Audio graph.
+//
+// Two of the six need genuine pitch shifting, which Web Audio has no node for, so
+// there is a small granular shifter below as an AudioWorklet: a circular buffer
+// with two read heads moving at the pitch ratio, crossfaded so the wrap is not
+// audible. The other four are ordinary nodes.
+//
+// AudioWorklet is available in Chrome, in iOS Safari from 14.5, and therefore in
+// Capacitor's WebView on both platforms. Where it is missing, the two pitch
+// effects report themselves unavailable rather than silently doing nothing.
+// ==========================================================================
+// The shifter lives in its own static file. It was a blob: URL first, which the
+// site's CSP refused: an AudioWorklet module is fetched under script-src, and
+// script-src allows 'self' but not blob:. Serving it as a normal file is both
+// allowed and cacheable, and needed no change to the policy.
+var TF_PITCH_WORKLET_URL = '/static/core/js/tf-pitch-worklet.js';
+var _tfWorkletReady = null;
+function _tfEnsureVoiceWorklet(ctx) {
+    if (!ctx || !ctx.audioWorklet) return Promise.reject(new Error('no audioworklet'));
+    if (_tfWorkletReady) return _tfWorkletReady;
+    _tfWorkletReady = ctx.audioWorklet.addModule(TF_PITCH_WORKLET_URL)
+        .catch(function (e) { _tfWorkletReady = null; throw e; });
+    return _tfWorkletReady;
+}
+
+// True for the effects that need the worklet.
+function _tfVoiceNeedsPitch(effect) { return effect === 'deep' || effect === 'high'; }
+
+// Build the graph for one effect and return its input and output nodes.
+function _tfVoiceChain(ctx, effect) {
+    var input = ctx.createGain();
+    var output = ctx.createGain();
+
+    if (effect === 'echo') {
+        var delay = ctx.createDelay(1.0);
+        delay.delayTime.value = 0.24;
+        var fb = ctx.createGain(); fb.gain.value = 0.38;
+        var wet = ctx.createGain(); wet.gain.value = 0.55;
+        input.connect(output);                  // the dry voice
+        input.connect(delay);
+        delay.connect(fb); fb.connect(delay);   // repeats decaying into each other
+        delay.connect(wet); wet.connect(output);
+        return { input: input, output: output };
+    }
+
+    if (effect === 'robot' || effect === 'alien') {
+        // Ring modulation: multiply the voice by a tone. A steady tone reads as a
+        // robot, a wobbling one as something stranger.
+        var ring = ctx.createGain();
+        ring.gain.value = 0;                    // the carrier drives this, not a constant
+        var carrier = ctx.createOscillator();
+        carrier.type = 'sine';
+        carrier.frequency.value = (effect === 'robot') ? 48 : 118;
+        if (effect === 'alien') {
+            var lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 5.5;
+            var lfoAmt = ctx.createGain(); lfoAmt.gain.value = 70;
+            lfo.connect(lfoAmt); lfoAmt.connect(carrier.frequency);
+            lfo.start();
+        }
+        carrier.connect(ring.gain);
+        carrier.start();
+        input.connect(ring); ring.connect(output);
+        // A little dry mixed back keeps the words intelligible.
+        var dry = ctx.createGain(); dry.gain.value = 0.25;
+        input.connect(dry); dry.connect(output);
+        return { input: input, output: output, stop: function () {
+            try { carrier.stop(); } catch (e) {}
+        } };
+    }
+
+    if (_tfVoiceNeedsPitch(effect)) {
+        var node = new AudioWorkletNode(ctx, 'tf-pitch-shift');
+        var semis = (effect === 'deep') ? -5 : 7;
+        node.parameters.get('ratio').value = Math.pow(2, semis / 12);
+        // A shelf either side of the shift so "deep" also sounds warm and
+        // "chipmunk" also sounds thin, the way people expect them to.
+        var tone = ctx.createBiquadFilter();
+        tone.type = (effect === 'deep') ? 'lowshelf' : 'highshelf';
+        tone.frequency.value = (effect === 'deep') ? 260 : 2600;
+        tone.gain.value = 5;
+        input.connect(node); node.connect(tone); tone.connect(output);
+        return { input: input, output: output };
+    }
+
+    input.connect(output);   // 'none' or anything unknown: straight through
+    return { input: input, output: output };
+}
+
+// Route a media element's audio through an effect. Returns a promise resolving to
+// true when it is running.
+async function _tfVoiceAttach(el, effect) {
+    if (!el || !effect || effect === 'none') return false;
+    if (el._tfVoiceEffect === effect) return true;
+    if (!window.AudioContext && !window.webkitAudioContext) return false;
+
+    // Web Audio hands back silence for cross-origin media unless the response
+    // allows it. Supabase storage sends Access-Control-Allow-Origin: *, so this is
+    // all it takes, but the element has to be told before it loads.
+    if (el.src && !/^blob:|^data:/.test(el.src) && el.crossOrigin !== 'anonymous') {
+        var at = el.currentTime, wasPlaying = !el.paused;
+        el.crossOrigin = 'anonymous';
+        var src = el.src; el.src = ''; el.src = src; el.load();
+        try { el.currentTime = at; } catch (e) {}
+        if (wasPlaying) el.play().catch(function () {});
+    }
+
+    try {
+        window._tfAudioCtx = window._tfAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        var ctx = window._tfAudioCtx;
+        if (ctx.state === 'suspended') { try { await ctx.resume(); } catch (e) {} }
+
+        if (_tfVoiceNeedsPitch(effect)) await _tfEnsureVoiceWorklet(ctx);
+
+        // One source per element for the life of the page: creating a second one
+        // for the same element throws.
+        if (!el._tfVoiceSrc) el._tfVoiceSrc = ctx.createMediaElementSource(el);
+        if (el._tfVoiceChain) {
+            try { el._tfVoiceSrc.disconnect(); } catch (e) {}
+            try { el._tfVoiceChain.output.disconnect(); } catch (e) {}
+            if (el._tfVoiceChain.stop) el._tfVoiceChain.stop();
+        }
+        var chain = _tfVoiceChain(ctx, effect);
+        el._tfVoiceSrc.connect(chain.input);
+        chain.output.connect(ctx.destination);
+        el._tfVoiceChain = chain;
+        el._tfVoiceEffect = effect;
+        return true;
+    } catch (e) {
+        console.warn('[voice] could not apply ' + effect, e);
+        // Put the audio back on the speakers rather than leaving it routed nowhere.
+        try { if (el._tfVoiceSrc) el._tfVoiceSrc.connect(window._tfAudioCtx.destination); } catch (e2) {}
+        el._tfVoiceEffect = null;
+        return false;
+    }
+}
 
 // Playing an edit without re-encoding it. The editor's cuts are stored on the clip
 // as a list of ranges (trustclips.segments); the player skips through them in
@@ -39024,9 +39302,9 @@ function edOpenVoiceEffectsPanel() {
     var p = document.createElement('div'); p.id='edVoiceEffectsPanel';
     p.style.cssText='position:absolute;left:0;right:0;bottom:0;z-index:500;background:rgba(10,10,10,0.97);backdrop-filter:blur(30px);border-radius:24px 24px 0 0;padding:20px 16px max(32px,env(safe-area-inset-bottom,32px));animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
     p.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;"><span style="color:white;font-size:17px;font-weight:700;">Voice Effects</span><button onclick="document.getElementById(\'edVoiceEffectsPanel\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button></div>'+
-        // Was "Changes the voice of anyone talking in your video." It does not:
-        // altering recorded audio means re-encoding it, and nothing here does that.
-        '<p style="color:#FF9F0A;font-size:12px;margin:0 0 16px;line-height:1.45;">Voice effects are not available yet. Picking one here will not change your audio.</p>'+
+        // These are real now: the audio runs through Web Audio at playback, the same
+        // way volume and the segment list are applied without re-encoding.
+        '<p style="color:rgba(255,255,255,0.4);font-size:12px;margin:0 0 16px;line-height:1.45;">Changes the voice of anyone talking in your clip. Tap one to hear it.</p>'+
         '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px;">'+
         EFFECTS.map(function(ef){
             return '<button onclick="edApplyVoiceEffect(\''+ef.id+'\')" id="vefx_'+ef.id+'" style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 8px;border-radius:16px;border:2px solid '+(ef.id==='none'?'#007AFF':'rgba(255,255,255,0.12)')+';background:'+(ef.id==='none'?'rgba(0,122,255,0.15)':'rgba(255,255,255,0.07)')+';color:white;cursor:pointer;">'+
@@ -39039,13 +39317,47 @@ function edOpenVoiceEffectsPanel() {
         '<button onclick="document.getElementById(\'edVoiceEffectsPanel\').remove();triggerHaptic(15);" style="width:100%;padding:14px;border-radius:14px;border:none;background:#007AFF;color:white;font-size:15px;font-weight:700;cursor:pointer;">Close</button>';
     overlay.appendChild(p);
 }
-function edApplyVoiceEffect(effectId) {
+async function edApplyVoiceEffect(effectId) {
     var clip = edState.clips.find(function(c){return c.id===edState.selectedClipId;}) || edState.clips[0];
     if (clip) { clip.voiceEffect = effectId; edState.isDirty = true; }
     document.querySelectorAll('[id^="vefx_"]').forEach(function(b){ b.style.border='2px solid rgba(255,255,255,0.12)'; b.style.background='rgba(255,255,255,0.07)'; });
     var active = document.getElementById('vefx_'+effectId);
     if (active) { active.style.border='2px solid #007AFF'; active.style.background='rgba(0,122,255,0.15)'; }
     triggerHaptic(8);
+
+    // Hear it immediately, on the preview, rather than being told it was applied.
+    var vid = document.getElementById('edVideo');
+    if (!vid) return;
+    if (effectId === 'none') {
+        _tfVoiceDetach(vid);
+        showToast('Original audio');
+        return;
+    }
+    // The preview is unmuted by the editor; make sure it is, or there is nothing
+    // to hear and the effect looks broken.
+    vid.muted = false;
+    var ok = await _tfVoiceAttach(vid, effectId);
+    if (!ok) {
+        if (clip) clip.voiceEffect = 'none';
+        showToast(_tfVoiceNeedsPitch(effectId)
+            ? 'This browser cannot do that effect'
+            : 'Could not apply that effect');
+        return;
+    }
+    if (vid.paused) vid.play().catch(function(){});
+}
+
+// Put the audio back on the speakers untouched.
+function _tfVoiceDetach(el) {
+    if (!el || !el._tfVoiceChain) { if (el) el._tfVoiceEffect = null; return; }
+    try { el._tfVoiceSrc.disconnect(); } catch (e) {}
+    try { el._tfVoiceChain.output.disconnect(); } catch (e) {}
+    if (el._tfVoiceChain.stop) el._tfVoiceChain.stop();
+    el._tfVoiceChain = null;
+    el._tfVoiceEffect = null;
+    // A media element routed into Web Audio stays routed there, so it has to be
+    // reconnected to the output or it goes silent.
+    try { if (el._tfVoiceSrc && window._tfAudioCtx) el._tfVoiceSrc.connect(window._tfAudioCtx.destination); } catch (e) {}
 }
 function editorTogglePlay() {
     var vid = document.getElementById('edVideo');
@@ -43005,7 +43317,13 @@ is_demo: window._tcIsDemoClip || false,
                 // written when the timeline is actually more than the whole clip,
                 // so an untouched clip stays null and plays exactly as before.
                 sources: (window._pendingClipEdl && window._pendingClipEdl.sources) || null,
-                segments: (window._pendingClipEdl && window._pendingClipEdl.segments) || null
+                segments: (window._pendingClipEdl && window._pendingClipEdl.segments) || null,
+                // Applied by the player, not baked in, same as volume above.
+                voice_effect: (function(){
+                    var c = window.edState && edState.clips && edState.clips[0];
+                    var fx = c && c.voiceEffect;
+                    return (fx && fx !== 'none') ? fx : null;
+                })()
             };
             var clipSaved = true;
             var { error: insertErr } = await sb.from('trustclips').insert(insertRow);

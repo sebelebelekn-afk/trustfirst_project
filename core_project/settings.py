@@ -138,6 +138,39 @@ GIPHY_API_KEY                = os.environ.get('GIPHY_API_KEY', '')
 RESEND_API_KEY               = os.environ.get('RESEND_API_KEY', '')
 GOOGLE_CLOUD_VISION_API_KEY  = os.environ.get('GOOGLE_CLOUD_VISION_API_KEY', '')
 
+# ------------------------------------------------------------------
+# SENTRY
+# The DSN is a public identifier: it names where events go and grants no read
+# access, so the browser one is served to the client through /api/config/.
+# Both are empty unless set, so nothing is reported from a local machine.
+# ------------------------------------------------------------------
+SENTRY_DSN_PUBLIC = os.environ.get('SENTRY_DSN_PUBLIC', '')   # browser
+SENTRY_DSN        = os.environ.get('SENTRY_DSN', '')          # this server
+SENTRY_ENVIRONMENT = os.environ.get('SENTRY_ENVIRONMENT', 'development' if DEBUG else 'production')
+
+if SENTRY_DSN:
+    # Guarded: a missing package must not take the site down, and sentry-sdk is
+    # not installed in every environment this runs in.
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.django import DjangoIntegration
+
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            environment=SENTRY_ENVIRONMENT,
+            integrations=[DjangoIntegration()],
+            # This app carries private messages and identity documents. Never let
+            # request bodies, cookies or user emails travel to a third party.
+            send_default_pii=False,
+            request_bodies='never',
+            # Errors are the point; tracing every request would burn the free
+            # quota within days and tell us little we do not already know.
+            traces_sample_rate=0.0,
+        )
+    except Exception as _sentry_err:   # pragma: no cover
+        import logging
+        logging.getLogger(__name__).warning('Sentry not started: %s', _sentry_err)
+
 # Eddie, the in-app assistant. Every key here is server-side only and must
 # never be returned by /api/config/ — the browser talks to /api/eddie/*, never
 # to a model provider directly.
@@ -291,6 +324,11 @@ CONTENT_SECURITY_POLICY = {
             "https://api.giphy.com",
             "https://api.stripe.com",
             "https://api.paystack.co",
+            # Sentry posts events over fetch. Without this the SDK loads, catches
+            # errors and is then blocked on the way out, which looks exactly like
+            # monitoring that works until you notice nothing ever arrives.
+            "https://*.ingest.de.sentry.io",
+            "https://*.ingest.sentry.io",
         ],
         "frame-src": [
             "'self'",
