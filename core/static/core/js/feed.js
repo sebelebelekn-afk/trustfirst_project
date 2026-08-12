@@ -746,12 +746,44 @@ function skipVerification() {
     });
 }
 
+// Five seconds of a silent spinner is where people decide the app is broken. At
+// that point say so, and name the likely cause rather than leaving them guessing.
+var _tfSlowWatch = null;
+function tfStartSlowWatch(afterMs) {
+    tfStopSlowWatch();
+    _tfSlowWatch = setTimeout(function () {
+        var note = document.getElementById('tfSlowNote');
+        if (!note) {
+            note = document.createElement('div');
+            note.id = 'tfSlowNote';
+            note.style.cssText = 'position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom, 0px) + 34px);' +
+                'z-index:100001;display:flex;justify-content:center;padding:0 24px;pointer-events:none;';
+            (document.getElementById('app') || document.body).appendChild(note);
+        }
+        note.innerHTML =
+            '<div style="background:rgba(255,159,10,0.14);border:0.5px solid rgba(255,159,10,0.4);' +
+                'border-radius:14px;padding:12px 16px;max-width:340px;text-align:center;">' +
+                '<b style="display:block;font-size:14px;color:#FF9F0A;margin-bottom:3px;">' +
+                    (navigator.onLine === false ? 'You appear to be offline' : 'Your connection is unstable') + '</b>' +
+                '<span style="font-size:12.5px;color:var(--text-secondary,#aaa);line-height:1.4;">' +
+                    'This is taking longer than it should. Still trying…</span>' +
+            '</div>';
+    }, afterMs || 5000);
+}
+function tfStopSlowWatch() {
+    if (_tfSlowWatch) { clearTimeout(_tfSlowWatch); _tfSlowWatch = null; }
+    var note = document.getElementById('tfSlowNote');
+    if (note) note.remove();
+}
+
 function showAuthLoader() {
     document.querySelectorAll('.auth-step').forEach(s => s.style.display = 'none');
     document.getElementById('auth-loader').style.display = 'block';
+    tfStartSlowWatch(5000);
 }
 
 function hideAuthLoader() {
+    tfStopSlowWatch();
     var l = document.getElementById('auth-loader');
     if (l) l.style.display = 'none';
     // showAuthLoader stamps an inline display:none on every step, and an inline
@@ -925,8 +957,11 @@ try {
 
     } catch (error) {
         console.error('[Registration]', error);
+        var netMsg = tfNetworkMessage(error);
         let msg = 'Registration failed. ';
-        if (error.message?.includes('duplicate')) {
+        if (netMsg) {
+            msg = netMsg;
+        } else if (error.message?.includes('duplicate')) {
             msg += 'This email or username is already taken.';
         } else if (error.message?.includes('password')) {
             msg += 'Password does not meet requirements.';
@@ -934,6 +969,8 @@ try {
             msg += error.message || 'Please try again.';
         }
         showAuthError(msg, 'step-register');
+    } finally {
+        tfStopSlowWatch();
     }
 }
 
@@ -1110,7 +1147,13 @@ localStorage.setItem('tf_burst', JSON.stringify(burstAttempts));
     let msg = '';
     const code = error?.message?.toLowerCase() || '';
 
-    if (code.includes('email not confirmed')) {
+    // A stalled or absent connection is not a login failure, and telling someone
+    // "Login failed" when their signal dropped sends them hunting for a password
+    // problem that does not exist.
+    const netMsg = tfNetworkMessage(error);
+    if (netMsg) {
+        msg = netMsg;
+    } else if (code.includes('email not confirmed')) {
         msg = 'Please check your email and click the confirmation link first.';
     } else if (code.includes('invalid login') || code.includes('invalid credentials')) {
         msg = 'Wrong email or password. Please try again.';
@@ -1120,6 +1163,8 @@ localStorage.setItem('tf_burst', JSON.stringify(burstAttempts));
         msg = 'Login failed: ' + (error.message || 'Unknown error');
     }
     showAuthError(msg, returnStep);
+} finally {
+    tfStopSlowWatch();
 }
 }   // ← THIS is the missing closing brace for authenticateUser()
 window.__authenticateUserImpl = authenticateUser;
@@ -1635,6 +1680,14 @@ function launchApp() {
     // the block/mute lists so they hold on a device that did not make them.
     tfHydrateFollowCache();
     tfHydrateBlockMuteCache();
+
+    // Badges were only refreshed 2.5s after DOMContentLoaded, on a tab switch, or
+    // on a 45 second poll. DOMContentLoaded has long since fired by the time
+    // anyone finishes logging in, and at that moment currentUser was still null, so
+    // a message waiting for you showed no badge until the poll came round. Ask now,
+    // when there is finally an account to ask about.
+    if (typeof navRefreshBadges === 'function') navRefreshBadges();
+    tfStopSlowWatch();
 
     // A shared link lands here with the post or clip in the path.
     tfOpenDeepLink();
@@ -14261,9 +14314,51 @@ function waitForSb() {
     return data;
 };
 
+// Nothing the app awaits on a network should be able to hang. Supabase's client
+// has no timeout of its own, so a request that never answers used to leave the
+// spinner up indefinitely — thirty seconds on a sign-in, in the report that
+// prompted this. Anything wrapped here gives up after `ms` and throws an error
+// tagged tf_timeout, which callers turn into "your connection is unstable"
+// instead of a failure that reads like the app is broken.
+function tfWithTimeout(promise, ms, label) {
+    var timer;
+    return Promise.race([
+        promise,
+        new Promise(function (_, reject) {
+            timer = setTimeout(function () {
+                var e = new Error((label || 'That') + ' took too long');
+                e.tf_timeout = true;
+                reject(e);
+            }, ms || 8000);
+        })
+    ]).finally(function () { clearTimeout(timer); });
+}
+
+// True when the problem is the phone's connection rather than the app. An
+// explicit offline flag is certain; a timeout while apparently online is the
+// usual signature of a connection that is up but not moving.
+function tfLooksLikeNetwork(err) {
+    if (navigator.onLine === false) return true;
+    if (!err) return false;
+    if (err.tf_timeout) return true;
+    var m = String(err.message || '').toLowerCase();
+    return m.indexOf('failed to fetch') >= 0 || m.indexOf('networkerror') >= 0 ||
+           m.indexOf('load failed') >= 0 || m.indexOf('timeout') >= 0 ||
+           m.indexOf('network request failed') >= 0;
+}
+
+function tfNetworkMessage(err) {
+    if (navigator.onLine === false) return 'You appear to be offline. Check your connection and try again.';
+    if (tfLooksLikeNetwork(err)) return 'Your connection is unstable. Check your signal and try again.';
+    return null;
+}
+
 DB.signIn = async function(email, password) {
     await waitForSb();
-    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    // Two things happen on a sign-in: the token exchange, then the profile read.
+    // Eight seconds is already far longer than either should ever take.
+    const { data, error } = await tfWithTimeout(
+        sb.auth.signInWithPassword({ email, password }), 8000, 'Signing in');
     if (error) throw error;
     return data;
 };
@@ -14311,11 +14406,12 @@ DB.getUserProfile = async function(userId) {
     let ownId = null;
     try { ownId = (await sb.auth.getSession()).data.session?.user?.id || null; } catch (e) {}
     if (ownId && userId === ownId) {
-        const { data, error } = await sb.rpc('tf_my_profile');
+        const { data, error } = await tfWithTimeout(sb.rpc('tf_my_profile'), 8000, 'Loading your profile');
         if (error) throw error;
         return (data && data[0]) || null;
     }
-    const { data, error } = await sb.from('users').select(USER_PUBLIC_COLS).eq('id', userId).maybeSingle();
+    const { data, error } = await tfWithTimeout(
+        sb.from('users').select(USER_PUBLIC_COLS).eq('id', userId).maybeSingle(), 8000, 'Loading that profile');
     if (error) throw error;
     return data;
 };
@@ -36840,10 +36936,27 @@ async function _cvrStartStream() {
         // Mirror the selfie view only; the rear camera stayed flipped before.
         vid.style.transform = _cvrFront ? 'scaleX(-1)' : 'none';
     }
-    // auto-start recording
+    // auto-start recording.
+    // video/webm was hardcoded, and Safari cannot record webm — the constructor
+    // throws there, so on an iPhone the recorder never started, no chunks were
+    // ever collected and the "video note" was a zero-byte file. Ask what this
+    // browser can actually do.
     _cvrChunks = []; _cvrSecs = 0;
-    _cvrRecorder = new MediaRecorder(_cvrStream, { mimeType: 'video/webm' });
+    _cvrMime = _cvrPickMime();
+    try {
+        _cvrRecorder = _cvrMime ? new MediaRecorder(_cvrStream, { mimeType: _cvrMime })
+                                : new MediaRecorder(_cvrStream);
+    } catch (e) {
+        console.warn('[video note] recorder failed', e);
+        showToast('Video notes are not supported on this browser');
+        closeCVR();
+        return;
+    }
+    _cvrChunksDone = null;
     _cvrRecorder.ondataavailable = function(e){ if(e.data.size>0) _cvrChunks.push(e.data); };
+    // stop() is asynchronous: the final chunk arrives after it returns, so
+    // anything that builds the blob has to wait for this.
+    _cvrRecorder.onstop = function(){ if (_cvrResolveStop) { _cvrResolveStop(); _cvrResolveStop = null; } };
     _cvrRecorder.start();
     var timerEl = document.getElementById('cvrTimer');
     if (timerEl) timerEl.style.display = 'block';
@@ -36860,19 +36973,52 @@ async function _cvrStartStream() {
 
 function cvrFlip() { _cvrFront = !_cvrFront; _cvrStartStream(); }
 
+// Safari records mp4 and cannot do webm; Chrome and Firefox are the other way
+// round. Take the first thing this browser admits to supporting.
+var _cvrMime = '';
+var _cvrResolveStop = null;
+var _cvrChunksDone = null;
+function _cvrPickMime() {
+    if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return '';
+    var options = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    for (var i = 0; i < options.length; i++) {
+        if (MediaRecorder.isTypeSupported(options[i])) return options[i];
+    }
+    return '';
+}
+
+// Resolves once the recorder has actually flushed its last chunk.
 function stopCVR() {
     clearInterval(_cvrInterval);
-    if (_cvrRecorder && _cvrRecorder.state !== 'inactive') _cvrRecorder.stop();
+    if (!_cvrRecorder || _cvrRecorder.state === 'inactive') return Promise.resolve();
+    var done = new Promise(function (resolve) { _cvrResolveStop = resolve; });
+    try { _cvrRecorder.stop(); } catch (e) { return Promise.resolve(); }
+    // Never wait forever on a recorder that misbehaves.
+    return Promise.race([done, new Promise(function (r) { setTimeout(r, 2000); })]);
 }
 
 function discardCVR() { clearInterval(_cvrInterval); closeCVR(); }
 
-function sendCVR() {
-    stopCVR();
-    closeCVR();
+async function sendCVR() {
+    // The old version claimed "Video note sent" before the upload had even
+    // started, swallowed every error, built the blob before stop() had flushed the
+    // last chunk, and then asked a PRIVATE bucket for a public URL, which comes
+    // back as a link that will not load. Nothing about it worked, and nothing
+    // about it said so.
+    var btn = document.getElementById('cvrSendBtn');
+    if (btn) { btn.style.pointerEvents = 'none'; btn.style.opacity = '0.5'; }
+
+    await stopCVR();
+
     var chatBody = document.getElementById('chat-body');
+    var blob = new Blob(_cvrChunks, { type: _cvrMime || 'video/mp4' });
+    var secs = _cvrSecs;
+    closeCVR();
+
+    if (!blob.size) { showToast('That recording came out empty, try again'); return; }
     if (!chatBody) return;
-    var blob = new Blob(_cvrChunks, { type: 'video/webm' });
+    if (!window.sb || !currentUser || !currentConversationId) { showToast('Open a chat first'); return; }
+
     var localUrl = URL.createObjectURL(blob);
     var msgId = 'cvr_' + Date.now();
     var bubble = document.createElement('div');
@@ -36883,32 +37029,49 @@ function sendCVR() {
         '<video src="' + localUrl + '" autoplay loop muted playsinline ' +
             'style="width:120px;height:120px;border-radius:50%;object-fit:cover;display:block;' +
                    'border:3px solid #007AFF;box-shadow:0 4px 16px rgba(0,122,255,0.35);"></video>' +
-        '<small style="color:#aaa;font-size:10px;margin-top:3px;">' +
-            new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) + '</small>';
+        '<small id="' + msgId + '_status" style="color:#aaa;font-size:10px;margin-top:3px;">Sending…</small>';
     chatBody.appendChild(bubble);
     chatBody.scrollTop = chatBody.scrollHeight;
-    showToast('Video note sent');
     triggerHaptic(25);
-    // Upload and save to DB
-    if (window.sb && currentUser && currentConversationId) {
-        var path = currentUser.id + '/vn_' + Date.now() + '.webm';
-        window.sb.storage.from('chat_media').upload(path, blob, { contentType: 'video/webm' })
-            .then(function(r) {
-                if (!r.error) {
-                    var urlResult = window.sb.storage.from('chat_media').getPublicUrl(r.data.path);
-                    var publicUrl = urlResult.data && urlResult.data.publicUrl;
-                    if (publicUrl) {
-                        window.sb.from('messages').insert({
-                            conversation_id: currentConversationId,
-                            sender_id: currentUser.id,
-                            message_type: 'video',
-                            media_url: publicUrl,
-                            created_at: new Date().toISOString(),
-                            inserted_at: new Date().toISOString()
-                        }).catch(function(){});
-                    }
-                }
-            }).catch(function(){});
+
+    function status(text, colour) {
+        var el = document.getElementById(msgId + '_status');
+        if (el) { el.textContent = text; if (colour) el.style.color = colour; }
+    }
+
+    try {
+        var ext = (_cvrMime.indexOf('mp4') >= 0 || !_cvrMime) ? 'mp4' : 'webm';
+        var ctype = _cvrMime ? _cvrMime.split(';')[0] : 'video/mp4';
+        // The media bucket is public, so the URL stored on the message resolves.
+        var path = currentUser.id + '/vn_' + Date.now() + '.' + ext;
+        var up = await tfWithTimeout(
+            sb.storage.from('media').upload(path, blob, { contentType: ctype, upsert: false }),
+            30000, 'Sending the video note');
+        if (up.error) throw up.error;
+
+        var pub = sb.storage.from('media').getPublicUrl(path);
+        var publicUrl = pub && pub.data && pub.data.publicUrl;
+        if (!publicUrl) throw new Error('Could not build a link for that clip');
+
+        var ins = await sb.from('messages').insert({
+            conversation_id: currentConversationId,
+            sender_id: currentUser.id,
+            message_type: 'video',
+            media_url: publicUrl,
+            video_duration: secs || null,
+            created_at: new Date().toISOString(),
+            inserted_at: new Date().toISOString()
+        });
+        if (ins.error) throw ins.error;
+
+        status(new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }));
+        showToast('Video note sent');
+    } catch (e) {
+        console.warn('[video note] send failed', e);
+        status('Not sent, tap to retry', '#FF3B30');
+        var st = document.getElementById(msgId + '_status');
+        if (st) { st.style.cursor = 'pointer'; st.onclick = function(){ bubble.remove(); openCircularVideoRecorder(); }; }
+        showToast(tfNetworkMessage(e) || (e && e.message ? 'Could not send: ' + e.message : 'Could not send that video note'));
     }
 }
 
@@ -38599,18 +38762,15 @@ function edApplySpeed(speed) {
     if (active) { active.style.border='2px solid #007AFF'; active.style.background='rgba(0,122,255,0.2)'; active.style.color='#007AFF'; }
     triggerHaptic(8);
 }
+// Reverse is not implemented and cannot be from here. Playing a file backwards
+// means decoding every frame and writing a new file, and nothing in this editor
+// re-encodes anything — the "effects" are metadata applied at playback. What this
+// used to do was mirror the picture left-to-right with scaleX(-1), call that
+// "Clip reversed" and set a flag that the publish step ignores. A mirror is not a
+// reverse, and claiming otherwise is worse than the button being unavailable.
 function edReverseClip() {
-    if (!edState.selectedClipId) { showToast('Select a clip first'); return; }
-    var clip = edState.clips.find(function(c){return c.id===edState.selectedClipId;});
-    if (!clip) return;
-    clip.reversed = !clip.reversed;
-    edState.isDirty = true;
-    edRenderTimeline(); edSaveHistory();
-    showToast(clip.reversed ? 'Clip reversed ↩' : 'Reverse removed');
-    triggerHaptic(10);
-    // Visual indicator on video
-    var vid = document.getElementById('edVideo');
-    if (vid && clip.reversed) { vid.style.transform='scaleX(-1)'; } else if (vid) { vid.style.transform=''; }
+    showToast('Reversing a clip is not available yet');
+    triggerHaptic(6);
 }
 function edOpenVoiceEffectsPanel() {
     var existing = document.getElementById('edVoiceEffectsPanel'); if (existing) { existing.remove(); return; }
@@ -38626,7 +38786,9 @@ function edOpenVoiceEffectsPanel() {
     var p = document.createElement('div'); p.id='edVoiceEffectsPanel';
     p.style.cssText='position:absolute;left:0;right:0;bottom:0;z-index:500;background:rgba(10,10,10,0.97);backdrop-filter:blur(30px);border-radius:24px 24px 0 0;padding:20px 16px max(32px,env(safe-area-inset-bottom,32px));animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
     p.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;"><span style="color:white;font-size:17px;font-weight:700;">Voice Effects</span><button onclick="document.getElementById(\'edVoiceEffectsPanel\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button></div>'+
-        '<p style="color:rgba(255,255,255,0.4);font-size:12px;margin:0 0 16px;">Changes the voice of anyone talking in your video.</p>'+
+        // Was "Changes the voice of anyone talking in your video." It does not:
+        // altering recorded audio means re-encoding it, and nothing here does that.
+        '<p style="color:#FF9F0A;font-size:12px;margin:0 0 16px;line-height:1.45;">Voice effects are not available yet. Picking one here will not change your audio.</p>'+
         '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px;">'+
         EFFECTS.map(function(ef){
             return '<button onclick="edApplyVoiceEffect(\''+ef.id+'\')" id="vefx_'+ef.id+'" style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 8px;border-radius:16px;border:2px solid '+(ef.id==='none'?'#007AFF':'rgba(255,255,255,0.12)')+';background:'+(ef.id==='none'?'rgba(0,122,255,0.15)':'rgba(255,255,255,0.07)')+';color:white;cursor:pointer;">'+
@@ -38635,7 +38797,8 @@ function edOpenVoiceEffectsPanel() {
             '</button>';
         }).join('')+
         '</div>'+
-        '<button onclick="document.getElementById(\'edVoiceEffectsPanel\').remove();showToast(\'Voice effect applied ✅\');triggerHaptic(15);" style="width:100%;padding:14px;border-radius:14px;border:none;background:#007AFF;color:white;font-size:15px;font-weight:700;cursor:pointer;">Done</button>';
+        // It used to say "Voice effect applied", which was simply untrue.
+        '<button onclick="document.getElementById(\'edVoiceEffectsPanel\').remove();triggerHaptic(15);" style="width:100%;padding:14px;border-radius:14px;border:none;background:#007AFF;color:white;font-size:15px;font-weight:700;cursor:pointer;">Close</button>';
     overlay.appendChild(p);
 }
 function edApplyVoiceEffect(effectId) {
@@ -41512,7 +41675,8 @@ function edOpenGifStickerModal() {
     m.id = 'edGifModal';
     m.style.cssText = 'position:absolute;inset:0;z-index:600;background:rgba(0,0,0,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);display:flex;flex-direction:column;animation:slideUpOverlay 0.3s ease;';
     m.innerHTML =
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px 10px;">' +
+        // The title and close button sat under the status bar without this inset.
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top, 0px) + 16px) 18px 10px;">' +
             '<span style="color:white;font-size:17px;font-weight:700;">GIFs</span>' +
             '<button onclick="document.getElementById(\'edGifModal\').remove()" style="background:rgba(255,255,255,0.12);border:none;color:white;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark"></i></button>' +
         '</div>' +
@@ -41534,9 +41698,14 @@ function _edGifSearchNow(q) {
     var grid = document.getElementById('edGifGrid');
     if (!grid) return;
     grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:24px;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:20px;"></i></div>';
-    fetch('/api/giphy/search/?q=' + encodeURIComponent((q || '').trim() || 'trending') + '&type=gifs')
+    // A search that never answers used to leave the spinner spinning forever.
+    var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+    var killer = setTimeout(function () { if (ctrl) try { ctrl.abort(); } catch (e) {} }, 9000);
+    fetch('/api/giphy/search/?q=' + encodeURIComponent((q || '').trim() || 'trending') + '&type=gifs',
+          ctrl ? { signal: ctrl.signal } : undefined)
         .then(function (r) { return r.json(); })
         .then(function (data) {
+            clearTimeout(killer);
             var items = (data && data.data) || [];
             if (!items.length) {
                 grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:24px;color:rgba(255,255,255,0.4);font-size:13px;">No GIFs found</div>';
@@ -41545,7 +41714,13 @@ function _edGifSearchNow(q) {
             grid.innerHTML = '';
             items.forEach(function (it) {
                 var imgs = it && it.images; if (!imgs || !imgs.original) return;
-                var thumb = (imgs.fixed_height_small || imgs.original).url, orig = imgs.original.url;
+                var thumb = (imgs.fixed_height_small || imgs.original).url;
+                // Placing the GIF used to fetch images.original, which for a Giphy
+                // GIF is routinely several megabytes — that is the load that went on
+                // and on after tapping one. A fixed-height rendition is a fraction of
+                // the size and this is an overlay at under half the video's width, so
+                // the original's resolution was never going to be visible anyway.
+                var placed = (imgs.fixed_height || imgs.downsized_medium || imgs.downsized || imgs.original).url;
                 var cell = document.createElement('div');
                 cell.style.cssText = 'aspect-ratio:1;border-radius:8px;overflow:hidden;background:#222;cursor:pointer;';
                 var img = document.createElement('img');
@@ -41554,15 +41729,27 @@ function _edGifSearchNow(q) {
                 cell.appendChild(img);
                 cell.onclick = function () {
                     var mm = document.getElementById('edGifModal'); if (mm) mm.remove();
-                    _edPlaceOverlay({ type: 'image', wPct: 0.45, data: { url: orig, gif: true } },
+                    // On screen straight away; the browser already has the thumbnail
+                    // cached from the grid, and the larger one swaps in when it lands.
+                    _edPlaceOverlay({ type: 'image', wPct: 0.45, data: { url: thumb, gif: true } },
                         { removeMsg: 'GIF removed', fontK: 0.08 });
                     showToast('GIF added');
+                    var pre = new Image();
+                    pre.onload = function () {
+                        document.querySelectorAll('img[src="' + thumb + '"]').forEach(function (el) {
+                            if (el.closest('#edGifGrid')) return;   // leave the picker's own tiles alone
+                            el.src = placed;
+                        });
+                    };
+                    pre.src = placed;
                 };
                 grid.appendChild(cell);
             });
         })
-        .catch(function () {
-            grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:24px;color:rgba(255,255,255,0.4);font-size:13px;">Could not load GIFs</div>';
+        .catch(function (e) {
+            clearTimeout(killer);
+            var why = (e && e.name === 'AbortError') ? 'That took too long. Check your connection.' : 'Could not load GIFs';
+            grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:24px;color:rgba(255,255,255,0.4);font-size:13px;">' + why + '</div>';
         });
 }
 
@@ -44489,11 +44676,14 @@ function openCheckInScreen() {
         overlay.id = 'checkin-screen';
         overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:5200;background:var(--bg-primary,#fff);display:flex;flex-direction:column;overflow:hidden;';
         overlay.innerHTML =
-          '<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:0.5px solid #eee;">' +
-            '<button onclick="document.getElementById(\'checkin-screen\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#000;">✕</button>' +
-            '<b style="flex:1;text-align:center;font-size:17px;">Check In</b><div style="width:32px;"></div></div>' +
-          '<div style="padding:12px 16px;border-bottom:0.5px solid #eee;">' +
-            '<input id="checkin-search" placeholder="Search places" oninput="filterCheckInPlaces(this.value)" style="width:100%;padding:10px 14px;border-radius:12px;border:none;background:#f2f2f7;font-size:15px;outline:none;"></div>' +
+          // The header started at the very top of the screen, so the title and the
+          // close button sat under the clock. Also themed: it was hardcoded to a
+          // black ✕ on a light divider over a dark page.
+          '<div style="display:flex;align-items:center;gap:12px;padding:calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px;border-bottom:0.5px solid var(--border-color,#eee);">' +
+            '<button onclick="document.getElementById(\'checkin-screen\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-primary,#000);">✕</button>' +
+            '<b style="flex:1;text-align:center;font-size:17px;color:var(--text-primary,#000);">Check In</b><div style="width:32px;"></div></div>' +
+          '<div style="padding:12px 16px;border-bottom:0.5px solid var(--border-color,#eee);">' +
+            '<input id="checkin-search" placeholder="Search places" oninput="filterCheckInPlaces(this.value)" style="width:100%;padding:10px 14px;border-radius:12px;border:none;background:var(--input-bg,#f2f2f7);color:var(--text-primary,#000);font-size:15px;outline:none;"></div>' +
           '<div class="check-in-list" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;">' + buildCheckInList() + '</div>';
         document.getElementById('app').appendChild(overlay);
         setTimeout(loadCheckInPlaces, 100);

@@ -656,7 +656,8 @@ function authenticateUser() {
 
 <!-- ========== NEW TRUST CLIP POST SCREEN ========== -->
 <div id="new-trust-clip-overlay" class="white-overlay" style="z-index:8800;display:none;flex-direction:column;">
-  <div class="header-container" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:0.5px solid rgba(128,128,128,0.12);">
+  <!-- The title and the back button sat level with the clock without this inset. -->
+  <div class="header-container" style="display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top, 0px) + 16px) 20px 16px;border-bottom:0.5px solid rgba(128,128,128,0.12);">
     <div class="liquid-glass-btn" onclick="tcGoBack()"><i class="fa-solid fa-chevron-left"></i></div>
     <b style="font-size:17px;">New trust clip</b>
     <div style="width:36px;"></div>
@@ -4222,7 +4223,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=216"></script>
+<script src="{% static 'core/js/feed.js' %}?v=217"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=75"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
@@ -4232,7 +4233,7 @@ function authenticateUser() {
 <script src="{% static 'core/js/native.js' %}?v=5"></script>
 <!-- Story camera: gallery picker, composer, sound picker and trimmer.
      Loads after feed.js because it overrides lgGallery(). -->
-<script src="{% static 'core/js/story-camera.js' %}?v=10"></script>
+<script src="{% static 'core/js/story-camera.js' %}?v=11"></script>
 <!-- ===== LIVE MINI-PLAYER ===== -->
 <!-- Docked directly under the header rather than floating over the middle of the
      feed, so it never covers a post you are reading. -->
