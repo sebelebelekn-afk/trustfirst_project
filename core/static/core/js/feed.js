@@ -13515,7 +13515,9 @@ function tfReelPageHTML(post, avatarHtml, username, verified, likes) {
     var src = post.media_url || post.video_url || '';
     return '' +
     '<div class="reel-page" data-post-id="' + escapeHtml(String(post.id)) + '">' +
-        '<video src="' + escapeHtml(src) + '" class="reel-video" data-vol="' + (post.volume == null ? 100 : post.volume) + '" autoplay muted loop playsinline preload="auto" style="width:100%;height:100%;object-fit:cover;opacity:1;" onclick="reelTogglePlay(this)"></video>' +
+        // data-edl carries the editor's cuts; _tfEdlAttach honours them on play and
+        // takes over looping. Absent on any clip that was never edited.
+        '<video src="' + escapeHtml(src) + '" class="reel-video" data-vol="' + (post.volume == null ? 100 : post.volume) + '"' + _tfEdlAttr(post) + ' autoplay muted loop playsinline preload="auto" style="width:100%;height:100%;object-fit:cover;opacity:1;" onclick="reelTogglePlay(this)"></video>' +
         '<div class="reel-play-indicator" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:82px;height:82px;border-radius:50%;background:rgba(0,0,0,0.42);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;pointer-events:none;z-index:25;"><i class="fa-solid fa-play" style="color:#fff;font-size:32px;margin-left:4px;"></i></div>' +
         '<button class="reel-mute-btn" onclick="toggleReelMute(this)" style="position:absolute;top:max(54px,env(safe-area-inset-top,54px));right:14px;width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,0.5);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:30;"><i class="fa-solid fa-volume-xmark" style="color:#fff;font-size:15px;"></i></button>' +
         '<div class="reel-ui">' +
@@ -17917,7 +17919,8 @@ function openContextualVideo(videoUrl, context, startIndex, clipArray) {
             user_id: c.user_id || (c.users && c.users.id) || '',
             comment_count: (c.comment_count != null ? c.comment_count : c.comments) || 0,
             view_count: c.view_count || 0,
-            volume: c.volume
+            volume: c.volume,
+            segments: c.segments || null   // the editor's cuts, honoured at playback
         };
         var profile = c.users || {};
         if (!profile.username && typeof c.username === 'string') profile.username = c.username.replace(/^@/, '');
@@ -18334,7 +18337,7 @@ function _applyClipVolume(v) {
     if (!isFinite(pct)) return;
     try { v.volume = Math.max(0, Math.min(pct / 100, 1)); } catch (e) {}
 }
-document.addEventListener('play', function (e) { _applyClipVolume(e.target); }, true);
+document.addEventListener('play', function (e) { _applyClipVolume(e.target); _tfEdlAttach(e.target); }, true);
 document.addEventListener('volumechange', function (e) {
     // Re-assert after an unmute (toggleReelMute resets volume implicitly on some browsers)
     var v = e.target;
@@ -18342,6 +18345,59 @@ document.addEventListener('volumechange', function (e) {
         v._volApplied = true; _applyClipVolume(v); v._volApplied = false;
     }
 }, true);
+
+// Playing an edit without re-encoding it. The editor's cuts are stored on the clip
+// as a list of ranges (trustclips.segments); the player skips through them in
+// order, exactly as volume above is applied as data rather than baked into the
+// file. A clip with no segments plays whole, so nothing that already exists
+// changes behaviour.
+//
+// data-edl on the <video> is that list as JSON. This is deliberately plain
+// HTMLMediaElement seeking, which behaves the same in a Capacitor WebView on
+// Android and in WKWebView on iOS as it does in a browser.
+function _tfEdlAttach(v) {
+    if (!v || v.tagName !== 'VIDEO' || v._edlWired) return;
+    var raw = v.getAttribute('data-edl');
+    if (!raw) return;
+    var segs;
+    try { segs = JSON.parse(raw); } catch (e) { return; }
+    if (!segs || !segs.length) return;
+
+    v._edlWired = true;
+    v._edlSegs = segs;
+    v._edlAt = 0;
+    v.loop = false;   // the edit loops, not the file
+
+    function seekTo(i) {
+        var s = v._edlSegs[i];
+        if (!s) return;
+        v._edlAt = i;
+        try { v.currentTime = (s.inMs || 0) / 1000; } catch (e) {}
+    }
+    function watch() {
+        var s = v._edlSegs[v._edlAt];
+        if (!s) return;
+        if (v.currentTime * 1000 >= (s.outMs || 0) - 40) {
+            seekTo(v._edlAt + 1 < v._edlSegs.length ? v._edlAt + 1 : 0);
+        }
+    }
+    v.addEventListener('timeupdate', watch);
+    v.addEventListener('ended', function () { seekTo(0); v.play().catch(function () {}); });
+
+    // Start at the first segment's in point rather than the file's 0:00, which the
+    // edit may have trimmed away.
+    if (isFinite(v.duration) && v.duration > 0) seekTo(0);
+    else v.addEventListener('loadedmetadata', function once() { v.removeEventListener('loadedmetadata', once); seekTo(0); });
+}
+
+// The list a <video> needs, in the attribute form the player reads.
+function _tfEdlAttr(row) {
+    if (!row || !row.segments) return '';
+    var segs = row.segments;
+    if (typeof segs === 'string') { try { segs = JSON.parse(segs); } catch (e) { return ''; } }
+    if (!segs || !segs.length) return '';
+    return ' data-edl=\'' + JSON.stringify(segs).replace(/'/g, '&#39;') + '\'';
+}
 
 function renderReelsFallback() {
     var loading = document.getElementById('reelsLoading');
@@ -38140,7 +38196,19 @@ function toggleClipSelection(idx, el) {
 // VIDEO EDITOR STATE
 // ============================================================
 var edState = {
-    clips: [],          // [{id, seed, startMs, endMs, durationMs, color}]
+    // A clip is a SEGMENT: a range of one source file, placed on the timeline by
+    // its position in this array. srcStartMs/srcEndMs are the in and out points
+    // within that clip's own file, srcDurationMs is how long that file actually
+    // is, and durationMs is what the segment plays for (out minus in).
+    //
+    // These used to be startMs/endMs doing two jobs at once: an offset along the
+    // timeline AND an offset into the file. Every editor bug followed from that.
+    // Duplicate set startMs to the previous clip's endMs, which is past the end of
+    // the source, so the copy pointed at video that does not exist and drew as an
+    // empty blue bar. Trim moved the same numbers and so moved the wrong thing.
+    // Nothing ever seeked the preview to a clip's in point, so touching any clip
+    // appeared to jump back to 0:00.
+    clips: [],          // [{id, file, objectUrl, srcStartMs, srcEndMs, srcDurationMs, durationMs, color}]
     audioTracks: [],    // [{id, label, startMs, durationMs}]
     textOverlays: [],   // [{id, text, x, y, startMs, durationMs}]
     playheadMs: 0,
@@ -38202,8 +38270,9 @@ function openPreviewEditScreen() {
 
 
 
-    // Build clip objects from real file objects
-    var cursor = 0;
+    // Build clip objects from real file objects. No running cursor: where a clip
+    // sits on the timeline is its index in this array, so there is nothing to keep
+    // in sync and nothing to get wrong.
     selectedClipFiles.forEach(function(idx, i) {
         var file = _clipFileObjects[idx];
         var dur = 10000; // placeholder; real duration set after metadata loads
@@ -38212,13 +38281,13 @@ function openPreviewEditScreen() {
             fileIndex: idx,
             file: file || null,
             objectUrl: file ? URL.createObjectURL(file) : null,
-            startMs: cursor,
-            endMs: cursor + dur,
+            srcStartMs: 0,
+            srcEndMs: dur,
+            srcDurationMs: dur,
             durationMs: dur,
             color: 'rgba(0,122,255,0.85)'
         };
         edState.clips.push(clipObj);
-        cursor += dur;
     });
 
     // Load real video durations
@@ -38229,13 +38298,10 @@ function openPreviewEditScreen() {
             v.preload = 'metadata';
             v.onloadedmetadata = function() {
                 var realDur = Math.round(v.duration * 1000);
-                // Shift all clips after this one
-                var diff = realDur - c.durationMs;
-                var found = false;
-                edState.clips.forEach(function(cc) {
-                    if (cc.id === c.id) { found = true; cc.durationMs = realDur; cc.endMs = cc.startMs + realDur; }
-                    else if (found) { cc.startMs += diff; cc.endMs += diff; }
-                });
+                // Only this clip changes. Nothing after it has to be shifted any
+                // more, because nothing stores an absolute timeline offset.
+                c.srcDurationMs = realDur;
+                if (!c._trimmed) { c.srcStartMs = 0; c.srcEndMs = realDur; c.durationMs = realDur; }
                 edRenderTimeline();
                 // Grab a frame for the clip's timeline-bar thumbnail (blob src is
                 // same-origin, so the canvas isn't tainted and toDataURL works).
@@ -38277,15 +38343,22 @@ function openPreviewEditScreen() {
 if (_edVidEl) {
             _edVidEl.src = _firstVidClip.objectUrl;
             _edVidEl.muted = false;
-            _edVidEl.loop = true;
+            // The element's own loop would restart at the FILE's 0:00, which may be
+            // trimmed away, and would skip the other segments entirely.
+            // _edSegmentWatch loops the edit instead.
+            _edVidEl.loop = false;
             _edVidEl.load();
             edWireVideo();
             _edVidEl.play().catch(function(){});
             _edVidEl.onloadedmetadata = function() {
                 var realDurMs = Math.round(_edVidEl.duration * 1000);
                 if (_firstVidClip && realDurMs > 0) {
-                    _firstVidClip.durationMs = realDurMs;
-                    _firstVidClip.endMs = realDurMs;
+                    _firstVidClip.srcDurationMs = realDurMs;
+                    if (!_firstVidClip._trimmed) {
+                        _firstVidClip.srcStartMs = 0;
+                        _firstVidClip.srcEndMs = realDurMs;
+                        _firstVidClip.durationMs = realDurMs;
+                    }
                 }
                 edUpdateTimestamp();
                 edRenderTimeline();
@@ -38327,7 +38400,14 @@ function _edBuildFilmstrip(clip) {
     v.addEventListener('loadedmetadata', function () {
         var dur = (v.duration && isFinite(v.duration)) ? v.duration : 0;
         if (!dur) { done(); return; }
-        for (var i = 0; i < COUNT; i++) times.push(Math.min(dur - 0.05, dur * i / COUNT));
+        // Sample across THIS segment, not across the whole file. Sampling the file
+        // meant a split or a trim left both pieces showing the same frames, so the
+        // strip never matched what the segment actually plays.
+        var inS  = Math.max(0, (clip.srcStartMs || 0) / 1000);
+        var outS = Math.min(dur, (clip.srcEndMs != null ? clip.srcEndMs : dur * 1000) / 1000);
+        if (!(outS > inS)) { inS = 0; outS = dur; }
+        var span = outS - inS;
+        for (var i = 0; i < COUNT; i++) times.push(Math.min(outS - 0.05, inS + span * i / COUNT));
         grab();
     });
 
@@ -38521,8 +38601,43 @@ function edSelectClip(id) {
     edState.selectedClipId = (edState.selectedClipId === id) ? null : id;
     var bar = document.getElementById('edClipActions');
     if (bar) bar.style.display = edState.selectedClipId ? 'flex' : 'none';
+    // Show the clip you just picked. Nothing used to seek here, so selecting the
+    // second segment left the preview playing the first from wherever it was,
+    // which read as "it keeps taking me back to the start".
+    if (edState.selectedClipId) {
+        var idx = edState.clips.findIndex(function (c) { return c.id === id; });
+        if (idx >= 0) {
+            var rows = _edTimeline();
+            edState.playheadMs = rows[idx].tlStartMs;
+            edSeekPreviewTo(rows[idx].tlStartMs);
+        }
+    }
     edRenderTimeline();
     triggerHaptic(8);
+}
+
+// Put the preview on a given timeline position: load that segment's file if it is
+// not already loaded, then seek to the matching point inside it.
+function edSeekPreviewTo(tlMs) {
+    var vid = document.getElementById('edVideo');
+    var hit = _edResolve(tlMs);
+    if (!vid || !hit || !hit.clip) return;
+    var wantSrc = hit.clip.objectUrl || '';
+    if (!wantSrc) return;
+    _edActiveClipIndex = hit.index;
+    function seek() {
+        try { vid.currentTime = hit.srcMs / 1000; } catch (e) {}
+    }
+    if (vid.src !== wantSrc) {
+        vid.src = wantSrc;
+        vid.addEventListener('loadedmetadata', function once() {
+            vid.removeEventListener('loadedmetadata', once);
+            seek();
+        });
+        vid.load();
+    } else {
+        seek();
+    }
 }
 
 // Drag the music bar along the timeline to set when it starts (clamped at 0:00
@@ -38642,12 +38757,84 @@ function edOpenAdjustMusicPanel(trackId) {
 }
 
 var _edTrimData = null;
+// The edit, in the form the player reads: the distinct source files, and the
+// ranges of them that play in order. Returns null when the timeline is just one
+// untouched clip, so an ordinary clip stores nothing and behaves exactly as it did
+// before any of this existed.
+//
+// Only the first file is uploaded today, so a multi-file timeline is reported
+// rather than silently published as its first clip.
+function _edBuildEdl() {
+    var clips = (edState && edState.clips) || [];
+    if (!clips.length) return null;
+
+    var files = [];
+    clips.forEach(function (c) {
+        var key = c.objectUrl || '';
+        if (key && files.indexOf(key) < 0) files.push(key);
+    });
+
+    var segments = clips.map(function (c) {
+        return {
+            src: Math.max(0, files.indexOf(c.objectUrl || '')),
+            inMs: Math.round(c.srcStartMs || 0),
+            outMs: Math.round(c.srcEndMs != null ? c.srcEndMs : (c.srcDurationMs || c.durationMs || 0))
+        };
+    }).filter(function (s) { return s.outMs > s.inMs; });
+
+    if (!segments.length) return null;
+
+    // Untouched single clip: nothing worth storing.
+    var only = clips.length === 1 && !clips[0]._trimmed;
+    if (only) return null;
+
+    return { sources: files, segments: segments, multiSource: files.length > 1 };
+}
+
+// Where each segment falls on the timeline, worked out from the order and the
+// trimmed lengths. Nothing stores this, so it can never drift.
+function _edTimeline() {
+    var at = 0;
+    return edState.clips.map(function (c) {
+        var d = Math.max(0, c.durationMs || 0);
+        var row = { clip: c, tlStartMs: at, tlEndMs: at + d };
+        at += d;
+        return row;
+    });
+}
+function _edTotalMs() {
+    return edState.clips.reduce(function (n, c) { return n + Math.max(0, c.durationMs || 0); }, 0);
+}
+// Timeline position → which segment, and where inside that segment's file.
+function _edResolve(tlMs) {
+    var rows = _edTimeline();
+    for (var i = 0; i < rows.length; i++) {
+        if (tlMs < rows[i].tlEndMs || i === rows.length - 1) {
+            var into = Math.max(0, Math.min(rows[i].clip.durationMs || 0, tlMs - rows[i].tlStartMs));
+            return { index: i, clip: rows[i].clip, srcMs: (rows[i].clip.srcStartMs || 0) + into, row: rows[i] };
+        }
+    }
+    return null;
+}
+// A trim or a split changes which frames a segment covers, so its cached strip is
+// no longer of the right piece of video.
+function _edInvalidateStrip(c) {
+    if (!c) return;
+    c.filmstrip = null;
+    c._stripPending = false;
+}
+
 function edTrimStart(e, clipId, side) {
     e.stopPropagation();
     var startX = e.touches ? e.touches[0].clientX : e.clientX;
     var clip = edState.clips.find(function(c){return c.id === clipId;});
     if (!clip) return;
-    _edTrimData = { clipId, side, startX, origStart: clip.startMs, origEnd: clip.endMs, origDur: clip.durationMs };
+    // Trimming moves the in or out point INSIDE this clip's own file, clamped to
+    // the file's real length. It used to move timeline offsets instead, which is
+    // why dragging the right handle appeared to send the preview back to the start.
+    _edTrimData = { clipId: clipId, side: side, startX: startX,
+                    origIn: clip.srcStartMs || 0,
+                    origOut: (clip.srcEndMs != null ? clip.srcEndMs : (clip.durationMs || 0)) };
 
     function onMove(ev) {
         var x = ev.touches ? ev.touches[0].clientX : ev.clientX;
@@ -38655,15 +38842,22 @@ function edTrimStart(e, clipId, side) {
         var dMs = Math.round((dx / (ED_CLIP_PX_PER_SEC * edZoom)) * 1000);
         var c = edState.clips.find(function(c){return c.id === _edTrimData.clipId;});
         if (!c) return;
-        var MIN = 1000;
+        var MIN = 300;
+        var srcMax = c.srcDurationMs || _edTrimData.origOut;
         if (_edTrimData.side === 'l') {
-            c.startMs = Math.min(_edTrimData.origEnd - MIN, _edTrimData.origStart + dMs);
-            c.durationMs = c.endMs - c.startMs;
+            c.srcStartMs = Math.max(0, Math.min(_edTrimData.origOut - MIN, _edTrimData.origIn + dMs));
         } else {
-            c.endMs = Math.max(_edTrimData.origStart + MIN, _edTrimData.origEnd + dMs);
-            c.durationMs = c.endMs - c.startMs;
+            c.srcEndMs = Math.min(srcMax, Math.max(_edTrimData.origIn + MIN, _edTrimData.origOut + dMs));
         }
+        c.durationMs = c.srcEndMs - c.srcStartMs;
+        c._trimmed = true;
         edState.isDirty = true;
+        // Show the frame the handle is sitting on, so trimming the end shows the
+        // end. Previously the preview was left wherever it happened to be.
+        var vid = document.getElementById('edVideo');
+        if (vid && edState.clips[0] === c) {
+            try { vid.currentTime = ((_edTrimData.side === 'l' ? c.srcStartMs : c.srcEndMs) / 1000); } catch (err) {}
+        }
         edRenderTimeline();
     }
     function onEnd() {
@@ -38671,6 +38865,9 @@ function edTrimStart(e, clipId, side) {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('touchend', onEnd);
         document.removeEventListener('mouseup', onEnd);
+        var c = edState.clips.find(function(c){return c.id === _edTrimData.clipId;});
+        _edInvalidateStrip(c);
+        edRenderTimeline();
         edSaveHistory();
         editorSaveDraft(false);
     }
@@ -38681,29 +38878,67 @@ function edTrimStart(e, clipId, side) {
 }
 
 function editorSplitClip() {
-    if (!edState.selectedClipId) return;
+    if (!edState.selectedClipId) { showToast('Select a clip first'); return; }
     var idx = edState.clips.findIndex(function(c){return c.id === edState.selectedClipId;});
     if (idx < 0) return;
     var c = edState.clips[idx];
-    var _sv = document.getElementById('edVideo');
-    if (_sv && isFinite(_sv.duration) && _sv.duration > 0) edState.playheadMs = Math.round(_sv.currentTime * 1000);
-    var splitAt = edState.playheadMs;
-    if (splitAt <= c.startMs || splitAt >= c.endMs) splitAt = c.startMs + Math.floor(c.durationMs / 2);
-    var newClip = { id: 'clip_' + Date.now(), seed: c.seed + 1, startMs: splitAt, endMs: c.endMs, durationMs: c.endMs - splitAt, color: c.color };
-    c.endMs = splitAt; c.durationMs = splitAt - c.startMs;
-    edState.clips.splice(idx + 1, 0, newClip);
+
+    // Where the playhead is inside THIS segment's file.
+    var rows = _edTimeline();
+    var row = rows[idx];
+    var vid = document.getElementById('edVideo');
+    var srcAt;
+    if (vid && isFinite(vid.duration) && vid.duration > 0 && edState.clips[0] === c) {
+        srcAt = Math.round(vid.currentTime * 1000);
+    } else {
+        var into = Math.max(0, Math.min(c.durationMs, edState.playheadMs - row.tlStartMs));
+        srcAt = (c.srcStartMs || 0) + into;
+    }
+    var MIN = 300;
+    var inMs = c.srcStartMs || 0, outMs = c.srcEndMs;
+    if (srcAt <= inMs + MIN || srcAt >= outMs - MIN) srcAt = inMs + Math.floor((outMs - inMs) / 2);
+    if (outMs - inMs < MIN * 2) { showToast('That clip is too short to split'); return; }
+
+    // Both halves are the same file, cut at srcAt. The second half goes straight
+    // after the first, which is all "position on the timeline" means now.
+    var second = Object.assign({}, c, {
+        id: 'clip_' + Date.now(),
+        seed: (c.seed || 0) + 1,
+        srcStartMs: srcAt,
+        srcEndMs: outMs,
+        durationMs: outMs - srcAt,
+        _trimmed: true,
+        filmstrip: null, _stripPending: false
+    });
+    c.srcEndMs = srcAt;
+    c.durationMs = srcAt - inMs;
+    c._trimmed = true;
+    _edInvalidateStrip(c);
+
+    edState.clips.splice(idx + 1, 0, second);
     edState.isDirty = true;
     edRenderTimeline(); edSaveHistory(); editorSaveDraft(false); triggerHaptic(15);
+    showToast('Split into 2 clips');
 }
 
 function editorDuplicateClip() {
-    if (!edState.selectedClipId) return;
-    var c = edState.clips.find(function(c){return c.id === edState.selectedClipId;});
-    if (!c) return;
-    var dup = Object.assign({}, c, { id: 'clip_' + Date.now(), startMs: c.endMs, endMs: c.endMs + c.durationMs });
-    edState.clips.push(dup);
+    if (!edState.selectedClipId) { showToast('Select a clip first'); return; }
+    var idx = edState.clips.findIndex(function(c){return c.id === edState.selectedClipId;});
+    if (idx < 0) return;
+    var c = edState.clips[idx];
+    // The copy points at the same range of the same file. The old version set
+    // startMs past the end of the source, so the copy referred to video that does
+    // not exist: that is the empty blue bar.
+    var dup = Object.assign({}, c, {
+        id: 'clip_' + Date.now(),
+        seed: (c.seed || 0) + 1,
+        filmstrip: c.filmstrip ? c.filmstrip.slice() : null,
+        _stripPending: false
+    });
+    edState.clips.splice(idx + 1, 0, dup);   // next to the original, not at the end
     edState.isDirty = true;
     edRenderTimeline(); edSaveHistory(); editorSaveDraft(false); triggerHaptic(10);
+    showToast('Clip duplicated');
 }
 
 // Close clip action bar on outside tap
@@ -38723,6 +38958,9 @@ function editorDeleteClip() {
     if (!edState.selectedClipId) return;
     edState.clips = edState.clips.filter(function(c){return c.id !== edState.selectedClipId;});
     edState.selectedClipId = null;
+    // The segment being played may have just been removed from under us.
+    _edActiveClipIndex = 0;
+    edState.playheadMs = 0;
     var bar = document.getElementById('edClipActions');
     if (bar) bar.style.display = 'none';
     edState.isDirty = true;
@@ -38873,9 +39111,70 @@ function edWireVideo() {
     // playhead (smooth). timeupdate only fires ~4×/sec, so only use it to catch
     // up when paused (e.g. the user scrubbed the native control) — using it
     // during playback fought the RAF and made the scrubber jump.
-    vid.addEventListener('timeupdate', function(){ if (!edState.isPlaying) { edState.playheadMs = Math.round(vid.currentTime * 1000); edUpdateTimestamp(); edSyncTimelineScroll(); _edAudioSync(false); } });
-    vid.addEventListener('seeked', function(){ edState.playheadMs = Math.round(vid.currentTime * 1000); edUpdateTimestamp(); edSyncTimelineScroll(); _edAudioSync(false); });
+    vid.addEventListener('timeupdate', function(){
+        _edSegmentWatch();
+        if (!edState.isPlaying) { edState.playheadMs = _edTlFromVideo(vid); edUpdateTimestamp(); edSyncTimelineScroll(); _edAudioSync(false); }
+    });
+    vid.addEventListener('seeked', function(){ edState.playheadMs = _edTlFromVideo(vid); edUpdateTimestamp(); edSyncTimelineScroll(); _edAudioSync(false); });
     icon();
+}
+
+// Which segment the preview is currently playing.
+var _edActiveClipIndex = 0;
+
+// The playhead is a timeline position, and the video element only knows where it
+// is inside one file. Translate: the segments before this one, plus how far into
+// this one we are past its in point.
+function _edTlFromVideo(vid) {
+    var rows = _edTimeline();
+    var row = rows[_edActiveClipIndex] || rows[0];
+    if (!row) return Math.round(vid.currentTime * 1000);
+    var into = Math.max(0, Math.round(vid.currentTime * 1000) - (row.clip.srcStartMs || 0));
+    return row.tlStartMs + Math.min(row.clip.durationMs || 0, into);
+}
+
+// Stop each segment at its out point and move to the next one, so the preview
+// plays the edit rather than the raw file from beginning to end. This is the whole
+// trick: no re-encoding, the player just honours the in and out points.
+function _edSegmentWatch() {
+    var vid = document.getElementById('edVideo');
+    if (!vid || vid.paused) return;
+    var rows = _edTimeline();
+    var row = rows[_edActiveClipIndex];
+    if (!row) return;
+    var out = row.clip.srcEndMs;
+    if (out == null) return;
+    if (vid.currentTime * 1000 < out - 40) return;
+
+    var next = rows[_edActiveClipIndex + 1];
+    if (!next) {
+        // End of the edit. Loop back to the first segment's in point rather than to
+        // the file's 0:00, which may have been trimmed away.
+        _edActiveClipIndex = 0;
+        var first = rows[0];
+        if (!first) return;
+        if (first.clip.objectUrl && vid.src !== first.clip.objectUrl) {
+            vid.src = first.clip.objectUrl;
+            vid.load();
+            vid.addEventListener('loadedmetadata', function once(){ vid.removeEventListener('loadedmetadata', once);
+                try { vid.currentTime = (first.clip.srcStartMs || 0) / 1000; } catch (e) {}
+                vid.play().catch(function(){}); });
+            return;
+        }
+        try { vid.currentTime = (first.clip.srcStartMs || 0) / 1000; } catch (e) {}
+        return;
+    }
+
+    _edActiveClipIndex += 1;
+    if (next.clip.objectUrl && vid.src !== next.clip.objectUrl) {
+        vid.src = next.clip.objectUrl;
+        vid.load();
+        vid.addEventListener('loadedmetadata', function once(){ vid.removeEventListener('loadedmetadata', once);
+            try { vid.currentTime = (next.clip.srcStartMs || 0) / 1000; } catch (e) {}
+            vid.play().catch(function(){}); });
+    } else {
+        try { vid.currentTime = (next.clip.srcStartMs || 0) / 1000; } catch (e) {}
+    }
 }
 
 // Scroll the timeline so the playhead position stays in view (shared by the
@@ -38898,7 +39197,10 @@ function edTickPlayhead() {
     if (!edState.isPlaying) { _edTickRAF = null; return; }
     var vid = document.getElementById('edVideo');
     if (vid && !vid.paused) {
-        edState.playheadMs = Math.round(vid.currentTime * 1000);
+        // Runs ~60x a second, which is a far finer net for a segment's out point
+        // than timeupdate's four times a second.
+        _edSegmentWatch();
+        edState.playheadMs = _edTlFromVideo(vid);
         edUpdateTimestamp();
         edSyncTimelineScroll();
         _edAudioSync(true);
@@ -42526,6 +42828,8 @@ function openNewTrustClipPost() {
     // Capture placed stickers before the editor DOM is torn down; they ride
     // along to the trustclips insert and render over the video in the feed.
     try { window._pendingClipStickers = _edCollectOverlays(); } catch (e) { window._pendingClipStickers = []; }
+    // Same for the edit itself, for the same reason.
+    try { window._pendingClipEdl = _edBuildEdl(); } catch (e) { window._pendingClipEdl = null; }
     _edStopMedia();
     closePage('preview-edit-overlay');
     openPage('new-trust-clip-overlay');
@@ -42648,6 +42952,25 @@ async function submitTrustClip() {
             } catch (e) { console.warn('[TrustClip] cover upload failed:', e && e.message); }
         }
 
+        // The EDL was captured against blob: URLs, which mean nothing once the clip
+        // is published. Only the first file is uploaded, so point every segment at
+        // the uploaded URL — correct for the ordinary case of one clip split,
+        // trimmed or duplicated. A timeline built from several separate files needs
+        // several uploads, which is not built, so say so rather than quietly
+        // publishing only the first one's ranges.
+        var _edl = window._pendingClipEdl || null;
+        if (_edl) {
+            if (_edl.multiSource) {
+                showToast('Only the first video was published. Joining separate clips is coming.');
+                _edl = null;
+            } else {
+                _edl = { sources: [videoUrl], segments: _edl.segments.map(function (s) {
+                    return { src: 0, inMs: s.inMs, outMs: s.outMs };
+                }) };
+            }
+        }
+        window._pendingClipEdl = _edl;
+
         // Insert row into trustclips table
         if (window.sb && currentUser && videoUrl) {
             var insertRow = {
@@ -42677,7 +43000,12 @@ is_demo: window._tcIsDemoClip || false,
                 no_downloads: document.getElementById('moAllowDownloads') && !document.getElementById('moAllowDownloads').classList.contains('active'),
                 allow_template: !(document.getElementById('moNoTemplate') && document.getElementById('moNoTemplate').classList.contains('active')),
                 scheduled_at: window._tcScheduledAt || null,
-                stickers: window._pendingClipStickers || []
+                stickers: window._pendingClipStickers || [],
+                // The edit itself: which ranges of which file play, in order. Only
+                // written when the timeline is actually more than the whole clip,
+                // so an untouched clip stays null and plays exactly as before.
+                sources: (window._pendingClipEdl && window._pendingClipEdl.sources) || null,
+                segments: (window._pendingClipEdl && window._pendingClipEdl.segments) || null
             };
             var clipSaved = true;
             var { error: insertErr } = await sb.from('trustclips').insert(insertRow);
