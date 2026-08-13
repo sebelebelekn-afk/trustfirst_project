@@ -921,8 +921,10 @@ try {
                     })
                 ]);
             } catch (e) { console.warn('[Registration] device/login log skipped:', e && e.message); }
-            // Keys are needed for encrypted chat, not for the first screen.
-            try { await E2E.init(); await E2E.publishKeyBundle(userId); }
+            // Keys are needed for encrypted chat, not for the first screen. The id
+            // is passed so a device that already holds another account's keys does
+            // not hand them to this one.
+            try { await E2E.init(userId); await E2E.publishKeyBundle(userId); }
             catch (e) { console.warn('[Registration] E2E key publish skipped:', e && e.message); }
         })(authData.user.id);
 
@@ -1109,9 +1111,16 @@ localStorage.setItem('tf_burst', JSON.stringify(burstAttempts));
                 ]);
             } catch (e) { console.warn('[Login] device/activity log skipped:', e && e.message); }
             try {
-                await E2E.init();
-                const existingKeys = await DB.getKeyBundle(userId);
-                if (!existingKeys) await E2E.publishKeyBundle(userId);
+                await E2E.init(userId);
+                // Publishing only when the server had nothing left a device whose
+                // keys had been regenerated permanently unable to read its own
+                // incoming mail. Compare and correct instead.
+                var _keyState = await E2E.reconcileKeys(userId);
+                if (_keyState === 'republished') {
+                    showToast('Encryption keys refreshed on this device. Messages sent before now cannot be opened here.');
+                } else if (_keyState === 'needs_restore') {
+                    showToast('Enter your recovery PIN in Settings to read your encrypted messages.');
+                }
             } catch (e) { console.warn('[Login] E2E check skipped:', e && e.message); }
         })(authData.user.id);
 
@@ -1199,7 +1208,7 @@ async function restoreSession() {
             if (cachedU && cachedU.id === session.user.id) {
                 currentUser = cachedU;
                 isAdmin = cachedU.is_admin === true;
-                try { await E2E.init(); } catch(e) {}
+                try { await E2E.init(cachedU.id); } catch(e) {}
                 console.warn('[Session] Offline, restored from cached profile');
                 return true;
             }
@@ -1239,7 +1248,18 @@ async function restoreSession() {
         isAdmin = currentUser.is_admin === true;
         secureSave('current_user', currentUser);
 
-        try { await E2E.init(); } catch(e) {}
+        // Restoring a session is the other way into the app, so it needs the same
+        // key reconciliation sign-in does, or a device with regenerated keys stays
+        // unable to read incoming messages until it next signs in fully.
+        try {
+            await E2E.init(currentUser.id);
+            var _ks = await E2E.reconcileKeys(currentUser.id);
+            if (_ks === 'republished') {
+                showToast('Encryption keys refreshed on this device. Messages sent before now cannot be opened here.');
+            } else if (_ks === 'needs_restore') {
+                showToast('Enter your recovery PIN in Settings to read your encrypted messages.');
+            }
+        } catch(e) {}
         return true;
     } catch (e) {
         console.error('[Session] Restore failed:', e);
@@ -2773,8 +2793,18 @@ function _isSafeUrl(url) {
 // chats filled up with base64 instead of words. Ciphertext is only ever shown
 // when there is no nonce, meaning the row was never encrypted (group chats and
 // older plaintext messages).
+// null means "this device cannot read it", which callers render as a lock rather
+// than as text.
+//
+// The distinction between a nonce that is absent and a nonce that was never
+// fetched matters. A query that forgets to select nonce used to look exactly like
+// an unencrypted row, and this returned the ciphertext as if it were prose: that is
+// how a line of base64 ended up in the inbox preview. A missing field is now
+// treated as unknown rather than as proof of plaintext.
 function _msgPlainText(m) {
+    if (!m) return null;
     if (m.content) return m.content;
+    if (!('nonce' in m)) return null;      // caller did not ask for it, so do not guess
     if (!m.nonce) return m.ciphertext || '';
     return null;
 }
@@ -13179,8 +13209,11 @@ async function fillMsgContent() {
             // Step 5: get last message per conversation (direction-aware preview)
             var lastMsgMap = {};
             var _meId = currentUser.id;
+            // nonce has to be selected. Without it _msgPlainText sees no nonce,
+            // decides the row is not encrypted and hands back the raw ciphertext,
+            // which is why the inbox preview showed a line of base64.
             var { data: lastMsgs } = await sb.from('messages')
-                .select('conversation_id, ciphertext, message_type, created_at, sender_id')
+                .select('conversation_id, ciphertext, nonce, message_type, created_at, sender_id')
                 .in('conversation_id', convIds)
                 .order('created_at', { ascending: false })
                 .limit(convIds.length * 5);
@@ -16668,8 +16701,12 @@ const E2EBackup = {
         E2E._keys = keys;
         E2E._needsRestore = false;
         // Same shape generateKeyPair writes, so a restored key is picked up by
-        // init() on the next load exactly like a locally generated one.
-        var rec = { id: 'e2e_keys', type: 'e2e', blob: JSON.stringify(keys), createdAt: Date.now() };
+        // init() on the next load exactly like a locally generated one. Stored
+        // under this account's own record, not the shared one, for the same reason
+        // generateKeyPair does.
+        var _rid = E2E._storeId();
+        E2E._keysFor = _rid;
+        var rec = { id: _rid, type: 'e2e', blob: JSON.stringify(keys), createdAt: Date.now() };
         try { await DB.update('mediaCache', rec); }
         catch (e) { try { await DB.add('mediaCache', rec); } catch (e2) {} }
         // Derived-key cache belongs to the old identity; drop it.
@@ -16690,16 +16727,45 @@ const E2E = {
     // new key could not open a single earlier message, and the chat filled up
     // with unreadable rows. Now a device with no local key first checks
     // whether a backup exists, and says so instead of quietly starting over.
-    async init() {
+    // Which IndexedDB record holds this account's keys. They used to all share one
+    // record called 'e2e_keys', so two accounts on the same phone loaded each
+    // other's private key: the second one to sign in could read the first one's
+    // messages, and could publish the first one's public key as its own. Keys are
+    // per account now, and an existing device's single record is migrated across on
+    // first use so nobody loses the key they already have.
+    _storeId(userId) {
+        var uid = userId || (typeof currentUser !== 'undefined' && currentUser && currentUser.id) || null;
+        return uid ? ('e2e_keys_' + uid) : 'e2e_keys';
+    },
+
+    async init(userId) {
+        var id = this._storeId(userId);
         try {
-            var stored = await DB.get('mediaCache', 'e2e_keys');
+            var stored = await DB.get('mediaCache', id);
             if (stored && stored.blob) {
                 this._keys = JSON.parse(stored.blob);
-                console.debug('[E2E] Keys loaded from IndexedDB');
+                this._keysFor = id;
+                console.debug('[E2E] Keys loaded for ' + id);
                 return;
             }
         } catch (e) {
-            console.warn('[E2E] No stored keys on this device');
+            console.warn('[E2E] No stored keys on this device for ' + id);
+        }
+        // One-time migration: a device that predates per-account storage has its
+        // keys under the shared record. Claim them for this account rather than
+        // generating a new pair, which would orphan every message already sent.
+        if (id !== 'e2e_keys') {
+            try {
+                var legacy = await DB.get('mediaCache', 'e2e_keys');
+                if (legacy && legacy.blob) {
+                    this._keys = JSON.parse(legacy.blob);
+                    this._keysFor = id;
+                    try { await DB.update('mediaCache', { id: id, type: 'e2e', blob: legacy.blob, createdAt: Date.now() }); }
+                    catch (e) { await DB.add('mediaCache', { id: id, type: 'e2e', blob: legacy.blob, createdAt: Date.now() }); }
+                    console.debug('[E2E] Migrated device keys to ' + id);
+                    return;
+                }
+            } catch (e) {}
         }
         // A backup means real history exists that this device cannot read
         // until it is unlocked, so do not clobber it with fresh keys.
@@ -16710,6 +16776,16 @@ const E2E = {
                 return;
             }
         } catch (e) {}
+        // Never mint keys for nobody. This function is also called once at load,
+        // before anyone has signed in, and generating there would create a pair
+        // under the shared record that the first account to sign in would then
+        // adopt and publish, rotating that account's key and orphaning every
+        // message already sent to it.
+        if (id === 'e2e_keys') {
+            console.debug('[E2E] No account yet, deferring key generation');
+            return;
+        }
+        this._keysFor = id;
         await this.generateKeyPair();
     },
 
@@ -16754,15 +16830,66 @@ const E2E = {
             oneTimePreKeys: oneTimePreKeys
         };
 
-        // Save to device ONLY (never sent to server unencrypted)
+        // Save to device ONLY (never sent to server unencrypted), under this
+        // account's own record so a second account cannot pick it up.
+        var _id = this._keysFor || this._storeId();
+        this._keysFor = _id;
+        var _blob = JSON.stringify(this._keys);
         try {
-    await DB.update('mediaCache', { id: 'e2e_keys', type: 'e2e', blob: JSON.stringify(this._keys), createdAt: Date.now() });
-} catch(e) {
-    await DB.add('mediaCache', { id: 'e2e_keys', type: 'e2e', blob: JSON.stringify(this._keys), createdAt: Date.now() });
-}
-localStorage.removeItem('tf_e2e_keys');
+            await DB.update('mediaCache', { id: _id, type: 'e2e', blob: _blob, createdAt: Date.now() });
+        } catch(e) {
+            await DB.add('mediaCache', { id: _id, type: 'e2e', blob: _blob, createdAt: Date.now() });
+        }
+        localStorage.removeItem('tf_e2e_keys');
 
-        console.debug('[E2E] New key pair generated and stored on device');
+        console.debug('[E2E] New key pair generated and stored on device as ' + _id);
+    },
+
+    // Does the key bundle the server hands out to senders match the private key
+    // this device actually holds?
+    //
+    // This is the whole reason incoming messages could not be opened. Sign-in only
+    // published a bundle when the server had none at all. A device that had
+    // generated a fresh key pair — a second phone, a different browser, cleared
+    // site data — therefore kept its new private key while the server carried on
+    // advertising the old public key. Senders encrypted to a key nobody held, and
+    // every message arrived unreadable with "encrypted for another device".
+    //
+    // Returns 'match', 'mismatch', 'none' or 'unknown'.
+    async checkPublishedKey(userId) {
+        try {
+            if (!this._keys) await this.init();
+            if (!this._keys) return 'unknown';
+            var bundle = await DB.getKeyBundle(userId);
+            if (!bundle || !bundle.identity_public_key) return 'none';
+            var theirs = bundle.identity_public_key;
+            if (typeof theirs === 'string') { try { theirs = JSON.parse(theirs); } catch (e) {} }
+            var mine = this._keys.identityKey.publicKey;
+            // x and y are the P-256 public point: equal x and y is the same key.
+            return (theirs && theirs.x === mine.x && theirs.y === mine.y) ? 'match' : 'mismatch';
+        } catch (e) {
+            console.warn('[E2E] could not compare keys', e && e.message);
+            return 'unknown';
+        }
+    },
+
+    // Make the server advertise the key this device can actually decrypt with, so
+    // messages sent from now on are readable. Anything sent to the previous key
+    // stays unreadable, which is what end-to-end encryption means: nobody, this app
+    // included, holds a copy to recover them from.
+    async reconcileKeys(userId) {
+        if (!userId) return 'unknown';
+        var state = await this.checkPublishedKey(userId);
+        if (state === 'match' || state === 'unknown') return state;
+        if (this._needsRestore) return 'needs_restore';   // a backup exists; do not clobber it
+        try {
+            await this.publishKeyBundle(userId);
+            console.warn('[E2E] republished key bundle for this device (was: ' + state + ')');
+            return state === 'none' ? 'published' : 'republished';
+        } catch (e) {
+            console.warn('[E2E] republish failed', e && e.message);
+            return 'unknown';
+        }
     },
 
     // Upload public key bundle to server (only PUBLIC keys)
@@ -16924,6 +17051,9 @@ localStorage.removeItem('tf_e2e_keys');
 };
 
 // Initialize E2E on load
+// Loads this device's keys if they are already here. It deliberately does not
+// generate any: there is no account yet at load time, and see init() for why
+// minting a pair for nobody is harmful.
 E2E.init().then(() => console.debug('[E2E] Encryption ready'));
 
     // ==========================================================================
