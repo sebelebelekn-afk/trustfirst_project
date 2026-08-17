@@ -2275,6 +2275,9 @@ async function initFeed() {
             feed.innerHTML = '';
             posts.filter(function(p) { return !isTrustClipPost(p); }).forEach(function(p) { feed.appendChild(renderRealPostCard(p)); });
             try { localStorage.setItem('tf_feed_cache', JSON.stringify(posts.slice(0, 12))); } catch (e) {}
+            // People to follow, dropped in among the posts rather than pinned to
+            // the top of every visit.
+            tfMaybeInjectFollowRail(feed);
         } else if (!_cachedFeed || !_cachedFeed.length) {
             feed.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#aaa;"><i class="fa-regular fa-newspaper" style="font-size:40px;margin-bottom:16px;display:block;"></i><p style="font-weight:600;color:var(--text-primary,#000);margin-bottom:6px;">Nothing here yet</p><p style="font-size:13px;">Follow people to see their posts here.</p></div>';
         }
@@ -19950,6 +19953,153 @@ function initViewTracking() {
         new MutationObserver(function () { _tfObserveNewPosts(); })
             .observe(feed, { childList: true, subtree: true });
     }
+}
+
+// ==========================================================================
+// PEOPLE TO FOLLOW, IN THE FEED
+// Two rails: accounts you might like, and accounts that already follow you and
+// are waiting to be followed back. Neither existed in the feed before this.
+//
+// They are placed at a random point among the posts and are not shown every
+// time, because a panel that is always in the same spot stops being read.
+// ==========================================================================
+
+// Who to offer. 'followback' is people who follow you and you have not followed
+// back; 'suggested' is anyone else you do not already follow.
+async function tfFetchFollowSuggestions(kind, limit) {
+    if (!window.sb || !currentUser) return [];
+    limit = limit || 10;
+    var me = currentUser.id;
+    try {
+        var mine = await sb.from('follows').select('following_id').eq('follower_id', me);
+        var following = (mine.data || []).map(function (f) { return f.following_id; });
+
+        var hidden = [];
+        try {
+            hidden = JSON.parse(localStorage.getItem('tf-blocked-users') || '[]')
+                .concat(JSON.parse(localStorage.getItem('tf-muted-users') || '[]'))
+                .concat(JSON.parse(localStorage.getItem('tf-dismissed-suggestions') || '[]'));
+        } catch (e) {}
+        var skip = following.concat(hidden, [me]).filter(Boolean);
+
+        if (kind === 'followback') {
+            // They follow me; keep the ones I have not followed back.
+            var inbound = await sb.from('follows')
+                .select('follower_id, users:follower_id(id,username,display_name,full_name,avatar_url,verified)')
+                .eq('following_id', me).limit(60);
+            return (inbound.data || [])
+                .map(function (r) { return r.users; })
+                .filter(function (u) { return u && u.id && skip.indexOf(u.id) < 0; })
+                .slice(0, limit);
+        }
+
+        var q = sb.from('users').select('id,username,display_name,full_name,avatar_url,verified');
+        if (skip.length) q = q.not('id', 'in', '(' + skip.map(function (i) { return '"' + i + '"'; }).join(',') + ')');
+        var r = await q.limit(limit * 2);
+        if (r.error) throw r.error;
+        return (r.data || []).filter(function (u) { return u && u.username; }).slice(0, limit);
+    } catch (e) {
+        console.warn('[suggestions] ' + kind + ' failed', e && e.message);
+        return [];
+    }
+}
+
+function _tfSuggestCard(u, kind) {
+    var label = u.display_name || u.full_name || u.username || 'User';
+    var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(label) + '&background=007AFF&color=fff&size=160');
+    var sub = kind === 'followback' ? 'Follows you' : 'Suggested for you';
+    var btn = kind === 'followback' ? 'Follow back' : 'Follow';
+    return '<div class="tf-sg-card" data-uid="' + escapeHtml(u.id) + '">' +
+        '<div class="tf-sg-x" onclick="tfDismissSuggestion(this,\'' + escapeHtml(u.id) + '\')" title="Not interested">' +
+            '<i class="fa-solid fa-xmark"></i></div>' +
+        '<img src="' + escapeHtml(av) + '" onclick="viewUserProfile(\'' + escapeHtml(u.id) + '\')" ' +
+            'onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=888&color=fff&size=160\'">' +
+        '<b onclick="viewUserProfile(\'' + escapeHtml(u.id) + '\')">' + escapeHtml(label) +
+            (u.verified ? ' <i class="fa-solid fa-circle-check verify-blue" style="font-size:10px;"></i>' : '') + '</b>' +
+        '<small>' + sub + '</small>' +
+        '<button onclick="tfSuggestFollow(this,\'' + escapeHtml(u.id) + '\')">' + btn + '</button>' +
+    '</div>';
+}
+
+function _tfSuggestRail(title, users, kind) {
+    var rail = document.createElement('div');
+    rail.className = 'tf-sg-rail';
+    rail.innerHTML =
+        '<div class="tf-sg-head">' +
+            '<b>' + title + '</b>' +
+            '<span onclick="openDiscoverScreen&&openDiscoverScreen()">See more</span>' +
+        '</div>' +
+        '<div class="tf-sg-scroll">' + users.map(function (u) { return _tfSuggestCard(u, kind); }).join('') + '</div>';
+    return rail;
+}
+
+// Called after the feed paints. Shows at most one rail, at a random position, and
+// only some of the time.
+async function tfMaybeInjectFollowRail(feed) {
+    if (!feed || !currentUser) return;
+    if (feed.querySelector('.tf-sg-rail')) return;          // already has one
+    // Roughly two visits in three. Not every scroll should carry a panel.
+    if (Math.random() > 0.66) return;
+
+    var cards = Array.prototype.filter.call(feed.children, function (n) {
+        return n.classList && n.classList.contains('post-card');
+    });
+    if (cards.length < 3) return;                            // too thin to interrupt
+
+    // Follow-back is the more useful of the two, so prefer it when there is one.
+    var kind = 'followback';
+    var users = await tfFetchFollowSuggestions('followback', 10);
+    if (users.length < 2) {
+        kind = 'suggested';
+        users = await tfFetchFollowSuggestions('suggested', 10);
+    }
+    if (users.length < 2) return;                            // nothing worth showing
+    if (feed.querySelector('.tf-sg-rail')) return;           // a second load beat us to it
+
+    var title = kind === 'followback' ? 'Accounts to follow back' : 'Suggested for you';
+    var rail = _tfSuggestRail(title, users, kind);
+
+    // Somewhere in the middle, never first and never last.
+    var at = 1 + Math.floor(Math.random() * Math.max(1, Math.min(cards.length - 1, 6)));
+    var anchor = cards[at] || cards[cards.length - 1];
+    feed.insertBefore(rail, anchor);
+}
+
+async function tfSuggestFollow(btn, userId) {
+    if (!userId) return;
+    btn.disabled = true;
+    var nowFollowing = await RealData.toggleFollow(userId);
+    btn.disabled = false;
+    if (nowFollowing) {
+        btn.textContent = 'Following';
+        btn.classList.add('following');
+        triggerHaptic(20);
+        // Once followed they do not belong in a list of people to follow.
+        var card = btn.closest('.tf-sg-card');
+        if (card) setTimeout(function () { _tfRemoveSuggestCard(card); }, 700);
+    } else {
+        btn.textContent = 'Follow';
+        btn.classList.remove('following');
+    }
+}
+
+function tfDismissSuggestion(el, userId) {
+    try {
+        var list = JSON.parse(localStorage.getItem('tf-dismissed-suggestions') || '[]');
+        if (list.indexOf(userId) < 0) list.push(userId);
+        localStorage.setItem('tf-dismissed-suggestions', JSON.stringify(list.slice(-200)));
+    } catch (e) {}
+    var card = el.closest('.tf-sg-card');
+    if (card) _tfRemoveSuggestCard(card);
+    triggerHaptic(8);
+}
+
+// Drop a card, and drop the whole rail once it is empty rather than leaving a
+// heading over nothing.
+function _tfRemoveSuggestCard(card) {
+    var rail = card.closest('.tf-sg-rail');
+    card.remove();
+    if (rail && !rail.querySelector('.tf-sg-card')) rail.remove();
 }
 
 function _tfObserveNewPosts() {
@@ -45519,9 +45669,108 @@ function runBreatheAnimation() {
     var u = window._qrProfileUrl || tfProfileUrl(currentUser.username || currentUser.handle);
     navigator.clipboard.writeText(u).then(function(){ showToast('Profile link copied'); triggerHaptic(12); });
 }
+// Compose the QR into a shareable card rather than exporting the bare grid: a
+// rounded white tile, the logo punched into the middle of the code, and the handle
+// underneath. What got saved before was the naked black-and-white square, which
+// tells nobody what app it belongs to.
+//
+// The logo can sit over the middle because the code is generated at error
+// correction level H, which tolerates about 30% of it being obscured.
+async function _tfBuildQRCard(srcCanvas, handle) {
+    var W = 1080, H = 1350;
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var x = cv.getContext('2d');
+
+    // Page behind the card.
+    x.fillStyle = '#f2f2f7';
+    x.fillRect(0, 0, W, H);
+
+    // The card.
+    var cardW = 820, cardH = 900, cardX = (W - cardW) / 2, cardY = 150, r = 68;
+    x.save();
+    x.shadowColor = 'rgba(0,0,0,0.13)';
+    x.shadowBlur = 46; x.shadowOffsetY = 16;
+    x.fillStyle = '#ffffff';
+    x.beginPath();
+    if (x.roundRect) x.roundRect(cardX, cardY, cardW, cardH, r);
+    else {
+        x.moveTo(cardX + r, cardY);
+        x.arcTo(cardX + cardW, cardY, cardX + cardW, cardY + cardH, r);
+        x.arcTo(cardX + cardW, cardY + cardH, cardX, cardY + cardH, r);
+        x.arcTo(cardX, cardY + cardH, cardX, cardY, r);
+        x.arcTo(cardX, cardY, cardX + cardW, cardY, r);
+    }
+    x.closePath(); x.fill();
+    x.restore();
+
+    // The code, generated fresh at the size it is drawn at. Upscaling the 200px
+    // one on screen would land module edges between pixels and make some wider
+    // than others, which is exactly what makes a QR hard to scan.
+    var qrSize = 620, qrX = (W - qrSize) / 2, qrY = cardY + 110;
+    var big = null;
+    try {
+        var url = window._qrProfileUrl || tfProfileUrl(handle);
+        var holder = document.createElement('div');
+        holder.style.cssText = 'position:fixed;left:-9999px;top:0;';
+        document.body.appendChild(holder);
+        new QRCode(holder, {
+            text: url, width: qrSize, height: qrSize,
+            colorDark: '#000000', colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.H
+        });
+        // qrcodejs paints on the next tick in some builds.
+        await new Promise(function (r) { setTimeout(r, 60); });
+        big = holder.querySelector('canvas');
+        if (big) x.drawImage(big, qrX, qrY, qrSize, qrSize);
+        holder.remove();
+    } catch (e) { big = null; }
+    if (!big) {
+        x.imageSmoothingEnabled = false;
+        x.drawImage(srcCanvas, qrX, qrY, qrSize, qrSize);
+        x.imageSmoothingEnabled = true;
+    }
+
+    // Logo in the middle, on a white plate so the code stays readable around it.
+    try {
+        var logo = await new Promise(function (res, rej) {
+            var im = new Image();
+            im.onload = function () { res(im); };
+            im.onerror = rej;
+            im.src = '/static/core/icon-dark-192.png';
+        });
+        var plate = 150, lp = 118;
+        var cx = W / 2, cy = qrY + qrSize / 2;
+        x.fillStyle = '#ffffff';
+        x.beginPath(); x.arc(cx, cy, plate / 2, 0, Math.PI * 2); x.fill();
+        x.save();
+        x.beginPath(); x.arc(cx, cy, lp / 2, 0, Math.PI * 2); x.clip();
+        x.drawImage(logo, cx - lp / 2, cy - lp / 2, lp, lp);
+        x.restore();
+    } catch (e) { /* no logo is better than no card */ }
+
+    // The handle, in caps like the reference.
+    var label = '@' + String(handle || '').replace(/^@/, '').toUpperCase();
+    x.fillStyle = '#111111';
+    x.textAlign = 'center';
+    x.textBaseline = 'alphabetic';
+    var size = 62;
+    do {
+        x.font = '800 ' + size + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        size -= 2;
+    } while (x.measureText(label).width > cardW - 120 && size > 24);
+    x.fillText(label, W / 2, qrY + qrSize + 132);
+
+    return cv;
+}
+
 async function downloadQRCode() {
-    var canvas = document.querySelector('#qr-canvas canvas');
-    if (!canvas) { showToast('QR not ready'); return; }
+    var srcCanvas = document.querySelector('#qr-canvas canvas');
+    if (!srcCanvas) { showToast('QR not ready'); return; }
+    var handle = currentUser ? (currentUser.username || currentUser.handle || 'trustfirst') : 'trustfirst';
+    var canvas;
+    try { canvas = await _tfBuildQRCard(srcCanvas, handle); }
+    catch (e) { console.warn('[QR] card build failed, saving the plain code', e); canvas = srcCanvas; }
     var name = (currentUser ? currentUser.username : 'trustfirst') + '-qr.png';
 
     // A browser cannot write to the camera roll, so "Saved to gallery" was simply

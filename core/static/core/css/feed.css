@@ -4003,3 +4003,62 @@ html, body { background: #000; }
 .otp-box { flex:1; min-width:0; height:56px; text-align:center; font-size:24px; font-weight:600; border-radius:14px; border:1.5px solid var(--border-color,#e2e2e2); background:var(--input-bg,#f7f7f8); color:var(--text-primary,#000); outline:none; -webkit-user-select:text; user-select:text; transition:border-color 0.15s ease, background 0.15s ease; box-sizing:border-box; }
 .otp-box:focus { border-color:#007AFF; background:var(--bg-primary,#fff); }
 .otp-box.filled { border-color:#007AFF; }
+
+/* ==========================================================================
+   PEOPLE TO FOLLOW, IN THE FEED
+   A horizontally scrolling rail dropped in among the posts. Themed rather than
+   hardcoded white, so it does not glow on a dark feed.
+   ========================================================================== */
+.tf-sg-rail {
+    border-top: 8px solid var(--bg-secondary, #f0f0f0);
+    border-bottom: 8px solid var(--bg-secondary, #f0f0f0);
+    padding: 16px 0 18px;
+    margin: 4px 0;
+    background: var(--bg-primary, #fff);
+}
+.tf-sg-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 0 16px 12px;
+}
+.tf-sg-head b { font-size: 17px; font-weight: 800; color: var(--text-primary, #000); }
+.tf-sg-head span { font-size: 14px; font-weight: 600; color: #0A84FF; cursor: pointer; }
+.tf-sg-scroll {
+    display: flex; gap: 10px; overflow-x: auto; padding: 0 16px 2px;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.tf-sg-scroll::-webkit-scrollbar { display: none; }
+.tf-sg-card {
+    position: relative; flex: 0 0 auto; width: 158px;
+    border: 0.5px solid var(--border-color, #e6e6e6); border-radius: 14px;
+    background: var(--card-bg, #fff);
+    padding: 20px 12px 14px;
+    display: flex; flex-direction: column; align-items: center; text-align: center;
+}
+.tf-sg-card img {
+    width: 92px; height: 92px; border-radius: 50%; object-fit: cover;
+    cursor: pointer; margin-bottom: 10px;
+}
+.tf-sg-card b {
+    font-size: 14px; font-weight: 700; color: var(--text-primary, #000);
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    cursor: pointer;
+}
+.tf-sg-card small {
+    font-size: 12px; color: var(--text-secondary, #888); margin: 3px 0 12px;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tf-sg-card button {
+    width: 100%; padding: 9px 0; border: none; border-radius: 9px;
+    background: #0A84FF; color: #fff; font-size: 14px; font-weight: 700;
+    cursor: pointer;
+}
+.tf-sg-card button.following {
+    background: var(--input-bg, #efefef); color: var(--text-primary, #000);
+}
+.tf-sg-card button:disabled { opacity: 0.6; }
+/* The dismiss cross, top-right of each card. */
+.tf-sg-x {
+    position: absolute; top: 6px; right: 8px;
+    width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+    color: var(--text-secondary, #999); font-size: 13px; cursor: pointer;
+}
