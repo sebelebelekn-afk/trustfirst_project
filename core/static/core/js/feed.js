@@ -28479,7 +28479,9 @@ function _userProfileSkeleton() {
             'style="position:fixed;top:calc(env(safe-area-inset-top,0px) + 14px);left:16px;width:36px;height:36px;' +
             'border-radius:50%;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
             '<i class="fa-solid fa-chevron-left" style="color:#fff;font-size:16px;"></i></div>';
-    document.body.appendChild(ov);
+    // Inside #app, so it shares a stacking context with whatever opens on top of
+    // it. See the note where the filled profile is mounted.
+    (document.getElementById('app') || document.body).appendChild(ov);
     return ov;
 }
 
@@ -28493,7 +28495,7 @@ function _renderPageUnavailable(existingOverlay) {
         ov = document.createElement('div');
         ov.id = 'user-profile-overlay';
         ov.className = 'page-overlay';
-        document.body.appendChild(ov);
+        (document.getElementById('app') || document.body).appendChild(ov);
     }
     delete ov.dataset.skeleton;
     ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg-primary,#fff);z-index:9999;display:flex;flex-direction:column;overflow-y:auto;';
@@ -28526,7 +28528,7 @@ function _renderPageUnavailable(existingOverlay) {
             '<p style="font-size:17px;color:var(--text-secondary,#7a7a7e);line-height:1.45;margin:0;">' +
                 'There may be a technical problem. Refresh to try again.</p>' +
         '</div>';
-    if (!ov.parentNode) document.body.appendChild(ov);
+    if (!ov.parentNode) (document.getElementById('app') || document.body).appendChild(ov);
     hideNavBar && hideNavBar();
     return ov;
 }
@@ -28675,8 +28677,14 @@ async function viewUserProfile(userId) {
               '</div>') +
         '';
 
-    // Already in the document when it is the skeleton being filled in.
-    if (!overlay.parentNode) document.body.appendChild(overlay);
+    // Mounted inside #app, not on body. Everything else in the app lives in #app,
+    // and #app becomes a stacking context whenever it has a transform or an opacity
+    // of its own, which it does during page transitions and before sign-in. A body
+    // level overlay is therefore outside that context, and nothing inside #app can
+    // ever rise above it however large its z-index: that is why Followers and
+    // Following opened behind this page even after being lifted to 10000 against
+    // its 9999. Same context, so z-index means something again.
+    if (!overlay.parentNode) (document.getElementById('app') || document.body).appendChild(overlay);
     if (!isLockedOut) switchUserProfileTab('posts', null, userId);
 }
 
@@ -45146,18 +45154,27 @@ async function openFollowersScreen(userId, initialTab) {
             sb.from('follows').select('follower_id, users:follower_id(' + userCols + ')').eq('following_id', targetUserId).limit(100),
             sb.from('follows').select('following_id, users:following_id(' + userCols + ')').eq('follower_id', targetUserId).limit(100),
             viewerId ? sb.from('follows').select('following_id').eq('follower_id', viewerId).limit(500) : Promise.resolve({ data: [] }),
-            DB.getUserProfile(targetUserId).catch(function() { return null; })
+            DB.getUserProfile(targetUserId).catch(function() { return null; }),
+            // Who follows the person looking. Needed to know whether a row is a
+            // "Follow" or a "Follow back": the row renderer already had a
+            // followsYou flag and a Follows you badge, but nothing ever set them.
+            viewerId ? sb.from('follows').select('follower_id').eq('following_id', viewerId).limit(500) : Promise.resolve({ data: [] })
         ]);
         if (requestGen !== _fsRequestGen || targetUserId !== _fsTargetUserId) return;
         var followedIds = new Set((results[2].data || []).map(function(row) { return row.following_id; }));
+        var followsMeIds = new Set((results[4].data || []).map(function(row) { return row.follower_id; }));
         function mapUser(row) {
             var user = row.users;
             if (!user) return null;
             var name = user.full_name || user.display_name || user.username || 'User';
+            var followsYou = followsMeIds.has(user.id);
             return {
                 id: user.id, name: name, handle: user.username || '', bio: user.bio || '', verified: !!user.verified,
                 avatar: user.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=007AFF&color=fff&size=80'),
-                state: followedIds.has(user.id) ? 'Following' : 'Follow'
+                followsYou: followsYou,
+                // Same wording as the profile page and the feed rail, so the
+                // platform says one thing about one relationship.
+                state: followedIds.has(user.id) ? 'Following' : (followsYou ? 'Follow back' : 'Follow')
             };
         }
         _fsData = {
@@ -45217,7 +45234,12 @@ async function toggleFsFollow(id, btn) {
     try {
         var isFollowing = await RealData.toggleFollow(id);
         if (typeof isFollowing !== 'boolean') return;
-        all.forEach(function(item) { if (item.id === id) item.state = isFollowing ? 'Following' : 'Follow'; });
+        // Unfollowing somebody who follows you goes back to "Follow back", not to a
+        // bare "Follow", or the wording would drift out of step with the profile.
+        all.forEach(function(item) {
+            if (item.id !== id) return;
+            item.state = isFollowing ? 'Following' : (item.followsYou ? 'Follow back' : 'Follow');
+        });
         renderFsList(document.getElementById('fs-search-input').value);
         if (typeof triggerHaptic === 'function') triggerHaptic(10);
     } catch (error) {

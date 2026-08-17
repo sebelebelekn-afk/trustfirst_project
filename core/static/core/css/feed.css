@@ -3744,7 +3744,9 @@ html, body { background: #000; }
 .fs-follows-badge { background:#222;color:#ccc;font-size:10px;font-weight:600;padding:2px 7px;border-radius:8px; }
 [data-theme="dark"] .fs-follows-badge { background:#333; }
 .fs-bio { font-size:13px;color:var(--text-secondary,#555);margin-top:3px;line-height:1.4;word-break:break-word; }
-.fs-follow-btn { padding:7px 16px;border-radius:20px;border:1.5px solid var(--border-color,#ddd);background:transparent;color:var(--text-primary,#000);cursor:pointer;font-size:14px;font-weight:600; }
+/* nowrap and no shrinking: "Follow back" is longer than "Follow" and was wrapping
+   onto two lines in a row that has an avatar and a name competing for width. */
+.fs-follow-btn { padding:7px 16px;border-radius:20px;border:1.5px solid var(--border-color,#ddd);background:transparent;color:var(--text-primary,#000);cursor:pointer;font-size:14px;font-weight:600;white-space:nowrap;flex-shrink:0; }
 
     #chat-body.bubble-focused .chat-bubble:not(.focused) {
     filter: blur(3px);
