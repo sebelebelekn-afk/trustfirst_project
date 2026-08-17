@@ -23648,11 +23648,123 @@ function renderSavedAccounts() {
     wrap.innerHTML = list.map(function(a) {
         var av = a.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(a.name || 'U') + '&background=007AFF&color=fff';
         return '<div class="saved-account-row" onclick="switchToSavedAccount(\'' + a.id + '\')">' +
-            '<img class="saved-account-avatar" src="' + escapeHtml(av) + '">' +
+            '<div class="saved-account-avwrap">' +
+                '<img class="saved-account-avatar" src="' + escapeHtml(av) + '">' +
+                // Filled in by tfRefreshSwitcherBadges once each account's own
+                // counts come back. Absent until then, so it never shows a guess.
+                '<span class="saved-account-badge" id="sab_' + escapeHtml(a.id) + '" style="display:none;"></span>' +
+            '</div>' +
             '<div class="saved-account-info"><b>' + escapeHtml(a.name || 'User') + '</b><small>@' + escapeHtml(a.username || 'user') + '</small></div>' +
             '<i class="fa-regular fa-trash-can saved-account-del" onclick="removeSavedAccount(\'' + a.id + '\', event)"></i>' +
         '</div>';
     }).join('');
+    tfRefreshSwitcherBadges();
+}
+
+// ==========================================================================
+// UNREAD COUNTS PER SAVED ACCOUNT
+// Someone with two accounts on one phone had no way to tell which of them had
+// something waiting without signing into each in turn. Each saved account
+// already carries its own tokens, because tapping it signs straight in, so its
+// counts can be read as that account. RLS scopes each query to its own rows, so
+// no account can see another's.
+//
+// Nothing is guessed: if a token has expired and cannot be refreshed, the badge
+// simply does not appear.
+// ==========================================================================
+async function _tfCountAs(token, path) {
+    var r = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
+        headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: 'Bearer ' + token,
+            Prefer: 'count=exact',
+            Range: '0-0'
+        }
+    });
+    if (!r.ok) { var e = new Error('count failed ' + r.status); e.status = r.status; throw e; }
+    // PostgREST reports the total in Content-Range as "0-0/<total>".
+    var cr = r.headers.get('content-range') || '';
+    var total = parseInt((cr.split('/')[1] || '0'), 10);
+    return isFinite(total) ? total : 0;
+}
+
+// Swap a refresh token for a fresh access token, and keep it for next time.
+async function _tfRefreshAccountToken(acc) {
+    if (!acc.refresh_token) return null;
+    try {
+        var r = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY },
+            body: JSON.stringify({ refresh_token: acc.refresh_token })
+        });
+        if (!r.ok) return null;
+        var j = await r.json();
+        if (!j.access_token) return null;
+        var list = _tfSavedAccounts().map(function (x) {
+            if (x.id !== acc.id) return x;
+            x.access_token = j.access_token;
+            if (j.refresh_token) x.refresh_token = j.refresh_token;
+            return x;
+        });
+        try { localStorage.setItem('tf_saved_accounts', JSON.stringify(list)); } catch (e) {}
+        return j.access_token;
+    } catch (e) { return null; }
+}
+
+async function _tfAccountUnread(acc) {
+    var token = acc.access_token;
+    if (!token && !acc.refresh_token) return null;
+    if (!token) token = await _tfRefreshAccountToken(acc);
+    if (!token) return null;
+
+    async function counts(tok) {
+        var notifs = await _tfCountAs(tok,
+            'notifications?select=id&user_id=eq.' + encodeURIComponent(acc.id) + '&read=is.false');
+        // Unread messages: my conversations, then messages in them from someone
+        // else that have not been read.
+        var msgs = 0;
+        try {
+            var pr = await fetch(SUPABASE_URL + '/rest/v1/conversation_participants?select=conversation_id&user_id=eq.' +
+                encodeURIComponent(acc.id) + '&limit=200',
+                { headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + tok } });
+            if (pr.ok) {
+                var ids = (await pr.json()).map(function (p) { return p.conversation_id; }).filter(Boolean);
+                if (ids.length) {
+                    msgs = await _tfCountAs(tok, 'messages?select=id&conversation_id=in.(' + ids.join(',') +
+                        ')&sender_id=neq.' + encodeURIComponent(acc.id) + '&read_at=is.null');
+                }
+            }
+        } catch (e) {}
+        return { notifs: notifs, msgs: msgs };
+    }
+
+    try {
+        return await counts(token);
+    } catch (e) {
+        if (e && e.status === 401) {
+            var fresh = await _tfRefreshAccountToken(acc);
+            if (fresh) { try { return await counts(fresh); } catch (e2) {} }
+        }
+        return null;
+    }
+}
+
+async function tfRefreshSwitcherBadges() {
+    if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) return;
+    var list = _tfSavedAccounts();
+    if (!list.length) return;
+    await Promise.all(list.map(async function (acc) {
+        // The account already signed in shows its counts on the nav bar.
+        if (currentUser && currentUser.id === acc.id) return;
+        var c = await _tfAccountUnread(acc);
+        var el = document.getElementById('sab_' + acc.id);
+        if (!el || !c) return;
+        var total = (c.notifs || 0) + (c.msgs || 0);
+        if (!total) { el.style.display = 'none'; return; }
+        el.textContent = total > 99 ? '99+' : String(total);
+        el.style.display = 'flex';
+        el.title = c.msgs ? (c.msgs + ' unread message' + (c.msgs === 1 ? '' : 's')) : (c.notifs + ' new notification' + (c.notifs === 1 ? '' : 's'));
+    }));
 }
 // Refresh the switcher whenever the login step is opened.
 (function() {
