@@ -115,7 +115,7 @@ function authenticateUser() {
 <div class="splash-screen" id="splash">
 
     <div class="auth-step active" id="step-splash" style="text-align:center;">
-        <div class="auth-brand" style="font-size:46px; margin-bottom:8px;">TrustFirst</div>
+        <div class="auth-brand" translate="no" style="font-size:46px; margin-bottom:8px;">TrustFirst</div>
         <p class="auth-sub">Connect with people you can trust</p>
         <div class="auth-cta-stack">
             <button class="auth-btn" onclick="nextAuthStep('step-register')">Create account</button>
@@ -127,7 +127,7 @@ function authenticateUser() {
         <div class="auth-topbar end"><div class="auth-back" onclick="nextAuthStep('step-splash')"><i class="fa-solid fa-xmark"></i></div></div>
         <div style="margin-bottom:6px;">
             <div style="font-size:20px; font-weight:600; margin-bottom:1px;">Log in to</div>
-            <div class="auth-x-title" style="margin:0;">TrustFirst</div>
+            <div class="auth-x-title" translate="no" style="margin:0;">TrustFirst</div>
         </div>
         <p class="auth-sub-left" id="login-switch-sub">Continue with your existing accounts</p>
         <div id="saved-accounts-list"></div>
@@ -193,7 +193,7 @@ function authenticateUser() {
     <div class="auth-step" id="step-register">
         <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-splash')"><i class="fa-solid fa-arrow-left"></i></div></div>
         <div class="auth-create-mid">
-            <div class="auth-brand">TrustFirst</div>
+            <div class="auth-brand" translate="no">TrustFirst</div>
             <h2 class="auth-create-title">Create an account</h2>
         </div>
         <div class="auth-create-bottom">
@@ -445,7 +445,7 @@ function authenticateUser() {
     <!-- Add this overlay to your HTML (before the closing </div> of .app) -->
 
     <div class="header-container">
-        <h1 class="brand-logo">TrustFirst</h1>
+        <h1 class="brand-logo" translate="no">TrustFirst</h1>
         <div class="plus-wrapper">
             <div class="liquid-glass-btn" onclick="togglePlusMenu()">
                 <i class="fa-solid fa-plus" id="plus-icon-anim"></i>
@@ -2125,7 +2125,7 @@ function authenticateUser() {
     <div style="padding:20px; line-height:1.7; color:var(--text-secondary,#555); font-size:14px; padding-bottom:100px;">
 
   <div style="text-align:center; margin-bottom:30px;">
-    <h2 style="color:var(--text-primary,#000); font-size:24px; font-weight:900;">TrustFirst</h2>
+    <h2 translate="no" style="color:var(--text-primary,#000); font-size:24px; font-weight:900;">TrustFirst</h2>
     <p style="font-size:13px; color:var(--text-tertiary,#999); margin-top:4px;">Privacy Policy, Effective Date: 20 April 2026</p>
   </div>
 
@@ -4223,7 +4223,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=224"></script>
+<script src="{% static 'core/js/feed.js' %}?v=225"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=75"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

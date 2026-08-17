@@ -5343,7 +5343,7 @@ function editProfile() {
                 '</div>'+
                 '<div style="padding:14px 16px;display:flex;align-items:center;gap:10px;">'+
                     '<span style="width:80px;font-size:14px;color:'+sub+';">Profile URL</span>'+
-                    '<span id="epProfileUrl" style="flex:1;font-size:14px;color:#007AFF;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">trustfirst.app/@'+escapeHtml(username)+'</span>'+
+                    '<span id="epProfileUrl" style="flex:1;font-size:14px;color:#007AFF;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escapeHtml(tfSiteHost())+'/@'+escapeHtml(username)+'</span>'+
                     '<button onclick="epCopyUrl()" style="background:none;border:none;cursor:pointer;color:'+sub+';padding:4px;"><i class="fa-solid fa-copy" style="font-size:15px;"></i></button>'+
                 '</div>'+
             '</div>'+
@@ -5473,7 +5473,7 @@ function epCheckUsername(val) {
     var fb = document.getElementById('epUsernameFeedback');
     var saveBtn = document.getElementById('epSaveBtn');
     var urlEl = document.getElementById('epProfileUrl');
-    if (urlEl) urlEl.textContent = 'trustfirst.app/@' + val.replace(/[^a-zA-Z0-9_.]/g,'');
+    if (urlEl) urlEl.textContent = tfSiteHost() + '/@' + val.replace(/[^a-zA-Z0-9_.]/g,'');
     if (!val || val.length < 3) {
         if (fb) { fb.textContent = 'Too short'; fb.style.color = '#FF3B30'; }
         _epUsernameValid = false;
@@ -6253,8 +6253,12 @@ async function loadProfileTags(container) {
 
 // --- SHARE ---
 var _activeSharePostId = null;
-function openShare(postId) {
+var _activeShareKind = 'post';   // 'clip' links to /clip/<id> instead of /post/<id>
+function openShare(postId, kind) {
     _activeSharePostId = postId || null;
+    // 'clip' links to the clip page, anything else to the post page.
+    _activeShareKind = kind || 'post';
+    if (!_activeSharePostId) console.warn('[share] opened with no post id, the link will be the site root');
     var sheet = document.getElementById('share-sheet');
     sheet.style.display = 'flex';
     sheet.classList.add('active');
@@ -6391,8 +6395,17 @@ async function tfShareStoryCard(postUrl) {
 function shareVia(method) {
     // This was a timestamp, so every "share" sent a link to a post that never
     // existed. Use the post the sheet was actually opened for.
-    var base = 'https://trustfirst.app';
-    var postUrl = _activeSharePostId ? (base + '/post/' + _activeSharePostId) : base;
+    //
+    // The domain was also hardcoded, and with no id it fell back to the bare
+    // domain: that is why sharing a clip copied "trustfirst.app" and nothing else.
+    // A clip needs /clip/<id> rather than /post/<id>, since that is the route that
+    // opens the clip page.
+    var base = tfSiteOrigin();
+    var postUrl = base;
+    if (_activeSharePostId) {
+        postUrl = (_activeShareKind === 'clip') ? tfClipUrl(_activeSharePostId)
+                                               : tfPostUrl(_activeSharePostId);
+    }
     var post = (typeof _tfPostById !== 'undefined' && _activeSharePostId) ? _tfPostById[_activeSharePostId] : null;
     var author = (post && post.users && (post.users.full_name || post.users.username)) || '';
 
@@ -9250,6 +9263,13 @@ function toggleAutoTranslate(el) {
 // ── Whole-app machine translation ───────────────────────────────────────────
 var _tfTransCache = (function(){ try { return JSON.parse(localStorage.getItem('tf_trans_cache') || '{}'); } catch (e) { return {}; } })();
 window._tfTx = window._tfTx || [];
+// Names that belong to the product and must read the same in every language.
+// Switching to another language was sending the wordmark itself to the translator,
+// so the logo came back as somebody's idea of "trust first" in French. A brand name
+// is a proper noun: it does not get translated.
+var TF_BRAND_TERMS = ['TrustFirst', 'TrustClips', 'TrustClip', 'TrustCircle', 'Trust-ID', 'TrustScore', 'Eddie'];
+var _TF_BRAND_RE = new RegExp('(' + TF_BRAND_TERMS.join('|') + ')', 'g');
+
 function _tfCollectTextNodes(root) {
     var out = [];
     try {
@@ -9262,12 +9282,38 @@ function _tfCollectTextNodes(root) {
                 var tag = p.tagName;
                 if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA' || tag === 'INPUT' || p.isContentEditable) return NodeFilter.FILTER_REJECT;
                 if (p.closest('[data-no-translate],.tf-mention,.tf-hashtag,#tfMentionDropdown')) return NodeFilter.FILTER_REJECT;
+                // The platform's own opt-out, which the logo now carries.
+                if (p.closest('[translate="no"],.notranslate')) return NodeFilter.FILTER_REJECT;
+                // Text that is nothing but a brand name: the wordmark, a heading,
+                // a label. Never send it anywhere.
+                var t = v.trim();
+                if (TF_BRAND_TERMS.indexOf(t) >= 0) return NodeFilter.FILTER_REJECT;
                 return NodeFilter.FILTER_ACCEPT;
             }
         });
         var n; while ((n = walker.nextNode())) out.push(n);
     } catch (e) {}
     return out;
+}
+
+// A brand name inside a sentence still has to survive the round trip, so it is
+// swapped for a marker before sending and put back after. If the marker does not
+// come back intact the sentence is left in English, which is a better outcome than
+// a mangled product name.
+function _tfProtectBrand(text) {
+    var found = [];
+    var masked = text.replace(_TF_BRAND_RE, function (m) {
+        found.push(m);
+        return '[[' + (found.length - 1) + ']]';
+    });
+    return { masked: masked, found: found };
+}
+function _tfRestoreBrand(translated, found) {
+    if (!found.length) return translated;
+    for (var i = 0; i < found.length; i++) {
+        if (translated.indexOf('[[' + i + ']]') < 0) return null;   // marker lost
+    }
+    return translated.replace(/\[\[(\d+)\]\]/g, function (_, i) { return found[+i] || ''; });
 }
 function _tfApplyNode(node, orig, translated, lang) {
     var lead = (orig.match(/^\s*/) || [''])[0], trail = (orig.match(/\s*$/) || [''])[0];
@@ -9292,13 +9338,21 @@ async function translateDOM(lang) {
     var keys = Object.keys(pending);
     for (var i = 0; i < keys.length; i += 40) {
         var chunk = keys.slice(i, i + 40);
+        // Mask any brand name in the string before it leaves, so the translator
+        // never sees "TrustFirst" as a word to render.
+        var masks = chunk.map(_tfProtectBrand);
         try {
-            var resp = await fetch('/api/translate-text/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ q: chunk, target: lang }) });
+            var resp = await fetch('/api/translate-text/', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ q: masks.map(function (m) { return m.masked; }), target: lang }) });
             if (!resp.ok) continue;
             var data = await resp.json();
             var tr = data.t || [];
             chunk.forEach(function(key, j) {
-                var translated = tr[j] || key;
+                var raw = tr[j];
+                var translated = raw ? _tfRestoreBrand(raw, masks[j].found) : null;
+                // A lost marker means the brand would have come out mangled, so keep
+                // the English rather than print a broken product name.
+                if (translated == null) translated = key;
                 _tfTransCache[lang + '::' + key] = translated;
                 (pending[key] || []).forEach(function(node) { _tfApplyNode(node, node._tfOrig, translated, lang); });
             });
@@ -13579,7 +13633,9 @@ function tfReelPageHTML(post, avatarHtml, username, verified, likes) {
             '<div class="reel-sidebar">' +
                 '<div class="reel-action" onclick="reelHeartTap(this,\'' + escapeHtml(String(post.id)) + '\')"><i class="fa-regular fa-heart"></i><br><span onclick="event.stopPropagation();openReelLikesModal(\'' + escapeHtml(String(post.id)) + '\',\'' + likes + '\',\'' + (post.view_count || 0) + '\')" style="cursor:pointer;">' + likes + '</span></div>' +
                 '<div class="reel-action" onclick="openComments(\'' + escapeHtml(String(post.id)) + '\')"><i class="fa-solid fa-comment-dots"></i><br>' + (post.comment_count || 0) + '</div>' +
-                '<div class="reel-action" onclick="openShare()"><i class="fa-solid fa-share"></i><br>Share</div>' +
+                // The clip's id has to reach the share sheet, or copy link has
+                // nothing to build a URL from and hands out the bare domain.
+                '<div class="reel-action" onclick="openShare(\'' + escapeHtml(String(post.id)) + '\',\'clip\')"><i class="fa-solid fa-share"></i><br>Share</div>' +
                 '<div class="reel-action" onclick="toggleReelBookmark(this,\'' + escapeHtml(String(post.id)) + '\')"><i class="fa-regular fa-bookmark"></i><br>Save</div>' +
             '</div>' +
         '</div>' +
@@ -17942,7 +17998,7 @@ function openShareMenu(postId) {
 }
 
 function handleShare(type, postId) {
-    const url = `https://trustfirst.app/post/${postId}`;
+    const url = tfPostUrl(postId);
     switch(type) {
         case 'copy link':
             // Via the shared helper, so it still works where
@@ -26131,14 +26187,24 @@ function tfOpenPostVideo(postId, idx) {
     var url = urls[idx || 0] || post.video_url || post.media_url;
     if (!url) return;
     if (typeof openContextualVideo === 'function') {
+        // The author has to travel with the clip. Without user_id the player cannot
+        // tell whose video it is, so it offered a Follow button on your own post,
+        // and without the users object there was no avatar to draw. Both were
+        // missing here, not in the player.
         openContextualVideo(url, 'feed', 0, [{
             id: post.id,
             videoUrl: url,
+            user_id: post.user_id || (post.users && post.users.id) || '',
+            users: post.users || null,
             username: post.users ? ('@' + (post.users.username || 'user')) : '@user',
             caption: post.text_content || '',
             sound_name: post.sound_name || null,
             like_count: post.like_count || 0,
-            comment_count: post.comment_count || 0
+            comment_count: post.comment_count || 0,
+            view_count: post.view_count || 0,
+            volume: post.volume,
+            segments: post.segments || null,
+            voice_effect: post.voice_effect || null
         }]);
     }
 }
@@ -37583,13 +37649,38 @@ async function sendPhoneOTP() {
     }
 }
 
+// One place that knows what this site is called, so a shared link always points at
+// something that exists.
+//
+// Links were hardcoded to https://trustfirst.app and to /u/<username>, a path that
+// is not a route at all: urls.py serves profile/<username>/. So a scanned QR code
+// went to a 404 on a domain that may not be the one the app is being served from,
+// while other copy-link buttons handed out the raw Render URL. Take the origin the
+// app is actually running on unless a canonical domain is configured, and use the
+// paths that exist.
+window.TF_CANONICAL_ORIGIN = window.TF_CANONICAL_ORIGIN || '';
+function tfSiteOrigin() {
+    if (window.TF_CANONICAL_ORIGIN) return window.TF_CANONICAL_ORIGIN.replace(/\/+$/, '');
+    return (location.origin || '').replace(/\/+$/, '');
+}
+// What to show a human: no protocol, no trailing slash.
+function tfSiteHost() {
+    try { return new URL(tfSiteOrigin()).host; } catch (e) { return tfSiteOrigin().replace(/^https?:\/\//, ''); }
+}
+function tfProfileUrl(username) {
+    return tfSiteOrigin() + '/profile/' + encodeURIComponent(String(username || '').replace(/^@/, ''));
+}
+function tfClipUrl(clipId)  { return tfSiteOrigin() + '/clip/' + encodeURIComponent(String(clipId || '')); }
+function tfPostUrl(postId)  { return tfSiteOrigin() + '/post/' + encodeURIComponent(String(postId || '')); }
+
     function renderQRCode() {
     var el = document.getElementById('qr-canvas');
     if (!el) return;
     el.innerHTML = '';
     var handle = currentUser ? (currentUser.handle || currentUser.username || '@user') : '@user';
     if (handle && !handle.startsWith('@')) handle = '@' + handle;
-    var url = 'https://trustfirst.app/u/' + handle.replace('@','');
+    var url = tfProfileUrl(handle);
+    window._qrProfileUrl = url;
     try {
         new QRCode(el, {
             text: url,
@@ -37606,12 +37697,12 @@ async function sendPhoneOTP() {
 }
 
 function shareQRCode() {
-    var handle = currentUser ? currentUser.handle : '@user';
-    var url = 'https://trustfirst.app/u/' + handle.replace('@','');
+    var handle = currentUser ? (currentUser.handle || currentUser.username || '') : '';
+    var url = window._qrProfileUrl || tfProfileUrl(handle);
     if (navigator.share) {
         navigator.share({ title: 'Connect with me on TrustFirst', url: url });
     } else {
-        navigator.clipboard.writeText(url).then(function(){ showToast('Profile link copied!'); });
+        navigator.clipboard.writeText(url).then(function(){ showToast('Profile link copied'); });
     }
 }
 
@@ -44861,12 +44952,32 @@ var _fsTab = 'followers';
 var _fsTargetUserId = null;
 var _fsRequestGen = 0;
 
+// Put an element above everything currently on screen. The followers screen is
+// z-index 6200 in the stylesheet while another person's profile overlay is 9999,
+// so opening followers from someone's profile put it behind the page you opened it
+// from. Rather than hardcode a bigger number that the next overlay will beat, look
+// at what is actually visible and go one above it.
+function _tfLiftAboveVisible(el, floor) {
+    if (!el) return;
+    var top = floor || 0;
+    document.querySelectorAll('body *').forEach(function (n) {
+        if (n === el || !n.style) return;
+        var z = parseInt(n.style.zIndex || '', 10);
+        if (!isFinite(z)) return;
+        var cs = window.getComputedStyle(n);
+        if (cs.display === 'none' || cs.visibility === 'hidden') return;
+        if (z > top) top = z;
+    });
+    el.style.zIndex = String(top + 1);
+}
+
 async function openFollowersScreen(userId, initialTab) {
     var targetUserId = userId || (currentUser && currentUser.id);
     if (!targetUserId) { showToast('Sign in to see followers'); return; }
     _fsTargetUserId = targetUserId;
     _fsTab = initialTab === 'following' ? 'following' : 'followers';
     openPage('followers-screen');
+    _tfLiftAboveVisible(document.getElementById('followers-screen'), 6200);
     var titleEl = document.getElementById('fs-title');
     if (titleEl) titleEl.textContent = (currentUser && currentUser.id === targetUserId && currentUser.name) || 'Followers';
     var searchInput = document.getElementById('fs-search-input');
@@ -45401,17 +45512,52 @@ function runBreatheAnimation() {
 }
 
     function copyQRLink() {
-    var u = currentUser ? (window.location.origin + '/@' + currentUser.username) : window.location.href;
-    navigator.clipboard.writeText(u).then(function(){ showToast('Link copied'); triggerHaptic(12); });
+    // Was origin + '/@username', which is not a route, and on Render the origin is
+    // the onrender.com address, so this handed out a link to a 404 on the wrong
+    // domain. One builder, one path that exists.
+    if (!currentUser) { showToast('Sign in first'); return; }
+    var u = window._qrProfileUrl || tfProfileUrl(currentUser.username || currentUser.handle);
+    navigator.clipboard.writeText(u).then(function(){ showToast('Profile link copied'); triggerHaptic(12); });
 }
-function downloadQRCode() {
+async function downloadQRCode() {
     var canvas = document.querySelector('#qr-canvas canvas');
     if (!canvas) { showToast('QR not ready'); return; }
+    var name = (currentUser ? currentUser.username : 'trustfirst') + '-qr.png';
+
+    // A browser cannot write to the camera roll, so "Saved to gallery" was simply
+    // untrue: the file went to Downloads, and on an installed iOS PWA an anchor
+    // download often does nothing at all. Use the native bridge where there is one,
+    // the share sheet where there is one (that is how you get to Save Image on
+    // iOS), and only then fall back to a download, described honestly.
+    try {
+        if (typeof tfNativeSaveImage === 'function' && tfNativeSaveImage.available && tfNativeSaveImage.available()) {
+            await tfNativeSaveImage(canvas.toDataURL('image/png'), name);
+            showToast('Saved to your photos');
+            triggerHaptic(20);
+            return;
+        }
+    } catch (e) { console.warn('[QR] native save failed', e); }
+
+    try {
+        var blob = await new Promise(function (res) { canvas.toBlob(res, 'image/png'); });
+        if (blob && navigator.canShare && navigator.share) {
+            var file = new File([blob], name, { type: 'image/png' });
+            if (navigator.canShare({ files: [file] })) {
+                await navigator.share({ files: [file], title: 'My TrustFirst QR code' });
+                triggerHaptic(20);
+                return;   // the share sheet is where Save Image lives
+            }
+        }
+    } catch (e) {
+        if (e && e.name === 'AbortError') return;   // they closed the sheet
+        console.warn('[QR] share failed', e);
+    }
+
     var link = document.createElement('a');
-    link.download = (currentUser ? currentUser.username : 'trustfirst') + '-qr.png';
+    link.download = name;
     link.href = canvas.toDataURL('image/png');
     link.click();
-    showToast('Saved to gallery ✅');
+    showToast('QR code downloaded');
     triggerHaptic(20);
 }
 
@@ -47156,7 +47302,9 @@ function openOfflineVideosScreen() {
             '</div>';
     }
     screen.innerHTML =
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;background:var(--bg-primary,#fff);border-bottom:0.5px solid var(--border-color,#f0f0f0);">' +
+        // Starts at the very top of the screen, so without the inset the title and
+        // the back button sat under the status bar.
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top, 0px) + 16px) 20px 16px;background:var(--bg-primary,#fff);border-bottom:0.5px solid var(--border-color,#f0f0f0);">' +
             '<button onclick="document.getElementById(\'offlineVideosScreen\').remove()" style="background:none;border:none;color:#007AFF;font-size:22px;cursor:pointer;"><i class="fa-solid fa-chevron-left"></i></button>' +
             '<b style="font-size:17px;color:var(--text-primary,#000);">Offline Videos</b>' +
             '<div style="width:36px;"></div>' +
@@ -48760,6 +48908,17 @@ function openLiquidGlassCameraWithFile(file, url) {
     }
 }
 
+// Whichever clip surface is on screen: the viewer a feed video opens, or the
+// TrustClip page. Sheets belonging to a clip card have to attach to this, not to
+// one of them by name.
+function _tfActiveClipSurface() {
+    var viewer = document.getElementById('tfClipViewer');
+    if (viewer && viewer.offsetParent !== null) return viewer;
+    var reels = document.getElementById('reel-overlay');
+    if (reels && reels.offsetParent !== null) return reels;
+    return viewer || reels || null;
+}
+
 function openReelLikesModal(postId, likes, views) {
     var existing = document.getElementById('reelLikesModal');
     if (existing) existing.remove();
@@ -48780,7 +48939,12 @@ function openReelLikesModal(postId, likes, views) {
             '<div style="overflow-y:auto;flex:1;padding:0 16px;" id="reelLikersList"><div style="text-align:center;padding:30px;color:rgba(255,255,255,0.4);font-size:14px;">Loading…</div></div>' +
         '</div>';
     modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
-    (document.getElementById('reel-overlay') || document.getElementById('app') || document.body).appendChild(modal);
+    // The same clip card is used by the TrustClip page and by the viewer a feed
+    // video opens, so this has to land on whichever one is actually up. It always
+    // went to #reel-overlay, which is why tapping the like count on a feed video
+    // put the sheet on the clips page instead of in front of you.
+    (_tfActiveClipSurface() || document.getElementById('app') || document.body).appendChild(modal);
+    _tfLiftAboveVisible(modal, 19000);
     triggerHaptic(10);
     // Load likers from Supabase.
     if (window.sb) {
