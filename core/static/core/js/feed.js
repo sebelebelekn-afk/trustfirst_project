@@ -4402,7 +4402,8 @@ function chatCamCapture() {
             if (!window._chatCamStream) { showToast('Camera not ready'); return; }
             var chunks = [];
             var mime = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
-            var rec = new MediaRecorder(window._chatCamStream, { mimeType: mime });
+            // Capped, so a chat video is born small rather than shrunk later.
+            var rec = new MediaRecorder(window._chatCamStream, { mimeType: mime, videoBitsPerSecond: TF_VID_BITRATE });
             rec.ondataavailable = function(e) { if (e.data.size > 0) chunks.push(e.data); };
             rec.onstop = function() {
                 var ext = mime.includes('mp4') ? '.mp4' : '.webm';
@@ -19824,7 +19825,18 @@ function startRecording() {
     inner.style.height = '30px';
     inner.style.borderRadius = '6px';
 
-    mediaRecorder = new MediaRecorder(cameraStream, { mimeType: 'video/webm' });
+    // video/webm was hardcoded, which Safari cannot record at all, and there was
+    // no bitrate cap, so a phone recorded at whatever it felt like — tens of
+    // megabytes a minute. Recording small costs nothing; shrinking afterwards
+    // costs the length of the clip.
+    mediaRecorder = (function () {
+        var mime = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm']
+            .filter(function (m) { return MediaRecorder.isTypeSupported(m); })[0];
+        var opts = { videoBitsPerSecond: TF_VID_BITRATE };
+        if (mime) opts.mimeType = mime;
+        try { return new MediaRecorder(cameraStream, opts); }
+        catch (e) { return new MediaRecorder(cameraStream); }
+    })();
     mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) recordedChunks.push(e.data);
     };
@@ -33001,7 +33013,15 @@ function lgStartRec() {
         } catch(e) {}
     }
     try {
-        lgRecorder = new MediaRecorder(lgStream, { mimeType: 'video/webm' });
+        // Was hardcoded to webm, which Safari cannot record, and uncapped.
+        lgRecorder = (function () {
+            var mime = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm']
+                .filter(function (m) { return MediaRecorder.isTypeSupported(m); })[0];
+            var opts = { videoBitsPerSecond: TF_VID_BITRATE };
+            if (mime) opts.mimeType = mime;
+            try { return new MediaRecorder(lgStream, opts); }
+            catch (e) { return new MediaRecorder(lgStream); }
+        })();
         lgRecorder.ondataavailable = function(e) { if (e.data.size > 0) lgChunks.push(e.data); };
         lgRecorder.onstop = function() {
             if (window._lgSoundAudio) { try { window._lgSoundAudio.pause(); } catch(e){} }
@@ -48340,6 +48360,168 @@ var TF_COMPOSER_EXT = {
 // decode HEIC into a canvas, so re-encode to JPEG before anything is uploaded.
 // Anything already web-safe, or that this device cannot decode, passes through
 // untouched.
+// ==========================================================================
+// SHRINKING MEDIA BEFORE IT IS UPLOADED
+//
+// Every byte stored is a byte served, over and over, and egress is the quota
+// that actually ran out. A phone photo arrives around 4MB and a phone video at
+// tens of megabytes, and both were being uploaded untouched: tfNormaliseImageFile
+// only ever converted exotic formats like HEIC and handed ordinary JPEGs straight
+// through.
+//
+// Nothing here is allowed to cost somebody their post. Every step falls back to
+// the original file if it fails, if the browser cannot do it, or if the result
+// is not actually smaller.
+// ==========================================================================
+var TF_IMG_MAX_EDGE = 1600;      // more than any phone screen shows
+var TF_IMG_QUALITY  = 0.82;      // visually clean, roughly a third of the bytes
+var TF_VID_MAX_EDGE = 720;       // 720p is plenty for a portrait feed
+var TF_VID_BITRATE  = 2000000;   // 2 Mbps
+var TF_VID_SHRINK_OVER = 6 * 1024 * 1024;   // leave small clips alone
+
+function _tfNiceBytes(n) {
+    if (!n) return '0 KB';
+    return n >= 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.round(n / 1024) + 'KB';
+}
+
+// Re-encode an image down to a sane size. Works in every browser here.
+function tfShrinkImage(file) {
+    return new Promise(function (resolve) {
+        if (!file || !file.type || file.type.indexOf('image/') !== 0) return resolve(file);
+        if (file.type === 'image/gif') return resolve(file);   // re-encoding kills the animation
+        var url;
+        try { url = URL.createObjectURL(file); } catch (e) { return resolve(file); }
+        var done = false;
+        function finish(f) {
+            if (done) return;
+            done = true;
+            try { URL.revokeObjectURL(url); } catch (e) {}
+            resolve(f);
+        }
+        var img = new Image();
+        img.onload = function () {
+            try {
+                var w = img.naturalWidth, h = img.naturalHeight;
+                var scale = Math.min(1, TF_IMG_MAX_EDGE / Math.max(w, h));
+                var c = document.createElement('canvas');
+                c.width = Math.round(w * scale);
+                c.height = Math.round(h * scale);
+                var x = c.getContext('2d');
+                x.imageSmoothingQuality = 'high';
+                x.drawImage(img, 0, 0, c.width, c.height);
+                c.toBlob(function (blob) {
+                    // Only keep it if it actually saved something.
+                    if (!blob || blob.size >= file.size) return finish(file);
+                    var name = (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg';
+                    finish(new File([blob], name, { type: 'image/jpeg', lastModified: Date.now() }));
+                }, 'image/jpeg', TF_IMG_QUALITY);
+            } catch (e) { finish(file); }
+        };
+        img.onerror = function () { finish(file); };
+        img.src = url;
+        setTimeout(function () { finish(file); }, 15000);   // never hang a post
+    });
+}
+
+// Re-encode a video smaller by playing it into a canvas and recording that.
+// This is real time, so it is only worth doing on a file big enough to matter,
+// and it is entirely best-effort: anything missing and the original is used.
+function tfShrinkVideo(file, onProgress) {
+    return new Promise(function (resolve) {
+        if (!file || !file.type || file.type.indexOf('video/') !== 0) return resolve(file);
+        if (file.size < TF_VID_SHRINK_OVER) return resolve(file);
+        if (typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream) return resolve(file);
+
+        var url, v, rec, canvas, stream, chunks = [], done = false, timer = null;
+        function finish(f) {
+            if (done) return;
+            done = true;
+            if (timer) clearTimeout(timer);
+            try { if (rec && rec.state !== 'inactive') rec.stop(); } catch (e) {}
+            try { v.pause(); v.src = ''; } catch (e) {}
+            try { URL.revokeObjectURL(url); } catch (e) {}
+            resolve(f);
+        }
+        try { url = URL.createObjectURL(file); } catch (e) { return resolve(file); }
+
+        v = document.createElement('video');
+        v.src = url; v.muted = true; v.playsInline = true; v.preload = 'auto';
+        v.onerror = function () { finish(file); };
+
+        v.onloadedmetadata = function () {
+            try {
+                var dur = v.duration;
+                if (!isFinite(dur) || dur <= 0 || dur > 300) return finish(file);   // not worth it
+
+                var scale = Math.min(1, TF_VID_MAX_EDGE / Math.max(v.videoWidth, v.videoHeight));
+                canvas = document.createElement('canvas');
+                canvas.width = Math.round(v.videoWidth * scale / 2) * 2;    // even dimensions encode better
+                canvas.height = Math.round(v.videoHeight * scale / 2) * 2;
+                var cx = canvas.getContext('2d');
+
+                stream = canvas.captureStream(30);
+                // Keep the sound. Without this the re-encode would silently
+                // strip the audio, which is worse than a large file.
+                try {
+                    if (v.captureStream || v.mozCaptureStream) {
+                        var src = (v.captureStream || v.mozCaptureStream).call(v);
+                        (src.getAudioTracks() || []).forEach(function (t) { stream.addTrack(t); });
+                    }
+                } catch (e) {}
+
+                var mime = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm']
+                    .filter(function (m) { return MediaRecorder.isTypeSupported(m); })[0];
+                if (!mime) return finish(file);
+
+                rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: TF_VID_BITRATE });
+                rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+                rec.onstop = function () {
+                    var out = new Blob(chunks, { type: mime });
+                    if (!out.size || out.size >= file.size) return finish(file);
+                    var ext = mime.indexOf('mp4') >= 0 ? 'mp4' : 'webm';
+                    var name = (file.name || 'video').replace(/\.[^.]+$/, '') + '.' + ext;
+                    finish(new File([out], name, { type: mime.split(';')[0], lastModified: Date.now() }));
+                };
+                rec.start(1000);
+
+                (function draw() {
+                    if (done) return;
+                    if (v.ended || v.paused) { try { rec.stop(); } catch (e) { finish(file); } return; }
+                    cx.drawImage(v, 0, 0, canvas.width, canvas.height);
+                    if (onProgress && dur) onProgress(Math.min(0.99, v.currentTime / dur));
+                    requestAnimationFrame(draw);
+                })();
+
+                v.onended = function () { try { rec.stop(); } catch (e) { finish(file); } };
+                v.play().catch(function () { finish(file); });
+
+                // A stall must not strand the post: allow the clip's length plus
+                // a generous margin, then give up and use the original.
+                timer = setTimeout(function () { finish(file); }, (dur * 1000) + 20000);
+            } catch (e) { finish(file); }
+        };
+    });
+}
+
+// The one call sites use. Returns the original unless something smaller came out.
+async function tfShrinkForUpload(file, onProgress) {
+    if (!file) return file;
+    try {
+        var before = file.size || 0;
+        var out = file;
+        if (file.type && file.type.indexOf('image/') === 0) out = await tfShrinkImage(file);
+        else if (file.type && file.type.indexOf('video/') === 0) out = await tfShrinkVideo(file, onProgress);
+        if (out && out.size && before && out.size < before) {
+            console.debug('[upload] ' + _tfNiceBytes(before) + ' → ' + _tfNiceBytes(out.size) +
+                          ' (' + Math.round((1 - out.size / before) * 100) + '% smaller)');
+        }
+        return out || file;
+    } catch (e) {
+        console.warn('[upload] could not shrink, sending the original', e);
+        return file;
+    }
+}
+
 function tfNormaliseImageFile(file) {
     return new Promise(function(resolve) {
         if (!file || !file.type || file.type.indexOf('image/') !== 0) return resolve(file);
@@ -48481,6 +48663,19 @@ async function _tfUploadComposerItem(m) {
     if (!isVideo) {
         try { m.file = await tfNormaliseImageFile(m.file); } catch (e) {}
     }
+    // Shrink before it goes up. Sending a 4MB phone photo or a 40MB clip
+    // untouched costs that much storage once and that much egress on every single
+    // view. Falls back to the original file if it cannot be done.
+    try {
+        m.status = 'compressing';
+        tfRenderComposerMedia();
+        m.file = await tfShrinkForUpload(m.file, function (p) {
+            m.progress = Math.round(p * 100);
+            tfRenderComposerMedia();
+        });
+        m.status = 'uploading';
+        tfRenderComposerMedia();
+    } catch (e) { /* upload the original */ }
     var ext = TF_COMPOSER_EXT[m.file.type] || (isVideo ? 'mp4' : 'jpg');
     var bucket = isVideo ? 'videos' : 'images';
     // Several files can land in the same millisecond, so the name carries a
@@ -49107,6 +49302,8 @@ async function sendMediaInChat(file, caption) {
     }
 
     try {
+        // Same treatment as a post: shrink first, keep the original if it cannot.
+        try { file = await tfShrinkForUpload(file); } catch (e) {}
         var ext = file.name.split('.').pop() || (isVideo ? 'mp4' : 'jpg');
         var path = currentUser.id + '/chat/' + Date.now() + '.' + ext;
         var bucket = isVideo ? 'videos' : 'images';
@@ -51337,6 +51534,17 @@ async function _eddieAsk(text, attachments) {
         if (!resp.ok) {
             var err = {};
             try { err = await resp.json(); } catch (e) {}
+            // Hitting the daily cap is not Eddie answering badly, and dressing it
+            // up as one of his replies made it look like the app had broken. It
+            // gets its own notice, outside the conversation.
+            if (resp.status === 429) {
+                _eddie.turns.pop();                    // drop the empty reply bubble
+                _eddie.busy = false;
+                _eddieRender();
+                _eddieShowLimit(err.error, err.limit);
+                eddieRefreshUsage();
+                return;
+            }
             turn.status = 'done';
             turn.content = err.error || 'Eddie could not answer that.';
             _eddie.busy = false; _eddieRender(); eddieRefreshUsage();
@@ -51527,6 +51735,41 @@ function _eddieChunks(text, max) {
     });
     if (buf.trim()) out.push(buf.trim());
     return out;
+}
+
+// The daily cap, said plainly. Sits above the composer rather than inside the
+// thread, because it is the app talking, not Eddie, and it says when it lifts.
+function _eddieShowLimit(message, kind) {
+    var existing = document.getElementById('eddieLimitCard');
+    if (existing) existing.remove();
+
+    var what = kind === 'attachments' ? 'attachment' : (kind === 'images' ? 'image' : 'message');
+    // The Eddie sheet is always dark, so this is styled for that rather than for
+    // the app's light and dark themes.
+    var card = document.createElement('div');
+    card.id = 'eddieLimitCard';
+    card.style.cssText = 'margin:0 14px 8px;padding:13px 15px;border-radius:16px;flex-shrink:0;' +
+        'background:rgba(255,159,10,0.14);border:0.5px solid rgba(255,159,10,0.4);' +
+        'display:flex;gap:12px;align-items:flex-start;animation:popIn 0.25s ease;';
+    card.innerHTML =
+        '<i class="fa-solid fa-hourglass-half" style="color:#FF9F0A;font-size:16px;margin-top:2px;flex-shrink:0;"></i>' +
+        '<div style="flex:1;min-width:0;">' +
+            '<b style="display:block;font-size:14px;color:#fff;margin-bottom:3px;">' +
+                "You've reached today's " + what + ' limit</b>' +
+            '<span style="font-size:13px;color:rgba(255,255,255,0.65);line-height:1.45;">' +
+                escapeHtml(message || 'It resets tomorrow.') + '</span>' +
+        '</div>' +
+        '<i class="fa-solid fa-xmark" onclick="this.parentElement.remove()" ' +
+            'style="color:rgba(255,255,255,0.5);font-size:14px;cursor:pointer;padding:2px 4px;flex-shrink:0;"></i>';
+
+    // Directly above the composer, where the reply would have appeared.
+    var atts = document.getElementById('eddieAtts');
+    if (atts && atts.parentElement) atts.parentElement.insertBefore(card, atts);
+    else {
+        var list = document.getElementById('eddieList');
+        if (list) list.appendChild(card); else return;
+    }
+    triggerHaptic(20);
 }
 
 // Only the message being read shows a stop icon. This used to flip every
