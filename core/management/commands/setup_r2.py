@@ -28,15 +28,16 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **opts):
-        from core.api_views import _r2_client, _r2_ready
+        from core.api_views import _r2_client
 
-        missing = [n for n in ('R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY',
-                               'R2_BUCKET', 'R2_PUBLIC_BASE')
+        # R2_PUBLIC_BASE is deliberately not required here. It is the last thing
+        # you get, after turning on public access, and being able to check the
+        # credentials and CORS before then is the point of this command.
+        missing = [n for n in ('R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID',
+                               'R2_SECRET_ACCESS_KEY', 'R2_BUCKET')
                    if not getattr(settings, n, '')]
         if missing:
             raise CommandError('Not configured. Missing: ' + ', '.join(missing))
-        if not _r2_ready():
-            raise CommandError('R2 settings are incomplete.')
 
         client = _r2_client()
         bucket = settings.R2_BUCKET
@@ -55,7 +56,7 @@ class Command(BaseCommand):
                 for rule in current.get('CORSRules', []):
                     self.stdout.write('  ' + str(rule))
             except Exception as exc:
-                self.stdout.write(self.style.WARNING('No CORS policy set (%s)' % exc))
+                self.stdout.write(self.style.WARNING('Could not read CORS (%s)' % exc))
             return
 
         # The presigned URL signs Content-Type and Cache-Control, so the browser
@@ -67,9 +68,20 @@ class Command(BaseCommand):
             'ExposeHeaders': ['ETag'],
             'MaxAgeSeconds': 3600,
         }]
-        client.put_bucket_cors(Bucket=bucket, CORSConfiguration={'CORSRules': rules})
-        self.stdout.write(self.style.SUCCESS(
-            'CORS set on %s for: %s' % (bucket, ', '.join(origins))))
+        try:
+            client.put_bucket_cors(Bucket=bucket, CORSConfiguration={'CORSRules': rules})
+            self.stdout.write(self.style.SUCCESS(
+                'CORS set on %s for: %s' % (bucket, ', '.join(origins))))
+        except Exception as exc:
+            # An Object Read & Write token can upload but cannot reconfigure the
+            # bucket. That is a perfectly sensible token to be holding, so print
+            # the policy to paste rather than treating it as a failure.
+            import json as _json
+            self.stdout.write(self.style.WARNING(
+                'Could not set CORS with this token (%s).\n'
+                'Either use an Admin Read & Write token, or paste this into\n'
+                'Cloudflare dashboard > R2 > %s > Settings > CORS policy:\n\n%s\n'
+                % (exc, bucket, _json.dumps(rules, indent=2))))
 
         # Prove it: sign an upload, use it, read the object back, then tidy up.
         import urllib.request
@@ -89,6 +101,14 @@ class Command(BaseCommand):
         except Exception as exc:
             raise CommandError('Presigned upload failed: %s' % exc)
         self.stdout.write(self.style.SUCCESS('Presigned upload works.'))
+
+        if not getattr(settings, 'R2_PUBLIC_BASE', ''):
+            client.delete_object(Bucket=bucket, Key=key)
+            self.stdout.write(self.style.WARNING(
+                'R2_PUBLIC_BASE is not set, so nothing can read the files back yet '
+                'and uploads will keep going to Supabase. Turn on public access for '
+                'the bucket and set it to the pub-xxxx.r2.dev URL, or a custom domain.'))
+            return
 
         public = settings.R2_PUBLIC_BASE.rstrip('/') + '/' + key
         try:
