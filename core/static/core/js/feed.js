@@ -28594,6 +28594,10 @@ function _userProfileSkeleton() {
     // Inside #app, so it shares a stacking context with whatever opens on top of
     // it. See the note where the filled profile is mounted.
     (document.getElementById('app') || document.body).appendChild(ov);
+    // A profile can be opened from on top of another screen: from a row in the
+    // followers list, from a comment, from the feed. Its fixed 9999 put it behind
+    // any of those that had been lifted, so it goes above whatever is showing.
+    _tfLiftAboveVisible(ov, 9999);
     return ov;
 }
 
@@ -28641,6 +28645,7 @@ function _renderPageUnavailable(existingOverlay) {
                 'There may be a technical problem. Refresh to try again.</p>' +
         '</div>';
     if (!ov.parentNode) (document.getElementById('app') || document.body).appendChild(ov);
+    _tfLiftAboveVisible(ov, 9999);
     hideNavBar && hideNavBar();
     return ov;
 }
@@ -28712,6 +28717,8 @@ async function viewUserProfile(userId) {
     overlay.id = 'user-profile-overlay';
     overlay.className = 'page-overlay';
     delete overlay.dataset.skeleton;
+    // Rewriting cssText wipes the lift the skeleton was given, so it is reapplied
+    // below once the element is in the document.
     overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg-primary,#fff);z-index:9999;overflow-y:auto;-webkit-overflow-scrolling:touch;';
 
     // Only the private-account notice is built up front now. Each tab loads its
@@ -28735,7 +28742,11 @@ async function viewUserProfile(userId) {
         '<div style="position:relative;">' +
             // The cover and its buttons start below the status bar; they used to
             // start at the very top, so the back arrow sat on top of the clock.
-            (coverUrl ? '<div style="height:calc(env(safe-area-inset-top, 0px) + 150px);background:url(' + escapeHtml(coverUrl) + ') center/cover;"></div>' : '<div style="height:calc(env(safe-area-inset-top, 0px) + 150px);background:linear-gradient(135deg,#007AFF,#5856D6);"></div>') +
+            // No cover photo used to draw a blue gradient here while your own
+            // profile drew flat dark grey, so one account looked like two
+            // different accounts depending on who opened it. Same token now.
+            (coverUrl ? '<div style="height:calc(env(safe-area-inset-top, 0px) + 150px);background:url(' + escapeHtml(coverUrl) + ') center/cover;"></div>'
+                      : '<div style="height:calc(env(safe-area-inset-top, 0px) + 150px);background:var(--cover-empty,#333);"></div>') +
             '<div style="position:absolute;top:calc(env(safe-area-inset-top, 0px) + 10px);left:10px;z-index:2;">' +
                 '<button onclick="document.getElementById(\'user-profile-overlay\').remove()" style="background:rgba(0,0,0,0.4);color:white;border:none;border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;"><i class="fa-solid fa-arrow-left"></i></button>' +
             '</div>' +
@@ -28797,6 +28808,9 @@ async function viewUserProfile(userId) {
     // Following opened behind this page even after being lifted to 10000 against
     // its 9999. Same context, so z-index means something again.
     if (!overlay.parentNode) (document.getElementById('app') || document.body).appendChild(overlay);
+    // Opened from a row in the followers list, a comment, or the feed: it has to
+    // sit above whichever of those is showing, not behind it.
+    _tfLiftAboveVisible(overlay, 9999);
     if (!isLockedOut) switchUserProfileTab('posts', null, userId);
 }
 

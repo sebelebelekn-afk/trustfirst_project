@@ -1443,7 +1443,12 @@ html, body { background: #000; }
        13. PROFILE (Jäger Style)
        ========================================================================== */
     .profile-hero { position: relative; }
-    .cover-img { height: 180px; width: 100%; background: #333; object-fit: cover; }
+    /* An account with no cover photo. One token, because your own profile and
+       somebody else's used to disagree: yours was this flat dark grey while
+       theirs was a blue gradient, so the same account looked different depending
+       on who was looking at it. */
+    :root { --cover-empty: #333; }
+    .cover-img { height: 180px; width: 100%; background: var(--cover-empty, #333); object-fit: cover; }
     .avatar-overlap { width: 95px; height: 95px; border-radius: 50%; border: 4px solid #fff; position: absolute; bottom: -45px; left: 20px; background: #eee; z-index: 5; }
     .profile-btn-row { display: flex; justify-content: flex-end; gap: 10px; padding: 10px 20px; margin-top: 5px; }
     .action-btn { padding: 8px 20px; border-radius: 20px; border: 1px solid #ddd; background: #fff; font-weight: bold; font-size: 13px; cursor: pointer; }
