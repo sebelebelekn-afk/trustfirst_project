@@ -5611,9 +5611,8 @@ async function saveEditProfile() {
             var file = avatarInput.files[0];
             var compressed = typeof compressImage === 'function' ? await compressImage(file, 500, 0.85) : file;
             var fileName = currentUser.id + '/avatar_' + Date.now() + '.jpg';
-            var uploadResult = await sb.storage.from('avatars').upload(fileName, compressed, { cacheControl: TF_MEDIA_CACHE_SECONDS, upsert: true });
-            if (uploadResult.error) throw uploadResult.error;
-            var publicUrl = sb.storage.from('avatars').getPublicUrl(fileName).data.publicUrl;
+            var publicUrl = await tfUploadPublicMedia(compressed, 'avatar', 'avatars', fileName);
+            if (!publicUrl) throw new Error('Upload failed');
             var _av = await sb.from('users').update({ avatar_url: publicUrl, updated_at: new Date().toISOString() }).eq('id', currentUser.id);
             if (_av && _av.error) throw _av.error;
             // The new URL has to land on currentUser and in the cached session as
@@ -14298,6 +14297,8 @@ var sb = null; // alias for window._sb, assigned in initSupabase()
         SUPABASE_ANON_KEY = cfg.supabase_anon_key || '';
         STRIPE_PUBLISHABLE_KEY = cfg.stripe_publishable_key || '';
         GIPHY_KEY_FROM_SERVER = cfg.giphy_api_key || '';
+        TF_R2_ENABLED = !!cfg.r2_enabled;
+        TF_R2_PUBLIC_BASE = cfg.r2_public_base || '';
         initSupabase();
         if (cfg.sentry_dsn) tfInitSentry(cfg.sentry_dsn, cfg.sentry_environment);
     } catch(e) {
@@ -32125,9 +32126,8 @@ function chooseCoverPhoto() {
             try {
                 var compressed = typeof compressImage === 'function' ? await compressImage(file, 1280, 0.85) : file;
                 var path = currentUser.id + '/cover_' + Date.now() + '.jpg';
-                var up = await sb.storage.from('avatars').upload(path, compressed, { cacheControl: TF_MEDIA_CACHE_SECONDS, upsert: true });
-                if (!up.error) {
-                    var url = sb.storage.from('avatars').getPublicUrl(path).data.publicUrl;
+                var url = await tfUploadPublicMedia(compressed, 'avatar', 'avatars', path);
+                if (url) {
                     var r = await sb.from('users').update({ cover_url: url, updated_at: new Date().toISOString() }).eq('id', currentUser.id);
                     if (!r.error) {
                         currentUser.cover_url = url;
@@ -43758,15 +43758,8 @@ async function submitTrustClip() {
             try {
                 var ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
                 var path = currentUser.id + '/' + clipId + '.' + ext;
-                var upRes = await sb.storage
-                    .from('trustclips')
-                    .upload(path, blob, { contentType: blob.type, upsert: true });
-                if (upRes.error) {
-                    console.warn('[TrustClip] Storage upload failed:', upRes.error.message);
-                    showToast('Upload failed: ' + upRes.error.message);
-                } else if (upRes.data) {
-                    videoUrl = sb.storage.from('trustclips').getPublicUrl(upRes.data.path).data.publicUrl;
-                }
+                videoUrl = await tfUploadPublicMedia(blob, 'clip', 'trustclips', path);
+                if (!videoUrl) showToast('Upload failed. Check your connection.');
             } catch (upEx) {
                 console.warn('[TrustClip] Storage upload threw:', upEx && upEx.message);
                 showToast('Upload error: ' + (upEx && upEx.message || 'unknown'));
@@ -43782,10 +43775,7 @@ async function submitTrustClip() {
             try {
                 var coverBlob = await (await fetch(window._tcCoverDataUrl)).blob();
                 var coverPath = currentUser.id + '/' + clipId + '_cover.jpg';
-                var coverUp = await sb.storage.from('trustclips').upload(coverPath, coverBlob, { contentType: 'image/jpeg', upsert: true });
-                if (!coverUp.error && coverUp.data) {
-                    thumbnailUrl = sb.storage.from('trustclips').getPublicUrl(coverUp.data.path).data.publicUrl;
-                }
+                thumbnailUrl = await tfUploadPublicMedia(coverBlob, 'image', 'trustclips', coverPath);
             } catch (e) { console.warn('[TrustClip] cover upload failed:', e && e.message); }
         }
 
@@ -48522,6 +48512,90 @@ async function tfShrinkForUpload(file, onProgress) {
     }
 }
 
+// ==========================================================================
+// UPLOADING
+// Storage is cheap; serving the same video a thousand times is not, and that
+// is the bill that ran out. Cloudflare R2 charges nothing to serve, so public
+// media goes there instead.
+//
+// The file goes from the phone straight to R2. It never passes through our
+// server, which has its own bandwidth bill, and the credentials never leave
+// the server, which only hands out a URL that works for five minutes.
+//
+// If R2 is not configured, or the sign fails, or the PUT fails, this quietly
+// uploads to Supabase exactly as before. Nobody loses a post over plumbing.
+// ==========================================================================
+var TF_R2_ENABLED = false;
+var TF_R2_PUBLIC_BASE = '';
+
+// A recorded blob's type is "video/webm;codecs=vp8,opus". The signature covers
+// the exact Content-Type, so the same trimmed string has to be used to sign and
+// to send, or R2 rejects the PUT.
+function _tfBaseType(file) {
+    return String((file && file.type) || 'application/octet-stream').split(';')[0].trim().toLowerCase();
+}
+
+async function _tfSignR2Upload(file, kind) {
+    var sess = await sb.auth.getSession();
+    var tok = sess && sess.data && sess.data.session && sess.data.session.access_token;
+    if (!tok) throw new Error('no session');
+    var r = await fetch('/api/upload/sign/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+        body: JSON.stringify({ kind: kind, content_type: _tfBaseType(file), size: file.size })
+    });
+    if (!r.ok) throw new Error('sign failed: ' + r.status);
+    return await r.json();
+}
+
+// PUT via XHR rather than fetch, because only XHR reports how far along the
+// upload is, and a long video upload with no progress bar looks frozen.
+function _tfPutToR2(url, file, headers, onProgress) {
+    return new Promise(function (resolve, reject) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('PUT', url, true);
+        xhr.setRequestHeader('Content-Type', _tfBaseType(file));
+        if (headers && headers.cache_control) xhr.setRequestHeader('Cache-Control', headers.cache_control);
+        if (onProgress) {
+            xhr.upload.onprogress = function (e) {
+                if (e.lengthComputable) onProgress(e.loaded / e.total);
+            };
+        }
+        xhr.onload = function () {
+            if (xhr.status >= 200 && xhr.status < 300) resolve();
+            else reject(new Error('R2 PUT ' + xhr.status));
+        };
+        xhr.onerror = function () { reject(new Error('R2 PUT failed')); };
+        xhr.ontimeout = function () { reject(new Error('R2 PUT timed out')); };
+        xhr.timeout = 10 * 60 * 1000;
+        xhr.send(file);
+    });
+}
+
+/**
+ * Put one file somewhere it can be read from, and return its URL.
+ * kind is one of image, video, avatar, story, clip. bucket/path are the
+ * Supabase fallback, used whenever R2 is not available.
+ */
+async function tfUploadPublicMedia(file, kind, bucket, path, onProgress) {
+    if (TF_R2_ENABLED) {
+        try {
+            var signed = await _tfSignR2Upload(file, kind);
+            await _tfPutToR2(signed.upload_url, file, signed, onProgress);
+            return signed.public_url;
+        } catch (e) {
+            console.warn('[upload] R2 unavailable, using Supabase', e);
+        }
+    }
+    var client = window._sb || window.sb;
+    var up = await client.storage.from(bucket).upload(path, file, {
+        cacheControl: TF_MEDIA_CACHE_SECONDS, contentType: file.type, upsert: false
+    });
+    if (up.error) throw up.error;
+    var pub = client.storage.from(bucket).getPublicUrl(path);
+    return pub.data && pub.data.publicUrl;
+}
+
 function tfNormaliseImageFile(file) {
     return new Promise(function(resolve) {
         if (!file || !file.type || file.type.indexOf('image/') !== 0) return resolve(file);
@@ -48682,10 +48756,10 @@ async function _tfUploadComposerItem(m) {
     // suffix as well — otherwise the second upload collides with the first.
     var path = currentUser.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
     try {
-        var up = await client.storage.from(bucket).upload(path, m.file, { cacheControl: TF_MEDIA_CACHE_SECONDS, upsert: false });
-        if (up.error) throw up.error;
-        var pub = client.storage.from(bucket).getPublicUrl(path);
-        m.url = pub.data && pub.data.publicUrl;
+        m.url = await tfUploadPublicMedia(m.file, isVideo ? 'video' : 'image', bucket, path, function (p) {
+            m.progress = Math.round(p * 100);
+            tfRenderComposerMedia();
+        });
         m.status = m.url ? 'ready' : 'failed';
         if (!m.url) m.error = 'Upload failed. Check your connection.';
     } catch(e) {
@@ -49307,15 +49381,13 @@ async function sendMediaInChat(file, caption) {
         var ext = file.name.split('.').pop() || (isVideo ? 'mp4' : 'jpg');
         var path = currentUser.id + '/chat/' + Date.now() + '.' + ext;
         var bucket = isVideo ? 'videos' : 'images';
-        var total = file.size;
         var progEl = document.getElementById('upload-prog-' + msgId);
 
-        // Upload with XHR for progress
-        var { data, error } = await window.sb.storage.from(bucket).upload(path, file, { cacheControl: TF_MEDIA_CACHE_SECONDS, upsert: false });
-        if (error) throw error;
-
-        var urlResult = window.sb.storage.from(bucket).getPublicUrl(path);
-        var publicUrl = urlResult.data && urlResult.data.publicUrl;
+        var publicUrl = await tfUploadPublicMedia(file, isVideo ? 'video' : 'image', bucket, path, function (p) {
+            // The label says "Uploading…" until there is something truthful to
+            // put there. A long video with no number looks like it has stalled.
+            if (progEl) progEl.textContent = 'Uploading ' + Math.round(p * 100) + '%';
+        });
 
         // Update bubble to sent state
         var oldBubble = chatBody.querySelector('[data-msg-id="' + msgId + '"]');

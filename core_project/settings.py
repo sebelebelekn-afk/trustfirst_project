@@ -130,6 +130,16 @@ SUPABASE_URL            = os.environ.get('SUPABASE_URL', '')
 SUPABASE_ANON_KEY       = os.environ.get('SUPABASE_ANON_KEY', '')
 SUPABASE_SERVICE_KEY    = os.environ.get('SUPABASE_SERVICE_KEY', '')
 
+# Cloudflare R2 holds the media people look at. R2 charges for what is stored
+# but nothing for serving it, which is the opposite of the bill that ran out.
+# Leave any of these unset and uploads keep going to Supabase storage.
+R2_ACCOUNT_ID        = os.environ.get('R2_ACCOUNT_ID', '')
+R2_ACCESS_KEY_ID     = os.environ.get('R2_ACCESS_KEY_ID', '')
+R2_SECRET_ACCESS_KEY = os.environ.get('R2_SECRET_ACCESS_KEY', '')
+R2_BUCKET            = os.environ.get('R2_BUCKET', 'trustfirst-media')
+# Where finished files are read from: the r2.dev URL, or a custom domain.
+R2_PUBLIC_BASE       = os.environ.get('R2_PUBLIC_BASE', '')
+
 STRIPE_PUBLISHABLE_KEY  = os.environ.get('STRIPE_PUBLISHABLE_KEY', '')
 STRIPE_SECRET_KEY       = os.environ.get('STRIPE_SECRET_KEY', '')
 STRIPE_WEBHOOK_SECRET   = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
@@ -329,6 +339,10 @@ CONTENT_SECURITY_POLICY = {
             # monitoring that works until you notice nothing ever arrives.
             "https://*.ingest.de.sentry.io",
             "https://*.ingest.sentry.io",
+            # The browser PUTs media straight to R2. img-src and media-src are
+            # already open to https:, so only the upload needs naming here.
+            "https://*.r2.cloudflarestorage.com",
+            "https://*.r2.dev",
         ],
         "frame-src": [
             "'self'",

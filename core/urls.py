@@ -10,6 +10,7 @@ from . import eddie_voice
 urlpatterns = [
     path('', views.feed, name='feed'),
     path('api/config/', api_views.get_config, name='api_config'),
+    path('api/upload/sign/', api_views.r2_sign_upload, name='api_upload_sign'),
     path('api/eddie/chat/', eddie_views.eddie_chat, name='api_eddie_chat'),
     path('api/eddie/usage/', eddie_views.eddie_usage, name='api_eddie_usage'),
     path('api/eddie/history/', eddie_views.eddie_history, name='api_eddie_history'),

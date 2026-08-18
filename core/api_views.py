@@ -26,6 +26,143 @@ def _is_valid_uuid(value):
         return False
 
 
+# ---------------------------------------------------------------------------
+# CLOUDFLARE R2
+# Storage was the cheap part; egress was the bill. R2 charges nothing to serve,
+# so the media people actually look at lives there.
+#
+# The browser uploads straight to R2 with a presigned URL, so a video never
+# passes through this server and costs nothing in Render bandwidth either. The
+# credentials stay here and are never sent to the client.
+#
+# Everything degrades: with no R2 settings the app carries on using Supabase
+# storage exactly as before.
+# ---------------------------------------------------------------------------
+R2_KINDS = {
+    # kind: (path prefix, allowed content-type prefix, max bytes)
+    'image':  ('images',  'image/', 15 * 1024 * 1024),
+    'video':  ('videos',  'video/', 200 * 1024 * 1024),
+    'avatar': ('avatars', 'image/', 10 * 1024 * 1024),
+    'story':  ('stories', None,     200 * 1024 * 1024),
+    'clip':   ('clips',   'video/', 300 * 1024 * 1024),
+}
+
+
+def _r2_ready():
+    return all([
+        getattr(settings, 'R2_ACCOUNT_ID', ''),
+        getattr(settings, 'R2_ACCESS_KEY_ID', ''),
+        getattr(settings, 'R2_SECRET_ACCESS_KEY', ''),
+        getattr(settings, 'R2_BUCKET', ''),
+        getattr(settings, 'R2_PUBLIC_BASE', ''),
+    ])
+
+
+_R2_CLIENT = None
+
+
+def _r2_client():
+    """Built once. boto3 spends about a second loading service data, which is a
+    second on every upload if the client is rebuilt each time."""
+    global _R2_CLIENT
+    if _R2_CLIENT is not None:
+        return _R2_CLIENT
+    import boto3
+    from botocore.config import Config
+    _R2_CLIENT = boto3.client(
+        's3',
+        endpoint_url='https://%s.r2.cloudflarestorage.com' % settings.R2_ACCOUNT_ID,
+        aws_access_key_id=settings.R2_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY,
+        region_name='auto',
+        # R2 wants SigV4 and no checksum headers the browser will not send.
+        config=Config(signature_version='s3v4', s3={'addressing_style': 'path'}),
+    )
+    return _R2_CLIENT
+
+
+@ratelimit(key='ip', rate='60/m', method='POST', block=True)
+@csrf_exempt
+@require_http_methods(["POST"])
+def r2_sign_upload(request):
+    """Hand back a short-lived URL the browser can PUT one file to.
+
+    The key is built here, from the signed-in user's id, so nobody can choose
+    where their upload lands or overwrite somebody else's file.
+    """
+    try:
+        payload = _verify_supabase_jwt(request)
+    except ValueError:
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    user_id = payload.get('sub')
+    if not _is_valid_uuid(user_id):
+        return JsonResponse({'error': 'Invalid session'}, status=401)
+
+    if not _r2_ready():
+        return JsonResponse({'error': 'R2 not configured', 'not_configured': True}, status=503)
+
+    try:
+        body = json.loads(request.body or b'{}')
+    except Exception:
+        return JsonResponse({'error': 'Bad request'}, status=400)
+
+    kind = (body.get('kind') or 'image').lower()
+    if kind not in R2_KINDS:
+        return JsonResponse({'error': 'Unknown upload kind'}, status=400)
+    prefix, type_prefix, max_bytes = R2_KINDS[kind]
+
+    content_type = (body.get('content_type') or '').lower().strip()
+    if type_prefix and not content_type.startswith(type_prefix):
+        return JsonResponse({'error': 'That file type is not allowed here'}, status=400)
+    if not re.match(r'^[a-z]+/[a-z0-9.+-]+$', content_type or ''):
+        return JsonResponse({'error': 'Bad content type'}, status=400)
+
+    try:
+        size = int(body.get('size') or 0)
+    except (TypeError, ValueError):
+        size = 0
+    if size <= 0 or size > max_bytes:
+        return JsonResponse({
+            'error': 'That file is too large (%dMB max)' % (max_bytes // (1024 * 1024)),
+        }, status=400)
+
+    # The extension is taken from the content type, never from the filename, so a
+    # crafted name cannot put a .html into a bucket that gets served publicly.
+    ext = {
+        'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
+        'image/heic': 'heic', 'image/heif': 'heif',
+        'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov', 'video/3gpp': '3gp',
+    }.get(content_type, 'bin')
+
+    key = '%s/%s/%s.%s' % (prefix, user_id, uuid.uuid4().hex, ext)
+
+    try:
+        client = _r2_client()
+        url = client.generate_presigned_url(
+            'put_object',
+            Params={
+                'Bucket': settings.R2_BUCKET,
+                'Key': key,
+                'ContentType': content_type,
+                # Paths carry a uuid and are never reused, so they can be cached
+                # forever. This is the header that made the old bill what it was.
+                'CacheControl': 'public, max-age=31536000, immutable',
+            },
+            ExpiresIn=300,
+        )
+    except Exception as exc:   # pragma: no cover
+        import logging
+        logging.getLogger(__name__).warning('R2 presign failed: %s', exc)
+        return JsonResponse({'error': 'Could not prepare the upload'}, status=502)
+
+    return JsonResponse({
+        'upload_url': url,
+        'public_url': settings.R2_PUBLIC_BASE.rstrip('/') + '/' + key,
+        'key': key,
+        'cache_control': 'public, max-age=31536000, immutable',
+    })
+
+
 # Cache one JWKS client per project URL so we don't refetch keys every call.
 _JWKS_CLIENTS = {}
 
@@ -87,6 +224,11 @@ def get_config(request):
         "supabase_url": settings.SUPABASE_URL,
         "supabase_anon_key": settings.SUPABASE_ANON_KEY,
         "stripe_publishable_key": settings.STRIPE_PUBLISHABLE_KEY,
+        # Whether uploads should go to R2 instead of Supabase storage. The client
+        # only needs to know that it is on, and where finished files are served
+        # from; the credentials never leave the server.
+        "r2_enabled": _r2_ready(),
+        "r2_public_base": getattr(settings, "R2_PUBLIC_BASE", "").rstrip("/"),
         # A Sentry DSN is a public identifier by design: it says where to send
         # events, and carries no permission to read anything back. Empty turns
         # browser monitoring off, which is what happens locally.
