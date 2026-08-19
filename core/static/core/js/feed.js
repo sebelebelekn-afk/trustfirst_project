@@ -18805,10 +18805,14 @@ function addReelsStyles() {
             white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
         }
         .tc-sg-sub { color:rgba(255,255,255,0.5); font-size:12.5px; display:block; margin-bottom:14px; }
-        .tc-sg-clips { display:flex; gap:4px; margin-bottom:16px; }
+        /* Fixed height, not an aspect ratio. With flex:1 and aspect-ratio, two
+           thumbnails were each twice as wide as three and so twice as tall, and
+           the tallest card set the height for the whole rail — which left a big
+           empty gap above the buttons on every other card. */
+        .tc-sg-clips { display:flex; gap:4px; margin-bottom:16px; height:132px; }
         .tc-sg-clip {
-            flex:1; aspect-ratio:9/14; border-radius:8px; overflow:hidden;
-            background:rgba(255,255,255,0.08); position:relative; cursor:pointer;
+            flex:1; height:100%; border-radius:8px; overflow:hidden;
+            background:rgba(255,255,255,0.08); position:relative;
         }
         .tc-sg-clip img { width:100%; height:100%; object-fit:cover; display:block; }
         .tc-sg-clip span {
@@ -18821,8 +18825,9 @@ function addReelsStyles() {
             font-weight:700; cursor:pointer; border:none;
         }
         .tc-sg-skip { background:rgba(255,255,255,0.13); color:#fff; }
-        .tc-sg-follow { background:#FF3B5C; color:#fff; }
+        .tc-sg-follow { background:#007AFF; color:#fff; }
         .tc-sg-follow.following { background:rgba(255,255,255,0.13); }
+        .tc-sg-card { cursor:pointer; }
         .tc-sg-hint {
             text-align:center; color:rgba(255,255,255,0.35); font-size:12px;
             margin-top:18px;
@@ -18837,13 +18842,28 @@ function addReelsStyles() {
 var TC_SUGGEST_COUNT = 6;
 
 async function _tcFetchSuggestSlide() {
-    var users = await tfFetchFollowSuggestions('suggested', TC_SUGGEST_COUNT);
-    if (!users || users.length < 2) return null;   // one card is not worth a slide
+    // Same two sources as the rails in the main feed, so someone who owes a
+    // follow back is asked for it here too rather than being offered as a
+    // stranger. Follow-backs come first because they are the likelier follow.
+    var back = await tfFetchFollowSuggestions('followback', TC_SUGGEST_COUNT);
+    var users = (back || []).map(function (u) { u._kind = 'followback'; return u; });
+
+    if (users.length < TC_SUGGEST_COUNT) {
+        var more = await tfFetchFollowSuggestions('suggested', TC_SUGGEST_COUNT - users.length);
+        var have = {};
+        users.forEach(function (u) { have[u.id] = 1; });
+        (more || []).forEach(function (u) {
+            if (!have[u.id]) { u._kind = 'suggested'; users.push(u); }
+        });
+    }
+    users = users.slice(0, TC_SUGGEST_COUNT);
+    if (users.length < 2) return null;   // one card is not worth a slide
+
+    var ids = users.map(function (u) { return u.id; });
+    var byUser = {};
 
     // One query for everybody's clips rather than one per person.
-    var byUser = {};
     try {
-        var ids = users.map(function (u) { return u.id; });
         var r = await sb.from('trustclips')
             .select('user_id, thumbnail_url, video_url, view_count')
             .in('user_id', ids)
@@ -18856,6 +18876,31 @@ async function _tcFetchSuggestSlide() {
         });
     } catch (e) { /* cards still work with no thumbnails */ }
 
+    // Someone who has not posted a clip has still shown their taste by what
+    // they reposted, which is more use than an empty card.
+    var need = ids.filter(function (id) { return !byUser[id] || !byUser[id].length; });
+    if (need.length) {
+        try {
+            var rr = await sb.from('reposts')
+                .select('user_id, posts:post_id(thumbnail_url, media_url, media_type, post_type, view_count)')
+                .in('user_id', need)
+                .order('created_at', { ascending: false })
+                .limit(need.length * 6);
+            (rr.data || []).forEach(function (row) {
+                var p = row.posts;
+                if (!p) return;
+                if (p.media_type !== 'video' && p.post_type !== 'video') return;
+                if (!byUser[row.user_id]) byUser[row.user_id] = [];
+                if (byUser[row.user_id].length >= 3) return;
+                byUser[row.user_id].push({
+                    thumbnail_url: p.thumbnail_url || '',
+                    view_count: p.view_count || 0,
+                    _repost: true
+                });
+            });
+        } catch (e) { /* still fine without them */ }
+    }
+
     return { __suggest: true, users: users, clips: byUser };
 }
 
@@ -18864,27 +18909,51 @@ function _tcSuggestCardHtml(u, clips) {
     var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' +
         encodeURIComponent(label) + '&background=222&color=fff&size=200');
     var uid = escapeHtml(u.id);
+    var isBack = u._kind === 'followback';
 
     var thumbs = (clips || []).map(function (c) {
         var src = c.thumbnail_url || '';
-        return '<div class="tc-sg-clip" onclick="viewUserProfile(\'' + uid + '\')">' +
+        return '<div class="tc-sg-clip">' +
             (src ? '<img src="' + escapeHtml(src) + '" loading="lazy" onerror="this.remove()">' : '') +
             (c.view_count ? '<span>' + formatCount(c.view_count) + '</span>' : '') +
             '</div>';
     }).join('');
 
-    return '<div class="tc-sg-card" data-uid="' + uid + '">' +
-        '<img src="' + escapeHtml(av) + '" onclick="viewUserProfile(\'' + uid + '\')" ' +
+    // The whole card opens the account. The two buttons stop the event, or
+    // turning someone down would also walk you into their profile.
+    return '<div class="tc-sg-card" data-uid="' + uid + '" ' +
+            'onclick="tcSuggestOpen(\'' + uid + '\')">' +
+        '<img src="' + escapeHtml(av) + '" ' +
             'onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=888&color=fff&size=200\'">' +
-        '<span class="tc-sg-name" onclick="viewUserProfile(\'' + uid + '\')">' + escapeHtml(label) +
+        '<span class="tc-sg-name">' + escapeHtml(label) +
             (u.verified ? ' <i class="fa-solid fa-circle-check verify-blue" style="font-size:11px;"></i>' : '') +
         '</span>' +
-        '<span class="tc-sg-sub">' + (u.username ? '@' + escapeHtml(u.username) : 'Suggested for you') + '</span>' +
+        '<span class="tc-sg-sub">' +
+            (isBack ? 'Follows you' : (u.username ? '@' + escapeHtml(u.username) : 'Suggested for you')) +
+        '</span>' +
         (thumbs ? '<div class="tc-sg-clips">' + thumbs + '</div>' : '') +
         '<div class="tc-sg-btns">' +
-            '<button class="tc-sg-skip" onclick="tcSuggestSkip(this,\'' + uid + '\')">Not interested</button>' +
-            '<button class="tc-sg-follow" onclick="tfSuggestFollow(this,\'' + uid + '\')">Follow</button>' +
+            '<button class="tc-sg-skip" onclick="event.stopPropagation();tcSuggestSkip(this,\'' + uid + '\')">Not interested</button>' +
+            '<button class="tc-sg-follow" onclick="event.stopPropagation();tfSuggestFollow(this,\'' + uid + '\')">' +
+                (isBack ? 'Follow back' : 'Follow') + '</button>' +
         '</div></div>';
+}
+
+// Swiping the rail can finish with a click landing on whichever card stopped
+// under the finger. Opening somebody's account because you were looking for the
+// next one is worse than needing a second tap, so a drag cancels the open.
+var _tcRailMoved = false;
+
+function _tcWireSuggestRail() {
+    var rail = document.getElementById('tcSuggestRail');
+    if (!rail) return;
+    rail.addEventListener('touchstart', function () { _tcRailMoved = false; }, { passive: true });
+    rail.addEventListener('scroll', function () { _tcRailMoved = true; }, { passive: true });
+}
+
+function tcSuggestOpen(userId) {
+    if (_tcRailMoved) { _tcRailMoved = false; return; }
+    if (userId) viewUserProfile(userId);
 }
 
 function _tcSuggestSlideHtml(slide) {
@@ -19284,6 +19353,7 @@ function renderReel(index) {
     if (reel && reel.__suggest) {
         try { const _pv = document.getElementById('reelVideo'); if (_pv) _pv.pause(); } catch (e) {}
         viewport.innerHTML = _tcSuggestSlideHtml(reel);
+        _tcWireSuggestRail();
         return;
     }
 
