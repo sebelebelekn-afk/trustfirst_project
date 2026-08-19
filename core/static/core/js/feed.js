@@ -18767,8 +18767,174 @@ function addReelsStyles() {
             height:100%; background:#007AFF; width:0%;
             transition: width 0.1s linear;
         }
+
+        /* Accounts-to-follow panel, shown between clips. The rail scrolls
+           horizontally on its own; the gesture handler already ignores swipes
+           wider than 100px, so a sideways drag moves between people and an up
+           swipe still goes to the next clip. */
+        .tc-sg-wrap {
+            position:absolute; inset:0; background:#000; z-index:5005;
+            display:flex; flex-direction:column; justify-content:center;
+        }
+        .tc-sg-head { padding:0 22px 16px; }
+        .tc-sg-head b { color:#fff; font-size:19px; font-weight:800; display:block; }
+        .tc-sg-head small { color:rgba(255,255,255,0.55); font-size:13px; }
+        .tc-sg-rail {
+            display:flex; gap:12px; overflow-x:auto; overflow-y:hidden;
+            scroll-snap-type:x mandatory; -webkit-overflow-scrolling:touch;
+            padding:0 22px 4px; scrollbar-width:none;
+        }
+        .tc-sg-rail::-webkit-scrollbar { display:none; }
+        .tc-sg-card {
+            scroll-snap-align:center; flex:0 0 78%; box-sizing:border-box;
+            background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.1);
+            border-radius:18px; padding:20px 16px 16px; text-align:center;
+            /* Not everybody has clips to show. Without this the buttons on a
+               card with no thumbnails ride up and the card beside it, half in
+               view, looks misaligned. */
+            display:flex; flex-direction:column;
+        }
+        .tc-sg-card .tc-sg-btns { margin-top:auto; }
+        .tc-sg-card > img {
+            width:88px; height:88px; border-radius:50%; object-fit:cover;
+            margin:0 auto 12px; display:block; cursor:pointer;
+        }
+        .tc-sg-name {
+            color:#fff; font-size:16px; font-weight:800; cursor:pointer;
+            display:block; margin-bottom:3px;
+            white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        }
+        .tc-sg-sub { color:rgba(255,255,255,0.5); font-size:12.5px; display:block; margin-bottom:14px; }
+        .tc-sg-clips { display:flex; gap:4px; margin-bottom:16px; }
+        .tc-sg-clip {
+            flex:1; aspect-ratio:9/14; border-radius:8px; overflow:hidden;
+            background:rgba(255,255,255,0.08); position:relative; cursor:pointer;
+        }
+        .tc-sg-clip img { width:100%; height:100%; object-fit:cover; display:block; }
+        .tc-sg-clip span {
+            position:absolute; bottom:4px; left:5px; color:#fff; font-size:10px;
+            font-weight:700; text-shadow:0 1px 3px rgba(0,0,0,0.7);
+        }
+        .tc-sg-btns { display:flex; gap:8px; }
+        .tc-sg-btns button {
+            flex:1; padding:11px 0; border-radius:10px; font-size:14px;
+            font-weight:700; cursor:pointer; border:none;
+        }
+        .tc-sg-skip { background:rgba(255,255,255,0.13); color:#fff; }
+        .tc-sg-follow { background:#FF3B5C; color:#fff; }
+        .tc-sg-follow.following { background:rgba(255,255,255,0.13); }
+        .tc-sg-hint {
+            text-align:center; color:rgba(255,255,255,0.35); font-size:12px;
+            margin-top:18px;
+        }
     `;
     document.head.appendChild(style);
+}
+
+// ── ACCOUNTS TO FOLLOW, BETWEEN CLIPS ──────────────────────────────────────
+// Not on every load and never in the same place, so it reads as something the
+// feed offered rather than a fixture to scroll past.
+var TC_SUGGEST_COUNT = 6;
+
+async function _tcFetchSuggestSlide() {
+    var users = await tfFetchFollowSuggestions('suggested', TC_SUGGEST_COUNT);
+    if (!users || users.length < 2) return null;   // one card is not worth a slide
+
+    // One query for everybody's clips rather than one per person.
+    var byUser = {};
+    try {
+        var ids = users.map(function (u) { return u.id; });
+        var r = await sb.from('trustclips')
+            .select('user_id, thumbnail_url, video_url, view_count')
+            .in('user_id', ids)
+            .neq('is_hidden', true)
+            .order('created_at', { ascending: false })
+            .limit(ids.length * 4);
+        (r.data || []).forEach(function (c) {
+            if (!byUser[c.user_id]) byUser[c.user_id] = [];
+            if (byUser[c.user_id].length < 3) byUser[c.user_id].push(c);
+        });
+    } catch (e) { /* cards still work with no thumbnails */ }
+
+    return { __suggest: true, users: users, clips: byUser };
+}
+
+function _tcSuggestCardHtml(u, clips) {
+    var label = u.display_name || u.full_name || u.username || 'User';
+    var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' +
+        encodeURIComponent(label) + '&background=222&color=fff&size=200');
+    var uid = escapeHtml(u.id);
+
+    var thumbs = (clips || []).map(function (c) {
+        var src = c.thumbnail_url || '';
+        return '<div class="tc-sg-clip" onclick="viewUserProfile(\'' + uid + '\')">' +
+            (src ? '<img src="' + escapeHtml(src) + '" loading="lazy" onerror="this.remove()">' : '') +
+            (c.view_count ? '<span>' + formatCount(c.view_count) + '</span>' : '') +
+            '</div>';
+    }).join('');
+
+    return '<div class="tc-sg-card" data-uid="' + uid + '">' +
+        '<img src="' + escapeHtml(av) + '" onclick="viewUserProfile(\'' + uid + '\')" ' +
+            'onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=888&color=fff&size=200\'">' +
+        '<span class="tc-sg-name" onclick="viewUserProfile(\'' + uid + '\')">' + escapeHtml(label) +
+            (u.verified ? ' <i class="fa-solid fa-circle-check verify-blue" style="font-size:11px;"></i>' : '') +
+        '</span>' +
+        '<span class="tc-sg-sub">' + (u.username ? '@' + escapeHtml(u.username) : 'Suggested for you') + '</span>' +
+        (thumbs ? '<div class="tc-sg-clips">' + thumbs + '</div>' : '') +
+        '<div class="tc-sg-btns">' +
+            '<button class="tc-sg-skip" onclick="tcSuggestSkip(this,\'' + uid + '\')">Not interested</button>' +
+            '<button class="tc-sg-follow" onclick="tfSuggestFollow(this,\'' + uid + '\')">Follow</button>' +
+        '</div></div>';
+}
+
+function _tcSuggestSlideHtml(slide) {
+    var cards = slide.users.map(function (u) {
+        return _tcSuggestCardHtml(u, slide.clips[u.id]);
+    }).join('');
+    return '<div class="tc-sg-wrap">' +
+        '<div class="tc-sg-head"><b>Accounts to follow</b>' +
+            '<small>Swipe sideways for more people</small></div>' +
+        '<div class="tc-sg-rail" id="tcSuggestRail">' + cards + '</div>' +
+        '<div class="tc-sg-hint">Swipe up to keep watching</div>' +
+    '</div>';
+}
+
+// Dismissing here removes the card and, once the rail is empty, moves on to the
+// next clip rather than leaving an empty panel with a heading over it.
+function tcSuggestSkip(btn, userId) {
+    try {
+        var list = JSON.parse(localStorage.getItem('tf-dismissed-suggestions') || '[]');
+        if (list.indexOf(userId) < 0) list.push(userId);
+        localStorage.setItem('tf-dismissed-suggestions', JSON.stringify(list.slice(-200)));
+    } catch (e) {}
+    var card = btn.closest('.tc-sg-card');
+    var rail = document.getElementById('tcSuggestRail');
+    if (card) card.remove();
+    // Keep the slide's own data in step, so re-rendering does not bring it back.
+    var slide = reelsData[currentReelIndex];
+    if (slide && slide.__suggest) {
+        slide.users = slide.users.filter(function (u) { return u.id !== userId; });
+    }
+    triggerHaptic(8);
+    if (rail && !rail.querySelector('.tc-sg-card')) {
+        if (currentReelIndex < reelsData.length - 1) renderReel(currentReelIndex + 1);
+    }
+}
+
+/**
+ * Drop a suggestion slide somewhere in the middle of the clips, about two loads
+ * out of three, at a position that moves each time.
+ */
+async function _tcMaybeInjectSuggestions() {
+    if (!reelsData || reelsData.length < 4) return;
+    if (reelsData.some(function (r) { return r && r.__suggest; })) return;
+    if (Math.random() < 0.34) return;          // not every time
+    try {
+        var slide = await _tcFetchSuggestSlide();
+        if (!slide) return;
+        var at = 3 + Math.floor(Math.random() * Math.min(5, reelsData.length - 3));
+        reelsData.splice(at, 0, slide);
+    } catch (e) { /* a missing rail is not worth breaking the feed for */ }
 }
 
 async function loadReels() {
@@ -18830,11 +18996,14 @@ async function loadReels() {
                         liked: false, bookmarked: false, isOriginalSound: true
                     };
                 });
+                // Cache before injecting, so a suggestion slide is never stored
+                // and replayed on the next open with stale people in it.
                 try { localStorage.setItem('tf_reels_cache', JSON.stringify(reelsData.slice(0, 15))); } catch(e) {}
                 var loading = document.getElementById('reelsLoading');
                 if (loading) loading.style.display = 'none';
                 renderReel(0);
                 setupReelGestures();
+                _tcMaybeInjectSuggestions();
                 return;
             }
             if (!reelsData || !reelsData.length) renderReelsFallback();
@@ -18863,11 +19032,14 @@ async function loadReels() {
             };
         });
 
+        // Cache before injecting, so a suggestion slide is never stored and
+        // replayed on the next open with stale people in it.
         try { localStorage.setItem('tf_reels_cache', JSON.stringify(reelsData.slice(0, 15))); } catch(e) {}
         var loading = document.getElementById('reelsLoading');
         if (loading) loading.style.display = 'none';
         renderReel(0);
         setupReelGestures();
+        _tcMaybeInjectSuggestions();
     } catch(e) {
         console.error('[Reels]', e);
         // Offline: keep whatever cache is already showing; only fall back if empty.
@@ -19107,6 +19279,14 @@ function renderReel(index) {
     const reel = reelsData[index];
     const viewport = document.getElementById('reelsViewport');
 
+    // A suggestion slide is not a clip: no video, no like or share rail, and
+    // nothing to keep playing in the background.
+    if (reel && reel.__suggest) {
+        try { const _pv = document.getElementById('reelVideo'); if (_pv) _pv.pause(); } catch (e) {}
+        viewport.innerHTML = _tcSuggestSlideHtml(reel);
+        return;
+    }
+
     viewport.innerHTML = `
         <div class="reel-slide" id="currentReel">
             <!-- Video or placeholder. Black, not a navy gradient: the gradient
@@ -19254,6 +19434,11 @@ function setupReelGestures() {
         const touchX = e.touches[0].clientX;
         const screenWidth = window.innerWidth;
         const isEdge = touchX < screenWidth * 0.2 || touchX > screenWidth * 0.8;
+
+        // No clip context menu over a suggestion slide — there is no clip to
+        // report, save or download.
+        var _cur = reelsData[currentReelIndex];
+        if (_cur && _cur.__suggest) return;
 
         longPressTimer = setTimeout(function() {
     showReelContextMenu();
