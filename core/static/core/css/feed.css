@@ -1478,6 +1478,19 @@ html, body { background: #000; }
     .thought-cloud::after { width: 5px; height: 5px; bottom: -15px; left: -2px; }
     @keyframes thoughtBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
 
+/* The cloud is nowrap and capped at 168px, which suits a short thought but let
+   the go-dark status run straight out past the white background. A status wraps
+   instead of spilling. */
+.thought-cloud.tf-cloud-status {
+    white-space: normal !important;
+    max-width: 176px;
+    line-height: 1.35;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+}
+.thought-cloud.tf-cloud-status i { margin-top: 2px; flex-shrink: 0; }
+
 [data-theme="dark"] .thought-cloud {
     background: #1e1e22 !important;
     color: #e5e5e5 !important;
@@ -3964,6 +3977,21 @@ html, body { background: #000; }
 }
 :root { --skeleton-bg: #e8e8e8; }
 [data-theme="dark"] { --skeleton-bg: #2c2c2e; }
+
+/* Chat bubbles. The received bubble used to be a hardcoded rgba(0,0,0,0.07):
+   7% black, which over a black background is nothing at all, so in dark mode a
+   received message looked like text floating with no bubble around it. Same for
+   the timestamp, which was 35% black on black. These are the tokens now. */
+:root {
+  --msg-in-bg: rgba(0,0,0,0.07);
+  --msg-in-quote: rgba(0,0,0,0.05);
+  --msg-time: rgba(0,0,0,0.35);
+}
+[data-theme="dark"] {
+  --msg-in-bg: #262629;
+  --msg-in-quote: rgba(255,255,255,0.09);
+  --msg-time: rgba(255,255,255,0.45);
+}
 
 /* Profile "you're already here" nudge — used when tapping your own username
    while the profile page is already open (paired with haptic feedback). */

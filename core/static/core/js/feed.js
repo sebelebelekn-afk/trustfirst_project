@@ -1311,6 +1311,30 @@ async function logOut() {
 // ==========================================================================
 // GO DARK MODE
 // ==========================================================================
+/**
+ * True while a go-dark window is running.
+ *
+ * Going dark used to be a note on your profile and nothing else: notifications
+ * kept arriving, buzzing and toasting, which is the opposite of taking space.
+ * Notifications are still collected while this is true — the badge and the list
+ * fill up as normal — they just arrive without a sound, a buzz or a banner.
+ *
+ * Expiry is handled here rather than on a timer, so a session left open past
+ * the end date comes back on its own.
+ */
+function tfIsGoingDark() {
+    try {
+        var s = secureLoad('go_dark_status');
+        if (!s || !s.active || !s.until) return false;
+        if (new Date(s.until) <= new Date()) {
+            localStorage.removeItem('tf_go_dark_status');
+            return false;
+        }
+        return true;
+    } catch (e) { return false; }
+}
+window.tfIsGoingDark = tfIsGoingDark;
+
 function openGoDarkModal() {
     var existing = document.getElementById('goDarkModal');
     if (existing) existing.remove();
@@ -1335,7 +1359,7 @@ function openGoDarkModal() {
         content = '<div style="text-align:center;padding:20px 0 10px;">' +
             '<div style="width:64px;height:64px;border-radius:50%;background:rgba(88,86,214,0.15);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;">' +
             '<i class="fa-solid fa-moon" style="font-size:28px;color:#5856D6;"></i></div>' +
-            '<h3 style="font-size:20px;font-weight:800;color:var(--text-primary,#000);margin-bottom:6px;">You\'re in the dark 🌙</h3>' +
+            '<h3 style="font-size:20px;font-weight:800;color:var(--text-primary,#000);margin-bottom:6px;">You\'re in the dark</h3>' +
             '<p style="color:#888;font-size:14px;margin-bottom:20px;line-height:1.5;">Your circle knows you\'re taking time away.<br>Back on <b>' + until.toLocaleDateString('en-ZA', {weekday:'long',month:'long',day:'numeric'}) + '</b></p>' +
             '<button onclick="cancelGoDark()" style="width:100%;padding:14px;border-radius:14px;border:none;background:rgba(255,59,48,0.1);color:#FF3B30;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:10px;">End Early &amp; Come Back</button>' +
             '</div>';
@@ -1371,28 +1395,65 @@ function activateGoDark(days) {
     document.getElementById('goDarkModal').remove();
 
     // Show confirmation toast
-    showToast('Going dark for ' + days + ' day' + (days > 1 ? 's' : '') + ' 🌙');
+    showToast('Going dark for ' + days + ' day' + (days > 1 ? 's' : ''));
     triggerHaptic(30);
 
-    // Add subtle badge to profile thought cloud
+    // Status on the profile cloud. The class lets it wrap — without it the text
+    // runs straight out past the white bubble.
     var tc = document.querySelector('.thought-cloud');
-    if (tc) { tc.textContent = '🌙 Taking some time away...'; }
+    if (tc) {
+        tc.classList.add('tf-cloud-status');
+        tc.innerHTML = '<i class="fa-solid fa-moon" style="font-size:12px;opacity:0.75;"></i>' +
+                       '<span>Taking some time away</span>';
+    }
 
-    // Show a full-screen farewell card briefly
-    var card = document.createElement('div');
-    card.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:20000;background:linear-gradient(135deg,#1a1a2e,#0f0f1a);display:flex;flex-direction:column;align-items:center;justify-content:center;animation:fadeUp 0.4s ease;';
-    card.innerHTML = '<div style="font-size:60px;margin-bottom:20px;">🌙</div>' +
-        '<h2 style="color:white;font-size:26px;font-weight:900;margin-bottom:10px;">You\'re going dark</h2>' +
-        '<p style="color:rgba(255,255,255,0.6);font-size:15px;text-align:center;padding:0 40px;line-height:1.6;margin-bottom:30px;">Your friends will know you\'re taking space.<br>See you on ' + until.toLocaleDateString('en-ZA', {weekday:'long',month:'long',day:'numeric'}) + ' 👋</p>' +
-        '<button onclick="this.parentElement.remove()" style="padding:14px 40px;border-radius:30px;border:2px solid rgba(255,255,255,0.2);background:transparent;color:white;font-size:15px;font-weight:700;cursor:pointer;">Got it</button>';
-    (document.getElementById('app') || document.body).appendChild(card);
-    setTimeout(function(){ if(card.parentNode) card.remove(); }, 4000);
+    _tfShowGoDarkCard(until);
+}
+
+// A centred card rather than a full-screen takeover: this is a confirmation,
+// not a destination, and it sits over the app the way the other sheets do.
+// Icons, not emoji, so it matches the rest of the app and scales with the text.
+function _tfShowGoDarkCard(until) {
+    var back = document.createElement('div');
+    back.id = 'goDarkCard';
+    back.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:20000;' +
+        'background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);display:flex;' +
+        'align-items:center;justify-content:center;padding:28px;box-sizing:border-box;';
+
+    var when = until.toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' });
+
+    back.innerHTML =
+        '<div style="background:#1c1c1e;border-radius:20px;width:100%;max-width:290px;' +
+        'box-shadow:0 24px 60px rgba(0,0,0,0.55);overflow:hidden;animation:fadeUp 0.28s ease;">' +
+            '<div style="padding:26px 24px 20px;text-align:center;">' +
+                '<i class="fa-solid fa-moon" style="font-size:30px;color:#5856D6;display:block;margin-bottom:14px;"></i>' +
+                '<div style="color:#fff;font-size:17px;font-weight:800;margin-bottom:7px;">You\'re going dark</div>' +
+                '<div style="color:rgba(255,255,255,0.6);font-size:13.5px;line-height:1.5;">' +
+                    'Notifications are muted and your circle knows you\'re taking space.<br>' +
+                    'See you on ' + escapeHtml(when) + '.' +
+                '</div>' +
+            '</div>' +
+            '<div onclick="var c=document.getElementById(\'goDarkCard\'); if(c) c.remove();" ' +
+            'style="border-top:0.5px solid rgba(255,255,255,0.14);padding:14px;text-align:center;' +
+            'color:#0A84FF;font-size:16px;font-weight:600;cursor:pointer;">OK</div>' +
+        '</div>';
+
+    back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
+    (document.getElementById('app') || document.body).appendChild(back);
 }
 
 function cancelGoDark() {
     localStorage.removeItem('tf_go_dark_status');
-    document.getElementById('goDarkModal').remove();
-    showToast('Welcome back! 👋');
+    var m = document.getElementById('goDarkModal');
+    if (m) m.remove();
+    // Coming back has to clear the status too, or the profile keeps telling
+    // people you are away after notifications have started arriving again.
+    var tc = document.querySelector('.thought-cloud.tf-cloud-status');
+    if (tc) {
+        tc.classList.remove('tf-cloud-status');
+        tc.textContent = 'Thinking...';
+    }
+    showToast('Welcome back');
     triggerHaptic(30);
 }
 
@@ -2145,7 +2206,7 @@ function _sendLiveLocation(duration, caption) {
             location_lat: lat, location_lng: lng, location_live: isLive,
             location_live_until: liveUntil, ciphertext: caption || null, created_at: new Date().toISOString(), status: 'sent'
         };
-        chatBody.insertAdjacentHTML('beforeend', renderMessageBubble(m));
+        _tfAppendMsg(chatBody, m);
         chatBody.scrollTop = chatBody.scrollHeight;
         triggerHaptic && triggerHaptic(15);
         if (window.sb && currentUser && currentConversationId) {
@@ -2928,6 +2989,169 @@ function _presenceFrom(lastSeenIso) {
 // ==========================================================================
 // CORE MESSAGE RENDERER — handles all message types from Supabase
 // ==========================================================================
+// ── SCREENSHOT NOTICES ─────────────────────────────────────────────────────
+// Told as a system line in the conversation, the way the messaging apps people
+// already use tell it. A burst of them collapses into one "See N updates" row
+// so screenshotting a long thread does not bury the messages underneath.
+//
+// IMPORTANT: the browser cannot detect a screenshot. There is no web API for
+// it on any platform, so nothing calls tfRecordScreenshot() from the PWA. The
+// native shell has to report it (Android registerScreenCaptureCallback, iOS
+// userDidTakeScreenshotNotification); this is the entry point it calls.
+function _tfIsScreenshotNotice(m) {
+    return !!m && (m.message_type === 'screenshot' || m.message_type === 'screen_recording');
+}
+
+function _tfScreenshotActor(m) {
+    if (currentUser && m && m.sender_id === currentUser.id) return 'You';
+    var el = document.getElementById('chat-header-name');
+    var n = el ? (el.textContent || '').trim() : '';
+    return n || 'They';
+}
+
+function _tfScreenshotLine(m) {
+    var what = (m.message_type === 'screen_recording') ? 'screen recording' : 'screenshot';
+    return escapeHtml(_tfScreenshotActor(m)) + ' took a ' + what + '.';
+}
+
+function _tfSysLineHtml(inner) {
+    return '<div style="display:flex;justify-content:center;margin:8px 0;">' +
+        '<span style="color:var(--text-secondary,#888);font-size:12.5px;font-weight:500;' +
+        'max-width:80%;text-align:center;line-height:1.45;">' + inner + '</span></div>';
+}
+
+var _tfRunSeq = 0;
+
+function _tfScreenshotRunHtml(run) {
+    if (run.length === 1) return _tfSysLineHtml(_tfScreenshotLine(run[0]));
+    var id = 'ssrun' + (++_tfRunSeq);
+    var lines = run.map(function (m) {
+        return _tfSysLineHtml(_tfScreenshotLine(m));
+    }).join('');
+    return '<div data-ss-run="1">' +
+        '<div id="' + id + '_lines" style="display:none;">' + lines + '</div>' +
+        '<div style="display:flex;justify-content:center;margin:8px 0;">' +
+        '<span id="' + id + '_btn" onclick="tfToggleUpdates(\'' + id + '\')" ' +
+        'style="color:var(--text-secondary,#888);font-size:12.5px;font-weight:700;cursor:pointer;">' +
+        'See ' + run.length + ' updates</span></div></div>';
+}
+
+function tfToggleUpdates(id) {
+    var lines = document.getElementById(id + '_lines');
+    var btn = document.getElementById(id + '_btn');
+    if (!lines || !btn) return;
+    var open = lines.style.display !== 'none';
+    lines.style.display = open ? 'none' : 'block';
+    var n = lines.children.length;
+    btn.textContent = open ? ('See ' + n + ' updates') : 'Hide updates';
+    triggerHaptic(6);
+}
+
+/**
+ * Record that a screenshot was taken of this conversation. Called by the native
+ * shell only — see the note above about why the browser can never call it.
+ */
+async function tfRecordScreenshot(conversationId, kind) {
+    conversationId = conversationId || currentConversationId;
+    if (!conversationId || !window.sb || !currentUser) return false;
+    try {
+        await DB.logScreenshot(conversationId, kind || 'screenshot');
+        return true;
+    } catch (e) {
+        console.warn('[screenshot] could not record:', e && e.message);
+        return false;
+    }
+}
+window.tfRecordScreenshot = tfRecordScreenshot;
+
+// ── DATE SEPARATORS ────────────────────────────────────────────────────────
+// A chat with no day markers reads as one endless conversation: a message from
+// three weeks ago sits directly above this morning's showing only "09:28".
+// openChat had a dateSep() helper for exactly this, but nothing ever called it,
+// so the separators only existed in the sample data they were written for.
+// These live at the top level because four different code paths paint the list.
+function _tfDayKey(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
+           '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function _tfDayLabel(d) {
+    var today = new Date();
+    var tKey = _tfDayKey(today);
+    var key = _tfDayKey(d);
+    if (key === tKey) return 'Today';
+    var y = new Date(today);
+    y.setDate(y.getDate() - 1);
+    if (key === _tfDayKey(y)) return 'Yesterday';
+    // Inside the last week the weekday is more use than a date.
+    var days = Math.round((today - d) / 86400000);
+    if (days > 0 && days < 7) return d.toLocaleDateString('en-ZA', { weekday: 'long' });
+    var opts = { day: 'numeric', month: 'long' };
+    if (d.getFullYear() !== today.getFullYear()) opts.year = 'numeric';
+    return d.toLocaleDateString('en-ZA', opts);
+}
+
+// Appending live: only emit a separator if the newest one on screen is not
+// already this day. Without this an empty chat's first message has no marker,
+// and a chat left open past midnight keeps stacking under yesterday.
+function _tfDaySepIfNeeded(chatBody, m) {
+    var when = (m && m.created_at) ? new Date(m.created_at) : new Date();
+    if (isNaN(when)) when = new Date();
+    var key = _tfDayKey(when);
+    var seps = chatBody.querySelectorAll('[data-date-sep]');
+    var last = seps.length ? seps[seps.length - 1].getAttribute('data-date-sep') : null;
+    return (last === key) ? '' : _tfDateSepHtml(_tfDayLabel(when), key);
+}
+
+function _tfAppendMsg(chatBody, m, replyMap) {
+    if (!chatBody) return;
+    chatBody.insertAdjacentHTML('beforeend',
+        _tfDaySepIfNeeded(chatBody, m) + renderMessageBubble(m, replyMap));
+}
+
+function _tfDateSepHtml(label, iso) {
+    var click = iso ? ' onclick="openChatCalModal(\'' + iso + '\')" style="cursor:pointer;"' : '';
+    return '<div data-date-sep="' + escapeHtml(iso || '') + '" style="text-align:center;margin:16px 0 8px;"' + click + '>' +
+        '<span style="display:inline-block;padding:4px 14px;border-radius:20px;background:var(--bg-secondary,rgba(0,0,0,0.06));' +
+        'font-size:11px;font-weight:700;color:var(--text-secondary,#888);">' + escapeHtml(label) + '</span></div>';
+}
+
+/**
+ * Paint a whole message list: day separators, screenshot notices collapsed into
+ * one expandable row, and the bubbles themselves. Every path that renders the
+ * chat body goes through here so they cannot drift apart again.
+ */
+function _renderMessageList(msgs) {
+    if (!msgs || !msgs.length) return '';
+    var replyMap = _buildReplyMap(msgs);
+    var out = [], lastKey = null;
+    var run = [];   // consecutive screenshot notices, stacked into one row
+
+    function flushRun() {
+        if (!run.length) return;
+        out.push(_tfScreenshotRunHtml(run));
+        run = [];
+    }
+
+    for (var i = 0; i < msgs.length; i++) {
+        var m = msgs[i];
+        var when = m.created_at ? new Date(m.created_at) : null;
+        if (when && !isNaN(when)) {
+            var key = _tfDayKey(when);
+            if (key !== lastKey) {
+                flushRun();
+                out.push(_tfDateSepHtml(_tfDayLabel(when), key));
+                lastKey = key;
+            }
+        }
+        if (_tfIsScreenshotNotice(m)) { run.push(m); continue; }
+        flushRun();
+        out.push(renderMessageBubble(m, replyMap));
+    }
+    flushRun();
+    return out.join('');
+}
+
 function renderMessageBubble(m, replyMap) {
     var isSent = currentUser && m.sender_id === currentUser.id;
     var time = m.created_at
@@ -2940,7 +3164,7 @@ function renderMessageBubble(m, replyMap) {
 
     var tickHtml = isSent ? _tickSpan(m, 'meta') : '';
     var timeHtml = '<div style="display:flex;align-items:center;gap:3px;justify-content:' + (isSent ? 'flex-end' : 'flex-start') + ';margin-top:3px;">' +
-        '<small style="font-size:10px;color:rgba(0,0,0,0.35);">' + time + '</small>' + tickHtml + '</div>';
+        '<small style="font-size:10px;color:var(--msg-time,rgba(0,0,0,0.35));">' + time + '</small>' + tickHtml + '</div>';
 
     // White-on-dark tick for media bubbles (rendered over the image/video).
     var mediaTick = isSent ? _tickSpan(m, 'media') : '';
@@ -2952,7 +3176,7 @@ function renderMessageBubble(m, replyMap) {
     var replyQuote = '';
     if (m.reply_to_id && replyMap && replyMap[m.reply_to_id]) {
         var _rq = replyMap[m.reply_to_id];
-        replyQuote = '<div style="border-left:3px solid ' + (isSent ? 'rgba(255,255,255,0.7)' : '#FF9500') + ';padding:4px 8px;margin-bottom:5px;background:' + (isSent ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.05)') + ';border-radius:6px;max-width:100%;overflow:hidden;">' +
+        replyQuote = '<div style="border-left:3px solid ' + (isSent ? 'rgba(255,255,255,0.7)' : '#FF9500') + ';padding:4px 8px;margin-bottom:5px;background:' + (isSent ? 'rgba(255,255,255,0.14)' : 'var(--msg-in-quote,rgba(0,0,0,0.05))') + ';border-radius:6px;max-width:100%;overflow:hidden;">' +
             '<div style="font-size:12px;font-weight:800;color:' + (isSent ? 'rgba(255,255,255,0.95)' : '#FF9500') + ';">' + escapeHtml(_rq.name || 'Reply') + '</div>' +
             '<div style="font-size:12px;color:' + (isSent ? 'rgba(255,255,255,0.75)' : 'var(--text-secondary,#888)') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(_rq.preview || '') + '</div>' +
         '</div>';
@@ -2963,6 +3187,12 @@ function renderMessageBubble(m, replyMap) {
         ? '<div data-fail-badge="1" style="position:absolute;top:50%;transform:translateY(-50%);' + (isSent ? 'left:-26px;' : 'right:-26px;') + 'width:20px;height:20px;border-radius:50%;background:#FF3B30;display:flex;align-items:center;justify-content:center;z-index:3;box-shadow:0 2px 6px rgba(255,59,48,0.5);">' +
           '<span style="color:white;font-size:12px;font-weight:900;line-height:1;">!</span></div>'
         : '';
+
+    // ── SCREENSHOT NOTICE — a plain centred line, never a bubble ───────────
+    // Reached when one arrives live; a list render stacks them instead.
+    if (_tfIsScreenshotNotice(m)) {
+        return _tfSysLineHtml(_tfScreenshotLine(m));
+    }
 
     // ── SYSTEM NOTICE (group events / deletions) — centered, no bubble ──────
     if (msgType === 'system') {
@@ -3059,7 +3289,7 @@ function renderMessageBubble(m, replyMap) {
                 '</div>' + timeHtml + '</div>';
         }
         return '<div style="' + wrapStyle + '">' +
-            '<div' + bubbleAttr + ' style="background:' + (isSent ? '#007AFF' : 'rgba(0,0,0,0.07)') + ';color:' + (isSent ? 'white' : 'var(--text-primary,#000)') + ';padding:11px 15px;border-radius:' + (isSent ? '20px 20px 4px 20px' : '20px 20px 20px 4px') + ';max-width:78%;font-size:15px;line-height:1.4;word-wrap:break-word;' + align + 'position:relative;">' +
+            '<div' + bubbleAttr + ' style="background:' + (isSent ? '#007AFF' : 'var(--msg-in-bg,rgba(0,0,0,0.07))') + ';color:' + (isSent ? 'white' : 'var(--text-primary,#000)') + ';padding:11px 15px;border-radius:' + (isSent ? '20px 20px 4px 20px' : '20px 20px 20px 4px') + ';max-width:78%;font-size:15px;line-height:1.4;word-wrap:break-word;' + align + 'position:relative;">' +
                 replyQuote + _linkifyMessage(text, isSent) + failedBadge +
             '</div>' + _linkPreviewCard(_firstUrl(text)) + timeHtml + '</div>';
     }
@@ -3127,7 +3357,7 @@ function renderMessageBubble(m, replyMap) {
         var cap = (m.content || m.ciphertext || '').trim();
         var capTick = isSent ? _tickSpan(m, 'caption') : '';
         return '<div style="' + wrapStyle + '">' +
-            '<div' + bubbleAttr + ' style="' + align + 'max-width:240px;border-radius:16px;overflow:hidden;position:relative;cursor:pointer;' + (cap ? 'background:' + (isSent ? '#007AFF' : 'rgba(0,0,0,0.07)') + ';' : '') + '">' +
+            '<div' + bubbleAttr + ' style="' + align + 'max-width:240px;border-radius:16px;overflow:hidden;position:relative;cursor:pointer;' + (cap ? 'background:' + (isSent ? '#007AFF' : 'var(--msg-in-bg,rgba(0,0,0,0.07))') + ';' : '') + '">' +
                 '<div style="position:relative;" onclick="openFullScreenMedia(\'' + imgUrl + '\',\'image\')">' +
                     '<img ' + _mediaSrcAttr(imgUrl, false) + ' style="width:100%;display:block;" onerror="this.style.background=\'#eee\'">' +
                     (isUploading ? '<div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;">' +
@@ -3156,7 +3386,7 @@ function renderMessageBubble(m, replyMap) {
         var capV = (m.content || m.ciphertext || '').trim();
         var capVTick = isSent ? _tickSpan(m, 'caption') : '';
         return '<div style="' + wrapStyle + '">' +
-            '<div' + bubbleAttr + ' style="' + align + 'max-width:240px;border-radius:16px;overflow:hidden;position:relative;cursor:pointer;' + (capV ? 'background:' + (isSent ? '#007AFF' : 'rgba(0,0,0,0.07)') + ';' : '') + '" onclick="openFullScreenMedia(\'' + vidUrl + '\',\'video\')">' +
+            '<div' + bubbleAttr + ' style="' + align + 'max-width:240px;border-radius:16px;overflow:hidden;position:relative;cursor:pointer;' + (capV ? 'background:' + (isSent ? '#007AFF' : 'var(--msg-in-bg,rgba(0,0,0,0.07))') + ';' : '') + '" onclick="openFullScreenMedia(\'' + vidUrl + '\',\'video\')">' +
                 '<div style="position:relative;">' +
                     '<video ' + _mediaSrcAttr(vidUrl, true) + ' style="width:100%;display:block;" preload="metadata" muted playsinline></video>' +
                     '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">' +
@@ -3215,7 +3445,7 @@ function renderMessageBubble(m, replyMap) {
         var hasChrome = locCap || wasLive;
         var locTick = isSent ? _tickSpan(m, 'caption') : '';
         return '<div style="' + wrapStyle + '">' +
-            '<div' + bubbleAttr + ' style="' + align + 'max-width:260px;border-radius:16px;overflow:hidden;position:relative;' + (hasChrome ? 'background:' + (isSent ? '#007AFF' : 'rgba(0,0,0,0.07)') + ';' : '') + '">' +
+            '<div' + bubbleAttr + ' style="' + align + 'max-width:260px;border-radius:16px;overflow:hidden;position:relative;' + (hasChrome ? 'background:' + (isSent ? '#007AFF' : 'var(--msg-in-bg,rgba(0,0,0,0.07))') + ';' : '') + '">' +
                 '<div style="height:150px;position:relative;overflow:hidden;cursor:pointer;background:linear-gradient(135deg,#2a3d52,#1a2433);" onclick="openLocationOnMap(' + lat + ',' + lng + ',\'' + escapeHtml(String(msgId)) + '\',' + (isSent ? 1 : 0) + ',' + (wasLive ? 1 : 0) + ')">' +
                     '<img src="' + mapUrl + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\'">' +
                     (wasLive && myAvatar
@@ -3237,7 +3467,7 @@ function renderMessageBubble(m, replyMap) {
         var contactNumber = m.contact_number || m.ciphertext || '';
         var cleanNumber = contactNumber.replace(/[^+\d]/g,'');
         return '<div style="' + wrapStyle + '">' +
-            '<div' + bubbleAttr + ' style="background:' + (isSent ? '#007AFF' : 'rgba(0,0,0,0.07)') + ';border-radius:' + (isSent ? '20px 20px 4px 20px' : '20px 20px 20px 4px') + ';max-width:260px;' + align + 'overflow:hidden;position:relative;">' +
+            '<div' + bubbleAttr + ' style="background:' + (isSent ? '#007AFF' : 'var(--msg-in-bg,rgba(0,0,0,0.07))') + ';border-radius:' + (isSent ? '20px 20px 4px 20px' : '20px 20px 20px 4px') + ';max-width:260px;' + align + 'overflow:hidden;position:relative;">' +
                 '<div style="display:flex;align-items:center;gap:12px;padding:14px 14px 10px;">' +
                     '<div style="width:44px;height:44px;border-radius:50%;background:' + (isSent ? 'rgba(255,255,255,0.2)' : '#007AFF') + ';display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
                         '<i class="fa-solid fa-person" style="color:white;font-size:18px;"></i></div>' +
@@ -3264,7 +3494,7 @@ function renderMessageBubble(m, replyMap) {
             return '<div style="width:3px;height:' + h + 'px;background:rgba(0,0,0,0.35);border-radius:2px;flex-shrink:0;"></div>';
         }).join('');
         return '<div style="' + wrapStyle + '">' +
-            '<div' + bubbleAttr + ' onclick="playVoiceNote(this,\'' + audioFileUrl + '\')" style="background:rgba(0,0,0,0.07);padding:10px 14px;border-radius:' + (isSent ? '20px 20px 4px 20px' : '20px 20px 20px 4px') + ';max-width:260px;' + align + 'display:flex;align-items:center;gap:10px;cursor:pointer;position:relative;">' +
+            '<div' + bubbleAttr + ' onclick="playVoiceNote(this,\'' + audioFileUrl + '\')" style="background:var(--msg-in-bg,rgba(0,0,0,0.07));padding:10px 14px;border-radius:' + (isSent ? '20px 20px 4px 20px' : '20px 20px 20px 4px') + ';max-width:260px;' + align + 'display:flex;align-items:center;gap:10px;cursor:pointer;position:relative;">' +
                 '<div id="vn-play-' + msgId + '" style="width:38px;height:38px;border-radius:50%;background:#007AFF;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
                     '<i class="fa-solid fa-play" style="color:white;font-size:14px;margin-left:2px;"></i></div>' +
                 '<div style="flex:1;min-width:0;">' +
@@ -3280,7 +3510,7 @@ function renderMessageBubble(m, replyMap) {
 
     // ── FALLBACK ──────────────────────────────────────────────────────────
     return '<div style="' + wrapStyle + '">' +
-        '<div' + bubbleAttr + ' style="background:rgba(0,0,0,0.07);padding:11px 15px;border-radius:20px 20px 20px 4px;max-width:78%;font-size:15px;' + align + '">' +
+        '<div' + bubbleAttr + ' style="background:var(--msg-in-bg,rgba(0,0,0,0.07));padding:11px 15px;border-radius:20px 20px 20px 4px;max-width:78%;font-size:15px;' + align + '">' +
             escapeHtml(m.content || m.ciphertext || '[Message]') +
         '</div>' + timeHtml + '</div>';
 }
@@ -3371,8 +3601,7 @@ if (handleEl) handleEl.textContent = '@' + userName.toLowerCase().replace(/\s+/g
                         try {
                             var _cm = JSON.parse(localStorage.getItem('tf_msgs_cache_' + currentConversationId) || 'null');
                             if (_cm && _cm.length) {
-                                var _rmapP = _buildReplyMap(_cm);
-                                _body.innerHTML = _cm.map(function(m){ return renderMessageBubble(m, _rmapP); }).join('');
+                                _body.innerHTML = _renderMessageList(_cm);
                                 _body.scrollTop = _body.scrollHeight;
                             }
                         } catch (e) {}
@@ -3381,10 +3610,9 @@ if (handleEl) handleEl.textContent = '@' + userName.toLowerCase().replace(/\s+/g
                         DB.getMessages(currentConversationId).then(function(msgs) {
                             var body = document.getElementById('chat-body');
                             if (!body) return;
-                            var _rmap = _buildReplyMap(msgs);
                             body.innerHTML = msgs.length === 0
                                 ? '<div style="text-align:center;padding:40px 0;color:#aaa;font-size:14px;">No messages yet. Say hello!</div>'
-                                : msgs.map(function(m){ return renderMessageBubble(m, _rmap); }).join('');
+                                : _renderMessageList(msgs);
                             body.scrollTop = body.scrollHeight;
                             _markChatRead(currentConversationId); // conversation just resolved → mark read
                         }).catch(function(){});
@@ -3452,33 +3680,15 @@ if (window.sb && window._currentChatUserId) {
         }).catch(function() {});
 }
 
-    // Insert date separators + sample messages
-    var today = new Date();
-    var yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-
-    function dateSep(label) {
-        var iso = chatDateLabelToISO(label);
-        var clickAttr = iso ? 'onclick="openChatCalModal(\'' + iso + '\')" style="cursor:pointer;"' : '';
-        return '<div style="text-align:center;margin:16px 0 8px;" ' + clickAttr + '><span style="display:inline-block;padding:4px 14px;border-radius:20px;background:var(--bg-secondary,rgba(0,0,0,0.06));font-size:11px;font-weight:700;color:#888;">' + label + '</span></div>';
-    }
-    function chatDateLabelToISO(label) {
-        try {
-            if (label === 'Today') {
-                var t = new Date();
-                return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');
-            }
-            var d = new Date(label);
-            if (!isNaN(d)) return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-        } catch(e) {}
-        return null;
-    }
+    // Date separators are built by _renderMessageList now, from the messages'
+    // own timestamps. The pair of helpers that used to live here were written
+    // against sample data and never called once the real messages arrived.
 
     var _msgCacheKey = 'tf_msgs_cache_' + (currentConversationId || window._tfCachedConvId || 'pending');
     var _cachedMsgs = null;
     try { _cachedMsgs = JSON.parse(localStorage.getItem(_msgCacheKey) || 'null'); } catch(e) {}
     if (_cachedMsgs && _cachedMsgs.length) {
-        var _rmapC = _buildReplyMap(_cachedMsgs);
-        chatBody.innerHTML = _cachedMsgs.map(function(m){ return renderMessageBubble(m, _rmapC); }).join('');
+        chatBody.innerHTML = _renderMessageList(_cachedMsgs);
         chatBody.scrollTop = chatBody.scrollHeight;
     } else {
         chatBody.innerHTML = '<div style="text-align:center;padding:40px 0;color:#aaa;font-size:14px;">Loading messages...</div>';
@@ -3491,12 +3701,11 @@ if (window.sb && window._currentChatUserId) {
             // Only overwrite the cache with a non-empty result (so an offline
             // empty fetch never wipes the messages the user came to re-read).
             try { if (currentConversationId) localStorage.setItem('tf_msgs_cache_' + currentConversationId, JSON.stringify(msgs)); } catch(e) {}
-            var _rmapM = _buildReplyMap(msgs);
-            chatBody.innerHTML = msgs.map(function(m){ return renderMessageBubble(m, _rmapM); }).join('');
+            chatBody.innerHTML = _renderMessageList(msgs);
             chatBody.scrollTop = chatBody.scrollHeight;
             _loadMsgReactions(msgs);
             _markChatRead(currentConversationId); // I opened the chat → mark their msgs read
-            chatBody.querySelectorAll('div[style*="background:#007AFF"],div[style*="rgba(0,0,0,0.07)"]').forEach(function(b){
+            chatBody.querySelectorAll('div[style*="background:#007AFF"],div[style*="--msg-in-bg"]').forEach(function(b){
                 if (!b.getAttribute('data-msg-bubble')) b.setAttribute('data-msg-bubble','true');
             });
         } else if (navigator.onLine || !_cachedMsgs || !_cachedMsgs.length) {
@@ -4533,7 +4742,7 @@ function sendMessageNew() {
         created_at: new Date().toISOString()
     };
     if (chatBody) {
-        chatBody.insertAdjacentHTML('beforeend', renderMessageBubble(tempMsg, _reply ? _replyMapFrom(_reply) : null));
+        _tfAppendMsg(chatBody, tempMsg, _reply ? _replyMapFrom(_reply) : null);
         chatBody.scrollTop = chatBody.scrollHeight;
     }
     cancelReply();
@@ -13122,6 +13331,8 @@ function _previewForMessage(m, meId) {
         case 'gif':      return mine ? 'You sent a GIF'           : 'You received a GIF';
         case 'sticker':  return mine ? 'You sent a sticker'       : 'You received a sticker';
         case 'deleted':  return 'This message was deleted';
+        case 'screenshot':      return mine ? 'You took a screenshot'      : 'Took a screenshot';
+        case 'screen_recording':return mine ? 'You took a screen recording': 'Took a screen recording';
         case 'call_log':
             // The call log text already reads "Voice call" or "Video call", with
             // the duration after a dot. Show the kind with an arrow for who
@@ -14057,11 +14268,14 @@ function requestNotificationPermission() {
 }
 
 function sendPushNotification(title, body) {
+    // Going dark means going dark. The notification is still recorded; it just
+    // does not surface as a banner.
+    if (tfIsGoingDark()) return;
     if ('Notification' in window && Notification.permission === 'granted') {
         new Notification(title, {
             body: body,
-            icon: 'https://picsum.photos/seed/trustfirst/100/100',
-            badge: 'https://picsum.photos/seed/badge/50/50'
+            icon: '/static/core/icon-dark-192.png',
+            badge: '/static/core/icon-dark-192.png'
         });
     }
 }
@@ -14928,7 +15142,7 @@ function handleNewMessage(message) {
         var chatBody = document.getElementById('chat-body');
         if (chatBody) {
             var msgObj = Object.assign({}, message, { content: text });
-            chatBody.insertAdjacentHTML('beforeend', renderMessageBubble(msgObj));
+            _tfAppendMsg(chatBody, msgObj);
             chatBody.scrollTop = chatBody.scrollHeight;
         }
     }
@@ -14953,14 +15167,28 @@ function handleNewMessage(message) {
 async function handleScreenshotNotification(event) {
     try {
         const { data: { session } } = await sb.auth.getSession();
-        if (!session || event.user_id === session.user.id) return;
+        if (!session || !event) return;
+        if (event.user_id === session.user.id) return;   // my own screenshot
 
-        const toast = document.createElement('div');
-        toast.className = 'screenshot-toast';
-        toast.innerHTML = `<i class="fa-solid fa-camera"></i> Someone took a ${event.event_type === 'screenshot' ? 'screenshot' : 'screen recording'}!`;
-        document.getElementById('app').appendChild(toast);
-        triggerHaptic(50);
-        setTimeout(() => toast.remove(), 4000);
+        // The channel has no filter, so this fires for every screenshot taken
+        // anywhere on the platform. Announcing those told you about strangers
+        // screenshotting strangers, and leaked that it happened at all. Only the
+        // conversation on screen is any of our business.
+        if (!event.conversation_id || event.conversation_id !== currentConversationId) return;
+
+        // The notice belongs in the conversation, where it stays. A toast that
+        // vanishes after four seconds is missed by whoever stepped away.
+        const chatBody = document.getElementById('chat-body');
+        if (chatBody) {
+            _tfAppendMsg(chatBody, {
+                id: 'ss_' + (event.id || Date.now()),
+                sender_id: event.user_id,
+                message_type: event.event_type === 'screen_recording' ? 'screen_recording' : 'screenshot',
+                created_at: event.created_at || new Date().toISOString()
+            });
+            chatBody.scrollTop = chatBody.scrollHeight;
+        }
+        if (!tfIsGoingDark()) triggerHaptic(50);
     } catch (e) {
         console.error('[Screenshot]', e);
     }
@@ -29166,6 +29394,7 @@ launchApp = async function() {
                 table: 'notifications',
                 filter: 'user_id=eq.' + currentUser.id
             }, function(payload) {
+                if (tfIsGoingDark()) return;   // collected, not announced
                 showToast('New notification!');
                 triggerHaptic(20);
             })
@@ -31269,8 +31498,12 @@ function subscribeToNotifications() {
             allNotifications.unshift(notif);
             navNotifications[notif.type === 'message' ? 'messages' : 'alerts'] += 1;
             navUpdateBadges();
-            showToast(({ like:'❤️ liked your post', comment:'💬 New comment', follow:'🤝 New follower!', repost:'🔁 Someone reposted you' })[notif.type] || '🔔 New notification');
-            triggerHaptic(20);
+            // While going dark the badge above still counts up, so nothing is
+            // missed, but there is no toast and no buzz.
+            if (!tfIsGoingDark()) {
+                showToast(({ like:'❤️ liked your post', comment:'💬 New comment', follow:'🤝 New follower!', repost:'🔁 Someone reposted you' })[notif.type] || '🔔 New notification');
+                triggerHaptic(20);
+            }
             const area = document.getElementById('notif-content-area');
             if (area && document.getElementById('notif-overlay')?.style.display !== 'none') {
                 area.insertAdjacentHTML('afterbegin', renderNotifCard(notif));
@@ -34054,8 +34287,16 @@ var cpReadReceiptsEnabled = JSON.parse(localStorage.getItem('tf-read-receipts') 
 var cpTypingEnabled = JSON.parse(localStorage.getItem('tf-typing-indicators') !== null ? localStorage.getItem('tf-typing-indicators') : 'true');
 
 function getCurrentChatUserKey() {
+    // #cp-name only exists while the chat profile panel is open. Reached from
+    // inside the conversation itself — which is where the disappearing-messages
+    // notice lives — that returned 'unknown', so every chat shared one setting.
     var el = document.getElementById('cp-name');
-    return el ? el.textContent.trim() : 'unknown';
+    var name = el ? el.textContent.trim() : '';
+    if (!name) {
+        var hdr = document.getElementById('chat-header-name');
+        name = hdr ? (hdr.textContent || '').trim() : '';
+    }
+    return name || 'unknown';
 }
 
 // --- BLOCK ---
@@ -34279,10 +34520,10 @@ function openDisappearingMessages() {
     var userName = getCurrentChatUserKey();
     var current = cpDisappearSettings[userName] || 'off';
     var options = [
-        { value: 'off', label: 'Off', desc: 'Messages are kept forever' },
-        { value: 'seen', label: 'Once Seen', desc: 'Disappear after being read' },
-        { value: '24h', label: '24 Hours', desc: 'Disappear after 24 hours' },
-        { value: '7d', label: '7 Days', desc: 'Disappear after 7 days' }
+        { value: 'off',  label: 'Off',                     desc: 'Messages are kept forever' },
+        { value: 'seen', label: 'Once they\'ve been seen',  desc: 'Disappear after being read' },
+        { value: '24h',  label: '24 hours',                desc: 'Disappear 24 hours after everyone has seen them' },
+        { value: '7d',   label: '7 days',                  desc: 'Disappear 7 days after everyone has seen them' }
     ];
 
     var modal = document.createElement('div');
@@ -34301,7 +34542,7 @@ function openDisappearingMessages() {
     modal.innerHTML =
         '<div style="background:var(--card-bg,#fff);border-radius:24px 24px 0 0;width:100%;max-width:500px;padding-bottom:40px;animation:slideUpOverlay 0.3s ease;">' +
         '<div style="width:40px;height:4px;background:#ccc;border-radius:2px;margin:12px auto 16px;"></div>' +
-        '<h3 style="font-size:18px;font-weight:800;padding:0 20px 14px;border-bottom:1px solid var(--border-color,#f0f0f0);color:var(--text-primary,#000);">Disappearing Messages</h3>' +
+        '<h3 style="font-size:18px;font-weight:800;padding:0 20px 14px;border-bottom:1px solid var(--border-color,#f0f0f0);color:var(--text-primary,#000);text-align:center;">Disappearing message timer</h3>' +
         optHTML +
         '<button onclick="this.closest(\'div\').parentElement.remove()" style="width:calc(100% - 40px);margin:16px 20px 0;padding:14px;border-radius:14px;border:none;background:var(--bg-secondary,#f0f0f0);color:var(--text-primary,#000);font-size:15px;font-weight:600;cursor:pointer;">Cancel</button>' +
         '</div>';
@@ -34309,6 +34550,8 @@ function openDisappearingMessages() {
     modal.addEventListener('click', function(e) { if (e.target === modal) modal.remove(); });
     document.body.appendChild(modal);
 }
+
+var TF_DISAPPEAR_SECONDS = { off: 0, seen: 0, '24h': 86400, '7d': 604800 };
 
 function setDisappearOption(userName, value) {
     cpDisappearSettings[userName] = value;
@@ -34319,8 +34562,57 @@ function setDisappearOption(userName, value) {
     document.querySelectorAll('[style*="background:rgba(0,0,0,0.5)"]').forEach(function(m) {
         if (m.querySelector('[onclick*="setDisappearOption"]')) m.remove();
     });
-    showToast('Disappearing messages: ' + (labels[value] || 'Off'));
+
+    // Persist on the conversation, not just this device. The column and the
+    // expiry logic in DB.sendMessage already existed; the setting was only ever
+    // written to localStorage, so messages never actually expired and the other
+    // person was never told the timer had changed.
+    // 'Once seen' has no seconds equivalent, so it stays a local-only setting.
+    if (currentConversationId && window.sb && TF_DISAPPEAR_SECONDS[value] !== undefined && value !== 'seen') {
+        sb.from('conversations')
+          .update({ disappearing_seconds: TF_DISAPPEAR_SECONDS[value] || null })
+          .eq('id', currentConversationId)
+          .then(function (r) {
+              if (r && r.error) console.warn('[disappearing] could not save:', r.error.message);
+          }, function () {});
+    }
+
+    _tfShowDisappearNotice(value);
     triggerHaptic(15);
+}
+
+// Turn on from the in-chat notice goes straight to 24 hours, which is the
+// default every app that has this feature uses.
+function tfDisappearTurnOn() {
+    setDisappearOption(getCurrentChatUserKey(), '24h');
+}
+
+function tfDisappearChange() {
+    openDisappearingMessages();
+}
+
+/**
+ * The line in the conversation saying the timer changed, with the link that
+ * opens the picker. Rendered locally: the other side sees their own notice when
+ * their client reads the conversation's new setting.
+ */
+function _tfShowDisappearNotice(value) {
+    var chatBody = document.getElementById('chat-body');
+    if (!chatBody) { showToast('Disappearing messages updated'); return; }
+
+    var word = { seen: 'once they\'ve been seen', '24h': '24 hours after everyone has seen them',
+                 '7d': '7 days after everyone has seen them' }[value];
+    var inner;
+    if (value === 'off') {
+        inner = 'You\'ve turned off disappearing messages. ' +
+            '<span onclick="tfDisappearTurnOn()" style="color:#0A84FF;font-weight:700;cursor:pointer;">Turn on</span>';
+    } else {
+        inner = 'You\'ve turned on disappearing messages. New messages and reactions will disappear ' +
+            word + '. ' +
+            '<span onclick="tfDisappearChange()" style="color:#0A84FF;font-weight:700;cursor:pointer;">Change</span>';
+    }
+    chatBody.insertAdjacentHTML('beforeend', _tfSysLineHtml(inner));
+    chatBody.scrollTop = chatBody.scrollHeight;
 }
 
 // --- READ RECEIPTS (functional) ---
@@ -38467,7 +38759,7 @@ function _sendContactMessage(name, phone) {
         status: 'sent'
     };
     if (chatBody) {
-        chatBody.insertAdjacentHTML('beforeend', renderMessageBubble(m));
+        _tfAppendMsg(chatBody, m);
         chatBody.scrollTop = chatBody.scrollHeight;
     }
     if (window.sb && currentUser && currentConversationId) {
@@ -48850,7 +49142,7 @@ async function sendAlbumInChat(files) {
     var msgId = 'album_' + Date.now();
     var localUrls = files.map(function(f){ return URL.createObjectURL(f); });
     var m = { id: msgId, sender_id: currentUser ? currentUser.id : null, message_type: 'album', media_urls: localUrls, status: 'uploading', created_at: new Date().toISOString() };
-    chatBody.insertAdjacentHTML('beforeend', renderMessageBubble(m));
+    _tfAppendMsg(chatBody, m);
     chatBody.scrollTop = chatBody.scrollHeight;
     if (!window.sb || !currentUser) { _markMsgFailed(msgId); return; }
     try {
@@ -49367,7 +49659,7 @@ async function sendMediaInChat(file, caption) {
         status: 'uploading',
         created_at: new Date().toISOString()
     };
-    chatBody.insertAdjacentHTML('beforeend', renderMessageBubble(m));
+    _tfAppendMsg(chatBody, m);
     chatBody.scrollTop = chatBody.scrollHeight;
 
     if (!window.sb || !currentUser) {
@@ -50359,7 +50651,7 @@ function _sendChecklistMessage() {
     if (!chatBody) { showToast('Open a chat first'); return; }
     var payload = JSON.stringify({ title: title || 'Checklist', items: items });
     var m = { id: 'ck_' + Date.now(), sender_id: currentUser ? currentUser.id : null, message_type: 'checklist', ciphertext: payload, status: 'sent', created_at: new Date().toISOString() };
-    chatBody.insertAdjacentHTML('beforeend', renderMessageBubble(m));
+    _tfAppendMsg(chatBody, m);
     chatBody.scrollTop = chatBody.scrollHeight;
     // Persist so it survives reload and reaches the other people in the chat.
     if (window.sb && currentUser && currentConversationId) {
@@ -50424,7 +50716,7 @@ function _sendMediaMessage(url, type, fileName, blob) {
         status: 'sent',
         created_at: new Date().toISOString()
     };
-    chatBody.insertAdjacentHTML('beforeend', renderMessageBubble(m));
+    _tfAppendMsg(chatBody, m);
     chatBody.scrollTop = chatBody.scrollHeight;
 
     if (window.sb && currentUser && currentConversationId && blob) {
