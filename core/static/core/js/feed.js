@@ -19619,7 +19619,7 @@ function showReelContextMenu() {
         '<div style="background:rgba(255,255,255,0.14);backdrop-filter:blur(50px) saturate(180%);-webkit-backdrop-filter:blur(50px) saturate(180%);border:0.5px solid rgba(255,255,255,0.18);border-radius:22px;overflow:hidden;margin-bottom:10px;box-shadow:0 12px 40px rgba(0,0,0,0.4),0 1px 0 rgba(255,255,255,0.12) inset;">' +
         ((reelsData[currentReelIndex] && reelsData[currentReelIndex].no_downloads) ? '' :
         '<div onclick="downloadReel();document.getElementById(\'reelLongPressMenu\').remove();" style="display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:0.5px solid rgba(255,255,255,0.08);cursor:pointer;" onmouseover="this.style.background=\'rgba(255,255,255,0.07)\'" onmouseout="this.style.background=\'\'">' +
-        '<div style="width:36px;height:36px;border-radius:10px;background:rgba(0,122,255,0.2);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-arrow-down-to-line" style="color:#007AFF;font-size:16px;"></i></div>' +
+        '<div style="width:36px;height:36px;border-radius:10px;background:rgba(0,122,255,0.2);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-download" style="color:#007AFF;font-size:16px;"></i></div>' +
         '<span style="font-size:15px;font-weight:600;color:white;">Download</span></div>') +
         '<div onclick="document.getElementById(\'reelLongPressMenu\').remove();showToast(\'You won\\\'t see similar content\');" style="display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:0.5px solid rgba(255,255,255,0.08);cursor:pointer;" onmouseover="this.style.background=\'rgba(255,255,255,0.07)\'" onmouseout="this.style.background=\'\'">' +
         '<div style="width:36px;height:36px;border-radius:10px;background:rgba(255,149,0,0.2);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-eye-slash" style="color:#FF9500;font-size:16px;"></i></div>' +
@@ -19697,7 +19697,7 @@ function openReelLongPressMenu(page) {
                 // Download is hidden when the creator turned it off, the same
                 // rule the reels-page menu already follows.
                 ((noDl || !pageUrl) ? '' :
-                    row('fa-arrow-down-to-line', '#5856D6', 'Download', 'download')) +
+                    row('fa-download', '#5856D6', 'Download', 'download')) +
                 row('fa-arrow-up-from-bracket', '#34C759', 'Share', 'share') +
                 row('fa-eye-slash', '#FF9500', 'Not interested', 'notinterested') +
                 row('fa-flag', '#FF3B30', 'Report', 'report', true) +
@@ -19710,7 +19710,7 @@ function openReelLongPressMenu(page) {
                rows that showed a toast and changed nothing. */
             '<div style="background:rgba(30,30,34,0.9);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.14);border-radius:20px;overflow:hidden;padding:16px 18px;margin-bottom:10px;box-shadow:0 12px 40px rgba(0,0,0,0.45);">' +
                 '<p style="font-size:11px;font-weight:800;color:rgba(255,255,255,0.45);text-transform:uppercase;letter-spacing:0.08em;margin:0 0 11px;">Playback speed</p>' +
-                '<div style="display:flex;gap:6px;' + (_tfCanPiP() ? 'margin-bottom:14px;' : '') + '">' +
+                '<div style="display:flex;gap:6px;margin-bottom:14px;">' +
                     ['0.5', '1.0', '1.5', '2.0'].map(function (s) {
                         var on = parseFloat(s) === (window._tfReelSpeed || 1);
                         return '<button onclick="setReelSpeed(' + s + ')" id="spd-' + s.replace('.', '_') + '" ' +
@@ -19719,11 +19719,12 @@ function openReelLongPressMenu(page) {
                             'color:#fff;font-size:14px;font-weight:700;cursor:pointer;">' + s + 'x</button>';
                     }).join('') +
                 '</div>' +
-                (_tfCanPiP()
-                    ? '<div onclick="tfReelPiP()" style="display:flex;align-items:center;gap:12px;padding:11px 0 2px;cursor:pointer;">' +
-                        '<i class="fa-solid fa-window-restore" style="color:rgba(255,255,255,0.6);font-size:15px;width:20px;text-align:center;"></i>' +
-                        '<span style="font-size:15px;color:#fff;font-weight:500;">Picture-in-Picture</span></div>'
-                    : '') +
+                // Always offered: this opens the in-app strip, which works in
+                // every browser. Handing off to the device's own window is a
+                // button on the strip, where a tap grants it.
+                '<div onclick="tfReelPiP()" style="display:flex;align-items:center;gap:12px;padding:11px 0 2px;cursor:pointer;">' +
+                    '<i class="fa-solid fa-clone" style="color:rgba(255,255,255,0.6);font-size:15px;width:20px;text-align:center;"></i>' +
+                    '<span style="font-size:15px;color:#fff;font-weight:500;">Keep playing while I scroll</span></div>' +
             '</div>' +
 
             '<button onclick="document.getElementById(\'reelLongPressMenu\').remove()" style="width:100%;padding:15px;border-radius:18px;border:none;background:rgba(255,255,255,0.12);color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Cancel</button>' +
@@ -19801,7 +19802,8 @@ function setReelSpeed(speed) {
     var video = document.getElementById('reelVideo') || _tfActiveReelVideo();
     if (video) video.playbackRate = speed;
     window._tfReelSpeed = speed;
-    showToast('Speed: ' + speed + 'x');
+    // No toast: the highlighted button already says which speed is on, and you
+    // can hear it. A toast per press covered the clip you were listening to.
 
     // Keep the sheet open and move the highlight, so you can hear the change
     // and adjust rather than reopening the menu for every step.
@@ -19814,26 +19816,143 @@ function setReelSpeed(speed) {
     triggerHaptic(8);
 }
 
-// iOS Safari has its own picture-in-picture and does not expose this API, so
-// the row is left out there rather than shown doing nothing.
-function _tfCanPiP() {
-    return !!(document.pictureInPictureEnabled &&
-              typeof HTMLVideoElement !== 'undefined' &&
-              HTMLVideoElement.prototype.requestPictureInPicture);
-}
+// ── MINI PLAYER ────────────────────────────────────────────────────────────
+// Inside the app the clip carries on in a strip along the bottom. Outside the
+// app it is handed to whatever picture-in-picture the device itself has, so
+// nothing here is written for one platform.
+//
+// The <video> element is moved into the strip rather than a new one created
+// with the same src: a second element starts from zero, downloads the file
+// again and drops the audio. Moving it keeps the exact frame that was on
+// screen, which is what makes it feel like one continuous thing.
+var _tfMini = null;
 
-async function tfReelPiP() {
+function tfReelPiP() {
     var v = _tfActiveReelVideo() || document.getElementById('reelVideo');
     var menu = document.getElementById('reelLongPressMenu');
     if (menu) menu.remove();
     if (!v) { showToast('No clip playing'); return; }
-    try {
-        if (document.pictureInPictureElement) await document.exitPictureInPicture();
-        else await v.requestPictureInPicture();
-    } catch (e) {
-        showToast('Picture-in-Picture is not available here');
-    }
+    tfOpenMiniPlayer(v);
 }
+
+function tfOpenMiniPlayer(v) {
+    if (document.getElementById('tfMini')) tfCloseMiniPlayer(true);
+
+    var page = v.closest('.reel-page');
+    var handle = '', caption = '';
+    if (page) {
+        var h = page.querySelector('.reel-username, [class*="username"], [class*="handle"]');
+        if (h) handle = (h.textContent || '').trim();
+        var c = page.querySelector('.reel-caption, [class*="caption"]');
+        if (c) caption = (c.textContent || '').trim().slice(0, 48);
+    }
+    if (!handle) handle = 'TrustClip';
+
+    // Remember exactly where it came from, so closing puts it back rather than
+    // leaving a hole in the feed where the video used to be.
+    _tfMini = { home: v.parentNode, next: v.nextSibling, video: v, styles: v.getAttribute('style') || '' };
+
+    var host = document.querySelector('.app') || document.body;
+    var bar = document.createElement('div');
+    bar.id = 'tfMini';
+    bar.className = 'tf-mini';
+    bar.innerHTML =
+        '<div class="tf-mini-thumb" id="tfMiniThumb"></div>' +
+        '<div class="tf-mini-meta"><b>' + escapeHtml(caption || handle) + '</b>' +
+            '<span>' + escapeHtml(caption ? handle : 'Tap to go back') + '</span></div>' +
+        '<button class="tf-mini-btn" id="tfMiniPip" aria-label="Picture in picture">' +
+            '<i class="fa-solid fa-clone"></i></button>' +
+        '<button class="tf-mini-btn" id="tfMiniPlay" aria-label="Pause">' +
+            '<i class="fa-solid fa-pause"></i></button>' +
+        '<button class="tf-mini-btn" id="tfMiniClose" aria-label="Close">' +
+            '<i class="fa-solid fa-xmark"></i></button>';
+    host.appendChild(bar);
+
+    v.setAttribute('style', '');
+    document.getElementById('tfMiniThumb').appendChild(v);
+    v.play().catch(function () {});
+
+    bar.onclick = function () { tfCloseMiniPlayer(); };
+    document.getElementById('tfMiniClose').onclick = function (e) {
+        e.stopPropagation(); tfCloseMiniPlayer();
+    };
+    document.getElementById('tfMiniPlay').onclick = function (e) {
+        e.stopPropagation();
+        var i = this.querySelector('i');
+        if (v.paused) { v.play().catch(function(){}); i.className = 'fa-solid fa-pause'; }
+        else { v.pause(); i.className = 'fa-solid fa-play'; }
+    };
+    document.getElementById('tfMiniPip').onclick = function (e) {
+        e.stopPropagation(); tfDevicePiP(v);
+    };
+
+    host.classList.add('tf-mini-open');
+    requestAnimationFrame(function () { bar.classList.add('in'); });
+    triggerHaptic(12);
+}
+
+function tfCloseMiniPlayer(immediate) {
+    var bar = document.getElementById('tfMini');
+    if (!bar) return;
+    var host = document.querySelector('.app') || document.body;
+
+    function finish() {
+        if (_tfMini && _tfMini.video && _tfMini.home) {
+            var v = _tfMini.video;
+            v.setAttribute('style', _tfMini.styles);
+            if (_tfMini.next && _tfMini.next.parentNode === _tfMini.home) _tfMini.home.insertBefore(v, _tfMini.next);
+            else _tfMini.home.appendChild(v);
+        }
+        _tfMini = null;
+        if (bar.parentNode) bar.remove();
+    }
+
+    if (immediate) { host.classList.remove('tf-mini-open'); finish(); return; }
+    // Both move together: the strip slides out while the nav settles back down
+    // on the same curve, rather than the nav jumping after the strip has gone.
+    bar.classList.remove('in');
+    host.classList.remove('tf-mini-open');
+    setTimeout(finish, 280);
+}
+
+/**
+ * Hand the clip to the device's own picture-in-picture window.
+ * Two APIs, because there are two: the standard one, and the WebKit one Safari
+ * still uses. Whichever exists is used; if neither does, say so plainly rather
+ * than leaving the button looking broken.
+ */
+async function tfDevicePiP(v) {
+    v = v || (_tfMini && _tfMini.video);
+    if (!v) return false;
+    try {
+        if (document.pictureInPictureEnabled && v.requestPictureInPicture) {
+            if (document.pictureInPictureElement) await document.exitPictureInPicture();
+            else await v.requestPictureInPicture();
+            return true;
+        }
+        if (typeof v.webkitSetPresentationMode === 'function') {
+            v.webkitSetPresentationMode(
+                v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
+            return true;
+        }
+        showToast('This browser has no picture-in-picture');
+    } catch (e) {
+        showToast('Picture-in-picture was not allowed');
+    }
+    return false;
+}
+
+// Leaving the app while the strip is playing tries to hand off to the device
+// window automatically. Browsers normally want a tap before granting this, so
+// it is attempted and allowed to fail — the button in the strip is the path
+// that always works.
+document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'hidden') return;
+    var v = _tfMini && _tfMini.video;
+    if (!v || v.paused) return;
+    if (document.pictureInPictureElement) return;
+    tfDevicePiP(v);
+});
 
 // The clip currently filling the screen in the .reel-page scroller.
 function _tfActiveReelVideo() {
@@ -36610,7 +36729,7 @@ function downloadReel(explicitUrl) {
     pill.innerHTML =
         '<style>@keyframes dlPillIn{0%{opacity:0;transform:translateX(-50%) translateY(-22px) scale(0.85)}100%{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}}</style>' +
         '<div style="width:26px;height:26px;border-radius:50%;background:rgba(0,122,255,0.2);border:1px solid rgba(0,122,255,0.4);display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
-            '<i class="fa-solid fa-arrow-down-to-line" style="color:#007AFF;font-size:10px;"></i></div>' +
+            '<i class="fa-solid fa-download" style="color:#007AFF;font-size:10px;"></i></div>' +
         '<div style="display:flex;flex-direction:column;gap:3px;">' +
             '<span style="color:white;font-size:13px;font-weight:700;">Downloading</span>' +
             '<div style="width:70px;height:3px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;">' +
@@ -37364,7 +37483,7 @@ function showMessageContextMenu(bubbleEl) {
             '</div>' +
             ((msgType === 'image' || msgType === 'video') ? '<div class="msg-ctx-row" onclick="showToast(\'Saved\');document.getElementById(\'msgContextOverlay\').remove();">' +
                 '<span style="font-size:15px;font-weight:600;color:white;">Save</span>' +
-                '<i class="fa-solid fa-arrow-down-to-line" style="color:rgba(255,255,255,0.4);font-size:15px;"></i>' +
+                '<i class="fa-solid fa-download" style="color:rgba(255,255,255,0.4);font-size:15px;"></i>' +
             '</div>' : '') +
             '<div class="msg-ctx-row" onclick="pinMessage();document.getElementById(\'msgContextOverlay\').remove();">' +
                 '<span style="font-size:15px;font-weight:600;color:white;">Pin</span>' +

@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=99">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=100">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -2470,7 +2470,7 @@ function authenticateUser() {
             <span id="storyViewsCount" style="color:white;font-size:13px;font-weight:700;">0</span>
         </div>
         <div style="display:flex;align-items:center;gap:18px;">
-            <i class="fa-solid fa-arrow-down-to-line" onclick="saveCurrentStory()" style="color:white;font-size:22px;cursor:pointer;filter:drop-shadow(0 1px 4px rgba(0,0,0,0.5));" title="Download"></i>
+            <i class="fa-solid fa-download" onclick="saveCurrentStory()" style="color:white;font-size:22px;cursor:pointer;filter:drop-shadow(0 1px 4px rgba(0,0,0,0.5));" title="Download"></i>
             <i class="fa-regular fa-trash-can" onclick="confirmDeleteStory()" style="color:white;font-size:22px;cursor:pointer;filter:drop-shadow(0 1px 4px rgba(0,0,0,0.5));" title="Delete"></i>
             <div onclick="openStoryOwnerMenu()" style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,0.15);backdrop-filter:blur(24px) saturate(200%);-webkit-backdrop-filter:blur(24px) saturate(200%);border:0.5px solid rgba(255,255,255,0.25);display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.3);">
                 <i class="fa-solid fa-ellipsis" style="color:white;font-size:18px;"></i>
@@ -4223,7 +4223,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=240"></script>
+<script src="{% static 'core/js/feed.js' %}?v=241"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=75"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
@@ -4313,7 +4313,7 @@ function authenticateUser() {
     </div>
     <div class="settings-section-title">ALLOW PEOPLE TO SHARE EXTERNALLY</div>
     <div class="settings-card">
-      <div class="settings-row"><div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-arrow-down-to-line" style="color:#888;"></i><div><b>Downloads</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Let people download your content</p></div></div><div class="toggle" data-share-key="downloads" onclick="toggleSharePref(this,'downloads')"></div></div>
+      <div class="settings-row"><div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-download" style="color:#888;"></i><div><b>Downloads</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Let people download your content</p></div></div><div class="toggle" data-share-key="downloads" onclick="toggleSharePref(this,'downloads')"></div></div>
       <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:10px;padding:14px 16px;">
         <b style="font-size:15px;color:var(--text-primary,#000);">Website embeds</b>
         <div style="width:100%;display:flex;flex-direction:column;gap:8px;">
