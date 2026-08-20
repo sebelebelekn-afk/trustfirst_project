@@ -18436,8 +18436,6 @@ function renderLanguageSelector() {
  // ============================================
 // REELS PAGE - Complete Implementation
 // ============================================
-let currentReelIndex = 0;
-let reelsData = [];
 var _videoFeedContext = 'feed';
 var _videoFeedList   = [];
 var _videoFeedIdx    = 0;
@@ -18567,9 +18565,6 @@ function openFullScreenMedia(url, type) {
         media.src = url;
     }
 }
-let reelsTutorialShown = localStorage.getItem('trustfirst-reels-tutorial') === 'true';
-let longPressTimer = null;
-let isSpedUp = false;
 
 /* ============================================================
    SENSITIVE CONTENT FILTER
@@ -18629,154 +18624,9 @@ function openSensitiveLearnMore() {
     (document.getElementById('app') || document.body).appendChild(sheet);
 }
 
-function showReelsPage() {
-    // Hide nav bar
-    var navBar = document.querySelector('.nav-container');
-if (navBar) navBar.style.display = 'none';
 
-// Release any existing audio context to respect phone audio route
-if (typeof soundPreviewCtx !== 'undefined' && soundPreviewCtx) {
-    try { soundPreviewCtx.close(); } catch(e) { if (e) console.warn('[Suppressed error]', e); }
-    soundPreviewCtx = null;
-}
 
-    // Use the existing reel overlay instead of wiping the app
-    const screen = document.getElementById('reel-overlay');
-    if (!screen) return;
-    screen.style.display = 'block';
-    screen.innerHTML = `
-        <div id="reelsContainer" style="
-            position:fixed; top:0; left:0; right:0; bottom:0; z-index:5000;
-            background:#000; overflow:hidden;
-        ">
-            <!-- Back Button -->
-            <button onclick="closeReelsPage()" style="
-                position:absolute; top:50px; left:16px; z-index:5010;
-                background:rgba(0,0,0,0.3); border:none; border-radius:50%;
-                width:40px; height:40px; display:flex; align-items:center; justify-content:center;
-                cursor:pointer; backdrop-filter:blur(10px);
-            ">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2">
-                    <path d="M19 12H5M12 19l-7-7 7-7"/>
-                </svg>
-            </button>
 
-            <!-- Loading State -->
-            <div id="reelsLoading" style="
-                position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-                display:flex; flex-direction:column; align-items:center; gap:12px;
-            ">
-                <div style="width:40px; height:40px; border:3px solid rgba(255,255,255,0.2);
-                    border-top-color:white; border-radius:50%; animation:spin 0.8s linear infinite;"></div>
-                <span style="color:rgba(255,255,255,0.6); font-size:14px;">Loading...</span>
-            </div>
-
-            <!-- Reels Viewport -->
-            <div id="reelsViewport" style="
-                width:100%; height:100%; overflow:hidden; position:relative;
-            "></div>
-
-            <!-- Long Press Speed Indicator -->
-            <div id="speedIndicator" style="
-                position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-                background:rgba(0,0,0,0.7); color:white; padding:8px 20px;
-                border-radius:20px; font-size:16px; font-weight:700;
-                display:none; z-index:5020; backdrop-filter:blur(10px);
-            ">2x</div>
-
-            <!-- Long Press Context Menu -->
-            <div id="reelContextMenu" style="display:none;"></div>
-        </div>
-    `;
-
-    addReelsStyles();
-    loadReels();
-
-    if (!reelsTutorialShown) {
-        setTimeout(showReelsTutorial, 500);
-    }
-}
-
-function addReelsStyles() {
-    if (document.getElementById('reelsStyles')) return;
-    const style = document.createElement('style');
-    style.id = 'reelsStyles';
-    style.textContent = `
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes swipeHand {
-            0%, 100% { transform: translateY(0); opacity:1; }
-            50% { transform: translateY(-80px); opacity:0.5; }
-        }
-        @keyframes fadeInUp {
-            from { opacity:0; transform:translateY(20px); }
-            to { opacity:1; transform:translateY(0); }
-        }
-        @keyframes downloadPulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-        }
-        .reel-slide {
-            position:absolute; top:0; left:0; width:100%; height:100%;
-            transition: transform 0.3s ease;
-        }
-        .reel-video {
-            width:100%; height:100%; object-fit:cover;
-        }
-        .reel-actions {
-            position:absolute; right:12px; bottom:120px;
-            display:flex; flex-direction:column; align-items:center; gap:20px; z-index:5010;
-        }
-        .reel-action-btn {
-            display:flex; flex-direction:column; align-items:center; gap:4px;
-            background:none; border:none; cursor:pointer;
-        }
-        .reel-action-btn span {
-            color:white; font-size:12px; font-weight:600;
-            text-shadow: 0 1px 3px rgba(0,0,0,0.5);
-        }
-        .reel-info {
-            position:absolute; left:16px; bottom:100px; right:80px; z-index:5010;
-        }
-        .reel-username {
-            color:white; font-size:15px; font-weight:700;
-            text-shadow: 0 1px 4px rgba(0,0,0,0.5);
-        }
-        .reel-caption {
-            color:rgba(255,255,255,0.9); font-size:13px; margin-top:6px;
-            text-shadow: 0 1px 3px rgba(0,0,0,0.5);
-            display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
-        }
-        .reel-sound-bar {
-            position:absolute; bottom:40px; left:16px; right:16px; z-index:5010;
-            display:flex; align-items:center; gap:10px;
-        }
-        .reel-sound-pill {
-            display:flex; align-items:center; gap:8px;
-            background:rgba(255,255,255,0.15); backdrop-filter:blur(20px);
-            border:1px solid rgba(255,255,255,0.2);
-            border-radius:30px; padding:8px 16px; max-width:70%;
-            overflow:hidden;
-        }
-        .reel-sound-pill .sound-name {
-            color:white; font-size:12px; font-weight:500;
-            white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-        }
-        .reel-progress {
-            position:absolute; bottom:0; left:0; right:0; height:3px;
-            background:rgba(255,255,255,0.2); z-index:5015;
-        }
-        .reel-progress-fill {
-            height:100%; background:#007AFF; width:0%;
-            transition: width 0.1s linear;
-        }
-
-        /* The accounts-to-follow panel's styles used to be here, and here is
-           only ever reached by showReelsPage, which the bottom bar does not
-           open. The panel rendered in the live feed with none of its CSS. They
-           live in feed.css now, which is always loaded. */
-    `;
-    document.head.appendChild(style);
-}
 
 // ── ACCOUNTS TO FOLLOW, BETWEEN CLIPS ──────────────────────────────────────
 // Not on every load and never in the same place, so it reads as something the
@@ -18921,33 +18771,17 @@ function tcSuggestSkip(btn, userId) {
     } catch (e) {}
 
     var card = btn.closest('.tc-sg-card');
-    // Two places this can live: a page in the scrolling feed, or a slide in the
-    // index-rendered one. Work out which from the card rather than assuming.
     var page = btn.closest('[data-suggest-page]');
-    var rail = page ? page.querySelector('.tc-sg-rail')
-                    : (card && card.parentNode) || document.querySelector('.tc-sg-rail');
+    var rail = page ? page.querySelector('.tc-sg-rail') : (card && card.parentNode);
     if (card) card.remove();
-
-    if (!page) {
-        // Keep the slide's own data in step, so re-rendering does not bring the
-        // card back.
-        var slide = reelsData[currentReelIndex];
-        if (slide && slide.__suggest) {
-            slide.users = slide.users.filter(function (u) { return u.id !== userId; });
-        }
-    }
     triggerHaptic(8);
 
-    if (rail && !rail.querySelector('.tc-sg-card')) {
-        if (page) {
-            // Move on to the next clip, then drop the empty page behind us
-            // rather than leaving a heading over nothing.
-            var next = page.nextElementSibling;
-            if (next && next.scrollIntoView) next.scrollIntoView({ behavior: 'smooth' });
-            setTimeout(function () { if (page.parentNode) page.remove(); }, 450);
-        } else if (currentReelIndex < reelsData.length - 1) {
-            renderReel(currentReelIndex + 1);
-        }
+    if (page && rail && !rail.querySelector('.tc-sg-card')) {
+        // Move on to the next clip, then drop the empty page behind us rather
+        // than leaving a heading over nothing.
+        var next = page.nextElementSibling;
+        if (next && next.scrollIntoView) next.scrollIntoView({ behavior: 'smooth' });
+        setTimeout(function () { if (page.parentNode) page.remove(); }, 450);
     }
 }
 
@@ -18987,127 +18821,9 @@ async function _tcInjectSuggestPage() {
  * Drop a suggestion slide somewhere in the middle of the clips, about two loads
  * out of three, at a position that moves each time.
  */
-async function _tcMaybeInjectSuggestions() {
-    if (!reelsData || reelsData.length < 4) return;
-    if (reelsData.some(function (r) { return r && r.__suggest; })) return;
-    if (Math.random() < 0.34) return;          // not every time
-    try {
-        var slide = await _tcFetchSuggestSlide();
-        if (!slide) return;
-        var at = 3 + Math.floor(Math.random() * Math.min(5, reelsData.length - 3));
-        reelsData.splice(at, 0, slide);
-    } catch (e) { /* a missing rail is not worth breaking the feed for */ }
-}
 
-async function loadReels() {
-    // Instant render from the last cache so an offline open isn't an empty screen.
-    try {
-        var _rc = JSON.parse(localStorage.getItem('tf_reels_cache') || 'null');
-        if (_rc && _rc.length && (!reelsData || !reelsData.length)) {
-            reelsData = _rc;
-            var _rl = document.getElementById('reelsLoading'); if (_rl) _rl.style.display = 'none';
-            renderReel(0); setupReelGestures();
-        }
-    } catch (e) {}
-    try {
-        if (!window.sb) { if (!reelsData || !reelsData.length) renderReelsFallback(); return; }
 
-        // Query trustclips table (allow rows where is_hidden is NULL or false)
-        var { data, error } = await sb
-            .from('trustclips')
-            .select('*, users:user_id (id, full_name, username, avatar_url, badge_tier, verified)')
-            .neq('is_hidden', true)
-            .order('created_at', { ascending: false })
-            .limit(20);
 
-        // If the users join fails (FK relationship not configured), retry without it
-        // so the clips still load instead of falling through to "no clips".
-        if (error) {
-            console.warn('[Reels] join query failed, retrying without users join:', error.message);
-            var retryR = await sb.from('trustclips').select('*')
-                .neq('is_hidden', true).order('created_at', { ascending: false }).limit(20);
-            data = retryR.data; error = retryR.error;
-        }
-
-        // Fallback: also look in posts table for video posts
-        if (!data || data.length === 0) {
-            var postsRes = await sb
-                .from('posts')
-                .select('id, media_url, video_url, thumbnail_url, text_content, like_count, comment_count, user_id, users:user_id(id,full_name,username,avatar_url,badge_tier,verified,ai_label)')
-                .or('post_type.eq.video,post_type.eq.trustclip,media_type.eq.video')
-                .not('media_url', 'is', null)
-                .order('created_at', { ascending: false })
-                .limit(20);
-            if (postsRes.error) {
-                postsRes = await sb.from('posts')
-                    .select('id, media_url, video_url, thumbnail_url, text_content, like_count, comment_count, user_id')
-                    .or('post_type.eq.video,post_type.eq.trustclip,media_type.eq.video')
-                    .not('media_url', 'is', null)
-                    .order('created_at', { ascending: false }).limit(20);
-            }
-            if (postsRes.data && postsRes.data.length > 0) {
-                reelsData = postsRes.data.map(function(p) {
-                    return {
-                        id: p.id,
-                        videoUrl: p.media_url || p.video_url || '',
-                        username: '@' + (p.users && p.users.username ? p.users.username : 'user'),
-                        caption: p.text_content || '',
-                        sound: 'Original Audio',
-                        likes: p.like_count || 0,
-                        comments: p.comment_count || 0,
-                        liked: false, bookmarked: false, isOriginalSound: true
-                    };
-                });
-                // Cache before injecting, so a suggestion slide is never stored
-                // and replayed on the next open with stale people in it.
-                try { localStorage.setItem('tf_reels_cache', JSON.stringify(reelsData.slice(0, 15))); } catch(e) {}
-                var loading = document.getElementById('reelsLoading');
-                if (loading) loading.style.display = 'none';
-                renderReel(0);
-                setupReelGestures();
-                _tcMaybeInjectSuggestions();
-                return;
-            }
-            if (!reelsData || !reelsData.length) renderReelsFallback();
-            return;
-        }
-
-        if (error) { renderReelsFallback(); return; }
-
-        reelsData = data.map(function(clip) {
-            return {
-                id: clip.id,
-                videoUrl: clip.video_url || clip.media_url || '',
-                username: '@' + (clip.users && clip.users.username ? clip.users.username : 'user'),
-                caption: clip.caption || '',
-                sound: clip.sound_name || 'Original Audio',
-                likes: clip.like_count || 0,
-                comments: clip.comment_count || 0,
-                liked: false,
-                bookmarked: false,
-                isOriginalSound: !clip.sound_name,
-                hide_likes: !!clip.hide_likes,
-                hide_shares: !!clip.hide_shares,
-                no_comments: !!clip.no_comments,
-                no_downloads: !!clip.no_downloads,
-                stickers: Array.isArray(clip.stickers) ? clip.stickers : []
-            };
-        });
-
-        // Cache before injecting, so a suggestion slide is never stored and
-        // replayed on the next open with stale people in it.
-        try { localStorage.setItem('tf_reels_cache', JSON.stringify(reelsData.slice(0, 15))); } catch(e) {}
-        var loading = document.getElementById('reelsLoading');
-        if (loading) loading.style.display = 'none';
-        renderReel(0);
-        setupReelGestures();
-        _tcMaybeInjectSuggestions();
-    } catch(e) {
-        console.error('[Reels]', e);
-        // Offline: keep whatever cache is already showing; only fall back if empty.
-        if (!reelsData || !reelsData.length) renderReelsFallback();
-    }
-}
 
 // The editor cannot re-encode the file, so a clip's chosen volume travels with it
 // as data (trustclips.volume) and is applied to the <video> whenever it plays.
@@ -19330,338 +19046,20 @@ function _tfEdlAttr(row) {
     return ' data-edl=\'' + JSON.stringify(segs).replace(/'/g, '&#39;') + '\'';
 }
 
-function renderReelsFallback() {
-    var loading = document.getElementById('reelsLoading');
-    if (loading) loading.innerHTML = '<p style="color:rgba(255,255,255,0.5);font-size:14px;">No clips yet. Be the first to post!</p>';
-}
 
-function renderReel(index) {
-    if (index < 0 || index >= reelsData.length) return;
-    currentReelIndex = index;
-    const reel = reelsData[index];
-    const viewport = document.getElementById('reelsViewport');
 
-    // A suggestion slide is not a clip: no video, no like or share rail, and
-    // nothing to keep playing in the background.
-    if (reel && reel.__suggest) {
-        try { const _pv = document.getElementById('reelVideo'); if (_pv) _pv.pause(); } catch (e) {}
-        viewport.innerHTML = _tcSuggestSlideHtml(reel);
-        _tcWireSuggestRail();
-        return;
-    }
 
-    viewport.innerHTML = `
-        <div class="reel-slide" id="currentReel">
-            <!-- Video or placeholder. Black, not a navy gradient: the gradient
-                 showed through for a frame whenever this re-rendered, which read
-                 as the whole video flashing blue on every like. -->
-            <div style="width:100%; height:100%; background:#000;
-                display:flex; align-items:center; justify-content:center;">
-                <video id="reelVideo" class="reel-video" src="${reel.videoUrl}" loop playsinline
-                    style="${reel.videoUrl ? '' : 'display:none;'}"></video>
-                ${!reel.videoUrl ? `<span style="color:rgba(255,255,255,0.3); font-size:18px;">Video Preview</span>` : ''}
-            </div>
 
-            <!-- Pause indicator -->
-            <div id="pauseIndicator" style="
-                position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-                display:none; z-index:5020;
-            ">
-                <svg width="60" height="60" viewBox="0 0 24 24" fill="rgba(255,255,255,0.8)">
-                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-                </svg>
-            </div>
 
-            <!-- Right side actions -->
-            <div class="reel-actions">
-                <button class="reel-action-btn" onclick="toggleReelLike('${reel.id}')">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="${reel.liked ? '#FF3B30' : 'none'}" stroke="white" stroke-width="2">
-                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-                    </svg>
-                    ${reel.hide_likes ? '' : `<span>${formatCount(reel.likes)}</span>`}
-                </button>
-                ${reel.no_comments ? '' : `<button class="reel-action-btn" onclick="openComments('${reel.id}')">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                    </svg>
-                    <span>${formatCount(reel.comments)}</span>
-                </button>`}
-                <button class="reel-action-btn" onclick="openShareMenu('${reel.id}')">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
-                        <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
-                    </svg>
-                    <span>Share</span>
-                </button>
-                <button class="reel-action-btn" onclick="toggleReelBookmark('${reel.id}')">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="${reel.bookmarked ? 'white' : 'none'}" stroke="white" stroke-width="2">
-                        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-                    </svg>
-                    <span>Save</span>
-                </button>
-                <!-- Sound disc -->
-                <div style="width:36px; height:36px; border-radius:50%; border:2px solid white;
-                    background:linear-gradient(135deg, #333, #666); animation:spin 3s linear infinite;
-                    display:flex; align-items:center; justify-content:center; margin-top:8px;">
-                    <div style="width:12px; height:12px; border-radius:50%; background:white;"></div>
-                </div>
-            </div>
 
-            <!-- Bottom info -->
-            <div class="reel-info">
-                <div class="reel-username">${reel.username}</div>
-                <div class="reel-caption">${reel.caption}</div>
-            </div>
 
-            <!-- Sound bar -->
-            <div class="reel-sound-bar">
-                <div class="reel-sound-pill" onclick="openSoundHub('${reel.sound}','${reel.videoUrl}')">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
-                        <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
-                    </svg>
-                    <span class="sound-name">${reel.sound}</span>
-                    ${reel.isOriginalSound ? '<span style="color:#007AFF; font-size:10px; font-weight:700;">Original</span>' : ''}
-                </div>
-            </div>
 
-            <!-- Progress bar -->
-            <div class="reel-progress">
-                <div class="reel-progress-fill" id="reelProgressFill"></div>
-            </div>
 
-            <!-- Interested / Not interested (shown randomly ~1 in 4 clips) -->
-            ${Math.random() < 0.25 ? `
-            <div id="reelInterestBar" style="position:absolute;bottom:0;left:0;right:0;z-index:5030;display:flex;animation:modalUp 0.3s ease;">
-                <button onclick="reelFeedback('not_interested',${index})" style="flex:1;padding:16px 10px;background:rgba(0,0,0,0.72);backdrop-filter:blur(12px);border:none;border-right:0.5px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.8);font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
-                    <i class="fa-solid fa-xmark" style="font-size:13px;"></i> Not interested
-                </button>
-                <button onclick="reelFeedback('interested',${index})" style="flex:1;padding:16px 10px;background:rgba(0,0,0,0.72);backdrop-filter:blur(12px);border:none;color:rgba(255,255,255,0.8);font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
-                    <i class="fa-solid fa-check" style="font-size:13px;"></i> Interested
-                </button>
-            </div>` : ''}
-        </div>
-    `;
 
-    // Render the creator's stickers over the video. The slide fills the screen,
-    // so the overlay box is the slide itself; normalised coords place each one.
-    if (reel.stickers && reel.stickers.length) {
-        var _slide = document.getElementById('currentReel');
-        if (_slide) {
-            _tfRenderClipOverlays(
-                _slide,
-                { left: 0, top: 0, width: _slide.clientWidth, height: _slide.clientHeight },
-                reel.stickers, reel.id
-            );
-        }
-    }
 
-    // Play video if available
-    const video = document.getElementById('reelVideo');
-    if (video && reel.videoUrl) {
-        video.play().catch(() => {});
-        updateReelProgress(video);
-        // Record watch history
-        if (window.sb && currentUser && reel.id && !String(reel.id).startsWith('tmp_') && !String(reel.id).startsWith('single_')) {
-            sb.from('watch_history').insert({ user_id: currentUser.id, post_id: reel.id, watched_at: new Date().toISOString() }).then(function(){}).catch(function(){});
-        }
-    }
-}
 
-function reelFeedback(type, index) {
-    var bar = document.getElementById('reelInterestBar');
-    if (bar) { bar.style.animation = 'none'; bar.style.opacity = '0'; bar.style.transition = 'opacity 0.2s'; setTimeout(function(){ bar.remove(); }, 200); }
-    // Record it so it shows in the Interested / Not-interested history page.
-    try {
-        var _rc = document.querySelector('#reelsContainer .reel-caption-text, #reelsContainer .reel-caption, #reelsContainer [class*="caption"]');
-        var _ru = document.querySelector('#reelsContainer .reel-user-handle, #reelsContainer [class*="username"], #reelsContainer [class*="handle"]');
-        _recordInterest(type, (_rc && _rc.textContent.trim().slice(0, 60)) || 'A TrustClip', (_ru && _ru.textContent.trim()) || '');
-    } catch (e) {}
-    if (type === 'not_interested') {
-        showToast('Got it, fewer clips like this');
-        setTimeout(function(){ renderReel(currentReelIndex + 1); }, 300);
-    } else {
-        showToast('Great, more like this coming');
-    }
-}
-function setupReelGestures() {
-    const container = document.getElementById('reelsContainer');
-    let startY = 0;
-    let startX = 0;
-    let isSwiping = false;
 
-    container.addEventListener('touchstart', (e) => {
-        startY = e.touches[0].clientY;
-        startX = e.touches[0].clientX;
-        isSwiping = true;
 
-        // Long press detection for speed up
-        const touchX = e.touches[0].clientX;
-        const screenWidth = window.innerWidth;
-        const isEdge = touchX < screenWidth * 0.2 || touchX > screenWidth * 0.8;
-
-        // No clip context menu over a suggestion slide — there is no clip to
-        // report, save or download.
-        var _cur = reelsData[currentReelIndex];
-        if (_cur && _cur.__suggest) return;
-
-        longPressTimer = setTimeout(function() {
-    showReelContextMenu();
-}, 600);
-    });
-
-    container.addEventListener('touchmove', (e) => {
-        if (longPressTimer) {
-            clearTimeout(longPressTimer);
-            longPressTimer = null;
-        }
-    });
-
-    container.addEventListener('touchend', (e) => {
-        if (longPressTimer) {
-            clearTimeout(longPressTimer);
-            longPressTimer = null;
-        }
-        if (isSpedUp) {
-            stopSpeedUp();
-            return;
-        }
-
-        const endY = e.changedTouches[0].clientY;
-        const endX = e.changedTouches[0].clientX;
-        const diffY = startY - endY;
-        const diffX = Math.abs(startX - endX);
-
-        // Only vertical swipes
-        if (Math.abs(diffY) > 50 && diffX < 100) {
-            if (diffY > 0 && currentReelIndex < reelsData.length - 1) {
-                renderReel(currentReelIndex + 1);
-            } else if (diffY < 0 && currentReelIndex > 0) {
-                renderReel(currentReelIndex - 1);
-            }
-        }
-        isSwiping = false;
-    });
-
-    // Tap to pause/play
-    container.addEventListener('click', (e) => {
-        const target = e.target;
-        if (target.closest('.reel-actions') || target.closest('.reel-info') ||
-            target.closest('.reel-sound-bar') || target.closest('button')) return;
-
-        const video = document.getElementById('reelVideo');
-        const indicator = document.getElementById('pauseIndicator');
-        if (video) {
-            if (video.paused) {
-                video.play();
-                indicator.style.display = 'none';
-            } else {
-                video.pause();
-                indicator.style.display = 'block';
-                setTimeout(() => { indicator.style.display = 'none'; }, 800);
-            }
-        }
-    });
-
-    // Long press for context menu (not on edges)
-    container.addEventListener('contextmenu', function(e) {
-    e.preventDefault();
-    showReelContextMenu();
-});
-}
-
-function startSpeedUp() {
-    isSpedUp = true;
-    const video = document.getElementById('reelVideo');
-    if (video) video.playbackRate = 2.0;
-    document.getElementById('speedIndicator').style.display = 'block';
-}
-
-function stopSpeedUp() {
-    isSpedUp = false;
-    const video = document.getElementById('reelVideo');
-    if (video) video.playbackRate = 1.0;
-    document.getElementById('speedIndicator').style.display = 'none';
-}
-
-function updateReelProgress(video) {
-    const fill = document.getElementById('reelProgressFill');
-    if (!fill || !video) return;
-    const update = () => {
-        if (video.duration) {
-            fill.style.width = (video.currentTime / video.duration * 100) + '%';
-        }
-        if (!video.paused) requestAnimationFrame(update);
-    };
-    video.addEventListener('play', () => requestAnimationFrame(update));
-}
-
-function showReelContextMenu() {
-    var existing = document.getElementById('reelContextMenu');
-    if (existing) { existing.style.display = 'none'; existing.innerHTML = ''; }
-
-    var container = document.getElementById('reelsContainer');
-    if (!container) return;
-
-    var overlay = document.createElement('div');
-    overlay.id = 'reelLongPressMenu';
-    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:6000;background:rgba(0,0,0,0.55);backdrop-filter:blur(25px);-webkit-backdrop-filter:blur(25px);display:flex;align-items:flex-end;justify-content:center;';
-
-    overlay.innerHTML =
-        '<div style="width:100%;max-width:500px;padding:0 12px 32px;animation:slideUpOverlay 0.35s cubic-bezier(0.32,0.72,0,1);">' +
-
-        /* Top card — primary actions */
-        '<div style="background:rgba(255,255,255,0.14);backdrop-filter:blur(50px) saturate(180%);-webkit-backdrop-filter:blur(50px) saturate(180%);border:0.5px solid rgba(255,255,255,0.18);border-radius:22px;overflow:hidden;margin-bottom:10px;box-shadow:0 12px 40px rgba(0,0,0,0.4),0 1px 0 rgba(255,255,255,0.12) inset;">' +
-        ((reelsData[currentReelIndex] && reelsData[currentReelIndex].no_downloads) ? '' :
-        '<div onclick="downloadReel();document.getElementById(\'reelLongPressMenu\').remove();" style="display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:0.5px solid rgba(255,255,255,0.08);cursor:pointer;" onmouseover="this.style.background=\'rgba(255,255,255,0.07)\'" onmouseout="this.style.background=\'\'">' +
-        '<div style="width:36px;height:36px;border-radius:10px;background:rgba(0,122,255,0.2);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-download" style="color:#007AFF;font-size:16px;"></i></div>' +
-        '<span style="font-size:15px;font-weight:600;color:white;">Download</span></div>') +
-        '<div onclick="document.getElementById(\'reelLongPressMenu\').remove();showToast(\'You won\\\'t see similar content\');" style="display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:0.5px solid rgba(255,255,255,0.08);cursor:pointer;" onmouseover="this.style.background=\'rgba(255,255,255,0.07)\'" onmouseout="this.style.background=\'\'">' +
-        '<div style="width:36px;height:36px;border-radius:10px;background:rgba(255,149,0,0.2);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-eye-slash" style="color:#FF9500;font-size:16px;"></i></div>' +
-        '<span style="font-size:15px;font-weight:600;color:white;">Not Interested</span></div>' +
-        '<div onclick="reportReel();document.getElementById(\'reelLongPressMenu\').remove();" style="display:flex;align-items:center;gap:14px;padding:16px 20px;cursor:pointer;" onmouseover="this.style.background=\'rgba(255,255,255,0.07)\'" onmouseout="this.style.background=\'\'">' +
-        '<div style="width:36px;height:36px;border-radius:10px;background:rgba(255,59,48,0.2);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-flag" style="color:#FF3B30;font-size:16px;"></i></div>' +
-        '<span style="font-size:15px;font-weight:600;color:white;">Report</span></div>' +
-        '</div>' +
-
-        /* Bottom card — playback controls */
-        '<div style="background:rgba(255,255,255,0.14);backdrop-filter:blur(50px) saturate(180%);-webkit-backdrop-filter:blur(50px) saturate(180%);border:0.5px solid rgba(255,255,255,0.18);border-radius:22px;overflow:hidden;padding:18px 20px;box-shadow:0 12px 40px rgba(0,0,0,0.4),0 1px 0 rgba(255,255,255,0.12) inset;margin-bottom:10px;">' +
-
-        /* Speed slider */
-        '<p style="font-size:11px;font-weight:800;color:rgba(255,255,255,0.45);text-transform:uppercase;letter-spacing:0.08em;margin:0 0 12px;">Playback Speed</p>' +
-        '<div style="display:flex;gap:6px;margin-bottom:18px;">' +
-        ['0.5','1.0','1.5','2.0'].map(function(s) {
-            return '<button onclick="setReelSpeed(' + s + ')" id="spd-' + s.replace('.','_') + '" style="flex:1;padding:10px 0;border-radius:14px;border:0.5px solid rgba(255,255,255,0.15);background:' + (s === '1.0' ? 'rgba(0,122,255,0.6)' : 'rgba(255,255,255,0.1)') + ';color:white;font-size:14px;font-weight:700;cursor:pointer;backdrop-filter:blur(10px);box-shadow:0 2px 8px rgba(0,0,0,0.2),' + (s === '1.0' ? '0 0 0 1px rgba(0,122,255,0.5)' : 'none') + ' inset;">' + s + 'x</button>';
-        }).join('') +
-        '</div>' +
-
-        /* Toggle controls */
-        /* Rows: Clear Display (text), Auto Scroll (toggle), Captions (text), PiP (text → triggers modal), Background Audio (toggle) */
-        '<div onclick="showToast(\'Display cleared\')" style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:0.5px solid rgba(255,255,255,0.06);cursor:pointer;">' +
-            '<div style="display:flex;align-items:center;gap:12px;"><i class="fa-solid fa-eye-low-vision" style="color:rgba(255,255,255,0.6);font-size:16px;width:20px;text-align:center;"></i><span style="font-size:15px;color:white;font-weight:500;">Clear display</span></div>' +
-        '</div>' +
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:0.5px solid rgba(255,255,255,0.06);">' +
-            '<div style="display:flex;align-items:center;gap:12px;"><i class="fa-solid fa-arrows-spin" style="color:rgba(255,255,255,0.6);font-size:16px;width:20px;text-align:center;"></i><span style="font-size:15px;color:white;font-weight:500;">Auto scroll</span></div>' +
-            '<div class="toggle" id="reel-autoscroll" onclick="this.classList.toggle(\'active\');triggerHaptic(10);" style="background:#555;"></div>' +
-        '</div>' +
-        '<div onclick="showToast(\'Captions & translation coming soon\')" style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:0.5px solid rgba(255,255,255,0.06);cursor:pointer;">' +
-            '<div style="display:flex;align-items:center;gap:12px;"><i class="fa-solid fa-closed-captioning" style="color:rgba(255,255,255,0.6);font-size:16px;width:20px;text-align:center;"></i><span style="font-size:15px;color:white;font-weight:500;">Captions and translation</span></div>' +
-        '</div>' +
-        '<div onclick="document.getElementById(\'reelLongPressMenu\').remove();showPiPModal();" style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:0.5px solid rgba(255,255,255,0.06);cursor:pointer;">' +
-            '<div style="display:flex;align-items:center;gap:12px;"><i class="fa-solid fa-window-restore" style="color:rgba(255,255,255,0.6);font-size:16px;width:20px;text-align:center;"></i><span style="font-size:15px;color:white;font-weight:500;">Picture-in-Picture</span></div>' +
-        '</div>' +
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;">' +
-            '<div style="display:flex;align-items:center;gap:12px;"><i class="fa-solid fa-music" style="color:rgba(255,255,255,0.6);font-size:16px;width:20px;text-align:center;"></i><span style="font-size:15px;color:white;font-weight:500;">Background audio</span></div>' +
-            '<div class="toggle" id="reel-bgaudio" onclick="this.classList.toggle(\'active\');triggerHaptic(10);" style="background:#555;"></div>' +
-        '</div>' +
-        '</div>' +
-
-        /* Cancel */
-        '<button onclick="document.getElementById(\'reelLongPressMenu\').remove()" style="width:100%;padding:15px;border-radius:18px;border:0.5px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);color:white;font-size:16px;font-weight:700;cursor:pointer;">Cancel</button>' +
-        '</div>';
-
-    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
-    var appContainer = document.getElementById('app') || document.body;
-    appContainer.appendChild(overlay);
-}
 
 // Long-press menu for the active reels tab (initReels / .reel-page).
 function openReelLongPressMenu(page) {
@@ -19745,47 +19143,7 @@ function reelMenuAction(action, pid) {
     }
 }
 
-// =====================================================
-// PICTURE-IN-PICTURE MODAL (Reference Image 3)
-// =====================================================
-function showPiPModal() {
-    var existing = document.getElementById('pipModal');
-    if (existing) existing.remove();
 
-    var modal = document.createElement('div');
-    modal.id = 'pipModal';
-    modal.style.cssText = 'position:absolute;inset:0;z-index:16000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);';
-
-    modal.innerHTML =
-        '<div style="position:relative;width:calc(100% - 48px);max-width:340px;background:var(--bg-primary,#1c1c1e);border-radius:22px;padding:28px 24px 24px;box-shadow:0 20px 60px rgba(0,0,0,0.5);animation:popIn 0.25s cubic-bezier(0.34,1.56,0.64,1);">' +
-            /* X close */
-            '<button onclick="document.getElementById(\'pipModal\').remove()" style="position:absolute;top:14px;right:14px;width:28px;height:28px;border-radius:50%;background:rgba(128,128,128,0.2);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
-                '<i class="fa-solid fa-xmark" style="color:var(--text-primary,#fff);font-size:13px;"></i>' +
-            '</button>' +
-            /* Graphic */
-            '<div style="margin:0 auto 20px;width:120px;height:80px;position:relative;">' +
-                /* Main screen */
-                '<div style="position:absolute;inset:0;border-radius:10px;border:2px solid rgba(0,122,255,0.7);background:rgba(0,122,255,0.08);display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:4px;padding:6px;">' +
-                    '<div style="border-radius:4px;background:rgba(0,122,255,0.2);"></div>' +
-                    '<div style="border-radius:4px;background:rgba(0,122,255,0.2);"></div>' +
-                    '<div style="border-radius:4px;background:rgba(0,122,255,0.2);"></div>' +
-                    '<div style="border-radius:4px;background:rgba(0,122,255,0.2);"></div>' +
-                '</div>' +
-                /* PiP small window */
-                '<div style="position:absolute;bottom:-4px;right:-4px;width:44px;height:30px;border-radius:6px;background:rgba(0,122,255,0.7);border:2px solid #fff;display:flex;align-items:center;justify-content:center;">' +
-                    '<i class="fa-solid fa-play" style="color:white;font-size:9px;"></i>' +
-                '</div>' +
-            '</div>' +
-            /* Text */
-            '<p style="text-align:center;font-size:15px;font-weight:500;color:var(--text-primary,#fff);line-height:1.5;margin-bottom:24px;">Videos will continue playing in a small window when you leave the app</p>' +
-            /* OK button */
-            '<button onclick="document.getElementById(\'pipModal\').remove();showToast(\'Picture-in-Picture enabled\');" style="width:100%;padding:15px;border-radius:14px;background:#007AFF;color:white;border:none;font-size:16px;font-weight:700;cursor:pointer;">OK</button>' +
-        '</div>';
-
-    modal.addEventListener('click', function(e) { if (e.target === modal) modal.remove(); });
-    var app = document.getElementById('app') || document.body;
-    app.appendChild(modal);
-}
 
 function setReelSpeed(speed) {
     // #reelVideo only exists in the renderReel screen. The trustclips tab the
@@ -19959,11 +19317,7 @@ function _tfActiveReelVideo() {
     return best;
 }
 
-function toggleFullscreen() {
-    const container = document.getElementById('reelsContainer');
-    if (container.requestFullscreen) container.requestFullscreen();
-    document.getElementById('reelContextMenu').style.display = 'none';
-}
+
 
 function closeReelsPage() {
     // The viewer a feed video opens owns its own element now.
@@ -20000,46 +19354,6 @@ function closeReelsPage() {
     }
 }
 
-function showDownloadPill(reelId) {
-    var existing = document.getElementById('downloadPill');
-    if (existing) existing.remove();
-    var pill = document.createElement('div');
-    pill.id = 'downloadPill';
-    pill.style.cssText = 'position:fixed;bottom:120px;left:50%;transform:translateX(-50%);background:rgba(20,20,20,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);color:#fff;padding:12px 22px;border-radius:50px;font-size:14px;font-weight:700;z-index:19999;display:flex;align-items:center;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,0.4);animation:popIn 0.3s cubic-bezier(0.34,1.56,0.64,1);white-space:nowrap;';
-    pill.innerHTML =
-        '<svg id="dpCircle" width="20" height="20" viewBox="0 0 20 20" style="transform:rotate(-90deg);flex-shrink:0;">' +
-            '<circle cx="10" cy="10" r="8" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="2"/>' +
-            '<circle id="dpArc" cx="10" cy="10" r="8" fill="none" stroke="#34C759" stroke-width="2" stroke-dasharray="50.27" stroke-dashoffset="50.27" stroke-linecap="round" style="transition:stroke-dashoffset 0.1s linear;"/>' +
-        '</svg>' +
-        '<span id="dpLabel">Saving to device… 0%</span>';
-    var appRoot = document.querySelector('.app') || document.body;
-    appRoot.appendChild(pill);
-    // Nothing calls this. It was a second progress ring counting up on a timer
-    // with no download behind it, one wiring mistake away from telling somebody
-    // a file had saved when it had not. Downloads go through downloadReel, which
-    // fetches real bytes; this only ever reports what that hands it.
-    var arc = document.getElementById('dpArc');
-    var label = document.getElementById('dpLabel');
-    window._tfDownloadPillUpdate = function (pct, done) {
-        if (done) {
-            if (arc) arc.setAttribute('stroke-dashoffset', '0');
-            if (label) label.textContent = 'Saved ✓';
-            triggerHaptic(30);
-            setTimeout(function() {
-                pill.style.transition = 'opacity 0.4s,transform 0.4s';
-                pill.style.opacity = '0';
-                pill.style.transform = 'translateX(-50%) translateY(10px)';
-                setTimeout(function() { pill.remove(); }, 400);
-            }, 1400);
-        } else if (pct === null || pct === undefined || isNaN(pct)) {
-            if (label) label.textContent = 'Saving…';
-        } else {
-            var offset = 50.27 * (1 - pct / 100);
-            if (arc) arc.setAttribute('stroke-dashoffset', offset.toFixed(2));
-            if (label) label.textContent = 'Saving… ' + Math.floor(pct) + '%';
-        }
-    };
-}
 
 
 
@@ -20049,73 +19363,14 @@ function showDownloadPill(reelId) {
 
 
 
-async function toggleReelLike(reelId) {
-    const reel = reelsData.find(r => r.id === reelId);
-    if (!reel) return;
-    reel.liked = !reel.liked;
-    reel.likes += reel.liked ? 1 : -1;
-    renderReel(currentReelIndex);
-    if (window.sb && currentUser && reelId && !String(reelId).startsWith('single_') && !String(reelId).startsWith('tmp_')) {
-        if (reel.liked) {
-            try { await sb.from('likes').insert({ user_id: currentUser.id, post_id: reelId }); } catch(e) {}
-            tfNotifyLike(reelId);
-        } else {
-            try { await sb.from('likes').delete().eq('user_id', currentUser.id).eq('post_id', reelId); } catch(e) {}
-        }
-    }
-}
 
-async function toggleReelBookmark(reelId) {
-    const reel = reelsData.find(r => r.id === reelId);
-    if (!reel) return;
-    reel.bookmarked = !reel.bookmarked;
-    renderReel(currentReelIndex);
-    showToast(reel.bookmarked ? 'Saved!' : 'Removed from saved');
-    if (window.sb && currentUser && reelId && !String(reelId).startsWith('single_') && !String(reelId).startsWith('tmp_')) {
-        if (reel.bookmarked) {
-            await sb.from('bookmarks').insert({ user_id: currentUser.id, post_id: reelId }).catch(function(){});
-        } else {
-            await sb.from('bookmarks').delete().eq('user_id', currentUser.id).eq('post_id', reelId).catch(function(){});
-        }
-    }
-}
 
-// ============================================
-// REELS TUTORIAL
-// ============================================
-function showReelsTutorial() {
-    const tutorial = document.createElement('div');
-    tutorial.id = 'reelsTutorial';
-    tutorial.style.cssText = `
-        position:fixed; top:0; left:0; right:0; bottom:0; z-index:6000;
-        background:rgba(0,0,0,0.7); display:flex; flex-direction:column;
-        align-items:center; justify-content:center; gap:20px;
-    `;
-    tutorial.innerHTML = `
-        <div style="animation:swipeHand 1.5s ease-in-out infinite;">
-            <svg width="60" height="60" viewBox="0 0 24 24" fill="white" opacity="0.8">
-                <path d="M9 11.24V7.5C9 6.12 10.12 5 11.5 5S14 6.12 14 7.5v3.74c1.21-.81 2-2.18 2-3.74C16 5.01 13.99 3 11.5 3S7 5.01 7 7.5c0 1.56.79 2.93 2 3.74zm9.84 4.63l-4.54-2.26c-.17-.07-.35-.11-.54-.11H13v-6c0-.83-.67-1.5-1.5-1.5S10 6.67 10 7.5v10.74l-3.43-.72c-.08-.01-.15-.03-.24-.03-.31 0-.59.13-.79.33l-.79.8 4.94 4.94c.27.27.65.44 1.06.44h6.79c.75 0 1.33-.55 1.44-1.28l.75-5.27c.01-.07.02-.14.02-.2 0-.62-.38-1.16-.91-1.38z"/>
-            </svg>
-        </div>
-        <p style="color:white; font-size:18px; font-weight:600; text-align:center;">Swipe up for more</p>
-        <p style="color:rgba(255,255,255,0.6); font-size:14px; text-align:center;">Tap to pause • Hold edges for 2x speed</p>
-        <button onclick="dismissReelsTutorial()" style="
-            margin-top:20px; padding:12px 32px; border-radius:30px; border:none;
-            background:rgba(255,255,255,0.2); backdrop-filter:blur(10px);
-            color:white; font-size:15px; font-weight:600; cursor:pointer;
-        ">Got it</button>
-    `;
-    document.body.appendChild(tutorial);
 
-    setTimeout(dismissReelsTutorial, 5000);
-}
 
-function dismissReelsTutorial() {
-    const tutorial = document.getElementById('reelsTutorial');
-    if (tutorial) tutorial.remove();
-    localStorage.setItem('trustfirst-reels-tutorial', 'true');
-    reelsTutorialShown = true;
-}
+
+
+
+
 
     // ============================================
 // CLIP CAMERA PAGE - Create Clips
@@ -21692,11 +20947,7 @@ function startLiveNow() {
 // SOUND HUB - Complete
 // ============================================
 function openSoundHubFromCamera() { if(typeof closeLgCam==='function')closeLgCam(); openSoundHub('Add Audio'); }
-function reportReel() {
-    var menu = document.getElementById('reelLongPressMenu');
-    if (menu) menu.remove();
-    openReportMenu('reel_' + currentReelIndex, 'reel');
-}
+
 function closeSoundHub() { stopSoundPreview&&stopSoundPreview(); var p=document.getElementById('soundHubPage'); if(p)p.remove(); var _rc=document.getElementById('reelsContainer'); if(!_rc) { showNavBar&&showNavBar(); } }
 async function openSoundHub(soundName, fallbackVideoUrl) {
     soundName = soundName || 'Original Audio';
@@ -26685,8 +25936,13 @@ function getTrustBadgeHTML() {
     function navigateTo(page) {
     if (page === 'home' && typeof resetNav === 'function') {
         resetNav();
-    } else if (page === 'reels' && typeof showReelsPage === 'function') {
-        showReelsPage();
+    } else if (page === 'reels' && typeof initReels === 'function') {
+        // Was showReelsPage, the index-rendered screen. That one is gone; this
+        // is the same trustclips feed the bottom bar opens.
+        var _ro = document.getElementById('reel-overlay');
+        if (_ro) { _ro.style.display = 'flex'; _ro.style.flexDirection = 'column'; }
+        if (typeof hideNavBar === 'function') hideNavBar();
+        initReels();
     } else if (typeof switchTab === 'function') {
         switchTab(page);
     }
@@ -36696,9 +35952,11 @@ function downloadReel(explicitUrl) {
     if (menu) menu.remove();
     if (window._dl.active) { showToast('Already downloading'); return; }
 
-    var reel = reelsData[currentReelIndex] || null;
-    var url = explicitUrl || (reel && reel.videoUrl) || '';
-    if (reel && reel.no_downloads) { showToast('The creator turned downloads off'); return; }
+    // The caller passes the clip's own URL. Whether downloads are allowed is
+    // decided by the menu, which reads it off the page being long-pressed.
+    var active = _tfActiveReelVideo();
+    var url = explicitUrl || (active && (active.currentSrc || active.src)) || '';
+    var reel = null;
     if (!url) { showToast('Nothing to download here'); return; }
 
     window._dl.active = true; window._dl.pct = 0;
@@ -48591,9 +47849,13 @@ function selectOfflineTier(count, sizeMB, watchHrs) {
         return;
     }
 
-    // Get the most recent videos from reelsData or your loaded feed
-    var videosToCache = (window.reelsData || [])
-        .filter(function(r){ return r.videoUrl; })
+    // The clips currently in the feed. This used to read window.reelsData,
+    // which was never set — reelsData was a lexical binding, so this was always
+    // an empty array and offline caching silently saved nothing.
+    var videosToCache = Array.prototype.slice
+        .call(document.querySelectorAll('#reel-scroller .reel-page video'))
+        .map(function (v) { return { videoUrl: v.currentSrc || v.src }; })
+        .filter(function (r) { return r.videoUrl; })
         .slice(0, count);
 
     if (videosToCache.length === 0) {
