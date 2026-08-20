@@ -49,8 +49,12 @@
     <a href="/privacy/">Privacy</a>
     <a href="/cookies/">Cookies</a>
     <a href="/accessibility/">Accessibility</a>
-    {# Terms is written but not linked: it names a company that is not registered
-       yet. It joins this row the day CIPC issues EDE's Corp. #}
+    {% comment %}
+      Terms is written but not linked here: it names a company that is not
+      registered yet. It joins this row the day CIPC issues EDE's Corp.
+      Must be {% comment %}, not {#...#} — the hash form is single-line only and
+      a two-line one renders as visible text, which is exactly what it did.
+    {% endcomment %}
     <a href="mailto:contacttrustfirst@gmail.com">Contact</a>
     <a href="/">Open TrustFirst</a>
     <span class="c" translate="no">&copy; {% now "Y" %} TrustFirst</span>
