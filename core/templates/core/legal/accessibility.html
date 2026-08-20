@@ -1,0 +1,161 @@
+{% extends "core/legal/base.html" %}
+
+{% block title %}Accessibility · TrustFirst{% endblock %}
+{% block description %}What works in TrustFirst if you use assistive technology, what does not work yet, and how to tell us where it fails you.{% endblock %}
+
+{% comment %}
+  Audited before writing, not after. Counts across feed.js, feed.html and
+  feed.css at the time of writing:
+
+    aria-label            5
+    other aria-*          3
+    role="                0
+    alt="                 4
+    tabindex              0
+    prefers-reduced-motion 1  (a single animation on the algorithm summary)
+    prefers-contrast       0
+    :focus rules           3
+
+  That is why this page says screen reader and keyboard support are incomplete
+  rather than claiming them. Every "works today" item below was confirmed in the
+  code: the theme switch at feed.js:126, speechSynthesis at feed.js:51147, and
+  the translate and data-saver preferences.
+
+  When the gaps are closed, this page changes. It should never be more generous
+  about the app than the app deserves — somebody relying on it to decide whether
+  they can use TrustFirst at all is exactly who a vague accessibility statement
+  wastes the most.
+{% endcomment %}
+
+{% block content %}
+<div class="tf-legal">
+
+  <div class="tf-legal-hero">
+    <h1>Accessibility</h1>
+    <p>What works, what does not work yet, and how to tell us where we have failed you.</p>
+    <p class="tf-legal-meta">Last updated 20 August 2026 · <a href="mailto:contacttrustfirst@gmail.com">contacttrustfirst@gmail.com</a></p>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-circle-info" style="color:#FF9500;"></i>Where we honestly are</h2>
+    <div class="tf-legal-flat">
+      <div class="tf-legal-note">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <div><b>TrustFirst is not yet properly accessible, and we are not going to pretend it is.</b>
+        <span>If you use a screen reader or navigate by keyboard, parts of this app will not work for you today. You deserve to know that before you spend an evening fighting it, rather than after.</span></div>
+      </div>
+      <p>We have not been independently audited and we do not claim to meet any conformance standard. What follows is a plain account of where things stand, checked against the code rather than written from good intentions.</p>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-circle-check" style="color:#34C759;"></i>What works today</h2>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Dark and light themes<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>A full dark theme, and a light one, switched in Settings. If you have not chosen, TrustFirst follows whatever your device is set to.</p>
+      </div>
+    </div>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Having things read aloud<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Messages in Eddie can be read out using your device's own speech. It is limited to that conversation at the moment; it is not a way to have the whole app read to you.</p>
+      </div>
+    </div>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Translation<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Posts can be translated into your language, and the app can do it automatically if you turn that on. Useful if reading in a second language is tiring rather than impossible.</p>
+      </div>
+    </div>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Turning the noise down<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Several things exist to make the app less overwhelming, and they were built for that reason rather than as accessibility features:</p>
+        <ul>
+          <li><b>Going dark</b> mutes every notification for a day or a month.</li>
+          <li><b>Muting and restricting</b> quiets someone without them knowing.</li>
+          <li><b>Blocking</b> removes them from your experience entirely.</li>
+          <li><b>Data saver</b> loads less, which helps on a slow or expensive connection.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Whatever your device already does<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>TrustFirst runs in a browser, so your system settings mostly apply and we do not override them. Pinch to zoom works. Browser and system text size work. If your phone is set to a larger typeface, the app follows.</p>
+        <p>This is the part of accessibility we get right largely by not getting in the way, and it is worth knowing it is available.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-circle-xmark" style="color:#FF3B30;"></i>What does not work yet</h2>
+    <div class="tf-legal-flat">
+      <p>Named specifically, because "we are always improving" tells you nothing about whether you can use the app tomorrow.</p>
+    </div>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Screen readers<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Incomplete. Most buttons in TrustFirst are unlabelled, most images have no description, and the app does not announce when things change on screen. A screen reader will read a lot of it as unlabelled buttons.</p>
+        <p>This is the biggest single gap and the one we should fix first.</p>
+      </div>
+    </div>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Using it by keyboard<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Incomplete. The app was built for touch. Many controls cannot be reached with Tab, and where focus is currently sitting is often invisible. If you cannot use a pointer, much of TrustFirst is not reachable today.</p>
+      </div>
+    </div>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Reduced motion<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Barely supported. If you have asked your device to reduce motion, TrustFirst honours it in exactly one place. Sheets still slide, things still bounce, and clips still autoplay. If motion makes you unwell, this app will currently do that.</p>
+      </div>
+    </div>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Captions on video<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Not built. There are no automatic captions, and no way to upload a caption file with a clip. If you are Deaf or hard of hearing, video on TrustFirst is currently silent to you unless the person who posted it wrote what was said.</p>
+      </div>
+    </div>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">High contrast and text size inside the app<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>There is no high contrast mode and no text size control of our own. Your device's settings are the only lever, and some of our text is smaller than it ought to be regardless.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-comment" style="color:#007AFF;"></i>Telling us</h2>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">If something stops you<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Write to <a href="mailto:contacttrustfirst@gmail.com">contacttrustfirst@gmail.com</a> and say what you were trying to do, what happened, and what you use — a screen reader and which one, keyboard only, magnification, whatever it is.</p>
+        <p>A specific report about one screen is worth more than a general one, and it is far more likely to get fixed quickly.</p>
+      </div>
+    </div>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">What we will do about it<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>A barrier that locks somebody out entirely is treated as a fault to be fixed, not a feature request to be scheduled. We cannot promise a date — this is a very small team — but we can promise you will get an honest answer about whether and when, rather than silence.</p>
+        <p>This page will be updated as things change. If something moves from the list above to the list below it, that is because it genuinely did.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
