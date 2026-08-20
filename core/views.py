@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.http import FileResponse
+from django.http import FileResponse, JsonResponse
 from django.shortcuts import render
 
 def feed(request, **kwargs):
@@ -11,6 +11,39 @@ def feed(request, **kwargs):
     the template, which is why this takes **kwargs.
     """
     return render(request, 'core/feed.html')
+
+
+def _apk_url():
+    return (getattr(settings, 'ANDROID_APK_URL', '') or '').strip()
+
+
+def download_android(request):
+    """A permanent address for the Android build.
+
+    The file itself lives in R2 and its name changes with every build. Without
+    this, the download link on the marketing site would have to be edited by
+    hand after each one, and every link anybody had already shared would rot.
+    Point people here forever; point ANDROID_APK_URL at the current file.
+    """
+    from django.http import HttpResponseRedirect
+    url = _apk_url()
+    if url:
+        return HttpResponseRedirect(url)
+    return render(request, 'core/legal/no_download.html', status=404)
+
+
+def download_status(request):
+    """Whether a build exists, for the marketing site to ask.
+
+    The site is served from a different origin, so this one endpoint allows any
+    reader. It exposes a single boolean and a URL that is public anyway, and
+    nothing about anybody using the app.
+    """
+    url = _apk_url()
+    resp = JsonResponse({'android': bool(url), 'url': url or None})
+    resp['Access-Control-Allow-Origin'] = '*'
+    resp['Cache-Control'] = 'public, max-age=300'
+    return resp
 
 
 def legal_page(request, page):

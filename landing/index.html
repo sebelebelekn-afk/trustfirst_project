@@ -254,7 +254,13 @@ footer a:hover{color:#fff;}
             when you have it: serving it costs nothing there.
 --------------------------------------------------------------------------- */
 var APP_URL = 'https://trustfirst.app';
-var APK_URL = '';   // e.g. 'https://media.trustfirst.app/apk/trustfirst.apk'
+
+// APK_URL is left empty on purpose. The page asks the app itself whether an
+// Android build exists — see the fetch at the bottom — so a new build never
+// needs this file edited. Set ANDROID_APK_URL on the server instead and the
+// download button appears here by itself.
+// Fill this in only to override that, or if the app is unreachable.
+var APK_URL = '';
 
 (function () {
   var ua = navigator.userAgent || '';
@@ -279,17 +285,34 @@ var APK_URL = '';   // e.g. 'https://media.trustfirst.app/apk/trustfirst.apk'
   });
   el('year').textContent = new Date().getFullYear();
 
-  // Android card. With no APK built yet there is nothing to download, and
-  // pointing a Download button at a website would be calling a web page a file.
-  // It offers the install that does work instead, and turns into a real
-  // download the moment APK_URL is filled in.
+  // Declared before the two functions below use them.
   var apk = el('apkBtn');
-  if (APK_URL) {
-    apk.setAttribute('href', APK_URL);
+  var primary = el('ctaPrimary'), secondary = el('ctaSecondary'), note = el('heroNote');
+
+  // Android card. Two states, and the page starts in the honest one: with no
+  // build to download, pointing a Download button at a website would be calling
+  // a web page a file. It offers the install that does work, and swaps to a real
+  // download if the app reports that a build exists.
+
+  function offerDownload(url) {
+    apk.setAttribute('href', url);
     apk.setAttribute('download', '');
-    apk.textContent = 'Download the app';
-  } else {
+    apk.textContent = 'Download for Android';
+    el('androidCopy').textContent =
+      'Download and install the app. Your phone will ask you to allow installing ' +
+      'from your browser — that is normal for apps that are not from the Play Store yet.';
+    el('androidSteps').style.display = 'none';
+    if (isAndroid) {
+      primary.textContent = 'Download for Android';
+      primary.setAttribute('href', url);
+      primary.setAttribute('download', '');
+      note.textContent = 'Free. No Play Store account needed.';
+    }
+  }
+
+  function offerBrowserInstall() {
     apk.setAttribute('href', APP_URL);
+    apk.removeAttribute('download');
     apk.textContent = 'Open in Chrome';
     el('androidCopy').textContent =
       'TrustFirst installs straight from Chrome and opens like any other app. ' +
@@ -297,8 +320,9 @@ var APK_URL = '';   // e.g. 'https://media.trustfirst.app/apk/trustfirst.apk'
     el('androidSteps').style.display = '';
   }
 
+  offerBrowserInstall();
+
   // Lead with whatever fits the device in the reader's hand.
-  var primary = el('ctaPrimary'), secondary = el('ctaSecondary'), note = el('heroNote');
   if (isAndroid && APK_URL) {
     primary.textContent = 'Download for Android';
     primary.setAttribute('href', APK_URL);
@@ -324,6 +348,28 @@ var APK_URL = '';   // e.g. 'https://media.trustfirst.app/apk/trustfirst.apk'
     secondary.textContent = 'Get it on your phone';
     secondary.setAttribute('href', '#get');
     note.textContent = 'Made for your phone.';
+  }
+
+  // Ask the app whether an Android build exists, rather than hardcoding the
+  // answer here. Upload a new APK, point ANDROID_APK_URL at it, and the button
+  // appears on this page by itself — no edit, no redeploy of the site.
+  //
+  // If the request fails for any reason — the app is down, offline, CORS, a
+  // typo in APP_URL — nothing happens and the page keeps the browser-install
+  // wording it already has. The failure mode is the honest state, not a broken
+  // download button.
+  if (!APK_URL) {
+    fetch(base + '/download/status.json', { mode: 'cors', credentials: 'omit' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        // Go through the app's permanent /download/android/ address rather than
+        // the storage URL it reports, so a link somebody shared still works
+        // after the next build replaces the file.
+        if (d && d.android) offerDownload(base + '/download/android/');
+      })
+      .catch(function () { /* stay as we are */ });
+  } else {
+    offerDownload(APK_URL);
   }
 })();
 </script>

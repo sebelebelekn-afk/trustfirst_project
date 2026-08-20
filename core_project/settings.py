@@ -130,6 +130,12 @@ SUPABASE_URL            = os.environ.get('SUPABASE_URL', '')
 SUPABASE_ANON_KEY       = os.environ.get('SUPABASE_ANON_KEY', '')
 SUPABASE_SERVICE_KEY    = os.environ.get('SUPABASE_SERVICE_KEY', '')
 
+# Where the current Android build lives, once one has been built and uploaded.
+# Empty until then, which makes /download/android/ explain itself instead of
+# handing somebody a broken file, and tells the marketing site not to offer a
+# download that does not exist.
+ANDROID_APK_URL = os.environ.get('ANDROID_APK_URL', '')
+
 # Cloudflare R2 holds the media people look at. R2 charges for what is stored
 # but nothing for serving it, which is the opposite of the bill that ran out.
 # Leave any of these unset and uploads keep going to Supabase storage.

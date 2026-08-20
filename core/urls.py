@@ -21,6 +21,11 @@ urlpatterns = [
     path('accessibility/', views.legal_page, {'page': 'accessibility'}, name='legal_accessibility'),
     path('help/', views.legal_page, {'page': 'help'}, name='legal_help'),
 
+    # A permanent address for the Android build, so a shared link never rots and
+    # the marketing site never needs editing when a new APK is uploaded.
+    path('download/android/', views.download_android, name='download_android'),
+    path('download/status.json', views.download_status, name='download_status'),
+
     path('api/config/', api_views.get_config, name='api_config'),
     path('api/upload/sign/', api_views.r2_sign_upload, name='api_upload_sign'),
     path('api/eddie/chat/', eddie_views.eddie_chat, name='api_eddie_chat'),
