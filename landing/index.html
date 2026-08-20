@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TrustFirst — Connect with people you can trust</title>
+<meta name="description" content="TrustFirst is a social app built around people you actually trust. Get it on Android, or add it to your home screen on iPhone.">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+
+<!-- Open Graph, so a link pasted into WhatsApp shows a card instead of a bare URL -->
+<meta property="og:title" content="TrustFirst">
+<meta property="og:description" content="Connect with people you can trust.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="icon.svg">
+
+<style>
+/* ---------------------------------------------------------------------------
+   Everything is inline and local. No web fonts, no CDN, no analytics: the page
+   has to open fast on a phone with one bar of signal, and it has to keep
+   working whoever ends up hosting it.
+   The palette and shapes come from the app's own splash so the two do not feel
+   like different products.
+--------------------------------------------------------------------------- */
+:root{
+  --bg:#000; --panel:#121214; --line:rgba(255,255,255,0.10);
+  --text:#fff; --muted:#8e8e93; --blue:#007AFF;
+  --pad:22px;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  line-height:1.5;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+a{color:inherit;text-decoration:none;}
+.wrap{max-width:920px;margin:0 auto;padding:0 var(--pad);}
+
+/* header ------------------------------------------------------------------ */
+header{
+  position:sticky;top:0;z-index:10;
+  background:rgba(0,0,0,0.72);backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--line);
+  padding-top:env(safe-area-inset-top);
+}
+.hrow{display:flex;align-items:center;justify-content:space-between;height:58px;}
+.mark{display:flex;align-items:center;gap:9px;font-weight:800;font-size:17px;letter-spacing:-0.3px;}
+.mark img{width:26px;height:26px;border-radius:7px;display:block;}
+.hlink{color:var(--muted);font-size:15px;font-weight:600;padding:8px 4px;}
+.hlink:hover{color:#fff;}
+
+/* hero -------------------------------------------------------------------- */
+.hero{text-align:center;padding:64px 0 52px;}
+.hero .logo{width:78px;height:78px;border-radius:20px;margin:0 auto 22px;display:block;}
+h1{
+  font-size:clamp(38px,11vw,60px);font-weight:900;letter-spacing:-1.2px;
+  margin:0 0 10px;line-height:1.05;
+}
+.sub{color:var(--muted);font-size:16px;margin:0 auto 30px;max-width:30ch;}
+
+/* buttons ----------------------------------------------------------------- */
+.btn{
+  display:flex;align-items:center;justify-content:center;gap:9px;
+  width:100%;padding:16px;border-radius:30px;border:none;
+  font-size:16px;font-weight:700;cursor:pointer;
+  font-family:inherit;transition:transform .12s,background .15s,border-color .15s;
+}
+.btn:active{transform:scale(0.98);}
+.btn-primary{background:var(--blue);color:#fff;}
+.btn-primary:hover{background:#0a84ff;}
+.btn-ghost{background:transparent;color:#fff;border:1.5px solid rgba(255,255,255,0.22);}
+.btn-ghost:hover{border-color:rgba(255,255,255,0.42);}
+.btn-soon{background:rgba(255,255,255,0.07);color:var(--muted);cursor:default;}
+.btn-soon:active{transform:none;}
+.stack{display:flex;flex-direction:column;gap:12px;max-width:330px;margin:0 auto;}
+.note{color:var(--muted);font-size:12.5px;margin-top:14px;}
+
+/* sections ---------------------------------------------------------------- */
+section{padding:44px 0;border-top:1px solid var(--line);}
+h2{font-size:22px;font-weight:800;letter-spacing:-0.4px;margin:0 0 6px;}
+.lede{color:var(--muted);font-size:15px;margin:0 0 26px;}
+
+.cards{display:grid;gap:14px;grid-template-columns:1fr;}
+@media(min-width:680px){.cards{grid-template-columns:1fr 1fr;}}
+.card{
+  background:var(--panel);border:1px solid var(--line);
+  border-radius:18px;padding:22px;
+}
+.card h3{display:flex;align-items:center;gap:9px;font-size:17px;font-weight:800;margin:0 0 6px;}
+.card p{color:var(--muted);font-size:14px;margin:0 0 18px;}
+.card .btn{max-width:none;}
+
+/* the iPhone steps -------------------------------------------------------- */
+ol.steps{margin:0 0 18px;padding-left:19px;color:var(--muted);font-size:14px;}
+ol.steps li{margin-bottom:7px;}
+ol.steps b{color:#fff;font-weight:700;}
+
+/* feature list ------------------------------------------------------------ */
+.feats{display:grid;gap:12px;grid-template-columns:1fr;}
+@media(min-width:680px){.feats{grid-template-columns:repeat(3,1fr);}}
+.feat{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;}
+.feat b{display:block;font-size:15.5px;font-weight:800;margin-bottom:5px;}
+.feat span{color:var(--muted);font-size:13.5px;}
+
+/* account row ------------------------------------------------------------- */
+.account{text-align:center;}
+.account .stack{margin-top:22px;}
+
+footer{
+  border-top:1px solid var(--line);padding:30px 0 44px;
+  color:var(--muted);font-size:13px;text-align:center;
+}
+footer a{color:var(--muted);text-decoration:underline;text-underline-offset:3px;}
+footer a:hover{color:#fff;}
+.dot{opacity:.4;margin:0 8px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap hrow">
+    <a class="mark" href="#top"><img src="icon.svg" alt=""><span translate="no">TrustFirst</span></a>
+    <a class="hlink" id="headerLogin" href="#account">Log in</a>
+  </div>
+</header>
+
+<main class="wrap" id="top">
+
+  <div class="hero">
+    <img class="logo" src="icon.svg" alt="TrustFirst">
+    <h1 translate="no">TrustFirst</h1>
+    <p class="sub">Connect with people you can trust.</p>
+
+    <div class="stack">
+      <!-- Filled in by the script below with whatever suits the device you are
+           actually holding, so nobody is offered an APK on an iPhone. -->
+      <a class="btn btn-primary" id="ctaPrimary" href="#get">Get the app</a>
+      <a class="btn btn-ghost" id="ctaSecondary" href="#account">Open in your browser</a>
+    </div>
+    <p class="note" id="heroNote"></p>
+  </div>
+
+  <section id="get">
+    <h2>Get TrustFirst</h2>
+    <p class="lede">Two ways in, depending on your phone.</p>
+
+    <div class="cards">
+      <div class="card">
+        <h3>Android</h3>
+        <p id="androidCopy">Download and install the app. Your phone will ask you to allow installing from your browser — that is normal for apps that are not from the Play Store yet.</p>
+        <a class="btn btn-primary" id="apkBtn" href="#">Download the app</a>
+      </div>
+
+      <div class="card">
+        <h3>iPhone &amp; iPad</h3>
+        <p>TrustFirst runs from Safari and installs to your home screen, so it opens like any other app.</p>
+        <ol class="steps">
+          <li>Open TrustFirst in <b>Safari</b>.</li>
+          <li>Tap the <b>Share</b> button at the bottom.</li>
+          <li>Choose <b>Add to Home Screen</b>.</li>
+        </ol>
+        <a class="btn btn-ghost" id="iosBtn" href="#">Open in Safari</a>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What you get</h2>
+    <p class="lede">Small on purpose. These are the parts people use.</p>
+    <div class="feats">
+      <div class="feat">
+        <b>TrustClips</b>
+        <span>Short videos from the people you follow, with an editor built in.</span>
+      </div>
+      <div class="feat">
+        <b>Messages only you can read</b>
+        <span>Direct messages are end&#8209;to&#8209;end encrypted, so they are unreadable in transit.</span>
+      </div>
+      <div class="feat">
+        <b>Going dark</b>
+        <span>Mute everything for a day or a month. Your circle is told you are taking space.</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="account" id="account">
+    <h2>Or just use it in your browser</h2>
+    <p class="lede">
+      Same app, nothing to install. Works on a laptop as well as a phone.
+    </p>
+    <div class="stack">
+      <a class="btn btn-primary" id="registerBtn" href="#">Create account</a>
+      <a class="btn btn-ghost" id="loginBtn" href="#">Log in</a>
+    </div>
+    <p class="note">
+      You sign in on TrustFirst itself, never on this page.
+    </p>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span translate="no">TrustFirst</span>
+    <!-- Add a contact address and a privacy policy here when you have them.
+         Google Play requires a working privacy policy URL before it will accept
+         a listing, so that one is not optional forever. Left out rather than
+         linked to a page that does not exist yet. -->
+  </div>
+</footer>
+
+<script>
+/* ---------------------------------------------------------------------------
+   CHANGE THESE TWO AND NOTHING ELSE.
+
+   APP_URL  where the app itself lives. Every button here points at it.
+   APK_URL  the Android build. Leave it empty until there is one — the button
+            says so honestly instead of pointing at a 404. Put the file in R2
+            when you have it: serving it costs nothing there.
+--------------------------------------------------------------------------- */
+var APP_URL = 'https://trustfirst.app';
+var APK_URL = '';   // e.g. 'https://media.trustfirst.app/apk/trustfirst.apk'
+
+(function () {
+  var ua = navigator.userAgent || '';
+  var isAndroid = /Android/i.test(ua);
+  // iPadOS reports itself as a Mac, so a touch-capable "Mac" is really an iPad.
+  var isIOS = /iPhone|iPad|iPod/i.test(ua) ||
+              (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+
+  function el(id) { return document.getElementById(id); }
+  function go(node, href) { if (node) node.setAttribute('href', href); }
+
+  go(el('loginBtn'), APP_URL);
+  go(el('registerBtn'), APP_URL);
+  go(el('headerLogin'), APP_URL);
+  go(el('iosBtn'), APP_URL);
+
+  // Android card
+  var apk = el('apkBtn');
+  if (APK_URL) {
+    apk.setAttribute('href', APK_URL);
+    apk.setAttribute('download', '');
+  } else {
+    apk.className = 'btn btn-soon';
+    apk.textContent = 'Android app coming soon';
+    apk.removeAttribute('href');
+    el('androidCopy').textContent =
+      'The Android app is not ready to download yet. In the meantime it runs in ' +
+      'Chrome, and you can add it to your home screen from the browser menu.';
+  }
+
+  // Lead with whatever fits the device in the reader's hand.
+  var primary = el('ctaPrimary'), secondary = el('ctaSecondary'), note = el('heroNote');
+  if (isAndroid && APK_URL) {
+    primary.textContent = 'Download for Android';
+    primary.setAttribute('href', APK_URL);
+    primary.setAttribute('download', '');
+    secondary.textContent = 'Open in your browser';
+    secondary.setAttribute('href', APP_URL);
+    note.textContent = 'Free. No Play Store account needed.';
+  } else if (isIOS) {
+    primary.textContent = 'Open TrustFirst';
+    primary.setAttribute('href', APP_URL);
+    secondary.textContent = 'How to add it to your home screen';
+    secondary.setAttribute('href', '#get');
+    note.textContent = 'On iPhone, TrustFirst installs from Safari.';
+  } else {
+    primary.textContent = 'Open TrustFirst';
+    primary.setAttribute('href', APP_URL);
+    secondary.textContent = 'Get it on your phone';
+    secondary.setAttribute('href', '#get');
+    note.textContent = 'Runs in your browser. Nothing to install.';
+  }
+})();
+</script>
+
+</body>
+</html>
