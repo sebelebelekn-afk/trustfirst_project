@@ -3978,6 +3978,27 @@ html, body { background: #000; }
 :root { --skeleton-bg: #e8e8e8; }
 [data-theme="dark"] { --skeleton-bg: #2c2c2e; }
 
+/* ── KEYBOARD FOCUS ──────────────────────────────────────────────────────────
+   A label is no use if you cannot reach the thing it names. Anything given
+   role="button" is reachable by Tab now, so it also has to be visible when it
+   is reached — without this, a keyboard user is moving an invisible cursor
+   around the screen.
+   :focus-visible rather than :focus, so a mouse click does not leave a ring
+   behind on something nobody is navigating by keyboard. */
+[role="button"]:focus-visible,
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+    outline: 2px solid #0A84FF;
+    outline-offset: 2px;
+    border-radius: 6px;
+}
+/* The nav icons are round, so the ring should be too. */
+.nav-icon:focus-visible,
+.search-circle:focus-visible { border-radius: 50%; }
+
 /* ── ACCOUNTS TO FOLLOW, BETWEEN CLIPS ───────────────────────────────────────
    The rail scrolls horizontally on its own, so a sideways drag moves between
    people while an up swipe still goes to the next clip. */

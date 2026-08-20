@@ -2910,6 +2910,21 @@ function _linkPreviewCard(url) {
     '</div>';
 }
 // Open a link inside a sandboxed in-app browser (never a raw new tab).
+// ── KEYBOARD ACTIVATION ────────────────────────────────────────────────────
+// A real <button> fires its click handler on Enter and Space. An element merely
+// given role="button" does not — the browser gives it the name and the shape but
+// none of the behaviour. Without this, everything just made reachable by Tab
+// could be reached and then not used, which is worse than not reaching it.
+document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+    var el = e.target;
+    if (!el || el.getAttribute('role') !== 'button') return;
+    // Leave real controls alone; they already do this themselves.
+    if (/^(BUTTON|A|INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+    e.preventDefault();          // stop Space scrolling the page underneath
+    el.click();
+});
+
 function openLinkInApp(url) {
     if (!_isSafeUrl(url)) { showToast('That link looks unsafe and was blocked'); return; }
     var host = '';
