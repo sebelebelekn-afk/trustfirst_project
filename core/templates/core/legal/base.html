@@ -1,0 +1,77 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{% block title %}TrustFirst{% endblock %}</title>
+<meta name="description" content="{% block description %}TrustFirst{% endblock %}">
+<link rel="icon" href="{% static 'core/icon-dark.svg' %}" type="image/svg+xml">
+
+<!-- These pages are ordinary web pages, not screens inside the app. They open
+     in any browser, they can be linked to and shared, and the app loads the
+     same URL rather than keeping its own copy of the words. -->
+<!-- Its own stylesheet, not the app's: feed.css pins .app to the viewport and
+     squeezes the body into a phone frame, which is right for the app and wrong
+     for a document. -->
+<link rel="stylesheet" href="{% static 'core/css/legal.css' %}?v=1">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+<script>
+// Follow the app's theme when it has one, otherwise the device's. Inline and
+// first, so the page never flashes white before the dark palette arrives.
+(function () {
+    try {
+        var saved = localStorage.getItem('tf_theme') || localStorage.getItem('theme');
+        if (saved === 'dark' || saved === 'light') {
+            document.documentElement.setAttribute('data-theme', saved);
+            return;
+        }
+    } catch (e) {}
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+    }
+})();
+</script>
+
+</head>
+<body>
+
+<header class="lg-top">
+    <a href="/"><img src="{% static 'core/icon-dark.svg' %}" alt=""><b translate="no">TrustFirst</b></a>
+</header>
+
+<main class="lg-body">
+    {% block content %}{% endblock %}
+</main>
+
+<footer class="lg-foot">
+    <a href="/privacy/">Privacy</a>
+    {# Terms goes here when it exists as a page. Linking it now would be a 404. #}
+    <a href="mailto:contacttrustfirst@gmail.com">Contact</a>
+    <a href="/">Open TrustFirst</a>
+    <span class="c" translate="no">&copy; {% now "Y" %} TrustFirst</span>
+</footer>
+
+<script>
+// Rows open on tap. Nobody reads a policy end to end; they arrive with one
+// question, so each answer is folded away until it is asked for.
+document.addEventListener('click', function (e) {
+    var q = e.target.closest('.tf-legal-q');
+    if (!q) return;
+    q.parentElement.classList.toggle('open');
+});
+
+// A link straight to one row (…/privacy/#coins) opens it and scrolls to it.
+(function () {
+    var id = (location.hash || '').slice(1);
+    if (!id) return;
+    var row = document.getElementById(id);
+    if (row && row.classList.contains('tf-legal-row')) {
+        row.classList.add('open');
+        setTimeout(function () { row.scrollIntoView({ block: 'center' }); }, 60);
+    }
+})();
+</script>
+
+</body>
+</html>

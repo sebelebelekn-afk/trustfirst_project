@@ -9,6 +9,12 @@ from . import eddie_voice
 
 urlpatterns = [
     path('', views.feed, name='feed'),
+
+    # Real pages at real URLs, so they can be linked, shared and indexed. These
+    # must come before the catch-all share routes at the bottom of this file,
+    # or /privacy/ would be read as somebody's profile.
+    path('privacy/', views.legal_page, {'page': 'privacy'}, name='legal_privacy'),
+
     path('api/config/', api_views.get_config, name='api_config'),
     path('api/upload/sign/', api_views.r2_sign_upload, name='api_upload_sign'),
     path('api/eddie/chat/', eddie_views.eddie_chat, name='api_eddie_chat'),

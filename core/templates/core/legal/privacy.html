@@ -1,0 +1,173 @@
+{% extends "core/legal/base.html" %}
+
+{% block title %}Privacy · TrustFirst{% endblock %}
+{% block description %}What TrustFirst collects, what it does with it, and what it never does.{% endblock %}
+
+{% block content %}
+<div class="tf-legal">
+
+  <div class="tf-legal-hero">
+    <h1>Privacy</h1>
+    <p>What we collect, what we do with it, and what we never do. Written to be read, not to be survived.</p>
+    <p class="tf-legal-meta">Last updated 20 August 2026 · South African law, including POPIA</p>
+  </div>
+
+  <!-- The four promises, up front, because they are what people came to check -->
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-shield-halved" style="color:#007AFF;"></i>The short version</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">We never sell your information<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a"><p>Not to advertisers, not to data brokers, not to anyone. There are no adverts on TrustFirst, so there is nobody to sell it to.</p></div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Your direct messages are end-to-end encrypted<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a"><p>They are encrypted on your device and decrypted on theirs. We hold the scrambled version and cannot read it. That is a real limit on us, and it cuts both ways: we cannot recover your messages for you either, and we cannot moderate what we cannot see.</p></div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">We do not keep your ID document<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a"><p>A verification document is deleted the moment your application is decided. See <a href="#verification">Verification documents</a> for exactly what happens to it.</p></div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">You can take everything with you, or delete it<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a"><p>Download or delete your account and its data at any time from Settings, Privacy.</p></div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-inbox" style="color:#34C759;"></i>What we collect</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Things you give us<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Your name, username, email address, date of birth and profile picture. Whatever you post, which includes clips, photos, captions, comments and live streams. For a child account, the linked parent or guardian's details.</p>
+        <p>Your date of birth is used to work out whether you are old enough to be here and which features apply to you, not to advertise to you.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Things your device tells us<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Device and browser type, IP address, which parts of the app you use, what you interact with, and crash reports when something breaks.</p>
+        <p>Crash reports are scrubbed before they are sent: we strip out message contents, tokens and personal fields, and we do not record your screen.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row" id="verification">
+      <div class="tf-legal-q">Verification documents<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <div class="tf-legal-note">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <div><b>We do not keep your ID.</b>
+          <span>Badges are reviewed by a person on our team, not handed to an identity company.</span></div>
+        </div>
+        <ul>
+          <li>It goes into private storage only a reviewer can open. It is never public and never linked from your profile.</li>
+          <li>It is <b>deleted the moment your application is approved or rejected</b>. Reviewing it is what destroys it.</li>
+          <li>If nobody reviews it, it is deleted automatically after <b>7 days</b>.</li>
+          <li>We keep only the outcome: whether you are verified, and when. We never store your ID number or a copy of the document.</li>
+          <li>We ask you to cover your ID number before photographing it, so even the file we hold briefly contains as little as possible.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-gears" style="color:#5856D6;"></i>What we do with it</h2>
+    <div class="tf-legal-flat">
+      <p>To run the app, keep it working, keep it safe, and decide what to show you. To spot fraud and enforce the rules. To answer you when you contact us. <b>Not to build an advertising profile, because there are no adverts.</b></p>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-handshake" style="color:#FF9500;"></i>Who else sees it</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">The services that make the app work<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>They only receive what they need to do their job, and none of them may use it for their own purposes.</p>
+        <ul>
+          <li><b>Supabase</b> — accounts, database and private file storage</li>
+          <li><b>Cloudflare R2</b> — where public media is stored and served from</li>
+          <li><b>Render</b> — hosting for the application itself</li>
+          <li><b>LiveKit</b> — live video and guest audio or video</li>
+          <li><b>Google Cloud Vision</b> — automated safety checks on images</li>
+          <li><b>Sentry</b> — crash reports, with personal fields stripped first</li>
+          <li><b>Giphy</b> — the GIF picker, and only while you have it open</li>
+          <li><b>Email and AI providers</b> — sign-in codes, and Eddie</li>
+          <li><b>Stripe and Paystack</b> — payments, if you buy or receive anything</li>
+        </ul>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">When the law requires it<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a"><p>We will hand over information when South African law obliges us to. We cannot hand over the contents of your direct messages, because we do not have them in a readable form.</p></div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Other people on TrustFirst<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a"><p>Anything you post publicly is public: your profile, clips, comments and live chat. Live chat is saved so somebody joining late can follow the conversation, so treat it as public.</p></div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-robot" style="color:#007AFF;"></i>Eddie and automated checks</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">What Eddie does with what you type<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Eddie is an AI assistant. What you send it is passed to an AI provider to produce a reply, so do not put anything in it you would not want leaving your device. Your conversation is kept so you can scroll back, and you can delete it.</p>
+        <p>Eddie has no access to your direct messages.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Automatic image checks<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <ul>
+          <li><b>Images and GIFs in comments</b> are checked for adult or violent content. Anything flagged is blurred for everyone behind a tap, so nobody is shown something graphic without choosing to look.</li>
+          <li><b>Face verification</b>, if you use it, checks that a real live face is present and not a photo of a photo. It is not facial recognition and we do not build a face database.</li>
+          <li>We store the <b>result</b> of these checks, never a second copy of your image.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-coins" style="color:#FF9500;"></i>Live, coins and gifts</h2>
+    <div class="tf-legal-row" id="coins">
+      <div class="tf-legal-q">How coins and gifts work<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <ul>
+          <li><b>Coins</b> are a virtual item with no cash value and cannot be turned back into money.</li>
+          <li>When you send a gift, the creator receives <b>80 percent</b> of its value and TrustFirst keeps <b>20 percent</b> to run the platform.</li>
+          <li>Your <b>wallet</b> balance is real money and is kept separate from coins.</li>
+          <li>We keep a record of these transactions, because we have to.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Going live, and joining someone else's<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a"><p>If you ask to join a live as a guest, the host sees your username and picture so they can decide. If they accept, your camera and microphone are shared with everyone watching until you leave.</p></div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-user-shield" style="color:#34C759;"></i>Your choices</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">See, correct or delete what we hold<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a"><p>All of it from Settings, Privacy. Deleting your account removes your data from our systems. Some records we are legally required to keep, such as transactions, survive deletion; nothing else does.</p></div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Cookies and device storage<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a"><p>Used to keep you signed in, remember preferences such as dark mode, and let the app work offline. There are <b>no advertising or third-party tracking cookies</b>. You can clear it all from your browser or device settings.</p></div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Complaining<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a"><p>Write to <a href="mailto:contacttrustfirst@gmail.com">contacttrustfirst@gmail.com</a> first and we will try to put it right. You also have the right to complain to the <a href="https://inforegulator.org.za" target="_blank" rel="noopener noreferrer">Information Regulator of South Africa</a>.</p></div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-envelope" style="color:#007AFF;"></i>Contact</h2>
+    <div class="tf-legal-flat">
+      <p>Questions about your information, or a request to see or delete it:<br>
+      <a href="mailto:contacttrustfirst@gmail.com">contacttrustfirst@gmail.com</a></p>
+      <p style="margin-top:8px;">TrustFirst · South Africa</p>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

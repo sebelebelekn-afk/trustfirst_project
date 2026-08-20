@@ -1,0 +1,150 @@
+/* ============================================================================
+   Legal and help pages.
+
+   Deliberately NOT feed.css. That stylesheet pins .app to the viewport and
+   constrains the body into a phone frame, which is right for the app and wrong
+   for a document: importing it squeezed this page into a 225px column with the
+   footer stranded beside it. These pages are ordinary web pages and carry their
+   own small stylesheet.
+   ========================================================================== */
+:root {
+    --bg: #ffffff;
+    --card: #ffffff;
+    --line: rgba(0,0,0,0.10);
+    --line-soft: rgba(0,0,0,0.06);
+    --text: #000000;
+    --text-2: #555555;
+    --text-3: #999999;
+    --hover: rgba(0,0,0,0.03);
+    --accent: #007AFF;
+}
+[data-theme="dark"] {
+    --bg: #000000;
+    --card: #121214;
+    --line: rgba(255,255,255,0.12);
+    --line-soft: rgba(255,255,255,0.07);
+    --text: #ffffff;
+    --text-2: #a8a8ad;
+    --text-3: #6e6e73;
+    --hover: rgba(255,255,255,0.05);
+    --accent: #0A84FF;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+}
+
+/* header / footer -------------------------------------------------------- */
+.lg-top {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; align-items: center;
+    padding: max(14px, env(safe-area-inset-top)) 18px 14px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+}
+.lg-top a { display: flex; align-items: center; gap: 9px; text-decoration: none; color: inherit; }
+.lg-top img { width: 26px; height: 26px; border-radius: 7px; display: block; }
+.lg-top b { font-size: 16px; font-weight: 800; letter-spacing: -0.3px; }
+
+.lg-body { padding: 26px 18px max(70px, calc(env(safe-area-inset-bottom) + 60px)); }
+
+.lg-foot {
+    border-top: 1px solid var(--line);
+    padding: 26px 18px max(40px, env(safe-area-inset-bottom));
+    text-align: center;
+}
+.lg-foot a {
+    color: var(--text-2); font-size: 13px;
+    text-decoration: none; margin: 0 9px; line-height: 2.1;
+}
+.lg-foot a:hover { text-decoration: underline; color: var(--text); }
+.lg-foot .c { display: block; color: var(--text-3); font-size: 12.5px; margin-top: 10px; }
+
+/* the document ------------------------------------------------------------ */
+.tf-legal { max-width: 680px; margin: 0 auto; }
+
+.tf-legal-hero { padding: 4px 2px 26px; }
+.tf-legal-hero h1 {
+    font-size: 32px; font-weight: 900; letter-spacing: -0.7px;
+    margin: 0 0 10px; line-height: 1.12;
+}
+.tf-legal-hero p { font-size: 15px; color: var(--text-2); line-height: 1.65; margin: 0 0 12px; }
+.tf-legal-meta { font-size: 12.5px; color: var(--text-3); margin: 0; }
+
+.tf-legal-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px; overflow: hidden; margin-bottom: 16px;
+}
+.tf-legal-card > h2 {
+    display: flex; align-items: center; gap: 11px;
+    font-size: 17px; font-weight: 800; margin: 0; padding: 17px 20px;
+    border-bottom: 1px solid var(--line);
+}
+.tf-legal-card > h2 i { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
+
+.tf-legal-row { border-bottom: 1px solid var(--line-soft); }
+.tf-legal-row:last-child { border-bottom: none; }
+.tf-legal-q {
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    padding: 16px 20px; cursor: pointer;
+    font-size: 15px; font-weight: 600;
+    transition: background .15s;
+}
+.tf-legal-q:hover { background: var(--hover); }
+.tf-legal-q i {
+    font-size: 13px; color: var(--text-3); flex-shrink: 0;
+    transition: transform .22s cubic-bezier(.32,.72,0,1);
+}
+.tf-legal-row.open .tf-legal-q i { transform: rotate(90deg); }
+
+.tf-legal-a { display: none; padding: 0 20px 18px; }
+.tf-legal-row.open .tf-legal-a { display: block; }
+.tf-legal-a p, .tf-legal-a li {
+    font-size: 14.5px; color: var(--text-2); line-height: 1.7; margin: 0 0 10px;
+}
+.tf-legal-a p:last-child, .tf-legal-a li:last-child { margin-bottom: 0; }
+.tf-legal-a ul { margin: 0; padding-left: 18px; }
+.tf-legal-a b { color: var(--text); }
+
+/* Links look and behave like links. A reference to another policy, an email
+   address or a regulator is something you should be able to click, not
+   something to copy out by hand. */
+.tf-legal-a a, .tf-legal-flat a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-thickness: 1px;
+}
+.tf-legal-a a:hover, .tf-legal-flat a:hover { text-decoration-thickness: 2px; }
+/* An external link says so, quietly. */
+.tf-legal-a a[target="_blank"]::after,
+.tf-legal-flat a[target="_blank"]::after {
+    content: "\f08e";
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    font-size: 9px;
+    margin-left: 4px;
+    vertical-align: 1px;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.tf-legal-flat { padding: 16px 20px; }
+.tf-legal-flat p { font-size: 14.5px; color: var(--text-2); line-height: 1.7; margin: 0; }
+.tf-legal-flat b { color: var(--text); }
+
+.tf-legal-note {
+    display: flex; gap: 12px; align-items: flex-start;
+    background: rgba(255,149,0,0.08); border: 1px solid rgba(255,149,0,0.22);
+    border-radius: 12px; padding: 14px 16px; margin: 0 0 12px;
+}
+.tf-legal-note i { color: #FF9500; font-size: 14px; margin-top: 2px; flex-shrink: 0; }
+.tf-legal-note b { display: block; color: var(--text); font-size: 14px; margin-bottom: 3px; }
+.tf-legal-note span { font-size: 13.5px; color: var(--text-2); line-height: 1.6; }

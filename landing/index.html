@@ -124,7 +124,13 @@ footer a:hover{color:#fff;}
   transition:color .15s,border-color .15s,background .15s;
 }
 .social:hover{color:#fff;border-color:rgba(255,255,255,0.3);background:rgba(255,255,255,0.05);}
-.foot-name{font-weight:700;color:var(--muted);}
+.foot-links{margin-bottom:12px;}
+.foot-links a{
+  color:var(--muted);font-size:13px;text-decoration:none;
+  margin:0 9px;line-height:2.1;cursor:pointer;white-space:nowrap;
+}
+.foot-links a:hover{color:#fff;text-decoration:underline;}
+.foot-name{font-weight:600;color:var(--muted);font-size:12.5px;}
 </style>
 </head>
 <body>
@@ -223,11 +229,16 @@ footer a:hover{color:#fff;}
         <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
       </svg>
     </a>
-    <div class="foot-name" translate="no">TrustFirst</div>
-    <!-- Add a contact address and a privacy policy here when you have them.
-         Google Play requires a working privacy policy URL before it will accept
-         a listing, so that one is not optional forever. Left out rather than
-         linked to a page that does not exist yet. -->
+    <!-- These point at the app's own pages, which are real URLs now rather than
+         screens inside it, so the same address works here, in the app and in a
+         Play Store listing. Filled in by the script from APP_URL. -->
+    <nav class="foot-links">
+      <a data-app-path="/privacy/">Privacy</a>
+      <a href="#get">Get the app</a>
+      <a href="https://x.com/_trustfirst" target="_blank" rel="noopener noreferrer">X</a>
+      <a data-app-path="/">Open TrustFirst</a>
+    </nav>
+    <div class="foot-name" translate="no">&copy; <span id="year"></span> TrustFirst</div>
   </div>
 </footer>
 
@@ -257,6 +268,14 @@ var APK_URL = '';   // e.g. 'https://media.trustfirst.app/apk/trustfirst.apk'
   go(el('registerBtn'), APP_URL);
   go(el('headerLogin'), APP_URL);
   go(el('iosBtn'), APP_URL);
+
+  // Footer links that live on the app's own domain, built from APP_URL so
+  // changing that one value moves them all.
+  var base = APP_URL.replace(/\/+$/, '');
+  document.querySelectorAll('[data-app-path]').forEach(function (a) {
+    a.setAttribute('href', base + a.getAttribute('data-app-path'));
+  });
+  el('year').textContent = new Date().getFullYear();
 
   // Android card. With no APK built yet there is nothing to download, and
   // pointing a Download button at a website would be calling a web page a file.

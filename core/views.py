@@ -13,6 +13,18 @@ def feed(request, **kwargs):
     return render(request, 'core/feed.html')
 
 
+def legal_page(request, page):
+    """Privacy, terms and the rest as ordinary web pages.
+
+    They used to be JavaScript strings inside feed.js, which meant they existed
+    only inside the app: they could not be linked to, the Share button on them
+    handed out trustfirst.app/privacy which was a 404, and Google Play needs a
+    privacy policy at a real URL before it will take a listing. Now the app
+    loads the same address anybody else would.
+    """
+    return render(request, 'core/legal/%s.html' % page)
+
+
 def service_worker(request):
     """Serve the service worker from the site root so it controls the whole origin scope."""
     path = settings.BASE_DIR / 'core' / 'static' / 'core' / 'js' / 'sw.js'

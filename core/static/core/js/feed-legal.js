@@ -130,8 +130,8 @@ var _tfPrivacyHTML = `
     <h2 style="font-size:18px;font-weight:800;color:var(--text-primary,#000);margin:0 0 4px;">9. Contact</h2>
     <div style="width:32px;height:3px;background:#007AFF;border-radius:2px;margin-bottom:14px;"></div>
     <div style="background:var(--bg-secondary,#f5f5f5);border-radius:16px;padding:18px 20px;">
-      <p style="font-size:14px;color:var(--text-secondary,#555);margin:0 0 4px;"><i class="fa-solid fa-envelope" style="color:#007AFF;margin-right:8px;"></i>privacy@trustfirst.app</p>
-      <p style="font-size:13px;color:#aaa;margin:0;">TrustFirst · Cape Town, South Africa</p>
+      <p style="font-size:14px;color:var(--text-secondary,#555);margin:0 0 4px;"><i class="fa-solid fa-envelope" style="color:#007AFF;margin-right:8px;"></i>contacttrustfirst@gmail.com</p>
+      <p style="font-size:13px;color:#aaa;margin:0;">TrustFirst · South Africa</p>
     </div>
   </div>
 </div>`;
@@ -226,7 +226,17 @@ var _tfTermsHTML = `
 
 var _tfInfoHTML = `<h2 style="font-size:20px;font-weight:900;margin:0 0 16px;">Why this information is important</h2><p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.75;margin-bottom:20px;">TrustFirst shows certain account information to help people understand who they are interacting with. This transparency builds trust and helps keep the platform safe.</p><div style="background:var(--card-bg,#fff);border-radius:16px;padding:18px 20px;margin-bottom:14px;border:0.5px solid var(--border-color,rgba(0,0,0,0.06));"><div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:14px;"><div style="width:32px;height:32px;border-radius:9px;background:rgba(0,122,255,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-regular fa-calendar" style="color:#007AFF;font-size:14px;"></i></div><div><b style="font-size:15px;color:var(--text-primary,#000);display:block;margin-bottom:4px;">Date Joined</b><p style="font-size:13px;color:var(--text-secondary,#555);line-height:1.6;margin:0;">Knowing when an account was created helps people identify recently-created accounts, which may indicate inauthentic activity.</p></div></div><div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:14px;"><div style="width:32px;height:32px;border-radius:9px;background:rgba(52,199,89,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-earth-africa" style="color:#34C759;font-size:14px;"></i></div><div><b style="font-size:15px;color:var(--text-primary,#000);display:block;margin-bottom:4px;">Account Based In</b><p style="font-size:13px;color:var(--text-secondary,#555);line-height:1.6;margin:0;">This refers to the country associated with your account at registration. It helps users make informed decisions about who they interact with.</p></div></div><div style="display:flex;gap:12px;align-items:flex-start;"><div style="width:32px;height:32px;border-radius:9px;background:rgba(255,149,0,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-clock-rotate-left" style="color:#FF9500;font-size:14px;"></i></div><div><b style="font-size:15px;color:var(--text-primary,#000);display:block;margin-bottom:4px;">Former Usernames</b><p style="font-size:13px;color:var(--text-secondary,#555);line-height:1.6;margin:0;">This helps prevent impersonation and keeps a transparent history of identity changes on the platform.</p></div></div></div>`;
 
+// Which of these live at a real URL. Anything listed here is loaded as a web
+// page in the in-app browser, the same address anyone else would open, instead
+// of being a copy of the words kept inside the app.
+var TF_LEGAL_URLS = {
+    privacy: '/privacy/'
+};
+
 function openInAppBrowser(title, type) {
+    var path = TF_LEGAL_URLS[type];
+    if (path) { openLinkInApp(location.origin + path); return; }
+
     var existing = document.getElementById('inAppBrowserOverlay');
     if (existing) existing.remove();
     var overlay = document.createElement('div');
@@ -249,10 +259,14 @@ function openInAppBrowser(title, type) {
 }
 
 function shareInAppPage(type) {
-    var urls = { privacy: 'https://trustfirst.app/privacy', terms: 'https://trustfirst.app/terms', info: 'https://trustfirst.app/about/info' };
+    // These were hardcoded to trustfirst.app/privacy and /terms, neither of
+    // which existed, so Share handed people a 404. It shares the page's real
+    // address now, on whatever host the app is actually running on.
+    var path = TF_LEGAL_URLS[type];
+    var url = path ? (location.origin + path) : location.origin;
     if (navigator.share) {
-        navigator.share({ title: 'TrustFirst', url: urls[type] || 'https://trustfirst.app' }).catch(function(){});
+        navigator.share({ title: 'TrustFirst', url: url }).catch(function(){});
     } else {
-        try { navigator.clipboard.writeText(urls[type] || 'https://trustfirst.app'); showToast('Link copied'); } catch(e) {}
+        try { navigator.clipboard.writeText(url); showToast('Link copied'); } catch(e) {}
     }
 }
