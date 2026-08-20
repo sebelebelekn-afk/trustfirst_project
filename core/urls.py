@@ -19,6 +19,7 @@ urlpatterns = [
     path('terms/', views.legal_page, {'page': 'terms'}, name='legal_terms'),
     path('cookies/', views.legal_page, {'page': 'cookies'}, name='legal_cookies'),
     path('accessibility/', views.legal_page, {'page': 'accessibility'}, name='legal_accessibility'),
+    path('help/', views.legal_page, {'page': 'help'}, name='legal_help'),
 
     path('api/config/', api_views.get_config, name='api_config'),
     path('api/upload/sign/', api_views.r2_sign_upload, name='api_upload_sign'),

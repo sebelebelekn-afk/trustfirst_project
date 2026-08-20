@@ -1,0 +1,255 @@
+{% extends "core/legal/base.html" %}
+
+{% block title %}Help Centre · TrustFirst{% endblock %}
+{% block description %}How to use TrustFirst: accounts, posting, messages, going live, coins and staying safe.{% endblock %}
+
+{% comment %}
+  Every feature described here was confirmed in the code before it was written
+  about. Things deliberately left out because they could not be confirmed as
+  working features: restricting an account (only a localStorage key exists), and
+  captions on video (the button shows a "coming soon" toast).
+
+  If a feature is removed or renamed, this page has to change with it. A help
+  centre describing an app that no longer exists is worse than no help centre.
+{% endcomment %}
+
+{% block content %}
+<div class="tf-legal">
+
+  <div class="tf-legal-hero">
+    <h1>Help Centre</h1>
+    <p>How things work, and what to do when they do not. If the answer is not here, write to us and it probably should be.</p>
+    <p class="tf-legal-meta"><a href="mailto:contacttrustfirst@gmail.com">contacttrustfirst@gmail.com</a></p>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-user-plus" style="color:#007AFF;"></i>Getting started</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Making an account<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>You need an email address, a username and a date of birth. The date of birth decides which features are open to you and is not there to advertise at you — see <a href="/terms/#ages">the age limits</a>.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Using more than one account<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>You can have several and switch between them without signing out each time. Saved accounts show a badge when one of them has something waiting, so you know before you switch.</p>
+        <p>The one thing you may not do is make a new account to get around a suspension.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Keeping your account safe<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Two-step verification and passkeys are both in Settings. A passkey is the stronger option: it uses your phone's own fingerprint or face unlock and there is no password to steal.</p>
+        <p>If you think somebody else is in your account, change your password and write to us immediately.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-pen" style="color:#34C759;"></i>Posting</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Posts, clips and stories<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <ul>
+          <li><b>A post</b> can hold text and up to several photos or videos, which appear as one swipeable set.</li>
+          <li><b>A TrustClip</b> is a short video for the clips feed, with an editor for trimming, splitting and adding stickers, text and sound.</li>
+          <li><b>A story</b> disappears after 24 hours.</li>
+          <li><b>A poll</b> lets people vote rather than reply.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Why my upload is taking a while<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Photos and videos are shrunk on your device before they are sent, which takes a moment but means the upload itself is far smaller and far faster on a weak connection. You will see it shrinking, then uploading, with a percentage where one is available.</p>
+        <p>If it fails, tap the item to retry rather than starting the post again.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Drafts<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>A post or clip you start and do not finish is kept on your device so you can come back to it. Clearing your browser data clears drafts too.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Deleting something you posted<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Use the menu on the post. It goes from TrustFirst, but anything somebody already reposted or saved is beyond our reach — the full explanation is in <a href="/terms/#deleting">the Terms</a>.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-comment-dots" style="color:#5856D6;"></i>Messages</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Why I cannot message somebody<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Starting a conversation with someone new needs a verification badge. It is the only thing verification gates, and it exists because opening a message to a stranger is where most scams begin. Replying to a conversation already open needs nothing.</p>
+        <p>If they have blocked you, you will not be able to reach them at all.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">This message was encrypted for another device<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Not a fault. Your messages are encrypted for the specific device that will read them, and this one was sealed for a different device — usually because you have signed in somewhere new since it was sent.</p>
+        <p>Ask them to send it again and it will be sealed for the device you are on now.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Can I get old messages back<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>No, and this is worth understanding rather than discovering. Your messages are encrypted with keys that exist only on your device. Clear your browser data or lose the device and they cannot be opened again by anyone, including us. There is no backup to restore.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Disappearing messages<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Tap the notice in the conversation, or open the chat settings, and choose: off, once seen, after 24 hours, or after 7 days. Either person can change it and both are told when it changes.</p>
+        <p>It removes messages from the conversation. It cannot remove them from a screenshot.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-tower-broadcast" style="color:#FF3B30;"></i>Going live</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Starting a stream<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>You must be 16 or older. Check what is behind you before you start: whatever is in frame goes out immediately and there is no editing it afterwards.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Bringing people up<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Viewers can ask to join. You see who they are before you accept, and accepting puts their camera and microphone in front of everyone watching. You can remove them at any time, and you are responsible for what they do while they are up.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Is my stream saved<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>The video is not recorded, so there is no replay. The chat and reactions are kept so somebody arriving late can follow along.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-coins" style="color:#FF9500;"></i>Coins, gifts and your wallet</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">How gifts work<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>You buy coins, and you spend coins to send someone a gift. The creator receives <b>80 percent</b> of its value into their wallet and TrustFirst keeps <b>20 percent</b> to run the platform. You must be 18.</p>
+        <p>A gift cannot be taken back once sent.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Coins and your wallet are different things<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p><b>Coins</b> are a virtual item. They have no cash value and cannot be turned back into money.</p>
+        <p><b>Your wallet</b> is real money you have earned from gifts, and you can withdraw it.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Getting paid out<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Minimum withdrawal is <b>R50</b>, and bank transfers take <b>1 to 3 business days</b>. The bank account must be your own.</p>
+        <p>Tax on what you earn is yours to declare. We do not deduct it for you.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Refunds<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Unspent coins can be refunded within 7 days of buying them. Spent coins cannot, because the value has already gone to a creator. If something went wrong at our end — a double charge, coins that never arrived — write to us and there is no time limit on us fixing it. Full detail in <a href="/terms/#refunds">the Terms</a>.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-circle-check" style="color:#007AFF;"></i>Verification</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">What the badges mean<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <ul>
+          <li><b>Blue</b> — a real person.</li>
+          <li><b>Silver</b> — a real business.</li>
+          <li><b>Red</b> — a government body or official.</li>
+          <li><b>Green</b> — a child account with a verified guardian.</li>
+          <li><b>Gold</b> — a public figure, granted by us.</li>
+        </ul>
+        <p>A badge means we checked who somebody is. It is not us saying they are trustworthy.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">What happens to my ID<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>It is deleted the moment your application is decided, either way, and automatically after 7 days if nobody has looked at it. Cover your ID number before photographing it — a reviewer only needs your face, your name and the document type.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-shield-halved" style="color:#34C759;"></i>Safety and control</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Blocking somebody<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Immediate, and it does not need us. A blocked person cannot message you, see your posts, mention you, tag you or interact with you anywhere. They are not told, and you do not owe anyone an explanation.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Reporting something<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Every post, clip, comment, message and account has a report option in its menu. Reporting a message sends us that message, which is the only way we can act on it — we cannot read your conversations.</p>
+        <p>Anything involving a child, a threat, or somebody in danger goes to the front of the queue.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Going dark<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Mutes every notification for a day, a week or a month, and tells your circle you are taking space. Notifications still arrive and still count up — you simply are not interrupted by them. You can come back early whenever you like.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Child accounts<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Anyone under 18 needs an account linked to a verified parent or guardian. The guardian can see their activity, change what they are allowed to do, and close the account at any time. Nobody under 18 can buy coins or send gifts, with or without permission.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-robot" style="color:#5856D6;"></i>Eddie</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">What Eddie can and cannot do<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Eddie is an AI assistant. It can answer questions, make images and read messages aloud. It cannot see your direct messages, it does not speak for us, and it is confidently wrong sometimes — check anything that matters.</p>
+        <p>There is a daily limit, which is what keeps it free.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Is what I type to Eddie private<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>It leaves TrustFirst. Eddie runs on an outside AI provider, so treat it as a conversation that goes elsewhere and do not paste passwords, ID numbers or somebody else's private information into it.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-book" style="color:#8e8e93;"></i>Rules and policies</h2>
+    <div class="tf-legal-flat">
+      <p>
+        <a href="/privacy/">Privacy Policy</a> — what we collect and what we do with it.<br>
+        <a href="/cookies/">Cookies and storage</a> — what is kept on your device.<br>
+        <a href="/accessibility/">Accessibility</a> — what works, and what does not yet.
+      </p>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-envelope" style="color:#007AFF;"></i>Still stuck</h2>
+    <div class="tf-legal-flat">
+      <p>Open a support request in the app, which is fastest for anything about your own account, or write to <a href="mailto:contacttrustfirst@gmail.com">contacttrustfirst@gmail.com</a>.</p>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
