@@ -1,0 +1,179 @@
+{% extends "core/legal/base.html" %}
+
+{% block title %}Cookies and storage · TrustFirst{% endblock %}
+{% block description %}What TrustFirst stores on your device, why, and how to clear it. No advertising cookies, no trackers.{% endblock %}
+
+{% comment %}
+  Everything on this page was read out of the code rather than adapted from
+  somebody else's cookie policy:
+
+    - No document.cookie anywhere in the app. The only cookies are the two
+      Django sets, sessionid and csrftoken, both HttpOnly, Secure outside DEBUG,
+      SameSite=Lax.
+    - No analytics or tracking scripts of any kind. Grepped for Google
+      Analytics, Tag Manager, gtag, Meta pixel, Mixpanel, Amplitude and Hotjar:
+      none present.
+    - Around a hundred localStorage keys, all tf_*, tf-* or trustfirst-*.
+      Grouped here by purpose rather than listed one by one, because a hundred
+      rows nobody reads is worse than an honest summary.
+    - IndexedDB: TrustFirstDB with stores posts, users, messages, conversations,
+      notifications, activity, videos, syncQueue and mediaCache, plus a separate
+      TrustFirstDrafts database.
+    - Cache Storage from the service worker: static, dynamic and image caches,
+      plus tf-offline-videos-v1.
+
+  If any of that changes, this page changes with it.
+{% endcomment %}
+
+{% block content %}
+<div class="tf-legal">
+
+  <div class="tf-legal-hero">
+    <h1>Cookies and storage</h1>
+    <p>What TrustFirst keeps on your device, why it is there, and how to get rid of it.</p>
+    <p class="tf-legal-meta">Last updated 20 August 2026 · See also the <a href="/privacy/">Privacy Policy</a></p>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-circle-check" style="color:#34C759;"></i>The short version</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">There are no advertising cookies<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>None. TrustFirst does not show adverts, so there is nothing to target and nobody to sell an audience to.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">There are no tracking or analytics scripts<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>No Google Analytics, no Tag Manager, no Meta pixel, no Mixpanel, no Hotjar. Nothing measuring you across other websites, and nothing following you off TrustFirst.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">That is why there is no cookie banner<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Banners exist to ask permission for the optional things. Everything TrustFirst stores is needed for the app to work — to keep you signed in, to remember your settings, to let it open without a signal. There is nothing optional to ask about, so we do not interrupt you to ask it.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-cookie-bite" style="color:#FF9500;"></i>The two actual cookies</h2>
+    <div class="tf-legal-flat">
+      <p>TrustFirst sets exactly two cookies, both from our own server, both necessary. The app itself never writes a cookie in your browser.</p>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">sessionid<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <ul>
+          <li><b>What it does</b> — identifies your session with our server so a page can tell it is still you.</li>
+          <li><b>Who sets it</b> — TrustFirst.</li>
+          <li><b>Protections</b> — HttpOnly, so no script can read it. Sent only over HTTPS. SameSite Lax, so another website cannot use it.</li>
+          <li><b>How long</b> — until it expires or you sign out.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">csrftoken<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <ul>
+          <li><b>What it does</b> — proves a form or request came from you on TrustFirst rather than from another site pretending to be you. It is a security measure, not a way of knowing who you are.</li>
+          <li><b>Who sets it</b> — TrustFirst.</li>
+          <li><b>Protections</b> — HttpOnly, HTTPS only, SameSite Lax.</li>
+          <li><b>How long</b> — about a year, or until you clear it.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-box-archive" style="color:#007AFF;"></i>What else is kept on your device</h2>
+    <div class="tf-legal-flat">
+      <p>Most of what TrustFirst stores is not a cookie. It sits in your browser's own storage, it is never sent to another website, and much of it never leaves your device at all.</p>
+    </div>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Local storage — your settings and your session<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Around a hundred small entries, all named <code>tf_</code>, <code>tf-</code> or <code>trustfirst-</code>. Rather than list every one, here is what they are for:</p>
+        <ul>
+          <li><b>Staying signed in</b> — your session and which accounts you have saved to switch between.</li>
+          <li><b>How you like the app</b> — dark or light, language, captions, data saver, the order of your profile tabs, notification preferences.</li>
+          <li><b>Your own choices about other people</b> — who you have blocked, muted, restricted, or told us not to suggest again.</li>
+          <li><b>Drafts</b> — a post or a clip you started and did not finish.</li>
+          <li><b>Making it fast</b> — a copy of your recent feed, messages and conversations, so the app opens instantly instead of blank.</li>
+          <li><b>Things with a memory</b> — which poll you voted in, which story you have seen, whether you have been shown a tutorial.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">IndexedDB — the offline copy, and your encryption keys<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>A larger store holding posts, messages, conversations, notifications and cached media, so the app works with no signal and syncs when one comes back.</p>
+        <p>It also holds <b>your private encryption keys</b>. Those are generated on your device and never sent to us. It is why we cannot read your messages, and why clearing this data means those messages can never be opened again — see the <a href="/terms/#dms">Terms</a>.</p>
+      </div>
+    </div>
+
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Cache storage — the app itself<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>A copy of the app's own files and recent images, kept by the service worker so TrustFirst opens quickly and still opens when you are offline. Videos you have saved for offline watching live here too.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-arrow-up-right-from-square" style="color:#5856D6;"></i>Other companies</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">When one of them might store something<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>We do not embed anybody's tracking code. A few services are contacted only at the moment you use the feature that needs them, and they may set their own storage under their own policies:</p>
+        <ul>
+          <li><b>Giphy</b> — only while the GIF picker is open.</li>
+          <li><b>Stripe and Paystack</b> — only when you are making a payment. Payment providers use storage to detect fraud, which is in your interest.</li>
+          <li><b>LiveKit</b> — only while you are in a live stream.</li>
+        </ul>
+        <p>Close the picker, finish the payment, leave the stream, and nothing further is contacted.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Crash reports<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>When something breaks, a report goes to Sentry so we can find out why. It sets no cookies and does not record your screen, and personal fields are stripped out before it is sent.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-broom" style="color:#FF3B30;"></i>Clearing it</h2>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">How to remove all of it<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>Clear site data for TrustFirst in your browser settings, or delete and reinstall the app. That removes the cookies, the local storage, the offline copy and the cache in one go.</p>
+        <p>Signing out also clears what is personal to you from the device, so the next person to use it does not see your feed or your messages.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">What clearing it costs you<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>You will be signed out and your settings reset, which is a small annoyance.</p>
+        <p><b>Your encryption keys go with it.</b> Messages already sent to you were sealed for those keys, and without them nobody can open them again, including us. If a conversation matters, save what you need before you clear anything.</p>
+      </div>
+    </div>
+    <div class="tf-legal-row">
+      <div class="tf-legal-q">Turning cookies off entirely<i class="fa-solid fa-chevron-right"></i></div>
+      <div class="tf-legal-a">
+        <p>You can, and TrustFirst will stop working. Without the session cookie there is no way to stay signed in, and without local storage there is nowhere to keep your keys or your settings. There is no version of this app that runs with no storage at all, and we would rather say so than let you fight it.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-legal-card">
+    <h2><i class="fa-solid fa-envelope" style="color:#007AFF;"></i>Questions</h2>
+    <div class="tf-legal-flat">
+      <p><a href="mailto:contacttrustfirst@gmail.com">contacttrustfirst@gmail.com</a></p>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

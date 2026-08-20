@@ -17,6 +17,7 @@ urlpatterns = [
     # Reachable so it can be read and reviewed, but linked from nowhere yet: only
     # 2 of its 16 sections are written, and the app still shows the old terms.
     path('terms/', views.legal_page, {'page': 'terms'}, name='legal_terms'),
+    path('cookies/', views.legal_page, {'page': 'cookies'}, name='legal_cookies'),
 
     path('api/config/', api_views.get_config, name='api_config'),
     path('api/upload/sign/', api_views.r2_sign_upload, name='api_upload_sign'),
