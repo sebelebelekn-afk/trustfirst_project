@@ -176,7 +176,7 @@ var _tfTermsHTML = `
         </div>
         <b style="font-size:16px;color:var(--text-primary,#000);">3. Verification</b>
       </div>
-      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.7;margin:0;">Verified users get full platform access, posting, commenting, messaging, going live. Non-verified users can view, bookmark, and share only.</p>
+      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.7;margin:0;">A badge means we checked something specific: that you are a real person, a real business, an official, or a child account linked to a verified guardian. Verification is needed to <b>start a conversation with someone new</b>, because that is where most scams begin. Everything else, posting, commenting, going live and replying, works without one. A badge is not our endorsement of anyone.</p>
     </div>
 
     <div style="background:var(--bg-secondary,#f8f8f8);border-radius:18px;padding:20px 22px;">
