@@ -19675,6 +19675,13 @@ function openReelLongPressMenu(page) {
     if (!page) return;
     document.getElementById('reelLongPressMenu')?.remove();
     var pid = page.getAttribute('data-post-id') || '';
+    // The clip's own source, so Download here saves the one being long-pressed
+    // rather than whatever renderReel last painted.
+    var pageVid = page.querySelector('video');
+    var pageUrl = (pageVid && (pageVid.currentSrc || pageVid.src)) || '';
+    var noDl = page.getAttribute('data-no-downloads') === '1';
+    window._reelMenuUrl = pageUrl;
+
     function row(icon, color, label, action, last) {
         return '<div onclick="reelMenuAction(\'' + action + '\',\'' + pid + '\')" style="display:flex;align-items:center;gap:14px;padding:16px 20px;cursor:pointer;' + (last ? '' : 'border-bottom:0.5px solid rgba(255,255,255,0.08);') + '">' +
             '<div style="width:36px;height:36px;border-radius:10px;background:' + color + '33;display:flex;align-items:center;justify-content:center;"><i class="fa-solid ' + icon + '" style="color:' + color + ';font-size:16px;"></i></div>' +
@@ -19687,6 +19694,10 @@ function openReelLongPressMenu(page) {
         '<div style="width:100%;max-width:500px;padding:0 12px max(24px,env(safe-area-inset-bottom,24px));animation:slideUpOverlay 0.32s cubic-bezier(0.32,0.72,0,1);">' +
             '<div style="background:rgba(30,30,34,0.9);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.14);border-radius:20px;overflow:hidden;margin-bottom:10px;box-shadow:0 12px 40px rgba(0,0,0,0.45);">' +
                 row('fa-bookmark', '#007AFF', 'Save', 'save') +
+                // Download is hidden when the creator turned it off, the same
+                // rule the reels-page menu already follows.
+                ((noDl || !pageUrl) ? '' :
+                    row('fa-arrow-down-to-line', '#5856D6', 'Download', 'download')) +
                 row('fa-arrow-up-from-bracket', '#34C759', 'Share', 'share') +
                 row('fa-eye-slash', '#FF9500', 'Not interested', 'notinterested') +
                 row('fa-flag', '#FF3B30', 'Report', 'report', true) +
@@ -19711,6 +19722,8 @@ function reelMenuAction(action, pid) {
         else showToast('Link copied');
     } else if (action === 'notinterested') {
         showToast("You'll see less like this");
+    } else if (action === 'download') {
+        downloadReel(window._reelMenuUrl || '');
     }
 }
 
@@ -19819,16 +19832,16 @@ function showDownloadPill(reelId) {
         '<span id="dpLabel">Saving to device… 0%</span>';
     var appRoot = document.querySelector('.app') || document.body;
     appRoot.appendChild(pill);
-    var progress = 0;
+    // Nothing calls this. It was a second progress ring counting up on a timer
+    // with no download behind it, one wiring mistake away from telling somebody
+    // a file had saved when it had not. Downloads go through downloadReel, which
+    // fetches real bytes; this only ever reports what that hands it.
     var arc = document.getElementById('dpArc');
     var label = document.getElementById('dpLabel');
-    var iv = setInterval(function() {
-        progress += Math.random() * 18 + 4;
-        if (progress >= 100) {
-            progress = 100;
-            clearInterval(iv);
+    window._tfDownloadPillUpdate = function (pct, done) {
+        if (done) {
             if (arc) arc.setAttribute('stroke-dashoffset', '0');
-            if (label) label.textContent = 'Saved to device ✓';
+            if (label) label.textContent = 'Saved ✓';
             triggerHaptic(30);
             setTimeout(function() {
                 pill.style.transition = 'opacity 0.4s,transform 0.4s';
@@ -19836,12 +19849,14 @@ function showDownloadPill(reelId) {
                 pill.style.transform = 'translateX(-50%) translateY(10px)';
                 setTimeout(function() { pill.remove(); }, 400);
             }, 1400);
+        } else if (pct === null || pct === undefined || isNaN(pct)) {
+            if (label) label.textContent = 'Saving…';
         } else {
-            var offset = 50.27 * (1 - progress / 100);
+            var offset = 50.27 * (1 - pct / 100);
             if (arc) arc.setAttribute('stroke-dashoffset', offset.toFixed(2));
-            if (label) label.textContent = 'Saving to device… ' + Math.floor(progress) + '%';
+            if (label) label.textContent = 'Saving… ' + Math.floor(pct) + '%';
         }
-    }, 120);
+    };
 }
 
 
@@ -36494,10 +36509,16 @@ openSub = function(id) {
 
     window._dl = { active:false, pct:0, timer:null };
 
-function downloadReel() {
+function downloadReel(explicitUrl) {
     var menu = document.getElementById('reelLongPressMenu');
     if (menu) menu.remove();
     if (window._dl.active) { showToast('Already downloading'); return; }
+
+    var reel = reelsData[currentReelIndex] || null;
+    var url = explicitUrl || (reel && reel.videoUrl) || '';
+    if (reel && reel.no_downloads) { showToast('The creator turned downloads off'); return; }
+    if (!url) { showToast('Nothing to download here'); return; }
+
     window._dl.active = true; window._dl.pct = 0;
 
     /* Pill */
@@ -36546,32 +36567,122 @@ function downloadReel() {
         homeIcon.appendChild(ring);
     }
 
-    /* Animate */
-    window._dl.timer = setInterval(function() {
-        window._dl.pct += Math.random() * 9 + 2.5;
-        if (window._dl.pct >= 100) { window._dl.pct = 100; clearInterval(window._dl.timer); _dlUpdate(100); setTimeout(_dlDone, 280); return; }
-        _dlUpdate(window._dl.pct);
-    }, 160);
+    /* Actually fetch it. This used to be a setInterval adding a random amount
+       until it reached 100, at which point it said "Saved to device" — while
+       nothing was ever fetched and no file was ever written. */
+    _dlRun(url, reel);
+}
+
+async function _dlRun(url, reel) {
+    try {
+        var blob = await _tfFetchWithProgress(url, _dlUpdate);
+
+        var name = 'trustfirst-' + (reel && reel.id ? String(reel.id).slice(0, 8) : Date.now()) +
+                   (/\.webm(\?|$)/i.test(url) ? '.webm' : '.mp4');
+
+        // In the shell this can reach the camera roll. In a browser it can only
+        // reach the downloads folder, and calling that "gallery" would be the
+        // same lie the progress bar was telling.
+        var inGallery = false;
+        if (typeof tfSaveVideoToGallery === 'function') {
+            inGallery = await tfSaveVideoToGallery(blob);
+        }
+        if (!inGallery) _tfBlobDownload(blob, name);
+
+        _dlUpdate(100);
+        _dlDone(inGallery);
+    } catch (e) {
+        console.warn('[download]', e && e.message);
+        _dlFail();
+    }
+}
+
+/**
+ * Fetch with a percentage taken from bytes actually received.
+ * onPct(null) means the server sent no length, so there is no honest number to
+ * show and the bar goes indeterminate instead of inventing one.
+ */
+async function _tfFetchWithProgress(url, onPct) {
+    var res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+
+    var total = parseInt(res.headers.get('Content-Length') || '0', 10);
+    if (!res.body || !res.body.getReader || !total) {
+        onPct(null);
+        return await res.blob();
+    }
+
+    var reader = res.body.getReader();
+    var chunks = [], received = 0;
+    for (;;) {
+        var r = await reader.read();
+        if (r.done) break;
+        chunks.push(r.value);
+        received += r.value.length;
+        onPct(Math.min(99, received / total * 100));   // 100 is for when it is saved
+    }
+    return new Blob(chunks, { type: res.headers.get('Content-Type') || 'video/mp4' });
+}
+
+function _tfBlobDownload(blob, filename) {
+    var href = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = href;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(href); }, 60000);
 }
 
 function _dlUpdate(pct) {
-    var p = Math.round(pct);
     var bar = document.getElementById('dlBar');
     var pctEl = document.getElementById('dlPct');
     var ring = document.getElementById('homeRing');
+
+    // Unknown size: stripe the bar rather than invent a number.
+    if (pct === null || pct === undefined || isNaN(pct)) {
+        if (bar) {
+            bar.style.width = '100%';
+            bar.style.background = 'repeating-linear-gradient(90deg,#007AFF 0 8px,rgba(0,122,255,0.25) 8px 16px)';
+        }
+        if (pctEl) pctEl.textContent = '';
+        return;
+    }
+    var p = Math.round(pct);
+    window._dl.pct = p;
     if (bar)   bar.style.width = p + '%';
     if (pctEl) pctEl.textContent = p + '%';
     if (ring)  ring.style.background = 'conic-gradient(#34C759 ' + Math.round(pct/100*360) + 'deg,rgba(255,255,255,0.07) ' + Math.round(pct/100*360) + 'deg)';
 }
 
-function _dlDone() {
+function _dlFail() {
+    var pill = document.getElementById('reelDlPill');
+    if (pill) {
+        var icon = pill.querySelector('i');
+        if (icon) { icon.className = 'fa-solid fa-triangle-exclamation'; icon.style.color = '#FF9500'; }
+        var label = pill.querySelector('span[style*="font-weight:700"]');
+        if (label) label.textContent = 'Download failed';
+        var pctEl = document.getElementById('dlPct');
+        if (pctEl) pctEl.style.display = 'none';
+        setTimeout(function () { if (pill.parentNode) pill.remove(); }, 2200);
+    }
+    var ring = document.getElementById('homeRing');
+    if (ring) ring.remove();
+    window._dl.active = false;
+    window._dl.pct = 0;
+}
+
+function _dlDone(inGallery) {
     /* Update pill */
     var pill = document.getElementById('reelDlPill');
     if (pill) {
-        pill.querySelector('.fa-arrow-down-to-line').className = 'fa-solid fa-check';
-        pill.querySelector('.fa-check').style.color = '#34C759';
+        var dlIcon = pill.querySelector('i');
+        if (dlIcon) { dlIcon.className = 'fa-solid fa-check'; dlIcon.style.color = '#34C759'; }
         var label = pill.querySelector('span[style*="font-weight:700"]');
-        if (label) label.textContent = 'Saved to device';
+        // Only a real gallery save may claim the gallery. A browser download
+        // goes to the downloads folder and nowhere near the camera roll.
+        if (label) label.textContent = inGallery ? 'Saved to gallery' : 'Downloaded';
         var pctEl = document.getElementById('dlPct');
         if (pctEl) pctEl.style.display = 'none';
         setTimeout(function() {
@@ -49191,7 +49302,12 @@ function tfComposerMediaUrls() {
 }
 
 function tfComposerUploading() {
-    return tfComposerMedia().some(function(m) { return m.status === 'uploading'; });
+    // Shrinking counts as busy too. Without it the Post button came back to life
+    // partway through re-encoding a video, and posting then would have gone out
+    // with no media attached.
+    return tfComposerMedia().some(function(m) {
+        return m.status === 'uploading' || m.status === 'compressing';
+    });
 }
 
 function _tfSyncComposerMediaLegacy() {
@@ -49209,8 +49325,25 @@ function _tfComposerItemHTML(m, i, big) {
         ? '<video src="' + escapeHtml(src) + '"' + (big ? ' controls' : ' muted') + ' playsinline preload="metadata" style="' + fit + 'background:#000;"></video>'
         : '<img src="' + escapeHtml(src) + '" style="' + fit + '">';
     var cover = '';
-    if (m.status === 'uploading') {
-        cover = '<div style="position:absolute;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;border-radius:14px;"><i class="fa-solid fa-spinner fa-spin" style="color:#fff;font-size:18px;"></i></div>';
+    if (m.status === 'uploading' || m.status === 'compressing') {
+        // The real number was already being computed — shrinking reports its
+        // position in the video, and an R2 upload reports bytes sent — and then
+        // thrown away behind a spinner that told you nothing. It is shown when
+        // there is one, and only when there is one: a Supabase upload reports no
+        // progress at all, so that still spins rather than inventing a figure.
+        var pct = (typeof m.progress === 'number' && m.progress > 0)
+            ? Math.min(99, Math.round(m.progress)) : null;
+        var word = m.status === 'compressing' ? 'Shrinking' : 'Uploading';
+        cover = '<div style="position:absolute;inset:0;background:rgba(0,0,0,0.42);display:flex;' +
+            'flex-direction:column;gap:7px;align-items:center;justify-content:center;border-radius:14px;">' +
+            (pct === null
+                ? '<i class="fa-solid fa-spinner fa-spin" style="color:#fff;font-size:18px;"></i>'
+                : '<div style="width:58%;max-width:130px;height:4px;background:rgba(255,255,255,0.22);border-radius:3px;overflow:hidden;">' +
+                      '<div style="height:100%;width:' + pct + '%;background:#fff;border-radius:3px;transition:width .2s ease;"></div>' +
+                  '</div>') +
+            '<small style="color:#fff;font-size:10.5px;font-weight:700;letter-spacing:0.2px;">' +
+                word + (pct === null ? '…' : ' ' + pct + '%') +
+            '</small></div>';
     } else if (m.status === 'failed') {
         cover = '<div onclick="tfRetryComposerMedia(' + i + ')" style="position:absolute;inset:0;background:rgba(0,0,0,0.55);display:flex;flex-direction:column;gap:4px;align-items:center;justify-content:center;border-radius:14px;cursor:pointer;"><i class="fa-solid fa-rotate-right" style="color:#fff;font-size:16px;"></i><small style="color:#fff;font-size:10px;font-weight:700;">Retry</small></div>';
     }

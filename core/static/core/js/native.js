@@ -259,6 +259,34 @@ async function tfLibraryFile(id, isVideo) {
     } catch (e) { return null; }
 }
 
+// ---------- Saving a video to the camera roll --------------------------------
+// Returns true only when the file really landed in the gallery. The caller uses
+// the answer to decide what to tell the user, so guessing here would put the
+// words "Saved to gallery" on screen for a file that is not there.
+function _tfBlobToDataUrl(blob) {
+    return new Promise(function (resolve, reject) {
+        var fr = new FileReader();
+        fr.onload = function () { resolve(fr.result); };
+        fr.onerror = function () { reject(fr.error || new Error('read failed')); };
+        fr.readAsDataURL(blob);
+    });
+}
+
+async function tfSaveVideoToGallery(blob) {
+    var Media = _tfPlugin('Media');
+    if (!tfIsNative() || !Media || typeof Media.saveVideo !== 'function') return false;
+    try {
+        if (!(await tfLibraryPermission())) return false;
+        var dataUrl = await _tfBlobToDataUrl(blob);
+        await Media.saveVideo({ path: dataUrl });
+        return true;
+    } catch (e) {
+        console.warn('[Native] saveVideo failed:', e && e.message);
+        return false;
+    }
+}
+window.tfSaveVideoToGallery = tfSaveVideoToGallery;
+
 // ---------- Native camera capture -------------------------------------------
 // The WebView camera is where the quality complaints come from: it hands back a
 // landscape stream that has to be cropped hard to fill a phone screen, which is
