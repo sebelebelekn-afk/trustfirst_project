@@ -3978,6 +3978,68 @@ html, body { background: #000; }
 :root { --skeleton-bg: #e8e8e8; }
 [data-theme="dark"] { --skeleton-bg: #2c2c2e; }
 
+/* ── ACCOUNTS TO FOLLOW, BETWEEN CLIPS ───────────────────────────────────────
+   The rail scrolls horizontally on its own, so a sideways drag moves between
+   people while an up swipe still goes to the next clip. */
+.tc-sg-wrap {
+    position: absolute; inset: 0; background: #000; z-index: 5005;
+    display: flex; flex-direction: column; justify-content: center;
+}
+.tc-sg-head { padding: 0 22px 16px; }
+.tc-sg-head b { color: #fff; font-size: 19px; font-weight: 800; display: block; }
+.tc-sg-head small { color: rgba(255,255,255,0.55); font-size: 13px; }
+.tc-sg-rail {
+    display: flex; gap: 12px; overflow-x: auto; overflow-y: hidden;
+    scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+    padding: 0 22px 4px; scrollbar-width: none;
+}
+.tc-sg-rail::-webkit-scrollbar { display: none; }
+.tc-sg-card {
+    scroll-snap-align: center; flex: 0 0 78%; box-sizing: border-box;
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 18px; padding: 20px 16px 16px; text-align: center;
+    cursor: pointer;
+    /* Not everybody has clips. Without the column the buttons on a card with no
+       thumbnails ride up, and the card beside it half in view looks misaligned. */
+    display: flex; flex-direction: column;
+}
+.tc-sg-card .tc-sg-btns { margin-top: auto; }
+.tc-sg-card > img {
+    width: 88px; height: 88px; border-radius: 50%; object-fit: cover;
+    margin: 0 auto 12px; display: block;
+}
+.tc-sg-name {
+    color: #fff; font-size: 16px; font-weight: 800;
+    display: block; margin-bottom: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tc-sg-sub { color: rgba(255,255,255,0.5); font-size: 12.5px; display: block; margin-bottom: 14px; }
+/* A fixed height, not an aspect ratio. With flex:1 and aspect-ratio, two
+   thumbnails were each twice as wide as three and so twice as tall, and the
+   tallest card set the height for the whole rail. */
+.tc-sg-clips { display: flex; gap: 4px; margin-bottom: 16px; height: 132px; }
+.tc-sg-clip {
+    flex: 1; height: 100%; border-radius: 8px; overflow: hidden;
+    background: rgba(255,255,255,0.08); position: relative;
+}
+.tc-sg-clip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tc-sg-clip span {
+    position: absolute; bottom: 4px; left: 5px; color: #fff; font-size: 10px;
+    font-weight: 700; text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+}
+.tc-sg-btns { display: flex; gap: 8px; }
+.tc-sg-btns button {
+    flex: 1; padding: 11px 0; border-radius: 10px; font-size: 14px;
+    font-weight: 700; cursor: pointer; border: none;
+}
+.tc-sg-skip { background: rgba(255,255,255,0.13); color: #fff; }
+.tc-sg-follow { background: #007AFF; color: #fff; }
+.tc-sg-follow.following { background: rgba(255,255,255,0.13); }
+.tc-sg-hint {
+    text-align: center; color: rgba(255,255,255,0.35); font-size: 12px;
+    margin-top: 18px;
+}
+
 /* ── MINI PLAYER ─────────────────────────────────────────────────────────────
    A strip along the bottom edge with the nav pill riding above it, so a clip
    keeps playing while you carry on somewhere else. Both move on the same curve

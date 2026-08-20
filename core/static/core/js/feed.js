@@ -13924,6 +13924,7 @@ async function initReels() {
             c.innerHTML += tfReelPageHTML(post, avatarHtml, username, verified, likes);
         });
         if (typeof _tfObserveNewPosts === 'function') _tfObserveNewPosts();
+        _tcInjectSuggestPage();   // accounts to follow, somewhere in the middle
     } catch(e) {
         c.innerHTML = '<div style="color:rgba(255,255,255,0.4);text-align:center;padding:40px;font-size:14px;">Could not load clips.</div>';
     }
@@ -13957,7 +13958,8 @@ async function initReels() {
             if (e.touches.length > 1) return;
             var t = e.touches[0]; lx = t.clientX; ly = t.clientY;
             var pg = e.target.closest('.reel-page');
-            if (!pg || e.target.closest('button,a,.reel-action,.reel-sidebar,input,textarea')) return;
+            if (!pg || pg.hasAttribute('data-suggest-page')) return;   // no clip to act on
+            if (e.target.closest('button,a,.reel-action,.reel-sidebar,input,textarea')) return;
             clearTimeout(lt);
             lt = setTimeout(function() { lt = null; if (typeof openReelLongPressMenu === 'function') openReelLongPressMenu(pg); triggerHaptic(30); }, 480);
         }, { passive: true });
@@ -14092,7 +14094,7 @@ setTimeout(function() {
                 if (e.touches.length > 1) return;
                 var t = e.touches[0]; rlpX = t.clientX; rlpY = t.clientY;
                 var page = e.target.closest('.reel-page');
-                if (!page) return;
+                if (!page || page.hasAttribute('data-suggest-page')) return;
                 clearTimeout(rlpTimer);
                 rlpTimer = setTimeout(function() { rlpTimer = null; openReelLongPressMenu(page); }, 450);
             }, { passive: true });
@@ -18768,70 +18770,10 @@ function addReelsStyles() {
             transition: width 0.1s linear;
         }
 
-        /* Accounts-to-follow panel, shown between clips. The rail scrolls
-           horizontally on its own; the gesture handler already ignores swipes
-           wider than 100px, so a sideways drag moves between people and an up
-           swipe still goes to the next clip. */
-        .tc-sg-wrap {
-            position:absolute; inset:0; background:#000; z-index:5005;
-            display:flex; flex-direction:column; justify-content:center;
-        }
-        .tc-sg-head { padding:0 22px 16px; }
-        .tc-sg-head b { color:#fff; font-size:19px; font-weight:800; display:block; }
-        .tc-sg-head small { color:rgba(255,255,255,0.55); font-size:13px; }
-        .tc-sg-rail {
-            display:flex; gap:12px; overflow-x:auto; overflow-y:hidden;
-            scroll-snap-type:x mandatory; -webkit-overflow-scrolling:touch;
-            padding:0 22px 4px; scrollbar-width:none;
-        }
-        .tc-sg-rail::-webkit-scrollbar { display:none; }
-        .tc-sg-card {
-            scroll-snap-align:center; flex:0 0 78%; box-sizing:border-box;
-            background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.1);
-            border-radius:18px; padding:20px 16px 16px; text-align:center;
-            /* Not everybody has clips to show. Without this the buttons on a
-               card with no thumbnails ride up and the card beside it, half in
-               view, looks misaligned. */
-            display:flex; flex-direction:column;
-        }
-        .tc-sg-card .tc-sg-btns { margin-top:auto; }
-        .tc-sg-card > img {
-            width:88px; height:88px; border-radius:50%; object-fit:cover;
-            margin:0 auto 12px; display:block; cursor:pointer;
-        }
-        .tc-sg-name {
-            color:#fff; font-size:16px; font-weight:800; cursor:pointer;
-            display:block; margin-bottom:3px;
-            white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-        }
-        .tc-sg-sub { color:rgba(255,255,255,0.5); font-size:12.5px; display:block; margin-bottom:14px; }
-        /* Fixed height, not an aspect ratio. With flex:1 and aspect-ratio, two
-           thumbnails were each twice as wide as three and so twice as tall, and
-           the tallest card set the height for the whole rail — which left a big
-           empty gap above the buttons on every other card. */
-        .tc-sg-clips { display:flex; gap:4px; margin-bottom:16px; height:132px; }
-        .tc-sg-clip {
-            flex:1; height:100%; border-radius:8px; overflow:hidden;
-            background:rgba(255,255,255,0.08); position:relative;
-        }
-        .tc-sg-clip img { width:100%; height:100%; object-fit:cover; display:block; }
-        .tc-sg-clip span {
-            position:absolute; bottom:4px; left:5px; color:#fff; font-size:10px;
-            font-weight:700; text-shadow:0 1px 3px rgba(0,0,0,0.7);
-        }
-        .tc-sg-btns { display:flex; gap:8px; }
-        .tc-sg-btns button {
-            flex:1; padding:11px 0; border-radius:10px; font-size:14px;
-            font-weight:700; cursor:pointer; border:none;
-        }
-        .tc-sg-skip { background:rgba(255,255,255,0.13); color:#fff; }
-        .tc-sg-follow { background:#007AFF; color:#fff; }
-        .tc-sg-follow.following { background:rgba(255,255,255,0.13); }
-        .tc-sg-card { cursor:pointer; }
-        .tc-sg-hint {
-            text-align:center; color:rgba(255,255,255,0.35); font-size:12px;
-            margin-top:18px;
-        }
+        /* The accounts-to-follow panel's styles used to be here, and here is
+           only ever reached by showReelsPage, which the bottom bar does not
+           open. The panel rendered in the live feed with none of its CSS. They
+           live in feed.css now, which is always loaded. */
     `;
     document.head.appendChild(style);
 }
@@ -18944,9 +18886,10 @@ function _tcSuggestCardHtml(u, clips) {
 // next one is worse than needing a second tap, so a drag cancels the open.
 var _tcRailMoved = false;
 
-function _tcWireSuggestRail() {
-    var rail = document.getElementById('tcSuggestRail');
-    if (!rail) return;
+function _tcWireSuggestRail(root) {
+    var rail = (root || document).querySelector('.tc-sg-rail');
+    if (!rail || rail._tcWired) return;
+    rail._tcWired = true;
     rail.addEventListener('touchstart', function () { _tcRailMoved = false; }, { passive: true });
     rail.addEventListener('scroll', function () { _tcRailMoved = true; }, { passive: true });
 }
@@ -18976,18 +18919,68 @@ function tcSuggestSkip(btn, userId) {
         if (list.indexOf(userId) < 0) list.push(userId);
         localStorage.setItem('tf-dismissed-suggestions', JSON.stringify(list.slice(-200)));
     } catch (e) {}
+
     var card = btn.closest('.tc-sg-card');
-    var rail = document.getElementById('tcSuggestRail');
+    // Two places this can live: a page in the scrolling feed, or a slide in the
+    // index-rendered one. Work out which from the card rather than assuming.
+    var page = btn.closest('[data-suggest-page]');
+    var rail = page ? page.querySelector('.tc-sg-rail')
+                    : (card && card.parentNode) || document.querySelector('.tc-sg-rail');
     if (card) card.remove();
-    // Keep the slide's own data in step, so re-rendering does not bring it back.
-    var slide = reelsData[currentReelIndex];
-    if (slide && slide.__suggest) {
-        slide.users = slide.users.filter(function (u) { return u.id !== userId; });
+
+    if (!page) {
+        // Keep the slide's own data in step, so re-rendering does not bring the
+        // card back.
+        var slide = reelsData[currentReelIndex];
+        if (slide && slide.__suggest) {
+            slide.users = slide.users.filter(function (u) { return u.id !== userId; });
+        }
     }
     triggerHaptic(8);
+
     if (rail && !rail.querySelector('.tc-sg-card')) {
-        if (currentReelIndex < reelsData.length - 1) renderReel(currentReelIndex + 1);
+        if (page) {
+            // Move on to the next clip, then drop the empty page behind us
+            // rather than leaving a heading over nothing.
+            var next = page.nextElementSibling;
+            if (next && next.scrollIntoView) next.scrollIntoView({ behavior: 'smooth' });
+            setTimeout(function () { if (page.parentNode) page.remove(); }, 450);
+        } else if (currentReelIndex < reelsData.length - 1) {
+            renderReel(currentReelIndex + 1);
+        }
     }
+}
+
+/**
+ * Drop a suggestion page into the scrolling trustclips feed, about two loads in
+ * three and never at the same position.
+ *
+ * This is the feed the bottom bar opens. The panel used to be injected only
+ * into reelsData, which belongs to the index-rendered screen the bottom bar
+ * does not open, so it rendered correctly and nobody ever saw it.
+ */
+async function _tcInjectSuggestPage() {
+    var c = document.getElementById('reel-scroller');
+    if (!c || c.querySelector('[data-suggest-page]')) return;
+    if (c.querySelectorAll('.reel-page').length < 4) return;
+    if (Math.random() < 0.34) return;                 // not every time
+
+    try {
+        var slide = await _tcFetchSuggestSlide();
+        if (!slide) return;
+
+        // The feed can be rebuilt while the query is in flight.
+        var pages = c.querySelectorAll('.reel-page');
+        if (pages.length < 4 || c.querySelector('[data-suggest-page]')) return;
+
+        var at = 3 + Math.floor(Math.random() * Math.min(5, pages.length - 3));
+        var div = document.createElement('div');
+        div.className = 'reel-page';
+        div.setAttribute('data-suggest-page', '1');
+        div.innerHTML = _tcSuggestSlideHtml(slide);
+        c.insertBefore(div, pages[at] || null);
+        _tcWireSuggestRail(div);
+    } catch (e) { /* a missing panel is not worth breaking the feed for */ }
 }
 
 /**
