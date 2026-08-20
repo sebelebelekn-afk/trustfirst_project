@@ -19702,6 +19702,30 @@ function openReelLongPressMenu(page) {
                 row('fa-eye-slash', '#FF9500', 'Not interested', 'notinterested') +
                 row('fa-flag', '#FF3B30', 'Report', 'report', true) +
             '</div>' +
+
+            /* Playback controls. These lived on the renderReel screen, which the
+               bottom bar does not open, so they were unreachable from the tab
+               people actually use. Only the ones that do something are here:
+               the old sheet also had Clear display, Auto scroll and Captions
+               rows that showed a toast and changed nothing. */
+            '<div style="background:rgba(30,30,34,0.9);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.14);border-radius:20px;overflow:hidden;padding:16px 18px;margin-bottom:10px;box-shadow:0 12px 40px rgba(0,0,0,0.45);">' +
+                '<p style="font-size:11px;font-weight:800;color:rgba(255,255,255,0.45);text-transform:uppercase;letter-spacing:0.08em;margin:0 0 11px;">Playback speed</p>' +
+                '<div style="display:flex;gap:6px;' + (_tfCanPiP() ? 'margin-bottom:14px;' : '') + '">' +
+                    ['0.5', '1.0', '1.5', '2.0'].map(function (s) {
+                        var on = parseFloat(s) === (window._tfReelSpeed || 1);
+                        return '<button onclick="setReelSpeed(' + s + ')" id="spd-' + s.replace('.', '_') + '" ' +
+                            'style="flex:1;padding:10px 0;border-radius:13px;border:0.5px solid rgba(255,255,255,0.15);' +
+                            'background:' + (on ? 'rgba(0,122,255,0.6)' : 'rgba(255,255,255,0.1)') + ';' +
+                            'color:#fff;font-size:14px;font-weight:700;cursor:pointer;">' + s + 'x</button>';
+                    }).join('') +
+                '</div>' +
+                (_tfCanPiP()
+                    ? '<div onclick="tfReelPiP()" style="display:flex;align-items:center;gap:12px;padding:11px 0 2px;cursor:pointer;">' +
+                        '<i class="fa-solid fa-window-restore" style="color:rgba(255,255,255,0.6);font-size:15px;width:20px;text-align:center;"></i>' +
+                        '<span style="font-size:15px;color:#fff;font-weight:500;">Picture-in-Picture</span></div>'
+                    : '') +
+            '</div>' +
+
             '<button onclick="document.getElementById(\'reelLongPressMenu\').remove()" style="width:100%;padding:15px;border-radius:18px;border:none;background:rgba(255,255,255,0.12);color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Cancel</button>' +
         '</div>';
     overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
@@ -19770,11 +19794,57 @@ function showPiPModal() {
 }
 
 function setReelSpeed(speed) {
-    const video = document.getElementById('reelVideo');
+    // #reelVideo only exists in the renderReel screen. The trustclips tab the
+    // bottom bar opens is a scroller of .reel-page elements, each with its own
+    // <video>, so this looked for an element that was not on the page and the
+    // speed buttons did nothing there.
+    var video = document.getElementById('reelVideo') || _tfActiveReelVideo();
     if (video) video.playbackRate = speed;
-    showToast(`Speed: ${speed}x`);
+    window._tfReelSpeed = speed;
+    showToast('Speed: ' + speed + 'x');
+
+    // Keep the sheet open and move the highlight, so you can hear the change
+    // and adjust rather than reopening the menu for every step.
+    ['0_5', '1_0', '1_5', '2_0'].forEach(function (id) {
+        var b = document.getElementById('spd-' + id);
+        if (!b) return;
+        var on = parseFloat(id.replace('_', '.')) === speed;
+        b.style.background = on ? 'rgba(0,122,255,0.6)' : 'rgba(255,255,255,0.1)';
+    });
+    triggerHaptic(8);
+}
+
+// iOS Safari has its own picture-in-picture and does not expose this API, so
+// the row is left out there rather than shown doing nothing.
+function _tfCanPiP() {
+    return !!(document.pictureInPictureEnabled &&
+              typeof HTMLVideoElement !== 'undefined' &&
+              HTMLVideoElement.prototype.requestPictureInPicture);
+}
+
+async function tfReelPiP() {
+    var v = _tfActiveReelVideo() || document.getElementById('reelVideo');
     var menu = document.getElementById('reelLongPressMenu');
     if (menu) menu.remove();
+    if (!v) { showToast('No clip playing'); return; }
+    try {
+        if (document.pictureInPictureElement) await document.exitPictureInPicture();
+        else await v.requestPictureInPicture();
+    } catch (e) {
+        showToast('Picture-in-Picture is not available here');
+    }
+}
+
+// The clip currently filling the screen in the .reel-page scroller.
+function _tfActiveReelVideo() {
+    var vids = document.querySelectorAll('#reel-scroller .reel-page video');
+    var best = null, bestArea = 0;
+    for (var i = 0; i < vids.length; i++) {
+        var r = vids[i].getBoundingClientRect();
+        var visible = Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0));
+        if (visible > bestArea) { bestArea = visible; best = vids[i]; }
+    }
+    return best;
 }
 
 function toggleFullscreen() {
