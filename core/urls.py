@@ -14,6 +14,9 @@ urlpatterns = [
     # must come before the catch-all share routes at the bottom of this file,
     # or /privacy/ would be read as somebody's profile.
     path('privacy/', views.legal_page, {'page': 'privacy'}, name='legal_privacy'),
+    # Reachable so it can be read and reviewed, but linked from nowhere yet: only
+    # 2 of its 16 sections are written, and the app still shows the old terms.
+    path('terms/', views.legal_page, {'page': 'terms'}, name='legal_terms'),
 
     path('api/config/', api_views.get_config, name='api_config'),
     path('api/upload/sign/', api_views.r2_sign_upload, name='api_upload_sign'),

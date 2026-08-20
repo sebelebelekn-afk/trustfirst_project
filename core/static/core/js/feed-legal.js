@@ -166,7 +166,7 @@ var _tfTermsHTML = `
         </div>
         <b style="font-size:16px;color:var(--text-primary,#000);">2. Eligibility</b>
       </div>
-      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.7;margin:0;">You must be at least 13 years old. Users under 18 must have a linked parent account. Bots and fake accounts are strictly prohibited.</p>
+      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.7;margin:0;">You must be at least <b>13</b> to have an account, and users under 18 must have a linked parent account. You must be <b>16</b> to broadcast a live stream, and <b>18</b> to buy coins, send or receive gifts, or hold a wallet balance, with no exception. Bots and fake accounts are strictly prohibited.</p>
     </div>
 
     <div style="background:var(--bg-secondary,#f8f8f8);border-radius:18px;padding:20px 22px;">
@@ -209,7 +209,7 @@ var _tfTermsHTML = `
         </div>
         <b style="font-size:16px;color:var(--text-primary,#000);">6. No Ads · No Data Selling</b>
       </div>
-      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.7;margin:0;">TrustFirst does not display advertisements and <strong>never sells user data</strong>. Our revenue model is subscription-based, not ad-based.</p>
+      <p style="font-size:14px;color:var(--text-secondary,#555);line-height:1.7;margin:0;">TrustFirst does not display advertisements and <strong>never sells user data</strong>. The platform is paid for by a share of the gifts sent on it: when a gift is sent, the creator receives 80% and TrustFirst keeps 20%.</p>
     </div>
 
     <div style="background:var(--bg-secondary,#f8f8f8);border-radius:18px;padding:20px 22px;margin-bottom:8px;">
