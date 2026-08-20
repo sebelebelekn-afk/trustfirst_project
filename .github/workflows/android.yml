@@ -1,11 +1,26 @@
-name: Build Android APK
+name: Build Android app
 
 # The dev machine has no JDK and very little free RAM, so a local Gradle build
 # would fail. GitHub's runners build it for free instead, same reason the promo
 # video is rendered in Actions rather than locally.
 #
-# Run it from the Actions tab, choose "Build Android APK", press "Run workflow",
-# and paste the live site URL. The APK lands under the run's Artifacts.
+# Run it from the Actions tab, choose "Build Android app", press "Run workflow".
+# The APK lands under the run's Artifacts.
+#
+# WHAT THIS PRODUCES
+#   Always          a debug APK — installable immediately, no setup required.
+#   With secrets    a signed release APK for the website, and an AAB for Play.
+#
+# TO GET SIGNED BUILDS, once, on your own machine:
+#   keytool -genkey -v -keystore trustfirst.jks -keyalg RSA -keysize 2048 \
+#           -validity 10000 -alias trustfirst
+#   base64 -w0 trustfirst.jks > keystore.txt     (macOS: base64 -i trustfirst.jks)
+# Then add four repository secrets: ANDROID_KEYSTORE_BASE64 (contents of
+# keystore.txt), ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD.
+#
+# KEEP THAT KEYSTORE FILE SAFE AND BACKED UP. Android identifies an app by its
+# signature: lose the keystore and you can never publish an update to anyone who
+# already installed it. They would have to uninstall and start again.
 
 on:
   workflow_dispatch:
@@ -30,8 +45,14 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      # --legacy-peer-deps is not optional here. @capacitor-community/media is
+      # published as 7.0.1 but still declares a peer dependency on
+      # @capacitor/core ^6.0.0, so a plain npm install fails outright with
+      # ERESOLVE and the build never starts. The package itself is a Capacitor 7
+      # release; only the peer range is stale. Also set in .npmrc so a local
+      # install behaves the same way.
       - name: Install Capacitor
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       - name: Point the shell at the live site
         env:
@@ -45,8 +66,40 @@ jobs:
             console.log('Loading:', cfg.server.url);
           "
 
+      # The app icon is drawn once, as an SVG, and rasterised here. Committing a
+      # dozen PNGs at a dozen densities would mean twelve files to forget to
+      # update the next time the mark changes.
+      - name: Build the icon and splash from the app's own SVG
+        run: |
+          npm install --no-save --legacy-peer-deps sharp @capacitor/assets
+          mkdir -p assets
+          node -e "
+            const sharp = require('sharp');
+            const svg = 'core/static/core/icon-dark.svg';
+            // Flatten onto the artwork's own panel colour: store icons must be a
+            // full square with no transparency, and the OS applies its own mask.
+            const bg = { r: 26, g: 26, b: 26, alpha: 1 };
+            (async () => {
+              await sharp(svg, { density: 400 })
+                .resize(1024, 1024)
+                .flatten({ background: bg })
+                .png().toFile('assets/icon.png');
+
+              const logo = await sharp(svg, { density: 400 })
+                .resize(760, 760).png().toBuffer();
+              await sharp({ create: { width: 2732, height: 2732, channels: 4, background: bg } })
+                .composite([{ input: logo, gravity: 'centre' }])
+                .png().toFile('assets/splash.png');
+              await sharp('assets/splash.png').toFile('assets/splash-dark.png');
+              console.log('icon and splash generated');
+            })();
+          "
+
       - name: Add the Android platform
         run: npx cap add android
+
+      - name: Generate the icons at every density
+        run: npx @capacitor/assets generate --android --assetPath assets
 
       - name: Add Firebase config for push
         # Repo secret GOOGLE_SERVICES_JSON holds the contents of google-services.json
@@ -62,6 +115,20 @@ jobs:
             echo "No GOOGLE_SERVICES_JSON secret set, building without push"
           fi
 
+      # Play refuses an upload whose versionCode is not higher than the last one,
+      # so it comes from the run number and can never go backwards.
+      - name: Set the version
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = 'android/app/build.gradle';
+            let g = fs.readFileSync(p, 'utf8');
+            g = g.replace(/versionCode\s+\d+/, 'versionCode ${{ github.run_number }}');
+            g = g.replace(/versionName\s+\"[^\"]*\"/, 'versionName \"1.0.${{ github.run_number }}\"');
+            fs.writeFileSync(p, g);
+            console.log(g.match(/versionCode.*|versionName.*/g).join('  '));
+          "
+
       - name: Sync
         run: npx cap sync android
 
@@ -72,4 +139,82 @@ jobs:
         with:
           name: trustfirst-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      # Everything below only runs once the signing secrets exist. Without them
+      # the debug APK above is still produced, so a first build is never blocked
+      # on setting up a keystore.
+      - name: Is signing configured
+        id: signing
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KS" ]; then echo "ready=true" >> $GITHUB_OUTPUT
+          else echo "ready=false" >> $GITHUB_OUTPUT; echo "No keystore secret — skipping the release build."; fi
+
+      - name: Build and sign the release APK and AAB
+        if: steps.signing.outputs.ready == 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -e
+          echo "$KEYSTORE_B64" | base64 -d > android/keystore.jks
+
+          # Written as a properties file and read by Gradle, so the passwords
+          # never appear in a command line where they could be logged.
+          cat > android/key.properties <<EOF
+          storeFile=../keystore.jks
+          storePassword=$STORE_PASS
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASS
+          EOF
+
+          node -e "
+            const fs = require('fs');
+            const p = 'android/app/build.gradle';
+            let g = fs.readFileSync(p, 'utf8');
+            const load = [
+              'def keystoreProperties = new Properties()',
+              'def keystorePropertiesFile = rootProject.file(\"key.properties\")',
+              'if (keystorePropertiesFile.exists()) {',
+              '    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))',
+              '}',
+              ''
+            ].join('\n');
+            if (!g.includes('keystoreProperties')) g = load + g;
+
+            const cfg = [
+              '    signingConfigs {',
+              '        release {',
+              '            storeFile file(keystoreProperties[\"storeFile\"])',
+              '            storePassword keystoreProperties[\"storePassword\"]',
+              '            keyAlias keystoreProperties[\"keyAlias\"]',
+              '            keyPassword keystoreProperties[\"keyPassword\"]',
+              '        }',
+              '    }',
+              '    buildTypes {',
+              '        release {',
+              '            signingConfig signingConfigs.release',
+              '        }',
+              '    }'
+            ].join('\n');
+            // Drop it inside the android { } block, right after the opening brace.
+            g = g.replace(/android\s*\{/, m => m + '\n' + cfg + '\n');
+            fs.writeFileSync(p, g);
+          "
+
+          cd android
+          ./gradlew assembleRelease bundleRelease --no-daemon
+
+      - name: Upload the signed release
+        if: steps.signing.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: trustfirst-release
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error

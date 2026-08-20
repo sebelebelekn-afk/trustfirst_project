@@ -22,3 +22,8 @@ media/
 # Capacitor generated native projects (recreated by `npx cap add` in CI)
 /android/
 /ios/
+# Generated during the Android build from core/static/core/icon-dark.svg
+assets/
+android/
+keystore.jks
+key.properties
