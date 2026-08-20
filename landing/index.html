@@ -116,6 +116,15 @@ footer{
 footer a{color:var(--muted);text-decoration:underline;text-underline-offset:3px;}
 footer a:hover{color:#fff;}
 .dot{opacity:.4;margin:0 8px;}
+.social{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:40px;height:40px;border-radius:50%;
+  border:1px solid var(--line);color:var(--muted);
+  text-decoration:none;margin-bottom:14px;
+  transition:color .15s,border-color .15s,background .15s;
+}
+.social:hover{color:#fff;border-color:rgba(255,255,255,0.3);background:rgba(255,255,255,0.05);}
+.foot-name{font-weight:700;color:var(--muted);}
 </style>
 </head>
 <body>
@@ -138,7 +147,7 @@ footer a:hover{color:#fff;}
       <!-- Filled in by the script below with whatever suits the device you are
            actually holding, so nobody is offered an APK on an iPhone. -->
       <a class="btn btn-primary" id="ctaPrimary" href="#get">Get the app</a>
-      <a class="btn btn-ghost" id="ctaSecondary" href="#account">Open in your browser</a>
+      <a class="btn btn-ghost" id="ctaSecondary" href="#account">Log in</a>
     </div>
     <p class="note" id="heroNote"></p>
   </div>
@@ -151,6 +160,11 @@ footer a:hover{color:#fff;}
       <div class="card">
         <h3>Android</h3>
         <p id="androidCopy">Download and install the app. Your phone will ask you to allow installing from your browser — that is normal for apps that are not from the Play Store yet.</p>
+        <ol class="steps" id="androidSteps" style="display:none;">
+          <li>Open TrustFirst in <b>Chrome</b>.</li>
+          <li>Tap the <b>⋮</b> menu, top right.</li>
+          <li>Choose <b>Add to Home screen</b>.</li>
+        </ol>
         <a class="btn btn-primary" id="apkBtn" href="#">Download the app</a>
       </div>
 
@@ -187,24 +201,29 @@ footer a:hover{color:#fff;}
   </section>
 
   <section class="account" id="account">
-    <h2>Or just use it in your browser</h2>
+    <h2>Already have an account?</h2>
     <p class="lede">
-      Same app, nothing to install. Works on a laptop as well as a phone.
+      Pick up where you left off, or make an account in a minute.
     </p>
     <div class="stack">
       <a class="btn btn-primary" id="registerBtn" href="#">Create account</a>
       <a class="btn btn-ghost" id="loginBtn" href="#">Log in</a>
     </div>
-    <p class="note">
-      You sign in on TrustFirst itself, never on this page.
-    </p>
   </section>
 
 </main>
 
 <footer>
   <div class="wrap">
-    <span translate="no">TrustFirst</span>
+    <!-- Inline SVG, not an icon font: the page loads nothing from anywhere else
+         and one social link is not a reason to start. -->
+    <a class="social" href="https://x.com/_trustfirst" target="_blank" rel="noopener noreferrer"
+       aria-label="TrustFirst on X">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true">
+        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+      </svg>
+    </a>
+    <div class="foot-name" translate="no">TrustFirst</div>
     <!-- Add a contact address and a privacy policy here when you have them.
          Google Play requires a working privacy policy URL before it will accept
          a listing, so that one is not optional forever. Left out rather than
@@ -239,18 +258,22 @@ var APK_URL = '';   // e.g. 'https://media.trustfirst.app/apk/trustfirst.apk'
   go(el('headerLogin'), APP_URL);
   go(el('iosBtn'), APP_URL);
 
-  // Android card
+  // Android card. With no APK built yet there is nothing to download, and
+  // pointing a Download button at a website would be calling a web page a file.
+  // It offers the install that does work instead, and turns into a real
+  // download the moment APK_URL is filled in.
   var apk = el('apkBtn');
   if (APK_URL) {
     apk.setAttribute('href', APK_URL);
     apk.setAttribute('download', '');
+    apk.textContent = 'Download the app';
   } else {
-    apk.className = 'btn btn-soon';
-    apk.textContent = 'Android app coming soon';
-    apk.removeAttribute('href');
+    apk.setAttribute('href', APP_URL);
+    apk.textContent = 'Open in Chrome';
     el('androidCopy').textContent =
-      'The Android app is not ready to download yet. In the meantime it runs in ' +
-      'Chrome, and you can add it to your home screen from the browser menu.';
+      'TrustFirst installs straight from Chrome and opens like any other app. ' +
+      'The downloadable version is on its way.';
+    el('androidSteps').style.display = '';
   }
 
   // Lead with whatever fits the device in the reader's hand.
@@ -268,12 +291,18 @@ var APK_URL = '';   // e.g. 'https://media.trustfirst.app/apk/trustfirst.apk'
     secondary.textContent = 'How to add it to your home screen';
     secondary.setAttribute('href', '#get');
     note.textContent = 'On iPhone, TrustFirst installs from Safari.';
+  } else if (isAndroid) {
+    primary.textContent = 'Open TrustFirst';
+    primary.setAttribute('href', APP_URL);
+    secondary.textContent = 'How to add it to your home screen';
+    secondary.setAttribute('href', '#get');
+    note.textContent = 'On Android, TrustFirst installs from Chrome.';
   } else {
     primary.textContent = 'Open TrustFirst';
     primary.setAttribute('href', APP_URL);
     secondary.textContent = 'Get it on your phone';
     secondary.setAttribute('href', '#get');
-    note.textContent = 'Runs in your browser. Nothing to install.';
+    note.textContent = 'Made for your phone.';
   }
 })();
 </script>
