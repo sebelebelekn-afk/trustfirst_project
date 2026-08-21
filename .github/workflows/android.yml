@@ -98,8 +98,11 @@ jobs:
       - name: Add the Android platform
         run: npx cap add android
 
+      # The binary is called capacitor-assets, not @capacitor/assets. Invoking it
+      # by package name leaves npx guessing at which bin to run. assets/ is
+      # already the default path, so it does not need naming.
       - name: Generate the icons at every density
-        run: npx @capacitor/assets generate --android --assetPath assets
+        run: npx capacitor-assets generate --android
 
       - name: Add Firebase config for push
         # Repo secret GOOGLE_SERVICES_JSON holds the contents of google-services.json
