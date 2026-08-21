@@ -30,16 +30,19 @@
   </div>
 
   {% comment %}
-    Reachable and linked from Help, so it needs to say what it is. Remove this
-    whole block the day CIPC issues the registration and the number goes into
-    section 1 — not before.
+    The app links here now, so this can no longer say "the Terms in force are the
+    ones in the app" — that became circular the moment Settings pointed at this
+    page. It says what is actually true instead: these apply now, and they move
+    to the company when it exists, which section 15 already provides for.
+    Remove this block once CIPC issues the registration and the number is in
+    section 1.
   {% endcomment %}
   <div class="tf-legal-card">
     <div class="tf-legal-flat">
       <div class="tf-legal-note">
         <i class="fa-solid fa-circle-info"></i>
-        <div><b>Draft — not yet in force.</b>
-        <span>These Terms name EDE&rsquo;s Corp (Pty) Ltd, the company being registered to run TrustFirst. Until that registration is issued they are published so you can read them, not because they bind anybody. The Terms currently in force are the ones inside the app, under Settings.</span></div>
+        <div><b>About the company named here.</b>
+        <span>TrustFirst is run as a sole enterprise while <b>EDE&rsquo;s Corp (Pty) Ltd</b> is being registered. These Terms apply to you now on that basis, and they transfer to the company the moment it is formed, without changing anything you have agreed to — see <a href="#handover">If TrustFirst changes hands</a>. The registration number will be added to section 1 when it is issued.</span></div>
       </div>
     </div>
   </div>
@@ -1179,7 +1182,7 @@
       </div>
     </div>
 
-    <div class="tf-legal-row">
+    <div class="tf-legal-row" id="handover">
       <div class="tf-legal-q">If TrustFirst changes hands<i class="fa-solid fa-chevron-right"></i></div>
       <div class="tf-legal-a">
         <p>We may transfer this agreement to a company we form to run TrustFirst, or to whoever takes it over if it is sold. Your rights under these Terms come with it unchanged, and we will tell you when it happens.</p>

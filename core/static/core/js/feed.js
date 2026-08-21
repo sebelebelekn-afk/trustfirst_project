@@ -23518,21 +23518,28 @@ function _signupCheckApproval() {
 // ---- Auth: legal viewer — renders ABOVE the splash (openInAppBrowser mounts in
 // #app at z-index 7400, which is behind the splash during registration). ----
 function openAuthLegal(type, title) {
-    var map = {
-        privacy: (typeof _tfPrivacyHTML !== 'undefined' ? _tfPrivacyHTML : ''),
-        terms:   (typeof _tfTermsHTML !== 'undefined' ? _tfTermsHTML : '')
-    };
-    var html = map[type] || '<p style="color:#888;">This document isn\'t available yet.</p>';
+    // The sign-up screen used to hold its own copy of the terms and privacy
+    // text, so after the real pages went live this still showed the old words to
+    // exactly the people being asked to agree to them. It loads the same URL as
+    // everywhere else now.
+    var url = (typeof tfLegalUrl === 'function') ? tfLegalUrl(type) : null;
+
     var existing = document.getElementById('authLegalOverlay'); if (existing) existing.remove();
     var ov = document.createElement('div');
     ov.id = 'authLegalOverlay';
     ov.style.cssText = 'position:fixed;inset:0;z-index:10200;background:var(--bg-primary,#fff);color:var(--text-primary,#000);display:flex;flex-direction:column;animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
+
+    var body = url
+        ? '<iframe src="' + escapeHtml(url) + '" title="' + escapeHtml(title || 'Legal') + '" ' +
+          'style="flex:1;width:100%;border:none;background:var(--bg-primary,#fff);"></iframe>'
+        : '<div style="flex:1;overflow-y:auto;padding:26px 20px;"><p style="color:#888;">' +
+          'This document is not available yet.</p></div>';
+
     ov.innerHTML =
         '<div style="display:flex;align-items:center;gap:14px;padding:max(52px,env(safe-area-inset-top,52px)) 20px 14px;border-bottom:0.5px solid var(--border-color,#e0e0e0);flex-shrink:0;">' +
-            '<button onclick="document.getElementById(\'authLegalOverlay\').remove()" style="width:36px;height:36px;border-radius:50%;background:var(--bg-secondary,#f0f0f0);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"><i class="fa-solid fa-chevron-left" style="font-size:14px;color:var(--text-primary,#000);"></i></button>' +
+            '<button onclick="document.getElementById(\'authLegalOverlay\').remove()" aria-label="Back" style="width:36px;height:36px;border-radius:50%;background:var(--bg-secondary,#f0f0f0);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"><i class="fa-solid fa-chevron-left" style="font-size:14px;color:var(--text-primary,#000);"></i></button>' +
             '<b style="font-size:17px;">' + escapeHtml(title || 'Legal') + '</b>' +
-        '</div>' +
-        '<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:26px 20px max(60px,calc(env(safe-area-inset-bottom,0px)+60px));">' + html + '</div>';
+        '</div>' + body;
     document.body.appendChild(ov);
 }
 
@@ -35082,6 +35089,18 @@ function openAboutPage() {
                 '</div>' +
                 '<div class="settings-row" style="cursor:pointer;" onclick="openInAppBrowser(\'Terms of Use\',\'terms\')">' +
                     '<div style="display:flex;gap:12px;align-items:center;"><div style="width:30px;height:30px;border-radius:8px;background:#FF9500;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-file-contract" style="color:#fff;font-size:13px;"></i></div>Terms of Use</div>' +
+                    '<i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>' +
+                '</div>' +
+                '<div class="settings-row" style="cursor:pointer;" onclick="openInAppBrowser(\'Cookies and storage\',\'cookies\')">' +
+                    '<div style="display:flex;gap:12px;align-items:center;"><div style="width:30px;height:30px;border-radius:8px;background:#5856D6;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-cookie-bite" style="color:#fff;font-size:13px;"></i></div>Cookies and storage</div>' +
+                    '<i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>' +
+                '</div>' +
+                '<div class="settings-row" style="cursor:pointer;" onclick="openInAppBrowser(\'Accessibility\',\'accessibility\')">' +
+                    '<div style="display:flex;gap:12px;align-items:center;"><div style="width:30px;height:30px;border-radius:8px;background:#FF3B30;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-universal-access" style="color:#fff;font-size:13px;"></i></div>Accessibility</div>' +
+                    '<i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>' +
+                '</div>' +
+                '<div class="settings-row" style="cursor:pointer;" onclick="openInAppBrowser(\'Help Centre\',\'help\')">' +
+                    '<div style="display:flex;gap:12px;align-items:center;"><div style="width:30px;height:30px;border-radius:8px;background:#8e8e93;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-circle-question" style="color:#fff;font-size:13px;"></i></div>Help Centre</div>' +
                     '<i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>' +
                 '</div>' +
             '</div>' +
