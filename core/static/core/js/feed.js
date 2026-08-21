@@ -2848,6 +2848,95 @@ function _isSafeUrl(url) {
         return (u.protocol === 'http:' || u.protocol === 'https:') && !!u.hostname && u.hostname.indexOf('.') > 0;
     } catch (e) { return false; }
 }
+
+// ── The strips the phone keeps for itself ───────────────────────────────────
+// A phone with a notch reserves a strip behind the status bar and another
+// behind the home indicator. The page cannot draw into either: the system
+// paints them, using the theme-color meta. So they are only invisible while
+// that colour matches whatever the app is showing next to them.
+//
+// This app does not have one background. The feed is #000, most overlays are
+// #1a1a1a, and settings is #121212. Any single fixed theme-color is therefore
+// wrong on two screens out of three, and what that looks like is a black band
+// below a lighter page: the app appearing not to reach the bottom of the screen.
+//
+// So the colour is read from the app rather than declared. Whatever is actually
+// painted at the bottom edge of the window is what the strips are set to, which
+// covers every screen that exists now and any added later without any of them
+// having to know this code is here.
+// True only when a colour actually hides what is behind it.
+//
+// The obvious test, "does it end in , 0)", is wrong and quietly so: rgb(0, 0, 0)
+// is opaque black and ends in exactly that. Written that way the feed's own
+// black read as see-through, the search walked past it to the body, and the
+// strips took a colour from the wrong element. Only rgba() carries an alpha, and
+// only its fourth value decides this.
+function _tfOpaque(colour) {
+    if (!colour || colour === 'transparent') return false;
+    var m = colour.match(/^rgba?\(([^)]+)\)$/);
+    if (!m) return true;                       // a hex or named colour
+    var parts = m[1].split(',');
+    if (parts.length < 4) return true;         // rgb() has no alpha
+    return parseFloat(parts[3]) > 0;
+}
+
+function tfSyncEdgeColour() {
+    try {
+        var el = document.elementFromPoint(Math.floor(window.innerWidth / 2),
+                                           window.innerHeight - 1);
+        var colour = '';
+        while (el && el !== document.documentElement) {
+            // Skip anything see-through; the colour showing is the one behind it.
+            var c = window.getComputedStyle(el).backgroundColor;
+            if (_tfOpaque(c)) { colour = c; break; }
+            el = el.parentElement;
+        }
+        if (!colour) return;
+
+        // Every theme-color tag, not just one. They carry light and dark media
+        // queries, and the browser uses the first whose query matches, so
+        // setting only one leaves the other to win and nothing changes.
+        var metas = document.querySelectorAll('meta[name="theme-color"]');
+        for (var i = 0; i < metas.length; i++) {
+            if (metas[i].getAttribute('content') !== colour) {
+                metas[i].setAttribute('content', colour);
+            }
+        }
+        // Android and the desktop PWA use the document background for the same
+        // job, so it is kept in step too.
+        if (document.body.style.backgroundColor !== colour) {
+            document.body.style.backgroundColor = colour;
+        }
+    } catch (e) { /* never worth breaking a screen over a strip of colour */ }
+}
+
+// Screens in this app change on a tap, so that is when to look.
+//
+// animationend is not optional here and it is easy to leave out: these overlays
+// arrive on a keyframe animation, slideUpOverlay, not a transition. Measured
+// straight after being shown, a settings screen is still a full viewport height
+// below the fold, so reading the colour then gets whatever it is sliding over
+// rather than the screen itself. transitionend is kept for the handful of
+// surfaces that fade instead, and resize covers turning the phone over.
+//
+// No timer. Nothing here needs to run while nobody is doing anything.
+(function () {
+    var pending = null;
+    function soon() {
+        if (pending) return;
+        pending = setTimeout(function () { pending = null; tfSyncEdgeColour(); }, 120);
+    }
+    document.addEventListener('click', soon, true);
+    document.addEventListener('animationend', soon, true);
+    document.addEventListener('transitionend', soon, true);
+    window.addEventListener('resize', soon);
+    window.addEventListener('orientationchange', soon);
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', soon);
+    } else {
+        soon();
+    }
+})();
 // Readable text for a message row, or null when it is encrypted and this
 // device holds no key for it.
 //

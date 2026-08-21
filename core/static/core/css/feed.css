@@ -88,6 +88,11 @@ input, textarea, [contenteditable="true"], .post-content {
 html, body { background: #000; }
 @media (max-width: 499px) {
     html, body { height: 100%; min-height: 100%; }
+    /* The strips the phone reserves behind the status bar and the home indicator
+       are not painted from here — see tfSyncEdgeColour in feed.js. A fixed
+       colour cannot work: this app uses #000 behind the feed, #1a1a1a on most
+       overlays and #121212 on settings, so any one value leaves a band on the
+       screens that do not match it. */
     .app {
         position: fixed;
         top: 0; right: 0; bottom: 0; left: 0;
