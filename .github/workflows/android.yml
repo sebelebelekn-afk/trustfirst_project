@@ -45,14 +45,18 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      # --legacy-peer-deps is not optional here. @capacitor-community/media is
-      # published as 7.0.1 but still declares a peer dependency on
-      # @capacitor/core ^6.0.0, so a plain npm install fails outright with
-      # ERESOLVE and the build never starts. The package itself is a Capacitor 7
-      # release; only the peer range is stale. Also set in .npmrc so a local
-      # install behaves the same way.
+      # No --legacy-peer-deps. It was here to force past @capacitor-community/media
+      # refusing to install, on the assumption its peer range was merely stale.
+      # It was not: that version targets Capacitor 6, calls PluginCall.success()
+      # which Capacitor 7 removed, and the build got all the way to javac before
+      # failing. npm was right and the flag hid it.
+      #
+      # The plugin's major version runs one ahead of Capacitor's: media 8.x is the
+      # Capacitor 7 release, 9.x is for Capacitor 8. With the right one pinned the
+      # install resolves on its own, so the flag is gone and npm can catch the
+      # next mismatch instead of being told to ignore it.
       - name: Install Capacitor
-        run: npm install --legacy-peer-deps
+        run: npm install
 
       - name: Point the shell at the live site
         env:
@@ -71,7 +75,7 @@ jobs:
       # update the next time the mark changes.
       - name: Build the icon and splash from the app's own SVG
         run: |
-          npm install --no-save --legacy-peer-deps sharp @capacitor/assets
+          npm install --no-save sharp @capacitor/assets
           mkdir -p assets
           node -e "
             const sharp = require('sharp');
