@@ -360,16 +360,41 @@ var APK_URL = '';
   // typo in APP_URL — nothing happens and the page keeps the browser-install
   // wording it already has. The failure mode is the honest state, not a broken
   // download button.
-  if (!APK_URL) {
+  // Asked more than once on purpose. The app is on a free plan that puts the
+  // server to sleep once nobody has visited for a while, and the request that
+  // wakes it gets a 503 while it starts — measured at three and a half seconds
+  // from cold, and it can be longer. Asking a single time would mean the first
+  // person to arrive after a quiet night is told there is no Android build,
+  // and that person is the most likely of all to have come from a shared link.
+  //
+  // A real answer, even a negative one, is believed immediately. Only a server
+  // that did not answer is asked again.
+  function askForBuild(attempt) {
     fetch(base + '/download/status.json', { mode: 'cors', credentials: 'omit' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
-        // Go through the app's permanent /download/android/ address rather than
-        // the storage URL it reports, so a link somebody shared still works
-        // after the next build replaces the file.
-        if (d && d.android) offerDownload(base + '/download/android/');
+        if (d) {
+          // Go through the app's permanent /download/android/ address rather
+          // than the storage URL it reports, so a link somebody shared still
+          // works after the next build replaces the file.
+          if (d.android) offerDownload(base + '/download/android/');
+          return;                       // answered, whatever it said
+        }
+        retry(attempt);
       })
-      .catch(function () { /* stay as we are */ });
+      .catch(function () { retry(attempt); });
+  }
+
+  // Spread out to cover a cold start rather than hammering it: five, ten,
+  // fifteen, twenty seconds, then give up quietly and leave the page saying
+  // the honest thing it already says.
+  function retry(attempt) {
+    if (attempt >= 5) return;
+    setTimeout(function () { askForBuild(attempt + 1); }, attempt * 5000);
+  }
+
+  if (!APK_URL) {
+    askForBuild(1);
   } else {
     offerDownload(APK_URL);
   }
