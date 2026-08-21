@@ -2932,18 +2932,56 @@ function openLinkInApp(url) {
     var existing = document.getElementById('inAppBrowser'); if (existing) existing.remove();
     var ov = document.createElement('div');
     ov.id = 'inAppBrowser';
-    ov.style.cssText = 'position:absolute;inset:0;z-index:30000;background:#fff;display:flex;flex-direction:column;';
+    // The bottom inset keeps the page off the home indicator. Without it the
+    // last line of whatever is being read sits under it.
+    ov.style.cssText = 'position:absolute;inset:0;z-index:30000;background:#fff;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom,0px);';
     var encUrl = encodeURIComponent(url).replace(/'/g, '%27');
+
+    // The padlock said "encrypted" on every link it was ever given, including
+    // plain http ones, because it was hardcoded. It reads the scheme now, so it
+    // is either true or it is not shown. An http page cannot load in here at all
+    // (the app is https, so the browser blocks it as mixed content), which makes
+    // saying so up front more useful than a lock and a blank frame.
+    var isHttps = false;
+    try { isHttps = new URL(url).protocol === 'https:'; } catch (e) {}
+    var siteLabel = isHttps
+        ? '<i class="fa-solid fa-lock" style="font-size:10px;color:#34C759;margin-right:5px;" aria-hidden="true"></i>' + escapeHtml(host)
+        : '<i class="fa-solid fa-triangle-exclamation" style="font-size:10px;color:#FF9500;margin-right:5px;" aria-hidden="true"></i>' +
+          '<span style="color:#FF9500;">Not secure</span> ' + escapeHtml(host);
+    var siteTitle = isHttps
+        ? 'Encrypted connection to ' + host
+        : 'Not encrypted. Anything sent to ' + host + ' can be read in transit.';
+
     ov.innerHTML =
         '<div style="flex-shrink:0;display:flex;align-items:center;gap:8px;padding:max(46px,env(safe-area-inset-top,46px)) 12px 10px;background:var(--card-bg,#fff);border-bottom:0.5px solid rgba(0,0,0,0.1);">' +
-            '<i class="fa-solid fa-xmark" onclick="document.getElementById(\'inAppBrowser\').remove()" style="font-size:20px;color:var(--text-primary,#000);cursor:pointer;width:34px;text-align:center;"></i>' +
-            '<div style="flex:1;min-width:0;text-align:center;"><b style="font-size:14px;color:var(--text-primary,#000);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;"><i class="fa-solid fa-lock" style="font-size:10px;color:#34C759;margin-right:5px;"></i>' + escapeHtml(host) + '</b></div>' +
-            '<i class="fa-solid fa-arrow-up-right-from-square" onclick="window.open(decodeURIComponent(\'' + encUrl + '\'),\'_blank\',\'noopener,noreferrer\')" style="font-size:16px;color:#007AFF;cursor:pointer;width:34px;text-align:center;" title="Open in browser"></i>' +
+            '<i class="fa-solid fa-xmark" onclick="document.getElementById(\'inAppBrowser\').remove()" style="font-size:20px;color:var(--text-primary,#000);cursor:pointer;width:34px;text-align:center;" role="button" tabindex="0" aria-label="Close"></i>' +
+            '<div style="flex:1;min-width:0;text-align:center;" title="' + escapeHtml(siteTitle) + '" aria-label="' + escapeHtml(siteTitle) + '"><b style="font-size:14px;color:var(--text-primary,#000);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;">' + siteLabel + '</b></div>' +
+            '<i class="fa-solid fa-arrow-up-right-from-square" onclick="tfOpenInDeviceBrowser(decodeURIComponent(\'' + encUrl + '\'))" style="font-size:16px;color:#007AFF;cursor:pointer;width:34px;text-align:center;" role="button" tabindex="0" title="Open in your browser" aria-label="Open in your browser"></i>' +
         '</div>' +
         '<div id="iabHint" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#aaa;text-align:center;font-size:13px;width:80%;"><i class="fa-solid fa-spinner fa-spin" style="font-size:22px;display:block;margin-bottom:10px;"></i>Loading…<br><span style="font-size:11px;">If the page stays blank, tap the ⤴ icon to open it in your browser.</span></div>' +
         '<iframe src="' + escapeHtml(url) + '" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox" style="flex:1;width:100%;border:none;background:#fff;" onload="var h=document.getElementById(\'iabHint\');if(h)h.style.display=\'none\';"></iframe>';
     (document.getElementById('app') || document.body).appendChild(ov);
     if (typeof triggerHaptic === 'function') triggerHaptic(10);
+}
+
+// The "open in your browser" button. It used to call window.open with a feature
+// string, which a webview answers by opening another view of its own, so the
+// page appeared to expand rather than leave the app.
+//
+// tfOpenExternalUrl says which of the three things actually happened, and this
+// only stays quiet when the link really left. An installed PWA on iOS cannot be
+// made to hand a link to Safari, so rather than pretend, it puts the address on
+// the clipboard and says so, which leaves the person able to finish the job.
+function tfOpenInDeviceBrowser(url) {
+    if (typeof tfOpenExternalUrl !== 'function') { window.open(url, '_blank'); return; }
+    Promise.resolve(tfOpenExternalUrl(url)).then(function (how) {
+        if (how === 'native' || how === 'tab') return;   // it left, nothing to say
+        tfCopyText(url).then(function () {
+            showToast('Your phone keeps links inside the app. The address is copied, paste it into your browser.');
+        }).catch(function () {
+            showToast('Could not open your browser from here.');
+        });
+    });
 }
 
 // ── Delivery / read receipts + presence ────────────────────────────────────
@@ -47732,9 +47770,16 @@ function openFreeUpSpaceScreen() {
     var draftSizeMB = tcDrafts.reduce(function(a,d){ return a + parseFloat(d.fileSize||'0'); },0).toFixed(1);
     var screen = document.createElement('div');
     screen.id = 'freeUpSpaceScreen';
-    screen.style.cssText = 'position:absolute;inset:0;z-index:9100;display:flex;flex-direction:column;background:var(--bg-secondary,#f2f2f7);animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);overflow-y:auto;';
+    // The bottom inset stops the last row sitting under the home indicator once
+    // this list is long enough to scroll.
+    screen.style.cssText = 'position:absolute;inset:0;z-index:9100;display:flex;flex-direction:column;background:var(--bg-secondary,#f2f2f7);animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);overflow-y:auto;padding-bottom:env(safe-area-inset-bottom,0px);';
     screen.innerHTML =
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;background:var(--bg-primary,#fff);border-bottom:0.5px solid var(--border-color,#f0f0f0);position:sticky;top:0;z-index:2;">' +
+        // The title was printing across the clock and the battery: this header
+        // had a flat 16px of padding, so on a phone with a notch or an island it
+        // began at the very top of the glass. calc() with a zero fallback is the
+        // pattern the rest of the app's headers use, and it collapses back to
+        // plain 16px on anything without an inset.
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top,0px) + 16px) 20px 16px;background:var(--bg-primary,#fff);border-bottom:0.5px solid var(--border-color,#f0f0f0);position:sticky;top:0;z-index:2;">' +
             '<button onclick="document.getElementById(\'freeUpSpaceScreen\').remove()" style="background:none;border:none;color:#007AFF;font-size:22px;cursor:pointer;"><i class="fa-solid fa-chevron-left"></i></button>' +
             '<b style="font-size:17px;color:var(--text-primary,#000);">Free Up Space</b>' +
             '<div style="width:36px;"></div>' +

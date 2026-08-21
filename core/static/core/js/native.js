@@ -22,6 +22,55 @@ function _tfPlugin(name) {
     catch (e) { return null; }
 }
 
+// ---------- Open a link outside the app -------------------------------------
+// A button labelled "open in browser" has to hand the link to the browser, not
+// stack another view inside this app. What is actually possible depends on
+// where the app is running, and this reports which happened so the caller can
+// tell the truth rather than assume.
+//
+//   native shell   AppLauncher.openUrl gives the URL to whatever the device has
+//                  set as its default browser. This is the real thing.
+//   browser tab    a plain anchor opens a new tab, which is the browser.
+//   installed PWA  neither is available. iOS in particular keeps target=_blank
+//                  inside the app window, which is exactly the "it just expands
+//                  the page" behaviour. Nothing here can override that, so it
+//                  returns 'inapp' and the caller offers the link instead.
+//
+// window.open(url, '_blank', features) was what it used before. Passing a
+// feature string asks for a popup window, and a webview answers that by opening
+// another view of its own, which is the bug.
+async function tfOpenExternalUrl(url) {
+    if (!url) return 'failed';
+
+    var Launcher = _tfPlugin('AppLauncher');
+    if (tfIsNative() && Launcher && Launcher.openUrl) {
+        try {
+            var res = await Launcher.openUrl({ url: url });
+            // completed === false means the system found nothing to handle it.
+            if (!res || res.completed !== false) return 'native';
+        } catch (e) { /* fall through and try the web route */ }
+    }
+
+    var standalone = false;
+    try {
+        standalone = window.navigator.standalone === true ||
+            (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    } catch (e) {}
+
+    try {
+        var a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    } catch (e) { return 'failed'; }
+
+    return standalone ? 'inapp' : 'tab';
+}
+
 // ---------- Push notifications ----------------------------------------------
 // Android delivery needs a Firebase project and its google-services.json in the
 // native build. Without it registration simply fails and we stay silent rather
