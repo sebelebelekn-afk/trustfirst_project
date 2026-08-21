@@ -88,11 +88,6 @@ input, textarea, [contenteditable="true"], .post-content {
 html, body { background: #000; }
 @media (max-width: 499px) {
     html, body { height: 100%; min-height: 100%; }
-    /* The strips the phone reserves behind the status bar and the home indicator
-       are not painted from here — see tfSyncEdgeColour in feed.js. A fixed
-       colour cannot work: this app uses #000 behind the feed, #1a1a1a on most
-       overlays and #121212 on settings, so any one value leaves a band on the
-       screens that do not match it. */
     .app {
         position: fixed;
         top: 0; right: 0; bottom: 0; left: 0;
@@ -779,7 +774,15 @@ html, body { background: #000; }
 [data-theme="dark"] .activity-item { background: transparent !important; border-bottom-color: #1e1e1e !important; }
 
 /* Settings */
-[data-theme="dark"] #settings-overlay { background: var(--bg-primary, #121212) !important; }
+/* Black, not #121212, and this is the whole fix for the band along the bottom
+   of this screen.
+   The phone reserves a strip behind the home indicator and paints it from
+   theme-color, which is #000 and matches the feed exactly, so the feed has
+   never shown a seam. Settings was the one screen a shade lighter than that
+   strip, which is what made the strip visible here and nowhere else.
+   Matching it is also the right look: iOS Settings in dark mode is a black page
+   with #1c1c1e cards, which is exactly what this is now. */
+[data-theme="dark"] #settings-overlay { background: #000 !important; }
 [data-theme="dark"] .settings-card { background: var(--card-bg, #1c1c1e) !important; border-color: var(--border-color, #2e2e30) !important; }
 [data-theme="dark"] .settings-row { background: var(--card-bg, #1c1c1e) !important; border-bottom-color: var(--border-color, #2e2e30) !important; color: #e5e5e5 !important; }
 [data-theme="dark"] .settings-section-title { color: #555 !important; }
