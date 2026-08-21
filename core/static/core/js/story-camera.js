@@ -469,7 +469,7 @@ async function lgSoundTab(tab, el) {
             '<img src="' + cover + '" onclick="lgPreviewSound(\'' + s.id + '\')" style="width:46px;height:46px;border-radius:8px;object-fit:cover;flex-shrink:0;cursor:pointer;">' +
             '<div style="flex:1;min-width:0;cursor:pointer;" onclick="lgPreviewSound(\'' + s.id + '\')">' +
                 '<div style="font-size:15px;font-weight:700;color:var(--text-primary,#000);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(s.name || 'Sound') + '</div>' +
-                '<div style="font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(s.artist || 'Original sound') + ' Â· ' + _lgFmt(s.duration_sec) + '</div>' +
+                '<div style="font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(s.artist || 'Original sound') + ' · ' + _lgFmt(s.duration_sec) + '</div>' +
             '</div>' +
             '<i class="fa-solid fa-scissors" onclick="lgOpenSoundTrim(\'' + s.id + '\')" title="Trim" style="color:var(--text-primary,#000);font-size:16px;padding:8px;cursor:pointer;"></i>' +
             '<i class="fa-regular fa-bookmark" onclick="lgFavSound(\'' + s.id + '\',this)" style="color:var(--text-primary,#000);font-size:16px;padding:8px;cursor:pointer;"></i>' +

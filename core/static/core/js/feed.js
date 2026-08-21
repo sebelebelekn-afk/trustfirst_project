@@ -3591,7 +3591,7 @@ if (handleEl) handleEl.textContent = '@' + userName.toLowerCase().replace(/\s+/g
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString()
                     }).select('id').single();
-                    if (crErr) { console.error('[openChat] conversation insert failed:', crErr); showToast('Could not start chat – check Supabase RLS'); }
+                    if (crErr) { console.error('[openChat] conversation insert failed:', crErr); showToast('Could not start chat. Check Supabase RLS'); }
                     if (cr) {
                         var _parts = [{ conversation_id: cr.id, user_id: uid, is_blocked: false }];
                         if (!isSelf) _parts.push({ conversation_id: cr.id, user_id: oid, is_blocked: false });
@@ -10372,7 +10372,7 @@ function _cShareExt(icon, color, label, method, brand) {
 }
 function _cShareVia(method) {
     var url = window._cShareUrl || 'https://trustfirst.app';
-    var text = window._cShareText ? (window._cShareText + ' — ') : '';
+    var text = window._cShareText ? (window._cShareText + '\n\n') : '';
     var payload = text + url;
     switch (method) {
         case 'copy':
@@ -10447,7 +10447,7 @@ function _cShareToPerson(uid) {
         } catch (e) {}
     }
     if (navigator.clipboard && text) navigator.clipboard.writeText(text).catch(function(){});
-    showToast('Comment copied — paste it in your chat with ' + name);
+    showToast('Comment copied. Paste it in your chat with ' + name);
 }
 
 // ==========================================================================
@@ -24419,7 +24419,7 @@ function metricCard(icon, color, label, value, change) {
         '</div>' +
         '<div style="font-size:26px;font-weight:900;color:var(--text-primary,#000);letter-spacing:-0.5px;">' + formatAnalyticsNum(value) + '</div>' +
         '<div style="font-size:12px;color:#888;margin-top:3px;">' + label + '</div>' +
-        '<div style="font-size:11px;font-weight:700;color:' + (change === 0 ? '#888' : (pos ? '#34C759' : '#FF3B30')) + ';margin-top:6px;">' + (change === 0 ? '— No comparison data yet' : (pos ? '↑' : '↓') + ' ' + Math.abs(change) + '% vs last period') + '</div>' +
+        '<div style="font-size:11px;font-weight:700;color:' + (change === 0 ? '#888' : (pos ? '#34C759' : '#FF3B30')) + ';margin-top:6px;">' + (change === 0 ? 'No comparison data yet' : (pos ? '↑' : '↓') + ' ' + Math.abs(change) + '% vs last period') + '</div>' +
     '</div>';
 }
 
@@ -24546,7 +24546,7 @@ function buildFollowersTab(stats) {
     '</div>' +
     '<div style="background:var(--card-bg,#fff);border-radius:20px;padding:20px;border:0.5px solid var(--border-color,rgba(0,0,0,0.06));margin-bottom:14px;">' +
         '<b style="font-size:15px;color:var(--text-primary,#000);display:block;margin-bottom:14px;">Age Groups</b>' +
-        [['18–24','—'],['25–34','—'],['35–44','—'],['45+','—']].map(function(a) {
+        [['18-24','—'],['25-34','—'],['35-44','—'],['45+','—']].map(function(a) {
             return '<div style="margin-bottom:12px;">' +
                 '<div style="display:flex;justify-content:space-between;margin-bottom:4px;"><small style="color:var(--text-primary,#000);font-weight:600;">'+a[0]+'</small><small style="color:#888;">'+a[1]+'</small></div>' +
                 '<div style="height:6px;background:var(--bg-secondary,#f0f0f0);border-radius:3px;overflow:hidden;"><div style="height:100%;width:'+a[1]+';background:linear-gradient(90deg,#007AFF,#34C759);border-radius:3px;transition:width 0.8s;"></div></div>' +
@@ -44756,7 +44756,7 @@ if (videoBtn) videoBtn.style.display = isSelf ? 'none' : '';
         content.innerHTML = `
             <b style="font-size:18px;display:block;margin-bottom:16px;">Withdraw Funds</b>
             <div style="background:rgba(255,149,0,0.1);border:1px solid rgba(255,149,0,0.3);border-radius:12px;padding:12px;margin-bottom:16px;font-size:13px;color:#FF9500;">
-                ⚠️ Minimum withdrawal: R50. Bank transfers take 1–3 business days.
+                ⚠️ Minimum withdrawal: R50. Bank transfers take 1 to 3 business days.
             </div>
             <input id="withdraw-amount" type="number" placeholder="Amount (min R50)" style="width:100%;padding:16px;border-radius:14px;border:1px solid var(--border-color,#eee);background:var(--input-bg,#f5f5f5);font-size:16px;color:var(--text-primary,#000);margin-bottom:12px;outline:none;box-sizing:border-box;">
             <button onclick="confirmWithdraw()" style="width:100%;padding:16px;border-radius:14px;background:#007AFF;color:white;border:none;font-size:16px;font-weight:700;cursor:pointer;">Continue</button>`;

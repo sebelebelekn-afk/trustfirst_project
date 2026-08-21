@@ -54,7 +54,7 @@ async function startIdVerification() {
         } else {
             // Don't leak server config hints (e.g. "set DIDIT_WORKFLOW_ID") to users.
             var msg = /not configured|misconfigured/i.test(data.error || '')
-                ? 'Identity verification is being set up — please check back soon.'
+                ? 'Identity verification is being set up. Please check back soon.'
                 : (data.error || 'Could not start verification');
             showToast(msg);
         }

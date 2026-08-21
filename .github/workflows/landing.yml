@@ -47,7 +47,7 @@ jobs:
           TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           if [ -z "$TOKEN" ]; then
-            echo "::error::CLOUDFLARE_API_TOKEN is not set. See the setup notes at the top of .github/workflows/landing.yml — it takes about five minutes and costs nothing."
+            echo "::error::CLOUDFLARE_API_TOKEN is not set. See the setup notes at the top of .github/workflows/landing.yml. It takes about five minutes and costs nothing."
             exit 1
           fi
           echo "Token present."
