@@ -65,7 +65,13 @@
     <a href="/cookies/">Cookies</a>
     <a href="/accessibility/">Accessibility</a>
     <a href="mailto:contacttrustfirst@gmail.com">Contact</a>
-    <a href="/">Open TrustFirst</a>
+    {% comment %}
+      No "Open TrustFirst" here. These pages are read from inside the app far
+      more often than from anywhere else, and offering to open the app to
+      somebody already in it is a link that does nothing except take up a line
+      and make them wonder what they missed. Anyone reading on the web arrived
+      from the download site, which has the app in front of them already.
+    {% endcomment %}
     <span class="c" translate="no">&copy; {% now "Y" %} TrustFirst</span>
 </footer>
 
