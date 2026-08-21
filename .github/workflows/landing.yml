@@ -1,0 +1,62 @@
+name: Deploy the download site
+
+# Publishes landing/ to Cloudflare, who serve it from their network for free.
+#
+# It runs itself whenever the site changes on main, so there is no deploy step
+# to remember and no way for the live site to drift from what is in the repo.
+#
+# ONE-TIME SETUP, all free:
+#
+#   1. Cloudflare dashboard, top right profile menu, API Tokens, Create Token.
+#      Use the "Edit Cloudflare Workers" template. That is the only permission
+#      it needs. Copy the token — Cloudflare shows it once.
+#
+#   2. This repo, Settings, Secrets and variables, Actions, New repository secret:
+#         CLOUDFLARE_API_TOKEN    the token from step 1
+#         CLOUDFLARE_ACCOUNT_ID   the ID on the right of the Cloudflare dashboard
+#                                 home page, same one already used for R2
+#
+# After that every push that touches landing/ deploys itself. The site appears at
+# https://trustfirst.<your-subdomain>.workers.dev, and the deploy step prints the
+# address it went to. A domain can be pointed at it later without changing this.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "landing/**"
+      - "wrangler.jsonc"
+      - ".github/workflows/landing.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Checked before deploying rather than letting wrangler fail with an auth
+      # error that reads like something is broken, when in fact the setup above
+      # has simply not been done yet.
+      - name: Check the Cloudflare secrets exist
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is not set. See the setup notes at the top of .github/workflows/landing.yml — it takes about five minutes and costs nothing."
+            exit 1
+          fi
+          echo "Token present."
+
+      # Wrangler is pinned to a major version and pulled on demand rather than
+      # added to package.json, which belongs to the Android build: putting it
+      # there would make every APK build install a tool it never uses.
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy

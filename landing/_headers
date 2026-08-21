@@ -1,0 +1,33 @@
+# Response headers for the download site. Cloudflare reads this file when it
+# serves landing/, and does not serve the file itself.
+#
+# The page is entirely self-contained — one inline <script>, one inline <style>,
+# no external stylesheets, fonts, images or forms — which is what makes a real
+# policy possible here rather than one loosened until it means nothing. Checked
+# before writing it, not assumed.
+
+/*
+  # Nothing may be loaded from anywhere but this site. The two 'unsafe-inline'
+  # allowances are for the page's own inline script and style; everything else
+  # is refused, so an injected <script src> or a remote tracker cannot load.
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://trustfirst-project-bt1h.onrender.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+
+  # connect-src names the app because the page falls back to asking it whether
+  # an Android build exists when APK_URL is empty. Links out to GitHub and to X
+  # are ordinary navigation, which a policy does not restrict, so neither needs
+  # listing here.
+
+  # No framing. This page has login buttons on it, and a site that can be put in
+  # an invisible frame can have its buttons clicked by the page framing it.
+  X-Frame-Options: DENY
+
+  # Take the declared Content-Type at its word instead of guessing from content,
+  # which is how an uploaded file gets treated as a script.
+  X-Content-Type-Options: nosniff
+
+  # Send the full address to ourselves, only the origin to anybody else. Stops
+  # the app URL leaking through to X when somebody follows the footer link.
+  Referrer-Policy: strict-origin-when-cross-origin
+
+  # The page asks for none of these, so nothing embedded in it may either.
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(), usb=()

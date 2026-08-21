@@ -1,0 +1,26 @@
+{
+	// The download site. Cloudflare serves landing/ as a static site on their
+	// network, free on the Workers free plan, with HTTPS and a certificate
+	// handled for us.
+	//
+	// Workers rather than Pages on Cloudflare's own advice: "If you are starting
+	// a new project, use Workers instead of Pages. Pages continues to work, but
+	// new features and optimizations are focused on Workers." Same free tier and
+	// the same result, so there is no reason to start on the one being wound down.
+	//
+	// This is the marketing site only. The app itself stays on Render — it is
+	// Django, and this serves files, not Python.
+	"name": "trustfirst",
+
+	// Pins the runtime behaviour to what existed on this date, so a change
+	// Cloudflare makes later cannot alter how the site is served without the
+	// date being moved deliberately.
+	"compatibility_date": "2026-08-21",
+
+	// No "main" on purpose. With only an assets directory and no script, this is
+	// a pure static site: nothing runs per request, so nothing can break at
+	// runtime or cost anything per invocation.
+	"assets": {
+		"directory": "./landing"
+	}
+}

@@ -27,3 +27,6 @@ assets/
 android/
 keystore.jks
 key.properties
+
+# Local cache from `wrangler dev`, rebuilt on demand.
+.wrangler/
