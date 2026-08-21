@@ -7011,7 +7011,7 @@ function triggerThought() {
 
     overlay.innerHTML = `
         <!-- Floating glass header island -->
-        <div style="position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:space-between;padding:54px 20px 16px;background:${C.header};backdrop-filter:blur(30px);border-bottom:0.5px solid ${C.border};">
+        <div style="position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:space-between;padding:max(54px,env(safe-area-inset-top,54px)) 20px 16px;background:${C.header};backdrop-filter:blur(30px);border-bottom:0.5px solid ${C.border};">
             <button onclick="closeThoughts()" style="background:${C.close};border:none;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;color:${C.closeIcon};"><i class="fa-solid fa-xmark"></i></button>
             <span style="font-size:15px;font-weight:700;color:${C.text};">New Note</span>
             <button id="thoughtShareBtn" onclick="shareThought()" disabled style="background:linear-gradient(135deg,#007AFF,#00C7FF);border:none;border-radius:25px;padding:8px 20px;color:white;font-size:14px;font-weight:800;cursor:pointer;opacity:0.35;transition:opacity 0.3s,box-shadow 0.3s;">Share</button>
@@ -20636,7 +20636,7 @@ function openInterestHistory(type) {
             '<span style="font-size:12px;color:#aaa;flex-shrink:0;">' + when + '</span></div>';
     }).join('') : '<div style="text-align:center;padding:60px 24px;color:#888;"><i class="fa-solid ' + (isNot ? 'fa-thumbs-down' : 'fa-thumbs-up') + '" style="font-size:34px;opacity:0.3;display:block;margin-bottom:14px;"></i><p style="font-size:15px;">No ' + title.toLowerCase() + ' history yet.</p><p style="font-size:13px;color:#aaa;margin-top:6px;">When you mark clips as ' + title.toLowerCase() + ', they show up here.</p></div>';
     page.innerHTML =
-        '<div style="position:sticky;top:0;z-index:5;background:var(--bg-primary,#fff);padding:50px 16px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid var(--border-color,#eee);">' +
+        '<div style="position:sticky;top:0;z-index:5;background:var(--bg-primary,#fff);padding:max(50px,env(safe-area-inset-top,50px)) 16px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid var(--border-color,#eee);">' +
             '<div style="display:flex;align-items:center;gap:12px;"><i class="fa-solid fa-arrow-left" onclick="document.getElementById(\'interestHistoryPage\').remove()" style="font-size:20px;color:var(--text-primary,#000);cursor:pointer;"></i>' +
             '<b style="font-size:20px;color:var(--text-primary,#000);">' + title + '</b></div>' +
             (arr.length ? '<button onclick="_clearInterest(\'' + key + '\')" style="background:none;border:none;color:#FF3B30;font-size:14px;font-weight:600;cursor:pointer;">Clear</button>' : '') +
@@ -21103,7 +21103,7 @@ async function openSoundHub(soundName, fallbackVideoUrl) {
     page.id = 'soundHubPage';
     page.style.cssText = 'position:fixed;top:0;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;z-index:10001;background:var(--bg-primary,#fff);overflow-y:auto;-webkit-overflow-scrolling:touch;';
     page.innerHTML =
-        '<div style="position:sticky;top:0;z-index:10;background:var(--bg-primary,#fff);backdrop-filter:blur(20px);padding:50px 16px 16px;border-bottom:1px solid var(--border-color,#f0f0f0);">' +
+        '<div style="position:sticky;top:0;z-index:10;background:var(--bg-primary,#fff);backdrop-filter:blur(20px);padding:max(50px,env(safe-area-inset-top,50px)) 16px 16px;border-bottom:1px solid var(--border-color,#f0f0f0);">' +
             '<div style="display:flex;align-items:center;gap:12px;">' +
                 '<div class="liquid-glass-btn" onclick="closeSoundHub()" style="cursor:pointer;"><i class="fa-solid fa-chevron-left"></i></div>' +
                 '<h2 style="font-size:20px;font-weight:800;color:var(--text-primary,#000);flex:1;margin:0;">Sound Hub</h2>' +
@@ -32667,7 +32667,7 @@ async function openChannelReplies(postId, channelId) {
     ov.id = 'chRepliesOverlay';
     ov.style.cssText = 'position:absolute;inset:0;z-index:16000;background:var(--bg-primary,#fff);display:flex;flex-direction:column;animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
     ov.innerHTML =
-        '<div style="position:sticky;top:0;z-index:5;background:var(--bg-primary,#fff);padding:44px 16px 12px;display:flex;align-items:center;gap:12px;border-bottom:0.5px solid var(--border-color,#eee);">' +
+        '<div style="position:sticky;top:0;z-index:5;background:var(--bg-primary,#fff);padding:max(44px,env(safe-area-inset-top,44px)) 16px 12px;display:flex;align-items:center;gap:12px;border-bottom:0.5px solid var(--border-color,#eee);">' +
             '<i class="fa-solid fa-arrow-left" onclick="document.getElementById(\'chRepliesOverlay\').remove()" style="font-size:20px;cursor:pointer;color:var(--text-primary,#000);"></i>' +
             '<b style="font-size:18px;color:var(--text-primary,#000);">Replies</b>' +
         '</div>' +
@@ -36419,7 +36419,7 @@ window._lastAudioFingerprint = { genre: result.genre, bpm: result.bpm, duration:
     overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:10500;background:var(--bg-primary,#fff);animation:slideUpOverlay 0.38s cubic-bezier(0.32,0.72,0,1);display:flex;flex-direction:column;overflow:hidden;';
 
     overlay.innerHTML =
-        '<div style="position:sticky;top:0;z-index:10;background:var(--bg-primary,#fff);backdrop-filter:blur(20px);padding:54px 20px 14px;border-bottom:0.5px solid var(--border-color,#f0f0f0);flex-shrink:0;">' +
+        '<div style="position:sticky;top:0;z-index:10;background:var(--bg-primary,#fff);backdrop-filter:blur(20px);padding:max(54px,env(safe-area-inset-top,54px)) 20px 14px;border-bottom:0.5px solid var(--border-color,#f0f0f0);flex-shrink:0;">' +
             '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">' +
                 '<button onclick="document.getElementById(\'addToCircleSheet\').remove()" style="background:none;border:none;cursor:pointer;color:#007AFF;font-size:15px;font-weight:600;">Cancel</button>' +
                 '<b style="font-size:17px;color:var(--text-primary,#000);">Add to Circle</b>' +
