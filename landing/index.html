@@ -249,20 +249,30 @@ footer a:hover{color:#fff;}
    CHANGE THESE TWO AND NOTHING ELSE.
 
    APP_URL  where the app itself lives. Every button here points at it.
-   APK_URL  the Android build. Leave it empty until there is one — the button
-            says so honestly instead of pointing at a 404. Put the file in R2
-            when you have it: serving it costs nothing there.
+   APK_URL  the Android build. Neither needs touching for a new build: the
+            address below is fixed and every build replaces the file behind it.
 --------------------------------------------------------------------------- */
 // Where the app actually lives. Every link on this page is built from it, so
 // this is the one line to change if it moves to a domain of its own.
 var APP_URL = 'https://trustfirst-project-bt1h.onrender.com';
 
-// APK_URL is left empty on purpose. The page asks the app itself whether an
-// Android build exists — see the fetch at the bottom — so a new build never
-// needs this file edited. Set ANDROID_APK_URL on the server instead and the
-// download button appears here by itself.
-// Fill this in only to override that, or if the app is unreachable.
-var APK_URL = '';
+// The Android build, pointed at straight rather than routed through the app.
+//
+// The workflow publishes every build to this one address and it does not change
+// between builds, so the reason to go through the app — that the filename moved
+// each time and links rotted — no longer applies. What is left is a difference
+// that matters: the app sleeps on its free plan and takes the better part of a
+// minute to wake, and a download is the worst moment to make somebody wait.
+// GitHub serves this from a CDN that is always up, so the button works even when
+// the app is cold, and it keeps working if the app is down entirely.
+//
+// It arrives with the right Content-Type for an Android package, which is what
+// makes a phone offer to install it instead of just saving a file, and with a
+// Content-Disposition that names it. Both confirmed against the live URL.
+//
+// Empty this to fall back to asking the app what it has — see the bottom of
+// this file — which is the route to use if the build ever moves to R2.
+var APK_URL = 'https://github.com/sebelebelekn-afk/trustfirst_project/releases/download/android-latest/trustfirst.apk';
 
 (function () {
   var ua = navigator.userAgent || '';
