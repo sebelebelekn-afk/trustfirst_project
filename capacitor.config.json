@@ -4,7 +4,7 @@
   "webDir": "www",
   "server": {
     "androidScheme": "https",
-    "url": "https://trustfirst.app",
+    "url": "https://trustfirst-project-bt1h.onrender.com",
     "cleartext": false
   },
   "android": {
