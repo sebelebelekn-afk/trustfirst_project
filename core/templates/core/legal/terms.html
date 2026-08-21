@@ -33,23 +33,20 @@
   </div>
 
   {% comment %}
-    Shown only while there is no registration number. It says what is actually
-    true: these apply now, on a sole enterprise, and they move to the company
-    when it exists, which section 15 already provides for. Set COMPANY_REG_NUMBER
-    and this disappears on the next page load, because at that point it is no
-    longer true and a notice that has stopped being true is worse than none.
+    No banner about the company here, deliberately.
+
+    There was one, in the orange note style, and it was wrong twice over. The
+    orange is reserved for the liability warning in section 13, which the
+    Consumer Protection Act requires be drawn to attention rather than buried —
+    that is what the colour is for. Spending it on a note about company
+    formation both weakens the one that has to stand out and makes the whole
+    document look provisional, which it is not: it is in force, and it binds.
+
+    It was also redundant. Section 1 already opens by saying who the agreement
+    is with, in whichever of the two states is true, and section 15 covers the
+    handover. A reader who wants that finds it in the first place they would
+    look, rather than in a warning box above the title.
   {% endcomment %}
-  {% if not company_reg %}
-  <div class="tf-legal-card">
-    <div class="tf-legal-flat">
-      <div class="tf-legal-note">
-        <i class="fa-solid fa-circle-info"></i>
-        <div><b>About the company named here.</b>
-        <span>TrustFirst is run as a sole enterprise while <b>EDE&rsquo;s Corp (Pty) Ltd</b> is being registered. These Terms apply to you now on that basis, and they transfer to the company the moment it is formed, without changing anything you have agreed to — see <a href="#handover">If TrustFirst changes hands</a>. The registration number will be added to section 1 when it is issued.</span></div>
-      </div>
-    </div>
-  </div>
-  {% endif %}
 
   <!-- The takeaways, up front. Anyone who reads nothing else should read this. -->
   <div class="tf-legal-card">
