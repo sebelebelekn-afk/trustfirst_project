@@ -146,5 +146,8 @@ body {
     border-radius: 12px; padding: 14px 16px; margin: 0 0 12px;
 }
 .tf-legal-note i { color: #FF9500; font-size: 14px; margin-top: 2px; flex-shrink: 0; }
-.tf-legal-note b { display: block; color: var(--text); font-size: 14px; margin-bottom: 3px; }
+/* Only the note's own heading is a block. Scoped to the direct child because
+   the plain selector caught bold words inside the sentence too, and a company
+   name in the middle of a clause was being thrown onto a line of its own. */
+.tf-legal-note > div > b { display: block; color: var(--text); font-size: 14px; margin-bottom: 3px; }
 .tf-legal-note span { font-size: 13.5px; color: var(--text-2); line-height: 1.6; }

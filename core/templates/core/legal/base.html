@@ -13,7 +13,13 @@
 <!-- Its own stylesheet, not the app's: feed.css pins .app to the viewport and
      squeezes the body into a phone frame, which is right for the app and wrong
      for a document. -->
-<link rel="stylesheet" href="{% static 'core/css/legal.css' %}?v=1">
+{% comment %}
+  Bump this whenever legal.css changes. Anybody who has already read one of these
+  pages has the old file cached, and without a new query string they keep it —
+  which is how a fixed stylesheet stays broken for exactly the people who have
+  been here before.
+{% endcomment %}
+<link rel="stylesheet" href="{% static 'core/css/legal.css' %}?v=2">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
 
 <script>
@@ -47,14 +53,17 @@
 <footer class="lg-foot">
     <a href="/help/">Help</a>
     <a href="/privacy/">Privacy</a>
-    <a href="/cookies/">Cookies</a>
-    <a href="/accessibility/">Accessibility</a>
     {% comment %}
-      Terms is written but not linked here: it names a company that is not
-      registered yet. It joins this row the day CIPC issues EDE's Corp.
+      Terms sat out of this row because it named a company that does not exist
+      yet. It no longer does: section 1 states the sole enterprise until
+      COMPANY_REG_NUMBER is set and the company after, so there is nothing left
+      to keep it unlinked, and a Terms of Use nothing links to binds nobody.
       Must be {% comment %}, not {#...#} — the hash form is single-line only and
       a two-line one renders as visible text, which is exactly what it did.
     {% endcomment %}
+    <a href="/terms/">Terms</a>
+    <a href="/cookies/">Cookies</a>
+    <a href="/accessibility/">Accessibility</a>
     <a href="mailto:contacttrustfirst@gmail.com">Contact</a>
     <a href="/">Open TrustFirst</a>
     <span class="c" translate="no">&copy; {% now "Y" %} TrustFirst</span>

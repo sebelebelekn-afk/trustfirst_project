@@ -4,20 +4,23 @@
 {% block description %}The agreement between you and TrustFirst: who may use it, what you can post, and what happens when the rules are broken.{% endblock %}
 
 {% comment %}
-  WORK IN PROGRESS — not routed in urls.py yet, deliberately.
+  All sixteen sections are written, this page is routed, and the app links to it.
 
-  Sections 1 and 2 are written. The remaining fourteen are not, and publishing a
-  terms document with holes in it is worse than one that is merely short. It
-  goes live when it is finished.
+  ENTITY: EDE's Corp (Pty) Ltd, trading as TrustFirst, of Cape Town.
 
-  ENTITY: EDE's Corp (Pty) Ltd, trading as TrustFirst.
+  That company is being registered and does not exist yet, which this page does
+  not paper over: you cannot have an agreement with a company that has not been
+  formed, and saying otherwise is the kind of untrue sentence this rewrite exists
+  to remove. So the entity is not written into the text. It comes from
+  COMPANY_REG_NUMBER, and the page reads differently depending on whether there
+  is one — see the two branches below and in section 1.
 
-  THAT COMPANY DOES NOT EXIST YET — registration is in hand but not done. These
-  Terms must not go live until CIPC has issued it, because you cannot have an
-  agreement with a company that has not been formed, and saying otherwise is the
-  kind of untrue sentence this whole rewrite exists to remove. The registration
-  number goes into section 1 at the same time. ECTA section 43 wants an online
-  provider's full name and legal status, which is what that line then satisfies.
+  Set that on the server the day CIPC issues the certificate. Nothing here needs
+  editing, and there is no window in which the Terms claim a company that is not
+  yet real.
+
+  Sections 5 (money) and 13 (liability) still want a human lawyer's eye before
+  anybody is charged real money.
 {% endcomment %}
 
 {% block content %}
@@ -30,13 +33,13 @@
   </div>
 
   {% comment %}
-    The app links here now, so this can no longer say "the Terms in force are the
-    ones in the app" — that became circular the moment Settings pointed at this
-    page. It says what is actually true instead: these apply now, and they move
-    to the company when it exists, which section 15 already provides for.
-    Remove this block once CIPC issues the registration and the number is in
-    section 1.
+    Shown only while there is no registration number. It says what is actually
+    true: these apply now, on a sole enterprise, and they move to the company
+    when it exists, which section 15 already provides for. Set COMPANY_REG_NUMBER
+    and this disappears on the next page load, because at that point it is no
+    longer true and a notice that has stopped being true is worse than none.
   {% endcomment %}
+  {% if not company_reg %}
   <div class="tf-legal-card">
     <div class="tf-legal-flat">
       <div class="tf-legal-note">
@@ -46,6 +49,7 @@
       </div>
     </div>
   </div>
+  {% endif %}
 
   <!-- The takeaways, up front. Anyone who reads nothing else should read this. -->
   <div class="tf-legal-card">
@@ -79,7 +83,21 @@
     <div class="tf-legal-row">
       <div class="tf-legal-q">The agreement<i class="fa-solid fa-chevron-right"></i></div>
       <div class="tf-legal-a">
-        <p>These Terms are an agreement between you and <b>EDE's Corp (Pty) Ltd</b>, trading as <b>TrustFirst</b>, of Cape Town, South Africa{# registration number goes here once CIPC issues it #}. Where these Terms say <b>we</b>, <b>us</b> or <b>our</b>, they mean EDE's Corp.</p>
+        {% comment %}
+          Two versions of the same paragraph, because there are two versions of
+          the truth and only one of them is true at a time. The first says the
+          agreement is with a company, which it will be. The second says it is
+          with a sole enterprise, which it is today. Writing the first one alone
+          would be naming a company that has not been formed as the party you
+          are contracting with, which is not a small inaccuracy in section 1 of
+          a Terms of Use.
+        {% endcomment %}
+        {% if company_reg %}
+        <p>These Terms are an agreement between you and <b>EDE&rsquo;s Corp (Pty) Ltd</b>, trading as <b>TrustFirst</b>, a private company incorporated in South Africa under registration number <b>{{ company_reg }}</b>, of Cape Town. Where these Terms say <b>we</b>, <b>us</b> or <b>our</b>, they mean EDE&rsquo;s Corp.</p>
+        {% else %}
+        <p>These Terms are an agreement between you and <b>TrustFirst</b>, which is run as a sole enterprise from Cape Town, South Africa. <b>EDE&rsquo;s Corp (Pty) Ltd</b> is being registered to take it over, and on the day it is formed this becomes an agreement with that company, without anything you have agreed to changing — see <a href="#handover">If TrustFirst changes hands</a>.</p>
+        <p>Where these Terms say <b>we</b>, <b>us</b> or <b>our</b>, they mean whoever is running TrustFirst at the time: the sole enterprise today, and EDE&rsquo;s Corp once it exists.</p>
+        {% endif %}
         <p>You can reach us at <a href="mailto:contacttrustfirst@gmail.com">contacttrustfirst@gmail.com</a>. That is the address for legal notices, copyright complaints and anything else in these Terms.</p>
       </div>
     </div>

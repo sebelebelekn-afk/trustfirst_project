@@ -54,8 +54,14 @@ def legal_page(request, page):
     handed out trustfirst.app/privacy which was a 404, and Google Play needs a
     privacy policy at a real URL before it will take a listing. Now the app
     loads the same address anybody else would.
+
+    company_reg is the CIPC registration number, empty until there is one. The
+    Terms read differently either way, so that the day the company is formed is a
+    setting on the server rather than an edit to this repository.
     """
-    return render(request, 'core/legal/%s.html' % page)
+    return render(request, 'core/legal/%s.html' % page, {
+        'company_reg': settings.COMPANY_REG_NUMBER,
+    })
 
 
 def service_worker(request):

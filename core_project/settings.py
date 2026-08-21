@@ -136,6 +136,20 @@ SUPABASE_SERVICE_KEY    = os.environ.get('SUPABASE_SERVICE_KEY', '')
 # download that does not exist.
 ANDROID_APK_URL = os.environ.get('ANDROID_APK_URL', '')
 
+# The registration number CIPC issues for EDE's Corp (Pty) Ltd.
+#
+# Empty until the company exists, and the Terms tell the truth either way rather
+# than being edited by hand on the day. Unset, section 1 says TrustFirst is run
+# as a sole enterprise and that the agreement transfers to the company when it is
+# formed. Set, the notice about it disappears, section 1 names the registered
+# company and states its number, and ECTA section 43 — which wants an online
+# provider's full name and legal status — is satisfied by that line.
+#
+# Set it on the server the day the certificate arrives. No deploy, no code change,
+# and no window where the Terms claim an agreement with a company that does not
+# exist yet.
+COMPANY_REG_NUMBER = os.environ.get('COMPANY_REG_NUMBER', '').strip()
+
 # Cloudflare R2 holds the media people look at. R2 charges for what is stored
 # but nothing for serving it, which is the opposite of the bill that ran out.
 # Leave any of these unset and uploads keep going to Supabase storage.
