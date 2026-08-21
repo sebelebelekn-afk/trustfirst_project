@@ -11,6 +11,15 @@ name: Build Android app
 #   Always          a debug APK — installable immediately, no setup required.
 #   With secrets    a signed release APK for the website, and an AAB for Play.
 #
+# Either way the APK is also published to the android-latest release, which is
+# the address the website downloads from:
+#
+#   https://github.com/<owner>/<repo>/releases/download/android-latest/trustfirst.apk
+#
+# That address never changes, so it goes into ANDROID_APK_URL on the server once
+# and every build after this replaces the file behind it. Pushing an update is
+# then just running this workflow again — nothing to upload, nothing to re-point.
+#
 # TO GET SIGNED BUILDS, once, on your own machine:
 #   keytool -genkey -v -keystore trustfirst.jks -keyalg RSA -keysize 2048 \
 #           -validity 10000 -alias trustfirst
@@ -33,6 +42,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Needed by the last step, which publishes the APK as a release asset.
+    # Everything else here only reads.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -225,3 +238,65 @@ jobs:
             android/app/build/outputs/apk/release/app-release.apk
             android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
+
+      # The artifacts above cannot be what the website links to: they expire
+      # after 90 days and GitHub requires a login to fetch one, so a visitor
+      # clicking Download would land on a sign-in page. A release asset on a
+      # public repo is an ordinary HTTPS file that never expires and needs no
+      # account, and it costs nothing.
+      #
+      # The tag is fixed and moved on every build, so the download address never
+      # changes. Set ANDROID_APK_URL once and every later build replaces what it
+      # serves. That is also why the file is called trustfirst.apk rather than
+      # carrying its version: the version is in the release notes, where it can
+      # change without breaking a link somebody already shared.
+      #
+      # Signed build if there is one, debug otherwise, so this works before a
+      # keystore exists and upgrades itself the moment one does.
+      - name: Publish the APK the website downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: 1.0.${{ github.run_number }}
+          APP_URL: ${{ inputs.app_url }}
+        run: |
+          set -e
+          REL=android/app/build/outputs/apk/release/app-release.apk
+          DBG=android/app/build/outputs/apk/debug/app-debug.apk
+          if [ -f "$REL" ]; then SRC=$REL; KIND=release; else SRC=$DBG; KIND=debug; fi
+          cp "$SRC" trustfirst.apk
+          echo "Publishing the $KIND build, $(du -h trustfirst.apk | cut -f1)"
+
+          # Deleted and recreated rather than edited, so the tag follows the
+          # commit that was actually built instead of pointing at the first one.
+          gh release delete android-latest --repo "$GITHUB_REPOSITORY" \
+            --yes --cleanup-tag 2>/dev/null || true
+
+          if [ "$KIND" = release ]; then
+            NOTE="Signed release build. Installs and updates normally."
+            FLAG=""
+          else
+            NOTE="Debug build, for testers. It is signed with Android's shared debug key, which is fine for trying the app out and not fine as a public release. A signed build replaces it as soon as the keystore secrets are set."
+            FLAG="--prerelease"
+          fi
+
+          # Written to a file rather than passed inline: this step is indented
+          # inside the YAML, and a heredoc or a multi-line string would carry
+          # that indentation into the notes, where four spaces means a code block.
+          {
+            echo "$NOTE"
+            echo
+            echo "Version $VERSION, built from ${GITHUB_SHA:0:7}. Opens $APP_URL."
+            echo
+            echo "This tag always holds the current build, so the download address never changes."
+          } > notes.md
+
+          gh release create android-latest trustfirst.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "TrustFirst $VERSION for Android" \
+            --notes-file notes.md \
+            $FLAG
+
+          echo
+          echo "Set this on Render as ANDROID_APK_URL:"
+          echo "https://github.com/${GITHUB_REPOSITORY}/releases/download/android-latest/trustfirst.apk"
