@@ -153,10 +153,29 @@ COMPANY_REG_NUMBER = os.environ.get('COMPANY_REG_NUMBER', '').strip()
 # Cloudflare R2 holds the media people look at. R2 charges for what is stored
 # but nothing for serving it, which is the opposite of the bill that ran out.
 # Leave any of these unset and uploads keep going to Supabase storage.
-R2_ACCOUNT_ID        = os.environ.get('R2_ACCOUNT_ID', '')
-R2_ACCESS_KEY_ID     = os.environ.get('R2_ACCESS_KEY_ID', '')
-R2_SECRET_ACCESS_KEY = os.environ.get('R2_SECRET_ACCESS_KEY', '')
-R2_BUCKET            = os.environ.get('R2_BUCKET', 'trustfirst-media')
+
+# Cloudflare labels these "Access Key ID" and "Secret Access Key", the S3 names,
+# but its own docs and dashboard also say "access key" and "secret key" in
+# places, and boto3 calls them aws_access_key_id / aws_secret_access_key. So
+# there are two plausible spellings for each and it is easy to save one and read
+# the other, which is exactly what happened: R2_SECRET_KEY was set on the server
+# while this file asked for R2_SECRET_ACCESS_KEY. The result is not an error, it
+# is an empty string, so R2 silently stayed off and every upload kept going to
+# Supabase, which is the bill this was meant to stop.
+#
+# Accepting either spelling costs one helper and removes a failure whose only
+# symptom is nothing happening.
+def _env_any(*names, **kw):
+    for n in names:
+        v = (os.environ.get(n) or '').strip()
+        if v:
+            return v
+    return kw.get('default', '')
+
+R2_ACCOUNT_ID        = _env_any('R2_ACCOUNT_ID')
+R2_ACCESS_KEY_ID     = _env_any('R2_ACCESS_KEY_ID', 'R2_ACCESS_KEY')
+R2_SECRET_ACCESS_KEY = _env_any('R2_SECRET_ACCESS_KEY', 'R2_SECRET_KEY')
+R2_BUCKET            = _env_any('R2_BUCKET', default='trustfirst-media')
 # Where finished files are read from: the r2.dev URL, or a custom domain.
 R2_PUBLIC_BASE       = os.environ.get('R2_PUBLIC_BASE', '')
 
