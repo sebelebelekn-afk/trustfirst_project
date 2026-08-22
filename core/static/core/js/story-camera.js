@@ -329,11 +329,18 @@ async function lgPostStory() {
         }
         var ext = (f.name && f.name.split('.').pop()) || (_lgIsVideo(f) ? 'mp4' : 'jpg');
         var path = currentUser.id + '/story_' + Date.now() + '.' + ext;
-        var up = await sb.storage.from('stories').upload(path, f, { contentType: f.type, upsert: true });
-        // Say what actually went wrong. The bare "Could not upload story" is why
-        // a rejected file type looked like the feature simply not working.
-        if (up.error) { showToast('Story upload failed: ' + (up.error.message || 'try again')); return; }
-        var url = sb.storage.from('stories').getPublicUrl(up.data.path).data.publicUrl;
+        // Same route as every other upload: R2 first, Supabase if that fails.
+        // This was going only to Supabase, which is the storage that ran out.
+        var url;
+        try {
+            url = await tfUploadPublicMedia(f, 'story', 'stories', path);
+        } catch (upErr) {
+            // Say what actually went wrong. The bare "Could not upload story" is
+            // why a rejected file type looked like the feature simply not working.
+            showToast('Story upload failed: ' + ((upErr && upErr.message) || 'try again'));
+            return;
+        }
+        if (!url) { showToast('Story upload failed: no address came back'); return; }
         var row = {
             user_id: currentUser.id,
             media_url: url,

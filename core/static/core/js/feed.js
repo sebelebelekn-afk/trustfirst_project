@@ -10984,6 +10984,29 @@ let currentStoryIndex = 0;
 const STORY_DURATION = 5000;       // plain image/picture story
 const STORY_MUSIC_MAX = 45;        // seconds, story music cap
 const STORY_VIDEO_MAX = 120;       // seconds, video story cap (2 minutes)
+// Shown only when the browser refused to start a story with its sound on, which
+// it may do however the story was opened. Without it the video plays silently
+// and looks like a story that simply has no audio.
+function _tfStoryUnmuteChip(video) {
+    var host = video && video.parentElement;
+    if (!host || document.getElementById('tfStoryUnmute')) return;
+    var chip = document.createElement('button');
+    chip.id = 'tfStoryUnmute';
+    chip.setAttribute('aria-label', 'Turn sound on');
+    chip.innerHTML = '<i class="fa-solid fa-volume-xmark"></i> Sound off';
+    chip.style.cssText = 'position:absolute;top:76px;right:14px;z-index:12;border:none;' +
+        'background:rgba(0,0,0,0.55);backdrop-filter:blur(10px);color:#fff;font-size:12px;' +
+        'font-weight:700;padding:7px 12px;border-radius:50px;display:flex;align-items:center;' +
+        'gap:6px;cursor:pointer;';
+    chip.onclick = function (e) {
+        e.stopPropagation();          // the viewer advances on tap
+        video.muted = false;
+        video.play().catch(function () {});
+        chip.remove();
+    };
+    host.appendChild(chip);
+}
+
 function _getStoryDuration(story) {
     // Music story: run for the chosen clip length (sound_duration secs), up to
     // the 45s cap. Falls back to 15s only if the clip length is unknown.
@@ -11112,7 +11135,25 @@ function showStorySegment() {
         console.warn('[showStorySegment] No media_url for story:', story);
         if (content) content.innerHTML = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a1a2e,#16213e);"><p style="color:rgba(255,255,255,0.4);font-size:14px;">No media</p></div>';
     } else if (mediaType === 'video') {
-        if (content) content.innerHTML = '<video src="' + escapeHtml(mediaUrl) + '" autoplay muted playsinline style="width:100%;height:100%;object-fit:cover;" onerror="console.error(\'[Stories] Video failed:\',this.src)"></video>' + captionHtml;
+        // Not muted. It was, unconditionally, so every story with sound played
+        // silently and there was no way to hear it.
+        //
+        // Autoplay with sound is only allowed off the back of a real tap, and
+        // opening a story is one, so this usually just plays. Where a browser
+        // refuses anyway, the catch mutes and plays rather than leaving a still
+        // frame, and _tfStoryUnmuteChip offers a tap to turn the sound on.
+        if (content) content.innerHTML = '<video src="' + escapeHtml(mediaUrl) + '" autoplay playsinline style="width:100%;height:100%;object-fit:cover;" onerror="console.error(\'[Stories] Video failed:\',this.src)"></video>' + captionHtml;
+        var _sv = content && content.querySelector('video');
+        if (_sv) {
+            var _p = _sv.play();
+            if (_p && _p.catch) {
+                _p.catch(function () {
+                    _sv.muted = true;
+                    _sv.play().catch(function () {});
+                    _tfStoryUnmuteChip(_sv);
+                });
+            }
+        }
     } else {
         if (content) content.innerHTML = '<img src="' + escapeHtml(mediaUrl) + '" style="width:100%;height:100%;object-fit:cover;" onerror="console.error(\'[Stories] Image failed:\',this.src)">' + captionHtml;
     }
@@ -48720,13 +48761,33 @@ async function _tfSignR2Upload(file, kind) {
     var sess = await sb.auth.getSession();
     var tok = sess && sess.data && sess.data.session && sess.data.session.access_token;
     if (!tok) throw new Error('no session');
-    var r = await fetch('/api/upload/sign/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
-        body: JSON.stringify({ kind: kind, content_type: _tfBaseType(file), size: file.size })
-    });
-    if (!r.ok) throw new Error('sign failed: ' + r.status);
-    return await r.json();
+
+    // Twenty seconds, then give up and let the caller fall back to Supabase.
+    //
+    // This had no timeout at all. fetch waits as long as the network makes it,
+    // and the server sleeps on its free plan, so a request that arrived while it
+    // was waking could hang with nothing to end it. The upload sat on
+    // "Uploading" with no progress and no error, which is not a state anybody
+    // can act on: it looks identical to a slow upload right up until the app is
+    // closed. Signing is a small request to our own server; if it has not
+    // answered in twenty seconds it is not going to.
+    var ctl = ('AbortController' in window) ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, 20000) : null;
+    try {
+        var r = await fetch('/api/upload/sign/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+            body: JSON.stringify({ kind: kind, content_type: _tfBaseType(file), size: file.size }),
+            signal: ctl ? ctl.signal : undefined
+        });
+        if (!r.ok) throw new Error('sign failed: ' + r.status);
+        return await r.json();
+    } catch (e) {
+        if (e && e.name === 'AbortError') throw new Error('sign timed out');
+        throw e;
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
 }
 
 // PUT via XHR rather than fetch, because only XHR reports how far along the
@@ -49908,13 +49969,20 @@ function openStoryPostArea(file, url) {
             '</div>' +
         '</div>' +
         '<div style="position:absolute;bottom:0;left:0;right:0;padding:0 16px max(36px,env(safe-area-inset-bottom,36px));display:flex;gap:10px;align-items:center;">' +
-            '<button id="spBtnYourStory" style="flex:1;display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.15);backdrop-filter:blur(12px);border:none;border-radius:50px;padding:14px 20px;cursor:pointer;">' +
-                '<div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#5856d6,#007AFF);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-user" style="color:white;font-size:12px;"></i></div>' +
-                '<span style="color:white;font-size:15px;font-weight:700;">Your story</span>' +
+            // Both pills share the row evenly. flex:1 alone did not do that: a
+            // flex item will not shrink below its content's own minimum, and
+            // "TrustCircle" is one unbreakable word while "Your story" can wrap.
+            // So TrustCircle held its full width and Your story took whatever was
+            // left, which is why one looked right and the other looked squeezed.
+            // min-width:0 lets both shrink to the same share, and nowrap with an
+            // ellipsis keeps the label on one line instead of wrapping to two.
+            '<button id="spBtnYourStory" style="flex:1 1 0;min-width:0;display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.15);backdrop-filter:blur(12px);border:none;border-radius:50px;padding:14px 16px;cursor:pointer;">' +
+                '<div style="width:28px;height:28px;flex-shrink:0;border-radius:50%;background:linear-gradient(135deg,#5856d6,#007AFF);display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-user" style="color:white;font-size:12px;"></i></div>' +
+                '<span style="color:white;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Your story</span>' +
             '</button>' +
-            '<button id="spBtnTrustCircle" style="flex:1;display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.15);backdrop-filter:blur(12px);border:none;border-radius:50px;padding:14px 20px;cursor:pointer;">' +
-                '<div style="width:30px;height:30px;border-radius:50%;background:#007AFF;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-star" style="color:white;font-size:12px;"></i></div>' +
-                '<span style="color:white;font-size:15px;font-weight:700;">TrustCircle</span>' +
+            '<button id="spBtnTrustCircle" style="flex:1 1 0;min-width:0;display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.15);backdrop-filter:blur(12px);border:none;border-radius:50px;padding:14px 16px;cursor:pointer;">' +
+                '<div style="width:28px;height:28px;flex-shrink:0;border-radius:50%;background:#007AFF;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-star" style="color:white;font-size:12px;"></i></div>' +
+                '<span style="color:white;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">TrustCircle</span>' +
             '</button>' +
             '<button id="spBtnShare" style="width:50px;height:50px;border-radius:50%;background:#007AFF;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"><i class="fa-solid fa-arrow-up-from-bracket" style="color:white;font-size:17px;"></i></button>' +
         '</div>';
@@ -50409,24 +50477,28 @@ async function submitStoryPost(url, isVideo, audience) {
                 }
                 var ext = isVideo ? 'mp4' : 'jpg';
                 var path = currentUser.id + '/' + storyId + '.' + ext;
-                var { data: upData, error: upErr } = await sb.storage
-                    .from('stories')
-                    .upload(path, blob, { contentType: blob.type, upsert: false });
-                if (upErr) {
+                // Through tfUploadPublicMedia rather than straight at Supabase.
+                // Stories were the one kind of media still going only to Supabase
+                // storage, which is the account that ran out of egress and the
+                // reason R2 exists. It tries R2 and falls back to Supabase on any
+                // failure, so this is strictly more likely to succeed than what
+                // was here, not less.
+                try {
+                    finalUrl = await tfUploadPublicMedia(
+                        new File([blob], storyId + '.' + ext, { type: blob.type || (isVideo ? 'video/mp4' : 'image/jpeg') }),
+                        'story', 'stories', path);
+                } catch (upErr) {
                     // This used to only reach the console, and the story row was
                     // still written pointing at a blob: URL that dies with the
                     // page — so the story looked posted and was not.
                     console.error('[Story] Storage upload FAILED:', upErr);
-                    showToast('Story upload failed: ' + (upErr.message || 'try again'));
+                    showToast('Story upload failed: ' + ((upErr && upErr.message) || 'try again'));
                     try {
                         var sFail = JSON.parse(localStorage.getItem('tf_my_stories') || '[]');
                         localStorage.setItem('tf_my_stories', JSON.stringify(sFail.filter(function(s){ return s.id !== storyId; })));
                     } catch (e) {}
                     if (typeof loadFeedStories === 'function') loadFeedStories();
                     return;
-                } else if (upData) {
-                    var { data: urlData } = sb.storage.from('stories').getPublicUrl(upData.path);
-                    finalUrl = urlData.publicUrl;
                 }
             } else {
                 // Non-blob URL (e.g. album art from music hub) — use directly
