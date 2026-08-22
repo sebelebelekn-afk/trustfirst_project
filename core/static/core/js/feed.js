@@ -5976,9 +5976,11 @@ function _applyProfileStoryRing() {
         if ((r.count || 0) > 0) {
             wrap.style.boxShadow = '0 0 0 3px #007AFF';   // ring sits outside the 4px white border
             wrap.dataset.hasStory = '1';
+            wrap.setAttribute('data-has-story', '1');   // read by _tfAvatarHasStory
         } else {
             wrap.style.boxShadow = '';
             delete wrap.dataset.hasStory;
+            wrap.removeAttribute('data-has-story');
         }
     }, function(){});
 }
@@ -11296,6 +11298,21 @@ function showStorySegment() {
     var content = document.getElementById('story-content');
     var story = _storyItems && _storyItems[currentStoryIndex];
     console.debug('[showStorySegment] index:', currentStoryIndex, 'story:', story);
+
+    // Silence whatever was playing before drawing what comes next.
+    //
+    // Replacing innerHTML detaches the old <video>, and a detached video does
+    // not reliably stop: tapping quickly through stories left the previous
+    // clip's audio running underneath the new one, and tapping past a video
+    // that was still loading left it to finish buffering and start talking with
+    // nothing on screen. It has to be paused and unloaded by hand, before the
+    // element goes.
+    _tfStopStoryDriver(true);
+    if (content) {
+        content.querySelectorAll('video').forEach(function (v) {
+            try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+        });
+    }
 
     if (!story) {
         if (content) content.innerHTML = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a1a2e,#16213e);"><p style="color:rgba(255,255,255,0.4);font-size:14px;">No story content</p></div>';
@@ -21955,6 +21972,26 @@ function sanitizeUrl(url) {
     return url.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+function closeProfilePicSheet() {
+    var el = document.getElementById('profilePicOptions');
+    if (el) el.remove();
+}
+
+// Whether there is a story to offer, taken from the same place the ring around
+// the avatar is set. Reading the ring rather than asking again means the menu
+// and the ring can never disagree: if one says there is a story, so does the
+// other. Falls back to the local record of stories posted from this device,
+// which is what carries a story that has just gone up.
+function _tfAvatarHasStory() {
+    try {
+        if (document.querySelector('[data-has-story="1"]')) return true;
+        var wrap = document.querySelector('.profile-avatar-wrap, #profileAvatarWrap');
+        if (wrap && wrap.dataset && wrap.dataset.hasStory === '1') return true;
+        var mine = JSON.parse(localStorage.getItem('tf_my_stories') || '[]');
+        return mine.some(function (s) { return (s.expiry || 0) > Date.now(); });
+    } catch (e) { return false; }
+}
+
 function showProfilePictureOptions(imageUrl) {
     var currentPic = sanitizeUrl(imageUrl || currentUser?.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(currentUser?.name || 'U') + '&background=007AFF&color=fff&bold=true&size=200');
 
@@ -21985,6 +22022,22 @@ function showProfilePictureOptions(imageUrl) {
         // Options
         '<div style="display:flex; flex-direction:column; gap:2px;' +
         'background:var(--bg-secondary,#f5f5f5); border-radius:16px; overflow:hidden; margin-bottom:16px;">' +
+
+        // View story, only when there is one.
+        //
+        // The ring around the avatar said a story existed and this sheet was the
+        // one place that did not offer it, so tapping the picture to watch it
+        // gave four things to do with the photo and no way through to the story.
+        // Built from the same signal the ring uses, so the two cannot disagree.
+        (_tfAvatarHasStory()
+            ? '<button onclick="closeProfilePicSheet();openStoryViewer(\'' + (currentUser && currentUser.id) + '\')" style="' +
+              'width:100%; padding:16px 20px; border:none; background:var(--card-bg,#fff);' +
+              'color:var(--text-primary,#000); font-size:16px; cursor:pointer;' +
+              'display:flex; align-items:center; gap:14px; text-align:left;">' +
+              '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="2">' +
+              '<circle cx="12" cy="12" r="9"/><polygon points="10,8 16,12 10,16" fill="#007AFF" stroke="none"/></svg>' +
+              '<span>View Story</span></button>'
+            : '') +
 
         // See profile picture
         '<button onclick="viewProfilePicture(\'' + currentPic + '\')" style="' +

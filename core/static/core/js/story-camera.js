@@ -345,7 +345,14 @@ async function lgPostStory() {
             user_id: currentUser.id,
             media_url: url,
             media_type: _lgIsVideo(f) ? 'video' : 'image',
-            audience: window._lgStoryAudience || 'everyone'
+            audience: window._lgStoryAudience || 'everyone',
+            // Without this the story is invisible to everyone, including the
+            // person who posted it. The row saves fine, so it looks posted, but
+            // the read policy on stories is
+            //     expires_at > now() AND NOT tf_blocked(user_id)
+            // and NULL > now() is NULL, not true. The other posting path has
+            // always set it; this one never did.
+            expires_at: new Date(Date.now() + 86400000).toISOString()
         };
         if (_lgSound && _lgSound.name) row.sound_name = _lgSound.name;
 
