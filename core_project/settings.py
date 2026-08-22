@@ -361,6 +361,20 @@ CONTENT_SECURITY_POLICY = {
         "media-src": ["'self'", "data:", "blob:", "https:"],
         "connect-src": [
             "'self'",
+            # Reading back a file the page itself created.
+            #
+            # A story is held as a blob: URL between the trim screen and the
+            # upload, and submitStoryPost fetches that URL to get the bytes.
+            # connect-src did not allow blob:, so the browser refused the fetch
+            # before it left the page and the upload failed with a bare
+            # NetworkError. img-src and media-src have always allowed blob:,
+            # which is why the same video previewed perfectly and then would
+            # not post — it could be shown but not read.
+            #
+            # This grants nothing outward: a blob: URL is the page's own data,
+            # already in its own memory, and cannot address anybody else's
+            # server.
+            "blob:",
             "https://cdn.jsdelivr.net",               # MediaPipe wasm + model files
             "https://*.supabase.co", "wss://*.supabase.co",
             "https://*.livekit.cloud", "wss://*.livekit.cloud",
