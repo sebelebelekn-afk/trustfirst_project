@@ -10984,6 +10984,52 @@ let currentStoryIndex = 0;
 const STORY_DURATION = 5000;       // plain image/picture story
 const STORY_MUSIC_MAX = 45;        // seconds, story music cap
 const STORY_VIDEO_MAX = 120;       // seconds, video story cap (2 minutes)
+// Draw a story's text and stickers over its media.
+//
+// The media is never touched. Overlays are stored as descriptors and drawn at
+// watch time, which is how the clips already work and what keeps an interactive
+// sticker interactive instead of flattening it into pixels. It also means the
+// same story reads correctly on a phone it was not made on: every coordinate is
+// a fraction of the frame, so it scales rather than sliding out of place.
+function _tfRenderStoryOverlays(host, overlays) {
+    if (!host) return;
+    var old = host.querySelector('.tf-story-overlays');
+    if (old) old.remove();
+    if (!overlays || !overlays.length) return;
+
+    var layer = document.createElement('div');
+    layer.className = 'tf-story-overlays';
+    layer.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:8;';
+    var W = host.clientWidth || 1, H = host.clientHeight || 1;
+
+    overlays.forEach(function (o) {
+        if (!o) return;
+        var cell = document.createElement('div');
+        var w = (o.wPct || 0.5) * W;
+        cell.style.cssText = 'position:absolute;left:' + ((o.xPct || 0) * W) + 'px;' +
+            'top:' + ((o.yPct || 0) * H) + 'px;width:' + w + 'px;';
+
+        if (o.kind === 'text') {
+            cell.textContent = o.text || '';
+            // fPct is the size it was actually left at, as a fraction of the
+            // frame, so a pinched-larger caption stays larger here. The 0.058
+            // is only for stories posted before that was recorded.
+            cell.style.cssText += 'color:' + (o.color || '#fff') + ';font-size:' + Math.max(13, W * (o.fPct || 0.058)) + 'px;' +
+                'font-weight:800;text-align:' + (o.align || 'center') + ';' +
+                'font-family:' + ((typeof _edFontMap === 'object' && _edFontMap[o.font]) || 'sans-serif') + ';' +
+                'text-shadow:0 2px 10px rgba(0,0,0,0.55);word-wrap:break-word;';
+        } else {
+            cell.style.fontSize = (w * 0.11) + 'px';
+            cell.style.pointerEvents = 'auto';
+            try {
+                cell.appendChild(TFStickers.render(o, { mode: 'feed' }));
+            } catch (e) { return; }
+        }
+        layer.appendChild(cell);
+    });
+    host.appendChild(layer);
+}
+
 // Shown only when the browser refused to start a story with its sound on, which
 // it may do however the story was opened. Without it the video plays silently
 // and looks like a story that simply has no audio.
@@ -11036,7 +11082,7 @@ function openStoryViewer(userId) {
     var since = new Date(Date.now() - 86400000).toISOString();
     if (window.sb) {
         sb.from('stories')
-            .select('id,user_id,media_url,media_type,caption,created_at,audience,sound_name,sound_url,sound_start,sound_duration,music_style,users:user_id(full_name,username,avatar_url)')
+            .select('id,user_id,media_url,media_type,caption,created_at,audience,sound_name,sound_url,sound_start,sound_duration,music_style,overlays,users:user_id(full_name,username,avatar_url)')
             .eq('user_id', userId)
             .gte('created_at', since)
             .order('created_at', { ascending: true })
@@ -11156,6 +11202,13 @@ function showStorySegment() {
         }
     } else {
         if (content) content.innerHTML = '<img src="' + escapeHtml(mediaUrl) + '" style="width:100%;height:100%;object-fit:cover;" onerror="console.error(\'[Stories] Image failed:\',this.src)">' + captionHtml;
+    }
+
+    // Whatever was put on the story when it was made. Runs for photos and
+    // videos alike, since the overlays sit above the media rather than in it.
+    if (content && story && story.overlays && story.overlays.length) {
+        if (getComputedStyle(content).position === 'static') content.style.position = 'relative';
+        _tfRenderStoryOverlays(content, story.overlays);
     }
 
     // ── Music story: spinning disc + waveform + audio ──
@@ -41327,8 +41380,80 @@ function _edTextEffectCss(effect, color) {
     return m[effect] || '';
 }
 
+// Where overlays go, asked rather than assumed.
+//
+// The editor and the story screen both place text and stickers, but every
+// overlay function looked up the editor's elements by id. On the story screen
+// those do not exist, so _edPlaceOverlay returned null and edRenderTextOverlays
+// returned early — while their callers went on to say "Text added ✅". The
+// overlay was never created; only the message about it was.
+//
+// The story screen is checked first because it opens on top of the editor: when
+// both are in the document, the one being looked at is the story.
+function _tfOverlayArea() {
+    return document.getElementById('spOverlayArea') ||
+           document.getElementById('edPreviewArea');
+}
+
+// Everything placed on a story, as one list of descriptors.
+//
+// Two sources, because the app has two: stickers are DOM elements carrying
+// their own type and data, and text lives in edState.textOverlays. Both end up
+// in the same shape so the viewer needs one renderer, not two.
+//
+// Coordinates are fractions of the preview, never pixels. The story is watched
+// on a different screen from the one it was made on, and a pixel offset that
+// was right on a 393px phone is wrong everywhere else.
+function _tfCollectStoryOverlays() {
+    var area = document.getElementById('spOverlayArea');
+    if (!area) return [];
+    var aw = area.clientWidth || 1, ah = area.clientHeight || 1;
+    var out = [];
+
+    area.querySelectorAll('[data-ov="1"]').forEach(function (w) {
+        out.push({
+            kind: 'sticker',
+            type: w._ovType,
+            data: w._ovData || {},
+            xPct: w.offsetLeft / aw,
+            yPct: w.offsetTop / ah,
+            wPct: w.offsetWidth / aw
+        });
+    });
+
+    var layer = document.getElementById('spTextLayer');
+    if (layer) {
+        layer.querySelectorAll('.ed-text-item').forEach(function (el) {
+            var t = (edState && edState.textOverlays || []).filter(function (o) {
+                return o.id === el.getAttribute('data-id');
+            })[0] || {};
+            out.push({
+                kind: 'text',
+                text: el.textContent.replace(/✕$/, '').trim(),
+                color: t.color || '#ffffff',
+                font: t.font || 'Classic',
+                align: t.align || 'center',
+                effect: t.effect || 'none',
+                xPct: el.offsetLeft / aw,
+                yPct: el.offsetTop / ah,
+                wPct: (el.offsetWidth || aw * 0.8) / aw,
+                // Captured as a fraction of the frame rather than a pixel size,
+                // so text pinched larger stays that size relative to the story
+                // on whatever screen watches it. Reading it off the element
+                // means it is right however the size was arrived at.
+                fPct: (parseFloat(getComputedStyle(el).fontSize) || 22) / aw
+            });
+        });
+    }
+    return out;
+}
+function _tfTextLayer() {
+    return document.getElementById('spTextLayer') ||
+           document.getElementById('edTextLayer');
+}
+
 function edRenderTextOverlays() {
-    var layer = document.getElementById('edTextLayer');
+    var layer = _tfTextLayer();
     if (!layer) return;
     Array.prototype.slice.call(layer.querySelectorAll('.ed-text-item')).forEach(function(n) { n.remove(); });
     (edState.textOverlays || []).forEach(function(t) {
@@ -41367,10 +41492,21 @@ function edRenderTextOverlays() {
             };
         }
         function done() { edState.isDirty = true; edSaveHistory(); editorSaveDraft(false); }
+        // Pinch to resize the text, the same gesture the stickers take. Text had
+        // no resize at all before this: whatever size it was placed at was the
+        // size it stayed.
+        var _tf0 = 0;
+        _tfEnablePinch(el, function (ratio) {
+            if (!_tf0) _tf0 = parseFloat(getComputedStyle(el).fontSize) || 22;
+            var next = Math.min(140, Math.max(12, _tf0 * ratio));
+            el.style.fontSize = next + 'px';
+        }, function () { _tf0 = 0; done(); });
+
         el.addEventListener('touchstart', function(e) {
             if (e.target === del) return;
+            if (e.touches.length > 1) return;   // two fingers is a pinch, not a drag
             var pt = e.touches[0], move = from(pt.clientX, pt.clientY);
-            function mv(ev) { move(ev.touches[0].clientX, ev.touches[0].clientY); }
+            function mv(ev) { if (ev.touches.length > 1) return; move(ev.touches[0].clientX, ev.touches[0].clientY); }
             function en() { document.removeEventListener('touchmove', mv); document.removeEventListener('touchend', en); done(); }
             document.addEventListener('touchmove', mv, { passive: true });
             document.addEventListener('touchend', en);
@@ -42584,6 +42720,48 @@ function edApplyFilter(id) {
 // Shared drag / resize / remove for editor stickers. onTap (optional) fires on a
 // press that did not turn into a drag, so a sticker like the clock can toggle its
 // style without a stray move being read as a tap.
+// Two fingers to resize, which is how anyone who has used a phone expects to
+// resize a thing. The corner grip stays for a mouse and for precision, but a
+// grip is a 20px target on glass and pinching is what people actually reach for.
+//
+// The gesture is claimed on the second finger landing: onScale is fed the ratio
+// of the current finger distance to the distance they started at, so a pinch
+// that doubles the gap doubles the size. preventDefault stops the page zooming
+// underneath, and the elements this is attached to already carry
+// touch-action:none so the browser does not take the gesture first.
+function _tfEnablePinch(el, onScale, onEnd) {
+    var startGap = 0, active = false;
+
+    function gap(t) {
+        var dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    el.addEventListener('touchstart', function (e) {
+        if (e.touches.length !== 2) return;
+        e.preventDefault(); e.stopPropagation();
+        startGap = gap(e.touches);
+        active = startGap > 0;
+    }, { passive: false });
+
+    el.addEventListener('touchmove', function (e) {
+        if (!active || e.touches.length !== 2) return;
+        e.preventDefault(); e.stopPropagation();
+        var now = gap(e.touches);
+        if (now > 0 && startGap > 0) onScale(now / startGap);
+    }, { passive: false });
+
+    function done(e) {
+        if (!active) return;
+        // Only finished once fewer than two fingers remain.
+        if (e.touches && e.touches.length >= 2) return;
+        active = false;
+        if (onEnd) onEnd();
+    }
+    el.addEventListener('touchend', done);
+    el.addEventListener('touchcancel', done);
+}
+
 function _edMakeAdjustable(wrap, removeMsg, onTap) {
     var del = document.createElement('div');
     del.textContent = '✕';
@@ -42606,8 +42784,19 @@ function _edMakeAdjustable(wrap, removeMsg, onTap) {
     function pt(e) { var t = (e.touches && e.touches[0]) || e; return { x: t.clientX, y: t.clientY }; }
     function commit() { edState.isDirty = true; if (typeof edSaveHistory === 'function') edSaveHistory(); }
 
+    // Pinch to resize, same result as dragging the grip.
+    var _pinchW0 = 0;
+    _tfEnablePinch(wrap, function (ratio) {
+        if (!_pinchW0) _pinchW0 = wrap.offsetWidth;
+        var nw = _edClampWidth(wrap, Math.round(_pinchW0 * ratio), 60);
+        wrap.style.width = nw + 'px';
+        if (wrap._ovFontK) wrap.style.fontSize = (nw * wrap._ovFontK) + 'px';
+    }, function () { _pinchW0 = 0; commit(); });
+
     function drag(e) {
         if (e.target === del || e.target === grip) return;
+        // One finger moves it; two are a pinch, which the handler above owns.
+        if (e.touches && e.touches.length > 1) return;
         if (e.cancelable) e.preventDefault();
         var p0 = pt(e), ox = wrap.offsetLeft, oy = wrap.offsetTop, moved = false;
         function mv(ev) {
@@ -43271,7 +43460,7 @@ function _tfClockAnalogSVG(d) {
 // body's em sizing to the wrapper width, so resizing scales the whole sticker.
 function _edPlaceOverlay(descriptor, opts) {
     opts = opts || {};
-    var area = document.getElementById('edPreviewArea');
+    var area = _tfOverlayArea();
     if (!area) return null;
     descriptor.id = descriptor.id || ('stk_' + Math.random().toString(36).slice(2, 9));
     descriptor.data = descriptor.data || {};
@@ -43303,7 +43492,7 @@ function _edPlaceOverlay(descriptor, opts) {
 
 // Serialise every placed sticker to descriptors with normalised coordinates.
 function _edCollectOverlays() {
-    var area = document.getElementById('edPreviewArea');
+    var area = _tfOverlayArea();
     if (!area) return [];
     var aw = area.clientWidth || 1, ah = area.clientHeight || 1;
     var out = [];
@@ -48820,20 +49009,34 @@ function _tfPutToR2(url, file, headers, onProgress) {
  * Supabase fallback, used whenever R2 is not available.
  */
 async function tfUploadPublicMedia(file, kind, bucket, path, onProgress) {
+    // Why R2 was skipped or refused. When Supabase then fails too, the error
+    // that reaches the person carries both halves. "Upload failed" on its own
+    // is unactionable: it cannot tell you whether the file was too big, the
+    // type was refused, the signature expired or the network died, and those
+    // want four different responses.
+    var r2Reason = TF_R2_ENABLED ? null : 'R2 off in config';
     if (TF_R2_ENABLED) {
         try {
             var signed = await _tfSignR2Upload(file, kind);
             await _tfPutToR2(signed.upload_url, file, signed, onProgress);
             return signed.public_url;
         } catch (e) {
-            console.warn('[upload] R2 unavailable, using Supabase', e);
+            r2Reason = (e && e.message) || String(e);
+            console.warn('[upload] R2 unavailable, using Supabase:', r2Reason);
         }
     }
     var client = window._sb || window.sb;
     var up = await client.storage.from(bucket).upload(path, file, {
         cacheControl: TF_MEDIA_CACHE_SECONDS, contentType: file.type, upsert: false
     });
-    if (up.error) throw up.error;
+    if (up.error) {
+        var mb = (file && file.size) ? (file.size / 1048576).toFixed(1) + 'MB' : '?';
+        var err = new Error((up.error.message || 'storage refused it') +
+            ' [' + _tfBaseType(file) + ', ' + mb + '; R2: ' + (r2Reason || 'not tried') + ']');
+        err.r2Reason = r2Reason;
+        err.supabaseError = up.error;
+        throw err;
+    }
     var pub = client.storage.from(bucket).getPublicUrl(path);
     return pub.data && pub.data.publicUrl;
 }
@@ -49953,9 +50156,17 @@ function openStoryPostArea(file, url) {
                 '<button id="spBtnVolume" style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.55);border:none;color:white;font-size:16px;display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="fa-solid fa-volume-high"></i></button>' +
             '</div>' +
         '</div>' +
-        '<div style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;">' +
+        // spOverlayArea is where text and stickers land. It has to exist and it
+        // has to be positioned, because everything that places an overlay does
+        // so absolutely inside it. Without it the editor's own functions looked
+        // up elements belonging to a screen that was not open, found nothing,
+        // and returned quietly while still reporting success.
+        '<div id="spOverlayArea" style="position:relative;flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;">' +
             (isVideo ? '<video id="storyPostVid" src="'+url+'" style="width:100%;height:100%;object-fit:cover;will-change:transform;" loop playsinline muted preload="auto"></video>'
                      : '<img src="'+url+'" style="width:100%;height:100%;object-fit:cover;">') +
+            // Text sits in its own layer so taps fall through to the media;
+            // each item switches pointer events back on for dragging.
+            '<div id="spTextLayer" style="position:absolute;inset:0;pointer-events:none;z-index:55;"></div>' +
         '</div>' +
 
 
@@ -50445,6 +50656,11 @@ async function submitStoryPost(url, isVideo, audience) {
     var storyId = 'story_' + Date.now();
     var finalUrl = url;
 
+    // Read the overlays before the screen goes, which is two lines below. They
+    // live in that screen's DOM, so collecting them afterwards returns nothing
+    // and the story posts bare — which is precisely what used to happen.
+    var _overlays = _tfCollectStoryOverlays();
+
     // Close screen immediately — upload in background
     var _savedMusicInfo = window._spStoryMusicInfo ? Object.assign({}, window._spStoryMusicInfo) : null;
     spRemoveMusic();
@@ -50518,7 +50734,8 @@ async function submitStoryPost(url, isVideo, audience) {
                 sound_url: _sMusic ? (_sMusic.previewUrl || null) : null,
                 sound_start: _sMusic && typeof _sMusic.start === 'number' ? _sMusic.start : null,
                 sound_duration: _sMusic && typeof _sMusic.duration === 'number' ? _sMusic.duration : null,
-                music_style: _sMusic ? (window._spMusicOnly ? 'disc' : 'box') : null
+                music_style: _sMusic ? (window._spMusicOnly ? 'disc' : 'box') : null,
+                overlays: _overlays
             });
             if (storyDbErr) {
                 console.error('[Story] DB insert FAILED:', storyDbErr);
