@@ -16473,8 +16473,11 @@ function storyPickerLoadFiles(files) {
     window._spFiles.forEach(function(item, i) {
         var div = document.createElement('div');
         div.style.cssText = 'aspect-ratio:9/16;border-radius:8px;overflow:hidden;cursor:pointer;position:relative;background:#222;flex-shrink:0;width:calc((100% - 24px)/4);';
+        // A <video> is not a thumbnail. iOS decodes nothing until it plays, so
+        // preload="metadata" leaves a black rectangle, which is why the picker
+        // showed empty tiles for every clip. Draw a real frame instead.
         div.innerHTML = (item.isVid
-            ? '<video src="'+item.url+'" style="width:100%;height:100%;object-fit:cover;" muted playsinline preload="metadata"></video>'
+            ? '<img id="spThumb'+i+'" style="width:100%;height:100%;object-fit:cover;" alt="">'
             : '<img src="'+item.url+'" style="width:100%;height:100%;object-fit:cover;" loading="lazy">')
             + '<div id="spChk'+i+'" style="position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;background:#007AFF;border:2px solid white;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-check" style="color:white;font-size:9px;"></i></div>';
         (function(idx) {
@@ -16486,8 +16489,58 @@ function storyPickerLoadFiles(files) {
             };
         })(i);
         thumbs.appendChild(div);
+        if (item.isVid) _tfVideoPoster(item.url, document.getElementById('spThumb' + i));
     });
     spUpdateNextBtn();
+}
+
+// One frame out of a video, as an image.
+//
+// A <video> element is not a preview: iOS decodes nothing until playback
+// starts, so a grid of clips renders as a grid of black rectangles. Seeking a
+// little way in and drawing that frame to a canvas gives a picture on every
+// platform, and avoids the first frame being the black one a lot of videos open
+// on.
+function _tfVideoPoster(url, imgEl, atSeconds) {
+    if (!imgEl) return;
+    var v = document.createElement('video');
+    v.muted = true;                 // required before a browser will decode
+    v.playsInline = true;
+    v.preload = 'auto';
+    v.src = url;
+
+    var settled = false;
+    function give(dataUrl) {
+        if (settled) return;
+        settled = true;
+        if (dataUrl) imgEl.src = dataUrl;
+        try { v.removeAttribute('src'); v.load(); } catch (e) {}
+    }
+
+    v.addEventListener('loadeddata', function () {
+        var want = atSeconds != null ? atSeconds
+                 : Math.min(0.6, (isFinite(v.duration) && v.duration > 0) ? v.duration / 2 : 0.1);
+        try { v.currentTime = want; } catch (e) { draw(); }
+    });
+    v.addEventListener('seeked', draw);
+    v.addEventListener('error', function () { give(null); });
+
+    function draw() {
+        try {
+            var w = v.videoWidth, h = v.videoHeight;
+            if (!w || !h) return give(null);
+            // Small on purpose: this is a tile, and a full-resolution canvas per
+            // clip is a lot of memory on a phone holding twenty of them.
+            var scale = Math.min(1, 320 / Math.max(w, h));
+            var c = document.createElement('canvas');
+            c.width = Math.round(w * scale); c.height = Math.round(h * scale);
+            c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+            give(c.toDataURL('image/jpeg', 0.72));
+        } catch (e) { give(null); }
+    }
+
+    // Never leave a tile waiting forever on a file that will not decode.
+    setTimeout(function () { give(null); }, 6000);
 }
 
 function spUpdateNextBtn() {
@@ -47432,7 +47485,18 @@ function _ecCaptureCoverFrames(videoSrc, n) {
     return new Promise(function(resolve) {
         var v = document.createElement('video');
         v.muted = true; v.playsInline = true; v.preload = 'auto';
-        try { v.crossOrigin = 'anonymous'; } catch(e) {}
+        // crossOrigin only where it is needed and can actually be satisfied.
+        //
+        // It was set on everything. On a blob: or same-origin file that is
+        // pointless, and on a remote one it makes the load conditional on CORS
+        // headers coming back — so editing the cover of a clip already uploaded
+        // to R2 could fail to load the video at all and leave every frame in the
+        // strip blank. Without it, a remote video still plays; the canvas is
+        // tainted and toDataURL throws, which the catch below already turns into
+        // a null frame rather than a broken screen.
+        var remote = /^https?:/i.test(videoSrc || '') &&
+                     (videoSrc || '').indexOf(location.origin) !== 0;
+        if (remote) { try { v.crossOrigin = 'anonymous'; } catch(e) {} }
         var times = [], frames = [], done = false;
         var finish = function(){ if(!done){ done = true; resolve({ times: times, frames: frames }); } };
         v.addEventListener('error', finish);
