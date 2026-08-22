@@ -348,8 +348,25 @@ async function lgPostStory() {
             audience: window._lgStoryAudience || 'everyone'
         };
         if (_lgSound && _lgSound.name) row.sound_name = _lgSound.name;
+
+        // The upload has already succeeded by this point: the media is stored
+        // and only the row is missing. A bare "load failed" here is Safari's
+        // wording for a request that never completed, which is worth separating
+        // from the database refusing the row, because one is worth retrying on
+        // the spot and the other is not. Retried once before giving up, since
+        // the usual cause is a connection that dropped while a large video was
+        // going up.
         var res = await sb.from('stories').insert(row);
-        if (res.error) { showToast('Could not post story: ' + (res.error.message || 'try again')); return; }
+        if (res.error && /load failed|fetch|network/i.test(res.error.message || '')) {
+            await new Promise(function (r) { setTimeout(r, 1200); });
+            res = await sb.from('stories').insert(row);
+        }
+        if (res.error) {
+            console.error('[Story] insert failed', res.error, row);
+            showToast('Could not post story: ' + (res.error.message || 'try again') +
+                      ' — the file uploaded, only the post did not save');
+            return;
+        }
         showToast('Story posted');
         if (typeof triggerHaptic === 'function') triggerHaptic(25);
     } catch (e) { showToast('Story failed: ' + ((e && e.message) || 'try again')); }

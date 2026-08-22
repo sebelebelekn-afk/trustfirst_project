@@ -41483,6 +41483,23 @@ function edRenderTextOverlays() {
         el.appendChild(del);
 
         function from(sx, sy) {
+            // Freeze the box before measuring anything.
+            //
+            // Text is placed at left:10%; right:10%, so it is stretched between
+            // the two. The drag used to clear right on the first move, which
+            // collapsed the element to the width of its own text — so the box
+            // changed size the instant a drag began and the text, being centred,
+            // jumped somewhere else. That is the popping out.
+            //
+            // Pinning the current width and left first means clearing right
+            // changes nothing, and the drag starts from exactly where the finger
+            // landed.
+            if (el.style.right && el.style.right !== 'auto') {
+                el.style.width = el.offsetWidth + 'px';
+                el.style.left = el.offsetLeft + 'px';
+                el.style.right = 'auto';
+                t.right = '';
+            }
             var ox = el.offsetLeft, oy = el.offsetTop;
             return function(cx, cy) {
                 t.left = (ox + cx - sx) + 'px';
@@ -42737,6 +42754,33 @@ function _tfEnablePinch(el, onScale, onEnd) {
         return Math.sqrt(dx * dx + dy * dy);
     }
 
+    function finish() {
+        if (!active) return;
+        active = false;
+        if (onEnd) onEnd();
+    }
+
+    // Safari's own pinch events, and on an iPhone these are the ones that
+    // actually arrive. WebKit swallows a two-finger gesture and reports it as
+    // gesturestart/gesturechange with a ready-made scale, rather than delivering
+    // two-finger touchmove to the element, which is why a pinch built only on
+    // touch events does nothing on the device it was written for. e.scale is
+    // relative to the start of the gesture, which is exactly the ratio wanted.
+    el.addEventListener('gesturestart', function (e) {
+        e.preventDefault(); e.stopPropagation();
+        active = true;
+    });
+    el.addEventListener('gesturechange', function (e) {
+        if (!active) return;
+        e.preventDefault(); e.stopPropagation();
+        if (e.scale > 0) onScale(e.scale);
+    });
+    el.addEventListener('gestureend', function (e) {
+        e.preventDefault();
+        finish();
+    });
+
+    // The touch route, for everything that is not WebKit.
     el.addEventListener('touchstart', function (e) {
         if (e.touches.length !== 2) return;
         e.preventDefault(); e.stopPropagation();
@@ -42751,15 +42795,13 @@ function _tfEnablePinch(el, onScale, onEnd) {
         if (now > 0 && startGap > 0) onScale(now / startGap);
     }, { passive: false });
 
-    function done(e) {
-        if (!active) return;
+    function touchDone(e) {
         // Only finished once fewer than two fingers remain.
         if (e.touches && e.touches.length >= 2) return;
-        active = false;
-        if (onEnd) onEnd();
+        finish();
     }
-    el.addEventListener('touchend', done);
-    el.addEventListener('touchcancel', done);
+    el.addEventListener('touchend', touchDone);
+    el.addEventListener('touchcancel', touchDone);
 }
 
 function _edMakeAdjustable(wrap, removeMsg, onTap) {
