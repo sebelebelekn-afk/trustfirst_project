@@ -50449,7 +50449,9 @@ function openStoryPostArea(file, url) {
         // up elements belonging to a screen that was not open, found nothing,
         // and returned quietly while still reporting success.
         '<div id="spOverlayArea" style="position:relative;flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;">' +
-            (isVideo ? '<video id="storyPostVid" src="'+url+'" style="width:100%;height:100%;object-fit:cover;will-change:transform;" loop playsinline muted preload="auto"></video>'
+            // Not muted. This is the last look before posting, and reviewing a
+            // clip in silence means not knowing what is about to go out.
+            (isVideo ? '<video id="storyPostVid" src="'+url+'" style="width:100%;height:100%;object-fit:cover;will-change:transform;" loop playsinline preload="auto"></video>'
                      : '<img src="'+url+'" style="width:100%;height:100%;object-fit:cover;">') +
             // Text sits in its own layer so taps fall through to the media;
             // each item switches pointer events back on for dragging.
@@ -50528,7 +50530,18 @@ function openStoryPostArea(file, url) {
     // Smooth video playback
     if (isVideo) {
         var vid = document.getElementById('storyPostVid');
-        if (vid) { vid.load(); vid.addEventListener('canplaythrough', function(){ vid.play().catch(function(){}); }, {once:true}); }
+        if (vid) {
+            vid.load();
+            vid.addEventListener('canplaythrough', function () {
+                vid.play().catch(function () {
+                    // Refused with sound: play it silently rather than freezing,
+                    // and offer the one tap that turns audio on for good.
+                    vid.muted = true;
+                    vid.play().catch(function () {});
+                    if (typeof _tfStoryUnmuteChip === 'function') _tfStoryUnmuteChip(vid);
+                });
+            }, { once: true });
+        }
     }
     triggerHaptic && triggerHaptic(10);
 
