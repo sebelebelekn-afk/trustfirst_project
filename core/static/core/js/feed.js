@@ -11070,52 +11070,99 @@ function _tfStoryUnmuteChip(video) {
 // bar stops, because currentTime stops. If it buffers, the bar waits. There is
 // no separate clock to drift.
 function _tfDriveSegmentFromVideo(video, index) {
+    _tfStopStoryDriver();                      // never two drivers at once
+
     var seg = document.getElementById('seg-' + index);
     if (seg) { seg.style.transition = 'none'; seg.style.width = '0%'; }
 
-    function paint() {
-        if (index !== currentStoryIndex) return;          // moved on already
+    // Painted every frame, not on timeupdate.
+    //
+    // timeupdate fires roughly four times a second, so a bar driven by it
+    // advances in visible steps — synced to the video and jerky, which is what
+    // replaced the old smooth-but-lying animation. Reading currentTime on an
+    // animation frame is just as truthful and moves at the screen's refresh
+    // rate. When the video stalls, currentTime stops changing and the bar stops
+    // with it, which is the whole point.
+    function frame() {
+        if (index !== currentStoryIndex) return;
         var el = document.getElementById('seg-' + index);
-        if (!el) return;
         var d = video.duration;
-        if (!isFinite(d) || d <= 0) return;
-        var pct = Math.max(0, Math.min(100, (video.currentTime / d) * 100));
-        el.style.width = pct + '%';
+        if (el && isFinite(d) && d > 0) {
+            el.style.width = Math.max(0, Math.min(100, (video.currentTime / d) * 100)) + '%';
+        }
+        _tfStoryRaf = requestAnimationFrame(frame);
     }
 
     function advance() {
         if (index !== currentStoryIndex) return;
-        cleanup();
+        _tfStopStoryDriver();
         nextStorySegment();
     }
 
-    function cleanup() {
-        video.removeEventListener('timeupdate', paint);
-        video.removeEventListener('ended', advance);
-        clearTimeout(storyTimer);
+    // Say it is loading rather than just going quiet. A bar that has stopped
+    // and a video that has frozen look identical to something broken, and the
+    // one thing the person watching needs to know is that it is still coming.
+    function busy(on) {
+        var host = document.getElementById('story-content');
+        if (!host) return;
+        var el = document.getElementById('tfStoryBuffer');
+        if (on && !el) {
+            el = document.createElement('div');
+            el.id = 'tfStoryBuffer';
+            el.setAttribute('role', 'status');
+            el.setAttribute('aria-label', 'Loading');
+            el.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);' +
+                'z-index:9;width:44px;height:44px;border-radius:50%;pointer-events:none;' +
+                'border:3px solid rgba(255,255,255,0.25);border-top-color:#fff;' +
+                'animation:tfSpin 0.8s linear infinite;';
+            if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+            host.appendChild(el);
+        } else if (!on && el) {
+            el.remove();
+        }
     }
 
-    video.addEventListener('timeupdate', paint);
+    _tfStoryOnWaiting = function () { busy(true); };
+    _tfStoryOnPlaying = function () { busy(false); };
+
+    video.addEventListener('waiting', _tfStoryOnWaiting);
+    video.addEventListener('stalled', _tfStoryOnWaiting);
+    video.addEventListener('playing', _tfStoryOnPlaying);
+    video.addEventListener('canplay', _tfStoryOnPlaying);
     video.addEventListener('ended', advance);
+    _tfStoryOnEnded = advance;
 
-    // A backstop, because 'ended' does not always arrive: a stream that breaks
-    // mid-play can leave the viewer sitting on a frozen frame forever. Generous
-    // enough that it never beats a video that is genuinely still playing, and
-    // it is rescheduled on every tick of real progress.
-    function armBackstop() {
-        clearTimeout(storyTimer);
-        storyTimer = setTimeout(function () {
-            if (index !== currentStoryIndex) return;
-            // Only give up if the video really has not moved.
-            if (!video.paused && video.currentTime > 0 && !video.ended) { armBackstop(); return; }
-            advance();
-        }, STORY_VIDEO_MAX * 1000);
-    }
-    video.addEventListener('timeupdate', armBackstop);
-    armBackstop();
+    // Show it immediately if there is nothing buffered yet, rather than waiting
+    // for a 'waiting' event that may already have fired.
+    if (video.readyState < 3) busy(true);
 
     _tfStoryActiveVideo = video;
-    paint();
+    _tfStoryRaf = requestAnimationFrame(frame);
+}
+
+// One place that takes everything down: the frame loop, the listeners, the
+// spinner and the video itself. Closing the viewer used to leave the video
+// element playing behind a hidden parent, which is why a story carried on with
+// its sound after it had been closed.
+var _tfStoryRaf = null;
+var _tfStoryOnWaiting = null, _tfStoryOnPlaying = null, _tfStoryOnEnded = null;
+
+function _tfStopStoryDriver(alsoUnload) {
+    if (_tfStoryRaf) { cancelAnimationFrame(_tfStoryRaf); _tfStoryRaf = null; }
+    clearTimeout(storyTimer);
+    var v = _tfStoryActiveVideo;
+    if (v) {
+        if (_tfStoryOnWaiting) { v.removeEventListener('waiting', _tfStoryOnWaiting); v.removeEventListener('stalled', _tfStoryOnWaiting); }
+        if (_tfStoryOnPlaying) { v.removeEventListener('playing', _tfStoryOnPlaying); v.removeEventListener('canplay', _tfStoryOnPlaying); }
+        if (_tfStoryOnEnded) v.removeEventListener('ended', _tfStoryOnEnded);
+        if (alsoUnload) {
+            try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+            _tfStoryActiveVideo = null;
+        }
+    }
+    _tfStoryOnWaiting = _tfStoryOnPlaying = _tfStoryOnEnded = null;
+    var spin = document.getElementById('tfStoryBuffer');
+    if (spin) spin.remove();
 }
 
 // The video the open story is playing, so pausing the viewer can reach it.
@@ -11476,6 +11523,16 @@ function nextStorySegment() {
 
 function closeStoryViewer() {
     clearTimeout(storyTimer);
+    // Stop the video, do not merely hide it. Hiding the viewer left the element
+    // playing behind it, so a story closed mid-load carried on and started
+    // talking once it had buffered — with nothing on screen to stop it.
+    _tfStopStoryDriver(true);
+    var content = document.getElementById('story-content');
+    if (content) {
+        content.querySelectorAll('video').forEach(function (v) {
+            try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+        });
+    }
     if (window._storyAudio) { try { window._storyAudio.pause(); window._storyAudio.src = ''; } catch(e){} window._storyAudio = null; }
     var disc = document.getElementById('storyDiscOverlay'); if (disc) disc.remove();
     document.getElementById('story-viewer').style.display = 'none';

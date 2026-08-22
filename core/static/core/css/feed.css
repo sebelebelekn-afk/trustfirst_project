@@ -4332,3 +4332,7 @@ textarea:focus-visible,
     30%      { background: rgba(0,122,255,0.22); }
 }
 [data-date-sep].tf-jumped > span { animation: tfDateFlash 1.4s ease; }
+
+/* The story buffering spinner. A stalled video and a broken one look the same
+   without it: the bar stops, the picture holds, and nothing says which. */
+@keyframes tfSpin { to { transform: translate(-50%, -50%) rotate(360deg); } }
