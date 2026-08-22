@@ -5972,7 +5972,7 @@ function _applyProfileStoryRing() {
     var wrap = document.querySelector('#profile-overlay .avatar-overlap');
     if (!wrap) return;
     var since = new Date(Date.now() - 86400000).toISOString();
-    sb.from('stories').select('id', { count: 'exact', head: true }).eq('user_id', currentUser.id).gte('created_at', since).then(function(r) {
+    sb.from('stories').select('id', { count: 'exact', head: true }).eq('user_id', currentUser.id).gte('created_at', since).is('deleted_at', null).then(function(r) {
         if ((r.count || 0) > 0) {
             wrap.style.boxShadow = '0 0 0 3px #007AFF';   // ring sits outside the 4px white border
             wrap.dataset.hasStory = '1';
@@ -11247,6 +11247,7 @@ function openStoryViewer(userId) {
     if (window.sb) {
         sb.from('stories')
             .select('id,user_id,media_url,media_type,caption,created_at,audience,sound_name,sound_url,sound_start,sound_duration,music_style,overlays,users:user_id(full_name,username,avatar_url)')
+            .is('deleted_at', null)
             .eq('user_id', userId)
             .gte('created_at', since)
             .order('created_at', { ascending: true })
@@ -11276,7 +11277,10 @@ function openStoryViewer(userId) {
                 var timeEl = document.getElementById('story-time');
                 if (imgEl) imgEl.src = avatar;
                 if (nameEl) nameEl.textContent = name;
-                if (timeEl) { var diff = Date.now() - new Date(stories[0].created_at).getTime(); var hrs = Math.floor(diff/3600000); timeEl.textContent = hrs > 0 ? hrs + 'h ago' : Math.floor(diff/60000) + 'm ago'; }
+                // The time is per segment, so it is set in showStorySegment
+                // rather than here. Set once from stories[0], a second story
+                // posted a minute ago inherited the age of the first one and
+                // claimed to be four hours old.
                 // Build progress segments
                 var progress = document.getElementById('story-progress');
                 if (progress) {
@@ -11291,28 +11295,18 @@ function openStoryViewer(userId) {
                 var isOwn = !!(currentUser && userId === currentUser.id);
                 var ownerBar = document.getElementById('story-owner-bar');
                 var replyBar = document.getElementById('story-reply-bar-viewer');
+                // Which bar to show is a property of whose stories these are, so
+                // it belongs here. The counting and the logging are properties
+                // of the segment being watched, so they moved into
+                // showStorySegment: both were pinned to stories[0], which meant
+                // watching somebody's second story recorded a view against their
+                // first, and the owner's counter never moved off the first one.
                 if (isOwn) {
                     if (ownerBar) ownerBar.style.display = 'flex';
                     if (replyBar) replyBar.style.display = 'none';
-                    // Seed initial view count
-                    if (window.sb && stories[0]) {
-                        sb.from('story_views').select('id', { count: 'exact', head: true })
-                            .eq('story_id', stories[0].id)
-                            .then(function(vr) {
-                                var countEl = document.getElementById('storyViewsCount');
-                                if (countEl) countEl.textContent = String(vr.count || 0);
-                            }).catch(function(){});
-                    }
                 } else {
                     if (ownerBar) ownerBar.style.display = 'none';
                     if (replyBar) replyBar.style.display = 'flex';
-                    // Log view
-                    if (window.sb && currentUser && stories[0]) {
-                        sb.from('story_views').upsert(
-                            { story_id: stories[0].id, viewer_id: currentUser.id, viewed_at: new Date().toISOString() },
-                            { onConflict: 'story_id,viewer_id' }
-                        ).catch(function(){});
-                    }
                 }
             }).catch(function() {
                 if (content) content.innerHTML = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a1a2e,#16213e);"><p style="color:rgba(255,255,255,0.4);font-size:14px;">Could not load story</p></div>';
@@ -11326,6 +11320,40 @@ function showStorySegment() {
     var content = document.getElementById('story-content');
     var story = _storyItems && _storyItems[currentStoryIndex];
     console.debug('[showStorySegment] index:', currentStoryIndex, 'story:', story);
+
+    // Everything below belongs to the segment being watched, not to the first
+    // one in the set. All of it used to read stories[0] and be done once when
+    // the viewer opened.
+    if (story) {
+        var _tEl = document.getElementById('story-time');
+        if (_tEl) {
+            var diff = Date.now() - new Date(story.created_at).getTime();
+            var mins = Math.floor(diff / 60000), hrs = Math.floor(diff / 3600000);
+            _tEl.textContent = hrs > 0 ? hrs + 'h ago' : (mins > 0 ? mins + 'm ago' : 'Just now');
+        }
+
+        var _mine = !!(currentUser && story.user_id === currentUser.id);
+        if (window.sb) {
+            if (_mine) {
+                // This segment's own count, refreshed as you move through them.
+                sb.from('story_views').select('id', { count: 'exact', head: true })
+                    .eq('story_id', story.id)
+                    .then(function (vr) {
+                        if (_storyItems[currentStoryIndex] !== story) return;   // moved on
+                        var c = document.getElementById('storyViewsCount');
+                        if (c) c.textContent = String(vr.count || 0);
+                    }).catch(function () {});
+            } else if (currentUser) {
+                // Record a view against the story actually on screen. Pinned to
+                // stories[0], watching someone's second story counted as another
+                // view of their first, and the second stayed on zero forever.
+                sb.from('story_views').upsert(
+                    { story_id: story.id, viewer_id: currentUser.id, viewed_at: new Date().toISOString() },
+                    { onConflict: 'story_id,viewer_id' }
+                ).catch(function () {});
+            }
+        }
+    }
 
     // Silence whatever was playing before drawing what comes next.
     //
@@ -11555,6 +11583,39 @@ function showStorySegment() {
     } else {
         _runSeg(STORY_DURATION);
     }
+}
+
+// Left third back, the rest forward.
+//
+// Every tap called next, so a story you blinked through was gone and the only
+// way to see it again was to close the viewer and open it from the start.
+function storyTapNav(e) {
+    var host = document.getElementById('story-content');
+    if (!host) return nextStorySegment();
+    var r = host.getBoundingClientRect();
+    // A zero-width rect makes every comparison against 33% of nothing true or
+    // false by accident, which reverses the two sides. Go forward, which is what
+    // a tap did before any of this existed.
+    if (!r.width) return nextStorySegment();
+    var x = (e && (e.clientX != null ? e.clientX : (e.touches && e.touches[0] && e.touches[0].clientX))) || 0;
+    if ((x - r.left) < r.width * 0.33) prevStorySegment();
+    else nextStorySegment();
+}
+
+// Back one, and out of this person's stories at the first one — the same place
+// forward runs out. Standing still on the first segment would look broken.
+function prevStorySegment() {
+    if (currentStoryIndex <= 0) {
+        // Already at the beginning: restart it rather than doing nothing.
+        showStorySegment();
+        return;
+    }
+    var seg = document.getElementById('seg-' + currentStoryIndex);
+    if (seg) { seg.style.transition = 'none'; seg.style.width = '0%'; }
+    currentStoryIndex--;
+    var back = document.getElementById('seg-' + currentStoryIndex);
+    if (back) { back.style.transition = 'none'; back.style.width = '0%'; }
+    showStorySegment();
 }
 
 function nextStorySegment() {
@@ -13705,7 +13766,7 @@ async function fillMsgContent() {
     if (window.sb && currentUser) {
         try {
             var since = new Date(Date.now() - 86400000).toISOString();
-            var { data: _ms } = await sb.from('stories').select('id').eq('user_id', currentUser.id).gte('created_at', since).limit(1).maybeSingle();
+            var { data: _ms } = await sb.from('stories').select('id').eq('user_id', currentUser.id).gte('created_at', since).is('deleted_at', null).limit(1).maybeSingle();
             myStory = _ms;
             if (myStory) myStoryClick = 'openStoryViewer(\'' + currentUser.id + '\')';
         } catch(e) {}
@@ -13735,10 +13796,19 @@ async function fillMsgContent() {
                 .from('stories')
                 .select('user_id, users:user_id(id, full_name, username, avatar_url)')
                 .gte('created_at', since)
+                .is('deleted_at', null)
                 .neq('user_id', currentUser.id)
-                .limit(20);
+                .limit(60);
+            // One ring per person, not one per story. This walked the rows, so
+            // somebody who posted twice appeared twice, side by side, with the
+            // same name and the same face — and both rings opened the same
+            // viewer, because the viewer has always been keyed on the person.
+            // A story tray is a list of people who have something to show.
+            var _seenStoryUsers = {};
             (storyData || []).forEach(function(s) {
                 var u = s.users || {};
+                if (!u.id || _seenStoryUsers[u.id]) return;
+                _seenStoryUsers[u.id] = true;
                 var name = u.full_name || u.username || 'User';
                 var avatar = u.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=007AFF&color=fff&size=100';
                 stories.innerHTML += '<div class="story-item" onclick="openStoryViewer(\'' + escapeHtml(u.id || '') + '\')">' +
@@ -14244,7 +14314,7 @@ async function initReels() {
             var _authorIds = reels.map(function(p) { return p.user_id; }).filter(Boolean);
             if (_authorIds.length) {
                 var _since = new Date(Date.now() - 86400000).toISOString();
-                var _sres = await window.sb.from('stories').select('user_id').in('user_id', _authorIds).gte('created_at', _since);
+                var _sres = await window.sb.from('stories').select('user_id').in('user_id', _authorIds).gte('created_at', _since).is('deleted_at', null);
                 (_sres.data || []).forEach(function(r) { _storyAuthors[r.user_id] = true; });
             }
         } catch(e) { /* no story ring if the lookup fails */ }
@@ -24634,6 +24704,7 @@ async function loadArchiveContent(type) {
                 var { data: sData } = await sb.from('stories')
                     .select('id,media_url,created_at,duration_seconds')
                     .eq('user_id', currentUser.id)
+                    .is('deleted_at', null)
                     .order('created_at', { ascending: false })
                     .limit(60);
                 items = (sData || []).map(function(s) { return Object.assign({}, s, { duration: s.duration_seconds }); });
@@ -28162,7 +28233,7 @@ async function loadFeedStories() {
         try {
             var since24h = new Date(Date.now() - 86400000).toISOString();
             var { data: myStories } = await sb.from('stories')
-                .select('id').eq('user_id', currentUser.id).gte('created_at', since24h).limit(1);
+                .select('id').eq('user_id', currentUser.id).gte('created_at', since24h).is('deleted_at', null).limit(1);
             if (myStories && myStories.length > 0) {
                 myStoryClick = 'openStoryViewer(\'' + currentUser.id + '\')';
                 myRingStyle = 'background:linear-gradient(135deg,#007AFF,#5856D6);padding:3px';
@@ -28195,6 +28266,7 @@ async function loadFeedStories() {
         var { data } = await sb.from('stories')
             .select('id, user_id, users:user_id(id, full_name, username, avatar_url)')
             .gte('created_at', since)
+            .is('deleted_at', null)
             .neq('user_id', currentUser.id)
             .limit(100);
 
@@ -32220,7 +32292,7 @@ function openContactProfile() {
     window._cpHasStory = false;
     if (window._currentChatUserId && window.sb) {
         var _since = new Date(Date.now()-86400000).toISOString();
-        window.sb.from('stories').select('id').eq('user_id',window._currentChatUserId).gte('created_at',_since).limit(1).then(function(sr){
+        window.sb.from('stories').select('id').eq('user_id',window._currentChatUserId).gte('created_at',_since).is('deleted_at', null).limit(1).then(function(sr){
             window._cpHasStory = !!(sr.data && sr.data.length);
             if (_cpRing) _cpRing.style.display = window._cpHasStory ? 'block' : 'none';
             if (_cpNoRing) _cpNoRing.style.display = window._cpHasStory ? 'none' : 'block';
@@ -38090,6 +38162,7 @@ function _tfWireMapSheet() {
             sb.from('stories')
                 .select('location_lat,location_lng,created_at,profiles:user_id(display_name,username,avatar_url)')
                 .not('location_lat', 'is', null)
+                .is('deleted_at', null)
                 .gte('created_at', new Date(Date.now() - 24*60*60*1000).toISOString())
                 .then(function(r) {
                     (r.data || []).forEach(function(row) {

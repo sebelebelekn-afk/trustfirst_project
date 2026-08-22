@@ -2476,7 +2476,12 @@ function authenticateUser() {
         </div>
         <i class="fa-solid fa-xmark" style="color:white;font-size:22px;cursor:pointer;" onclick="closeStoryViewer()"></i>
     </div>
-    <div class="story-content" id="story-content" onclick="nextStorySegment()"></div>
+    {% comment %}
+      Left third goes back, the rest goes forward, which is what every story
+      app does. This used to call nextStorySegment() wherever you tapped, so
+      there was no way back to the one you just missed.
+    {% endcomment %}
+    <div class="story-content" id="story-content" onclick="storyTapNav(event)"></div>
 
     <!-- Reply bar — other people's stories -->
     <div id="story-reply-bar-viewer" class="story-reply-bar" style="gap:10px;display:none;">
@@ -4244,7 +4249,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=257"></script>
+<script src="{% static 'core/js/feed.js' %}?v=258"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
