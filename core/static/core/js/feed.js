@@ -10986,6 +10986,34 @@ let currentStoryIndex = 0;
 const STORY_DURATION = 5000;       // plain image/picture story
 const STORY_MUSIC_MAX = 45;        // seconds, story music cap
 const STORY_VIDEO_MAX = 120;       // seconds, video story cap (2 minutes)
+// A video the browser will not decode, said out loud.
+//
+// It used to log to the console and leave a black rectangle with the progress
+// bar running over it, which is indistinguishable from a story that is simply
+// dark. The commonest cause by far is H.265: recorded on an iPhone, played back
+// somewhere that has no HEVC decoder.
+function _tfStoryVideoFailed(video) {
+    console.error('[Stories] Video failed:', video && video.src);
+    var host = video && video.parentElement;
+    if (!host) return;
+    var hevcLikely = !_tfCanPlayHevc();
+    host.innerHTML =
+        '<div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;' +
+        'justify-content:center;gap:10px;padding:32px;text-align:center;' +
+        'background:linear-gradient(135deg,#1a1a2e,#16213e);">' +
+            '<i class="fa-solid fa-triangle-exclamation" style="color:#FF9500;font-size:26px;"></i>' +
+            '<p style="color:#fff;font-size:15px;font-weight:700;margin:0;">This video will not play here</p>' +
+            '<p style="color:rgba(255,255,255,0.55);font-size:13px;margin:0;line-height:1.5;">' +
+            (hevcLikely
+                ? 'It was recorded in a format this browser cannot open. It plays on iPhone.'
+                : 'The file could not be opened.') +
+            '</p>' +
+        '</div>';
+    // Do not leave the story stuck on a dead frame.
+    clearTimeout(storyTimer);
+    storyTimer = setTimeout(function () { nextStorySegment(); }, 3000);
+}
+
 // Draw a story's text and stickers over its media.
 //
 // The media is never touched. Overlays are stored as descriptors and drawn at
@@ -11339,7 +11367,7 @@ function showStorySegment() {
         // opening a story is one, so this usually just plays. Where a browser
         // refuses anyway, the catch mutes and plays rather than leaving a still
         // frame, and _tfStoryUnmuteChip offers a tap to turn the sound on.
-        if (content) content.innerHTML = '<video src="' + escapeHtml(mediaUrl) + '" autoplay playsinline style="width:100%;height:100%;object-fit:cover;" onerror="console.error(\'[Stories] Video failed:\',this.src)"></video>' + captionHtml;
+        if (content) content.innerHTML = '<video src="' + escapeHtml(mediaUrl) + '" autoplay playsinline style="width:100%;height:100%;object-fit:cover;" onerror="_tfStoryVideoFailed(this)"></video>' + captionHtml;
         var _sv = content && content.querySelector('video');
         if (_sv) {
             // Sound is remembered, so it is asked for once and never again.
@@ -16631,6 +16659,9 @@ function spUpdateNextBtn() {
     btn.onclick = function() {
         var chosen = (window._spFiles || []).filter(function(f){ return f.selected; });
         if (!chosen.length) return;
+        // Kept so the codec can be read at post time. By then only a blob: URL
+        // remains, and the original File is where the container header is.
+        window._spSourceFile = chosen[0] && chosen[0].file;
         document.getElementById('storyPickerOverlay')?.remove();
         if (chosen.length > 1) {
             chosen.forEach(function(item) { submitStoryPost(item.url, item.isVid, 'everyone'); });
@@ -49339,6 +49370,46 @@ var TF_R2_PUBLIC_BASE = '';
 // A recorded blob's type is "video/webm;codecs=vp8,opus". The signature covers
 // the exact Content-Type, so the same trimmed string has to be used to sign and
 // to send, or R2 rejects the PUT.
+// Is this an HEVC video, and can this browser play it?
+//
+// iPhones record H.265 by default. Safari decodes it; Firefox does not at all
+// and Chrome only where the hardware offers it, so a clip that plays perfectly
+// on the phone that shot it is a black rectangle for a large part of everyone
+// else. Nothing in the server or the storage shows this: the file downloads
+// fine with the right content type, and only the decoder refuses.
+//
+// The codec is in the first few kilobytes: an hvc1 or hev1 box in the sample
+// description. Reading that is cheap and does not need the whole file.
+function _tfSniffVideoCodec(file) {
+    return new Promise(function (resolve) {
+        if (!file || !/^video\//.test(file.type || '')) return resolve(null);
+        var head = file.slice(0, 96 * 1024);
+        var fr = new FileReader();
+        fr.onerror = function () { resolve(null); };
+        fr.onload = function () {
+            try {
+                var b = new Uint8Array(fr.result), s = '';
+                for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+                if (s.indexOf('hvc1') > -1 || s.indexOf('hev1') > -1) return resolve('hevc');
+                if (s.indexOf('avc1') > -1 || s.indexOf('avc3') > -1) return resolve('h264');
+                if (s.indexOf('vp09') > -1 || s.indexOf('VP8') > -1) return resolve('vp8/9');
+                resolve('unknown');
+            } catch (e) { resolve(null); }
+        };
+        fr.readAsArrayBuffer(head);
+    });
+}
+
+// What this browser will admit to playing. Chrome reports "probably" or
+// "maybe"; an empty string is a flat no.
+function _tfCanPlayHevc() {
+    try {
+        var v = document.createElement('video');
+        return !!(v.canPlayType('video/mp4; codecs="hvc1"') ||
+                  v.canPlayType('video/mp4; codecs="hev1"'));
+    } catch (e) { return false; }
+}
+
 function _tfBaseType(file) {
     return String((file && file.type) || 'application/octet-stream').split(';')[0].trim().toLowerCase();
 }
@@ -51070,6 +51141,19 @@ async function submitStoryPost(url, isVideo, audience) {
     // live in that screen's DOM, so collecting them afterwards returns nothing
     // and the story posts bare — which is precisely what used to happen.
     var _overlays = _tfCollectStoryOverlays();
+
+    // Warn about H.265 before it goes out, not after somebody cannot watch it.
+    // An iPhone records in it by default and plays it back perfectly, so there
+    // is nothing on this end to suggest half the people it reaches will get a
+    // black rectangle. Said once, and it does not block the post: it is their
+    // story and their call.
+    if (isVideo && window._spSourceFile) {
+        _tfSniffVideoCodec(window._spSourceFile).then(function (codec) {
+            if (codec === 'hevc' && !_tfCanPlayHevc()) {
+                showToast('Posted. Note: this clip is H.265, which some Android and desktop browsers cannot play.');
+            }
+        });
+    }
 
     // Close screen immediately — upload in background
     var _savedMusicInfo = window._spStoryMusicInfo ? Object.assign({}, window._spStoryMusicInfo) : null;
