@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=105">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=106">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub — mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -934,7 +934,12 @@ function authenticateUser() {
       <b id="chat-cal-month-label" style="font-size:16px;color:var(--text-primary,#000);"></b>
       <button class="liq-glass-cal" id="chat-cal-select-btn" onclick="chatCalSelectOrDone()">Select</button>
     </div>
-    <div class="chat-cal-grid" id="chat-cal-grid"></div>
+    {% comment %}
+      The months scroll inside here. It used to be a single grid showing the
+      current month only, which is no use for finding a conversation from a
+      while back.
+    {% endcomment %}
+    <div class="chat-cal-scroll" id="chat-cal-scroll"></div>
     <button id="chat-cal-clear-btn" onclick="clearSelectedChatDates()">
       <i class="fa-solid fa-trash-can" style="margin-right:8px;"></i>Clear Chats
     </button>
@@ -4239,7 +4244,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=251"></script>
+<script src="{% static 'core/js/feed.js' %}?v=252"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

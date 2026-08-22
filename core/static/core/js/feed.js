@@ -11048,10 +11048,97 @@ function _tfStoryUnmuteChip(video) {
         e.stopPropagation();          // the viewer advances on tap
         video.muted = false;
         video.play().catch(function () {});
+        // Remembered, so this is the last time it has to be pressed. Turning
+        // sound on is a real gesture, which is also what browsers want before
+        // they will allow audio, so the next story starts with it already on.
+        try { localStorage.setItem('tf_story_muted', '0'); } catch (e2) {}
         chip.remove();
     };
     host.appendChild(chip);
 }
+
+// The progress bar for a video segment follows the video, rather than running
+// a stopwatch beside it.
+//
+// It used to be a CSS transition of a fixed length with a setTimeout of the
+// same length. Neither knew anything about the video, so a clip that was still
+// buffering watched the bar sail to the end and the story advance out from
+// under it. Stalling, pausing, a slow connection, the app going to the
+// background: the bar ignored all of it.
+//
+// Now the width is the video's own position and nothing else. If it stops, the
+// bar stops, because currentTime stops. If it buffers, the bar waits. There is
+// no separate clock to drift.
+function _tfDriveSegmentFromVideo(video, index) {
+    var seg = document.getElementById('seg-' + index);
+    if (seg) { seg.style.transition = 'none'; seg.style.width = '0%'; }
+
+    function paint() {
+        if (index !== currentStoryIndex) return;          // moved on already
+        var el = document.getElementById('seg-' + index);
+        if (!el) return;
+        var d = video.duration;
+        if (!isFinite(d) || d <= 0) return;
+        var pct = Math.max(0, Math.min(100, (video.currentTime / d) * 100));
+        el.style.width = pct + '%';
+    }
+
+    function advance() {
+        if (index !== currentStoryIndex) return;
+        cleanup();
+        nextStorySegment();
+    }
+
+    function cleanup() {
+        video.removeEventListener('timeupdate', paint);
+        video.removeEventListener('ended', advance);
+        clearTimeout(storyTimer);
+    }
+
+    video.addEventListener('timeupdate', paint);
+    video.addEventListener('ended', advance);
+
+    // A backstop, because 'ended' does not always arrive: a stream that breaks
+    // mid-play can leave the viewer sitting on a frozen frame forever. Generous
+    // enough that it never beats a video that is genuinely still playing, and
+    // it is rescheduled on every tick of real progress.
+    function armBackstop() {
+        clearTimeout(storyTimer);
+        storyTimer = setTimeout(function () {
+            if (index !== currentStoryIndex) return;
+            // Only give up if the video really has not moved.
+            if (!video.paused && video.currentTime > 0 && !video.ended) { armBackstop(); return; }
+            advance();
+        }, STORY_VIDEO_MAX * 1000);
+    }
+    video.addEventListener('timeupdate', armBackstop);
+    armBackstop();
+
+    _tfStoryActiveVideo = video;
+    paint();
+}
+
+// The video the open story is playing, so pausing the viewer can reach it.
+var _tfStoryActiveVideo = null;
+
+// A story must not keep playing once the app is not on screen. Leaving a tab or
+// locking the phone left the video running and its sound with it, which is how
+// a story ends up playing out of a pocket.
+(function () {
+    document.addEventListener('visibilitychange', function () {
+        var viewer = document.getElementById('story-viewer');
+        var open = viewer && viewer.style.display !== 'none';
+        if (!open) return;
+        if (document.hidden) {
+            clearTimeout(storyTimer);
+            if (_tfStoryActiveVideo) { try { _tfStoryActiveVideo.pause(); } catch (e) {} }
+            if (window._storyAudio) { try { window._storyAudio.pause(); } catch (e) {} }
+        } else {
+            if (_tfStoryActiveVideo) { try { _tfStoryActiveVideo.play().catch(function () {}); } catch (e) {} }
+            if (window._storyAudio) { try { window._storyAudio.play().catch(function () {}); } catch (e) {} }
+        }
+    });
+})();
 
 function _getStoryDuration(story) {
     // Music story: run for the chosen clip length (sound_duration secs), up to
@@ -11191,9 +11278,16 @@ function showStorySegment() {
         if (content) content.innerHTML = '<video src="' + escapeHtml(mediaUrl) + '" autoplay playsinline style="width:100%;height:100%;object-fit:cover;" onerror="console.error(\'[Stories] Video failed:\',this.src)"></video>' + captionHtml;
         var _sv = content && content.querySelector('video');
         if (_sv) {
+            // Sound is remembered, so it is asked for once and never again.
+            // Before this, every video that a browser refused to autoplay with
+            // sound needed the volume button pressed by hand, on every single
+            // story, because nothing carried the answer forward.
+            _sv.muted = (localStorage.getItem('tf_story_muted') === '1');
             var _p = _sv.play();
             if (_p && _p.catch) {
                 _p.catch(function () {
+                    // Refused with sound. Play it silently rather than leaving a
+                    // still frame, and offer the one tap that fixes it for good.
                     _sv.muted = true;
                     _sv.play().catch(function () {});
                     _tfStoryUnmuteChip(_sv);
@@ -11348,15 +11442,8 @@ function showStorySegment() {
 
     if (mediaType === 'video') {
         var _vEl = document.getElementById('story-content').querySelector('video');
-        var _runVid = function() {
-            var secs = (_vEl && isFinite(_vEl.duration) && _vEl.duration > 0) ? _vEl.duration : STORY_VIDEO_MAX;
-            _runSeg(Math.min(secs, STORY_VIDEO_MAX) * 1000);
-        };
-        if (_vEl && isFinite(_vEl.duration) && _vEl.duration > 0) {
-            _runVid();
-        } else if (_vEl) {
-            _runSeg(STORY_VIDEO_MAX * 1000); // provisional until metadata loads
-            _vEl.addEventListener('loadedmetadata', _runVid, { once: true });
+        if (_vEl) {
+            _tfDriveSegmentFromVideo(_vEl, currentStoryIndex);
         } else {
             _runSeg(STORY_VIDEO_MAX * 1000);
         }
@@ -16253,7 +16340,10 @@ function openStoryVideoTrim(file, url) {
             '<button id="storyTrimDone" style="background:none;border:none;color:white;font-size:17px;font-weight:700;cursor:pointer;padding:8px 0;">Done</button>' +
         '</div>' +
         '<div style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;">' +
-            '<video id="storyTrimVideo" src="'+url+'" style="width:100%;height:100%;object-fit:cover;" autoplay loop playsinline muted></video>' +
+            // Not muted: trimming a clip without hearing it means guessing
+            // where the sound starts. muted is set only if the browser refuses
+            // to autoplay with it, which is handled just below.
+            '<video id="storyTrimVideo" src="'+url+'" style="width:100%;height:100%;object-fit:cover;" autoplay loop playsinline></video>' +
         '</div>' +
         '<div style="flex-shrink:0;padding:10px 16px 0;background:#111;">' +
             '<div style="position:relative;height:60px;border-radius:10px;overflow:hidden;background:#222;">' +
@@ -16283,6 +16373,19 @@ function openStoryVideoTrim(file, url) {
     };
     var vid = document.getElementById('storyTrimVideo');
     var strip = document.getElementById('storyTrimStrip');
+    // Autoplay with sound is allowed off a real tap, and picking a video is
+    // one. If a browser refuses anyway, fall back to muted and play rather than
+    // showing a frozen frame, with a tap to turn the sound on.
+    if (vid) {
+        var _tp = vid.play();
+        if (_tp && _tp.catch) {
+            _tp.catch(function () {
+                vid.muted = true;
+                vid.play().catch(function () {});
+                if (typeof _tfStoryUnmuteChip === 'function') _tfStoryUnmuteChip(vid);
+            });
+        }
+    }
     vid.addEventListener('loadedmetadata', function() {
         var duration = vid.duration;
         if (!duration || !isFinite(duration)) return;
@@ -46147,30 +46250,108 @@ function chatCalSelectOrDone() {
         closeChatCalModal();
     }
 }
+var _TF_MONTH_NAMES = ['January','February','March','April','May','June',
+                       'July','August','September','October','November','December'];
+
+// Which days this conversation actually has messages on, read off the day
+// separators already in the chat. They carry the date they stand for, so no
+// second query is needed to know which days are worth offering.
+function _tfChatDaysWithMessages() {
+    var found = {};
+    var body = document.getElementById('chat-body');
+    if (!body) return found;
+    body.querySelectorAll('[data-date-sep]').forEach(function (n) {
+        var iso = n.getAttribute('data-date-sep');
+        if (iso) found[iso] = true;
+    });
+    return found;
+}
+
+// Every month from the oldest message to this one, so scrolling back through
+// the year works the way the photo library does.
 function renderChatCalGrid() {
+    var scroll = document.getElementById('chat-cal-scroll');
+    if (!scroll) return;
+
+    var withMsgs = _tfChatDaysWithMessages();
+    var keys = Object.keys(withMsgs).sort();
     var now = new Date();
-    var year = now.getFullYear(), month = now.getMonth();
-    var firstDay = new Date(year, month, 1).getDay();
-    var daysInMonth = new Date(year, month + 1, 0).getDate();
-    var months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-    var lbl = document.getElementById('chat-cal-month-label');
-    if (lbl) lbl.textContent = months[month] + ' ' + year;
-    var grid = document.getElementById('chat-cal-grid');
-    if (!grid) return;
-    var days = ['S','M','T','W','T','F','S'];
-    grid.innerHTML = days.map(function(d) { return '<div class="chat-cal-cell hdr">'+d+'</div>'; }).join('');
-    for (var e = 0; e < firstDay; e++) grid.innerHTML += '<div class="chat-cal-cell empty"></div>';
-    for (var d = 1; d <= daysInMonth; d++) {
-        var iso = year+'-'+String(month+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
-        var sel = _chatCalSelDates.includes(iso) ? ' selected' : '';
-        grid.innerHTML += '<div class="chat-cal-cell'+sel+'" onclick="toggleChatCalDate(\''+iso+'\')">' + d + '</div>';
+    var first = keys.length ? new Date(keys[0] + 'T00:00:00') : new Date(now.getFullYear(), now.getMonth(), 1);
+    var startY = first.getFullYear(), startM = first.getMonth();
+    var endY = now.getFullYear(), endM = now.getMonth();
+
+    var todayIso = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') +
+                   '-' + String(now.getDate()).padStart(2, '0');
+    var dayLetters = ['S','M','T','W','T','F','S'];
+    var html = '';
+
+    for (var y = startY, m = startM; (y < endY) || (y === endY && m <= endM); ) {
+        html += '<div class="chat-cal-month-title">' + _TF_MONTH_NAMES[m] + ' ' + y + '</div>';
+        html += '<div class="chat-cal-grid">';
+        html += dayLetters.map(function (d) { return '<div class="chat-cal-cell hdr">' + d + '</div>'; }).join('');
+        var lead = new Date(y, m, 1).getDay();
+        for (var e = 0; e < lead; e++) html += '<div class="chat-cal-cell empty"></div>';
+        var total = new Date(y, m + 1, 0).getDate();
+        for (var d = 1; d <= total; d++) {
+            var iso = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+            var cls = 'chat-cal-cell';
+            if (_chatCalSelDates.indexOf(iso) > -1) cls += ' selected';
+            if (iso === todayIso) cls += ' today';
+            if (withMsgs[iso]) cls += ' has-msgs';
+            else cls += ' blank';                     // nothing to jump to
+            var click = withMsgs[iso]
+                ? ' onclick="chatCalDayTapped(\'' + iso + '\')"'
+                : '';
+            html += '<div class="' + cls + '" data-cal-iso="' + iso + '"' + click + '>' + d + '</div>';
+        }
+        html += '</div>';
+        m++; if (m > 11) { m = 0; y++; }
     }
+    scroll.innerHTML = html;
+
+    var lbl = document.getElementById('chat-cal-month-label');
+    if (lbl) lbl.textContent = 'Calendar';
+
+    // Open at the bottom, which is the most recent month, the same way a chat
+    // opens at its newest message.
+    scroll.scrollTop = scroll.scrollHeight;
+}
+
+// A tap does one of two things depending on the mode, and the difference
+// matters: normally it takes you to that day's messages, which is what the
+// calendar is for. In Select mode it marks days for clearing, which is what it
+// used to do always — so the only way to use the calendar was to pick days to
+// delete, and tapping a date never took you anywhere.
+function chatCalDayTapped(iso) {
+    if (_chatCalSelectMode) { toggleChatCalDate(iso); return; }
+    closeChatCalModal();
+    tfJumpChatToDate(iso);
+}
+
+// Scroll the conversation to a day and mark where it landed.
+function tfJumpChatToDate(iso) {
+    var body = document.getElementById('chat-body');
+    if (!body) return;
+    var sep = body.querySelector('[data-date-sep="' + iso + '"]');
+    if (!sep) { showToast('No messages on that day'); return; }
+    sep.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Without this it is not obvious anything happened, because one day
+    // separator looks much like another.
+    sep.classList.remove('tf-jumped');
+    void sep.offsetWidth;                 // restart the animation
+    sep.classList.add('tf-jumped');
+    if (typeof triggerHaptic === 'function') triggerHaptic(10);
 }
 function toggleChatCalDate(iso) {
     var idx = _chatCalSelDates.indexOf(iso);
     if (idx > -1) _chatCalSelDates.splice(idx, 1);
     else _chatCalSelDates.push(iso);
-    renderChatCalGrid();
+    // Repaint just the one cell. Rebuilding every month threw the scroll
+    // position back to the bottom, so picking a day in March bounced you to
+    // this month and you lost your place after every tap.
+    var cell = document.querySelector('[data-cal-iso="' + iso + '"]');
+    if (cell) cell.classList.toggle('selected', _chatCalSelDates.indexOf(iso) > -1);
+    else renderChatCalGrid();
     var clearBtn = document.getElementById('chat-cal-clear-btn');
     if (clearBtn) clearBtn.style.display = (_chatCalSelectMode && _chatCalSelDates.length > 0) ? 'block' : 'none';
     if (!_chatCalSelectMode && _chatCalSelDates.length > 0) {

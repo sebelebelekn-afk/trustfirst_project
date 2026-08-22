@@ -4252,3 +4252,83 @@ textarea:focus-visible,
     width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
     color: var(--text-secondary, #999); font-size: 13px; cursor: pointer;
 }
+
+/* ==========================================================================
+   CHAT CALENDAR
+   Every class here was already written into feed.html and none of them existed
+   in this file, so the sheet rendered as one unstyled column: seven weekday
+   letters and thirty-one numbers stacked vertically. A grid with no
+   display:grid is just a list.
+   ========================================================================== */
+.chat-cal-sheet {
+    width: 100%;
+    max-height: 78vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary, #fff);
+    border-radius: 22px 22px 0 0;
+    padding: 10px 14px calc(env(safe-area-inset-bottom, 0px) + 14px);
+    animation: slideUpOverlay 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.chat-cal-header {
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; padding: 6px 2px 12px;
+}
+.liq-glass-cal {
+    border: none; cursor: pointer;
+    background: var(--bg-secondary, rgba(120,120,128,0.16));
+    color: var(--text-primary, #000);
+    font-size: 14px; font-weight: 600;
+    padding: 7px 15px; border-radius: 50px;
+}
+
+/* The months scroll. One month on screen at a time is no use for finding a
+   conversation from a while back. */
+.chat-cal-scroll {
+    flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+}
+.chat-cal-month-title {
+    font-size: 17px; font-weight: 800; color: var(--text-primary, #000);
+    text-align: center; margin: 18px 0 12px;
+}
+.chat-cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px 0;
+}
+.chat-cal-cell {
+    aspect-ratio: 1;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; color: var(--text-primary, #000);
+    border-radius: 50%; cursor: pointer;
+    -webkit-user-select: none; user-select: none;
+}
+.chat-cal-cell.hdr {
+    font-size: 12px; font-weight: 600; color: var(--text-secondary, #8e8e93);
+    cursor: default; aspect-ratio: auto; height: 26px;
+}
+.chat-cal-cell.empty { cursor: default; }
+/* A day with nothing in it is not worth tapping, and saying so up front beats
+   opening the chat at a day that turns out to be empty. */
+.chat-cal-cell.blank { color: var(--text-secondary, #8e8e93); opacity: 0.35; cursor: default; }
+.chat-cal-cell.has-msgs { font-weight: 700; }
+.chat-cal-cell.today { color: #007AFF; font-weight: 800; }
+.chat-cal-cell.selected { background: #007AFF; color: #fff; font-weight: 700; }
+.chat-cal-cell:not(.empty):not(.hdr):not(.blank):active { background: var(--bg-secondary, rgba(120,120,128,0.2)); }
+
+#chat-cal-clear-btn {
+    flex-shrink: 0;
+    display: none; width: 100%; margin-top: 12px;
+    padding: 13px; border: none; border-radius: 14px;
+    background: rgba(255,59,48,0.12); color: #FF3B30;
+    font-size: 15px; font-weight: 700; cursor: pointer;
+}
+
+/* The day a jump landed on, so it is obvious where you were taken. */
+@keyframes tfDateFlash {
+    0%, 100% { background: transparent; }
+    30%      { background: rgba(0,122,255,0.22); }
+}
+[data-date-sep].tf-jumped > span { animation: tfDateFlash 1.4s ease; }
