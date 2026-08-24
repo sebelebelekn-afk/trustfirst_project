@@ -425,8 +425,67 @@ def _groq_messages(spec, system):
     return msgs
 
 
+# Groq retires models on its own schedule, and when it does every request comes
+# back 404 "The model ... does not exist or you do not have access to it". One
+# hardcoded name is therefore a dependency on somebody else's roadmap: Eddie
+# stopped answering in chat and in comments the day llama-3.3-70b-versatile went
+# away, and nothing in this codebase had changed.
+#
+# So there is a list, tried in order, and the first one that answers is
+# remembered for the life of the process. Setting EDDIE_GROQ_MODEL pins a
+# specific model and skips all of this.
+_GROQ_FALLBACKS = [
+    'llama-3.3-70b-versatile',
+    'meta-llama/llama-4-scout-17b-16e-instruct',
+    'openai/gpt-oss-120b',
+    'qwen/qwen3-32b',
+    'llama-3.1-8b-instant',          # smallest and longest-lived, last resort
+]
+
+_GROQ_WORKING = None
+
+
 def _groq_model():
-    return getattr(settings, 'EDDIE_GROQ_MODEL', '') or 'llama-3.3-70b-versatile'
+    pinned = getattr(settings, 'EDDIE_GROQ_MODEL', '')
+    if pinned:
+        return pinned
+    return _GROQ_WORKING or _GROQ_FALLBACKS[0]
+
+
+def _groq_is_missing_model(exc):
+    """A 404 for the model itself, rather than any other failure."""
+    text = str(exc)
+    return ('model_not_found' in text
+            or ('404' in text and 'does not exist' in text))
+
+
+def _groq_call(client, **kwargs):
+    """Call Groq, moving down the list when a model has been retired.
+
+    Only a missing model is retried. A bad key, a rate limit or a network
+    failure is raised as it is, because trying four more models would turn one
+    clear error into four confusing ones.
+    """
+    pinned = getattr(settings, 'EDDIE_GROQ_MODEL', '')
+    candidates = [pinned] if pinned else (
+        ([_GROQ_WORKING] if _GROQ_WORKING else []) +
+        [m for m in _GROQ_FALLBACKS if m != _GROQ_WORKING]
+    )
+    last = None
+    for name in candidates:
+        try:
+            result = client.chat.completions.create(model=name, **kwargs)
+        except Exception as exc:
+            last = exc
+            if _groq_is_missing_model(exc) and not pinned:
+                import logging
+                logging.getLogger(__name__).warning(
+                    'Groq model %s is gone, trying the next one', name)
+                continue
+            raise
+        globals()['_GROQ_WORKING'] = name
+        return result
+    raise last if last else RuntimeError('no Groq model available')
 
 
 def _groq_stream(spec, system, queue, emit, max_tokens):
@@ -437,8 +496,8 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
             yield queue.pop(0)
         return
 
-    stream = client.chat.completions.create(
-        model=_groq_model(),
+    stream = _groq_call(
+        client,
         messages=_groq_messages(spec, system),
         max_tokens=min(max_tokens, 8000),
         stream=True,
@@ -465,8 +524,8 @@ def _groq_once(spec, system, max_tokens):
     client = _groq_client()
     if client is None:
         return '', []
-    result = client.chat.completions.create(
-        model=_groq_model(),
+    result = _groq_call(
+        client,
         messages=_groq_messages(spec, system),
         max_tokens=min(max_tokens, 8000),
     )

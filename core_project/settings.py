@@ -234,7 +234,20 @@ EDDIE_PROVIDER = os.environ.get('EDDIE_PROVIDER', '')
 
 # Groq speaks the OpenAI wire format, so it reuses the openai package.
 GROQ_API_KEY     = os.environ.get('GROQ_API_KEY', '')
-EDDIE_GROQ_MODEL = os.environ.get('EDDIE_GROQ_MODEL', 'llama-3.3-70b-versatile')
+
+# Deliberately empty by default, which is not the same as unset.
+#
+# This used to default to llama-3.3-70b-versatile. Groq retired that model and
+# every Eddie request started coming back 404 "does not exist or you do not have
+# access to it" — in the chat and in comment mentions — with nothing in this
+# codebase having changed. A named default is a standing bet on somebody else's
+# release schedule.
+#
+# Empty means eddie_providers works down its own list of current models and
+# remembers the first that answers, so the next retirement costs nothing. Set
+# this to pin one deliberately, and then it is pinned: no fallback, because a
+# pin that quietly used a different model would not be a pin.
+EDDIE_GROQ_MODEL = os.environ.get('EDDIE_GROQ_MODEL', '')
 
 # Read aloud. Most devices only ship old formant voices, so speech is
 # synthesised server-side and the browser is only the fallback. Clips are

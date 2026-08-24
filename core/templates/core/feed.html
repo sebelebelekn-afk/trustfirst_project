@@ -2920,7 +2920,12 @@ function authenticateUser() {
     </div>
 
     <!-- ===== DRAFTS OVERLAY ===== -->
-<div id="drafts-overlay" class="white-overlay" style="z-index:6500; display:none; flex-direction:column;">
+{% comment %}
+  Above the composer, at 9600, because this is opened from inside it. At 6500
+  it opened behind the composer: the drafts list was genuinely there and
+  genuinely invisible, so tapping Drafts looked like it did nothing.
+{% endcomment %}
+<div id="drafts-overlay" class="white-overlay" style="z-index:9700; display:none; flex-direction:column;">
     <div class="header-container">
         <div class="liquid-glass-btn" onclick="closePage('drafts-overlay')"><i class="fa-solid fa-chevron-left"></i></div>
         <b>My Drafts</b>
@@ -2930,7 +2935,11 @@ function authenticateUser() {
 </div>
 
 <!-- ===== SCHEDULED OVERLAY ===== -->
-<div id="scheduled-overlay" class="white-overlay" style="z-index:6500; display:none; flex-direction:column;">
+{% comment %}
+  Same reason as drafts above: opened from the composer, so it has to sit on
+  top of it rather than underneath.
+{% endcomment %}
+<div id="scheduled-overlay" class="white-overlay" style="z-index:9700; display:none; flex-direction:column;">
     <div class="header-container">
         <div class="liquid-glass-btn" onclick="closePage('scheduled-overlay')"><i class="fa-solid fa-chevron-left"></i></div>
         <b>Scheduled Posts</b>
@@ -4249,7 +4258,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=259"></script>
+<script src="{% static 'core/js/feed.js' %}?v=260"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

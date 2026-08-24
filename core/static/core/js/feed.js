@@ -2331,6 +2331,11 @@ async function initFeed() {
     }
 
     try {
+        // Anything scheduled for a time that has passed becomes published
+        // first, so it is in the feed being fetched a line below rather than
+        // waiting for the next load.
+        await RealData.publishDuePosts();
+
         var posts = await RealData.getFeed(1, 20);
         if (posts && posts.length) {
             feed.innerHTML = '';
@@ -26526,6 +26531,33 @@ if (!session) { showToast('Please log in'); return null; }
         return data;
     },
 
+    // Publish anything whose time has come.
+    //
+    // Nothing ever did this. A post scheduled for 08:50 was still sitting at
+    // status 'scheduled' twelve hours later, which is why it never reached the
+    // profile: that view filters on published, correctly, and nothing had made
+    // it published. There is no worker and no cron on this plan, so the app
+    // does it when it opens — only for the signed-in person's own posts, which
+    // is all row-level security would allow anyway.
+    //
+    // Cheap: it matches on an index-friendly pair and usually updates nothing.
+    async publishDuePosts() {
+        var client = window._sb || window.sb;
+        if (!client || !currentUser) return 0;
+        try {
+            var { data, error } = await client.from('posts')
+                .update({ status: 'published' })
+                .eq('user_id', currentUser.id)
+                .eq('status', 'scheduled')
+                .lte('scheduled_for', new Date().toISOString())
+                .select('id');
+            if (error) { console.warn('[Schedule]', error.message); return 0; }
+            var n = (data || []).length;
+            if (n) console.debug('[Schedule] published ' + n + ' due post(s)');
+            return n;
+        } catch (e) { console.warn('[Schedule]', e && e.message); return 0; }
+    },
+
     async getFeed(page, limit) {
         page = page || 1; limit = limit || 20;
         var client = window._sb || window.sb;
@@ -26539,10 +26571,22 @@ var userId = session.user.id;
         var followIds = (followRes.data || []).map(function(f) { return f.following_id; });
         followIds.push(userId);
 
+        // Anything still waiting for its time is not in the feed yet.
+        //
+        // There was no status filter here at all, so a post scheduled for next
+        // week appeared the moment it was written, while the profile — which
+        // does filter on published — did not show it. The same post visible in
+        // one place and missing from the other, which is exactly backwards from
+        // what scheduling is for.
+        //
+        // Written as an or() so a row with no status at all is still included;
+        // status <> 'scheduled' is NULL for a NULL status, and NULL is not true,
+        // so a plain neq would silently drop those.
         var { data, error } = await client.from('posts')
             .select('*, users:user_id (id, full_name, username, avatar_url, badge_tier, verified), collab_user:collab_user_id (id, full_name, username, avatar_url, badge_tier, verified), quoted_post:quoted_post_id (id, text_content, media_url, thumbnail_url, post_type, media_type, users:user_id (full_name, username, avatar_url))')
             .in('user_id', followIds)
             .eq('is_hidden', false)
+            .or('status.is.null,status.neq.scheduled')
             .order('created_at', { ascending: false })
             .range(offset, offset + limit - 1);
 
