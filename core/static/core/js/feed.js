@@ -2457,20 +2457,20 @@ function _tfNotify(userId, row) {
     }, row)).then(function () {}).catch(function () {});
 }
 
-// "X liked your post" — looked up so it fires once, to the owner only.
-function tfNotifyLike(postId) {
-    if (!postId || !window.sb || !currentUser) return;
-    sb.from('posts').select('user_id').eq('id', postId).single().then(function (res) {
-        var owner = res && res.data && res.data.user_id;
-        if (owner) _tfNotify(owner, { type: 'like', post_id: postId,
-            message: _tfActorName() + ' liked your post' });
-    }).catch(function () {});
-}
-
-function tfNotifyFollow(targetUserId) {
-    _tfNotify(targetUserId, { type: 'follow',
-        message: _tfActorName() + ' started following you' });
-}
+// Likes and follows are notified by the database, not from here.
+//
+// There were two writers for each: these functions, and the on_like_notify /
+// on_follow_notify triggers on the rows themselves. Every like and every follow
+// therefore arrived twice. The trigger is the one to keep, because it fires
+// whatever route the row came in by and cannot be skipped by a client that
+// forgets to call it. These stay as no-ops so any caller left anywhere is
+// harmless rather than an error.
+//
+// The trigger leaves `message` empty on purpose: the card already prints the
+// person's name in bold and adds the wording for the type. Writing a whole
+// sentence in here is what produced "wayden wayden started following you".
+function tfNotifyLike(postId) {}
+function tfNotifyFollow(targetUserId) {}
 
 // One "X mentioned you" per real @username in the text. Usernames are matched
 // case-insensitively by trying both the written and lowercased form; a handle
@@ -9103,13 +9103,33 @@ function togglePrivateAccount() {
     const isPrivate = document.getElementById('private-toggle').classList.contains('active');
     secureSave('private_account', isPrivate);
     triggerHaptic(15);
+    // Private has to be private in the database, not just on this phone.
+    //
+    // This wrote is_private to `profiles`, a table with no such column that
+    // nothing reads. The switch moved, the toast said private, and the server
+    // never heard: the row-level policy that hides a private account's posts
+    // reads users.privacy_settings->>'private_account', and that stayed unset.
+    // So an account set to private stayed visible to everyone.
     if (window.sb && currentUser) {
-        sb.from('profiles')
-            .update({ is_private: isPrivate })
-            .eq('id', currentUser.id)
-            .then(function(r) {
-                if (r.error) console.warn('[togglePrivateAccount]', r.error);
-            });
+        (async function () {
+            try {
+                var cur = await sb.from('users').select('privacy_settings').eq('id', currentUser.id).maybeSingle();
+                var settings = (cur.data && cur.data.privacy_settings) || {};
+                if (typeof settings !== 'object' || Array.isArray(settings)) settings = {};
+                settings.private_account = isPrivate;
+                var w = await sb.from('users').update({ privacy_settings: settings }).eq('id', currentUser.id);
+                if (w.error) {
+                    console.warn('[togglePrivateAccount]', w.error.message);
+                    showToast('Could not save that. Check your connection and try again.');
+                    return;
+                }
+                currentUser.privacy_settings = settings;
+                secureSave('current_user', currentUser);
+            } catch (e) {
+                console.warn('[togglePrivateAccount]', e && e.message);
+                showToast('Could not save that. Check your connection and try again.');
+            }
+        })();
     }
     showToast(isPrivate ? 'Account set to private' : 'Account set to public');
 }
@@ -12823,25 +12843,81 @@ async function _lkStartBroadcast() {
         if (vt) await lkRoom.localParticipant.publishTrack(vt, { source: LivekitClient.Track.Source.Camera });
         if (at) await lkRoom.localParticipant.publishTrack(at, { source: LivekitClient.Track.Source.Microphone });
         window._lkRoom = lkRoom;
+        // Register the session so other people can find and join it.
+        //
+        // This used to retire the old row first and insert the new one second,
+        // which is the wrong way round: if anything went wrong in between, the
+        // person was left broadcasting with no row at all and nobody could see
+        // them. One real stream lasted 1.06 seconds in the registry for exactly
+        // that reason, while the broadcast itself carried on fine. Insert
+        // first, retire the older ones after, and say so when it fails instead
+        // of swallowing the error and letting them broadcast to an empty room.
         try {
-            // Clear any stale live row, then register this session so others can discover + join.
-            await sb.from('live_sessions').update({ is_live: false, ended_at: new Date().toISOString() }).eq('user_id', currentUser.id).eq('is_live', true);
-            await sb.from('live_sessions').insert({
+            var { data: _row, error: _regErr } = await sb.from('live_sessions').insert({
                 user_id: currentUser.id, room: room,
                 username: currentUser.username || dispName,
                 avatar_url: currentUser.avatar_url || '',
                 title: (document.getElementById('liveTitle') && document.getElementById('liveTitle').value) || null,
-                is_live: true, viewer_count: 0, started_at: new Date().toISOString()
-            });
-        } catch(e) {}
+                is_live: true, viewer_count: 0,
+                started_at: new Date().toISOString(),
+                last_seen_at: new Date().toISOString()
+            }).select('id').single();
+            if (_regErr || !_row) {
+                console.warn('[Live] could not register the session:', _regErr && _regErr.message);
+                showToast('You are live, but people may not find you in the Live list');
+            } else {
+                window._liveSessionId = _row.id;
+                await sb.from('live_sessions')
+                    .update({ is_live: false, ended_at: new Date().toISOString() })
+                    .eq('user_id', currentUser.id).eq('is_live', true).neq('id', _row.id);
+                _lkStartHeartbeat();
+            }
+        } catch (e) { console.warn('[Live] register threw:', e && e.message); }
         return true;
     } catch(e) { console.warn('[LiveKit] broadcast unavailable (local-only):', e && e.message); return false; }
 }
 
+// Say "still here" every twenty seconds while broadcasting.
+//
+// Ending a stream cleanly clears the row, but a phone that runs out of battery,
+// loses signal or has the app swiped away never gets to. Without this the
+// session stays flagged live for good and the browse list fills with people who
+// left hours ago. The row also gets put back if it has gone missing, so a
+// registration that lost a race repairs itself on the next beat rather than
+// leaving somebody broadcasting invisibly.
+function _lkStartHeartbeat() {
+    _lkStopHeartbeat();
+    window._liveHeartbeat = setInterval(async function () {
+        if (!window.sb || !currentUser || !window._lkRoom) return;
+        try {
+            var now = new Date().toISOString();
+            if (window._liveSessionId) {
+                var { data } = await sb.from('live_sessions')
+                    .update({ last_seen_at: now, is_live: true })
+                    .eq('id', window._liveSessionId).select('id');
+                if (data && data.length) return;
+            }
+            var re = await sb.from('live_sessions').insert({
+                user_id: currentUser.id, room: 'live_' + currentUser.id,
+                username: currentUser.username || currentUser.full_name || 'Live',
+                avatar_url: currentUser.avatar_url || '',
+                is_live: true, viewer_count: 0, started_at: now, last_seen_at: now
+            }).select('id').single();
+            if (re.data) window._liveSessionId = re.data.id;
+        } catch (e) {}
+    }, 20000);
+}
+
+function _lkStopHeartbeat() {
+    if (window._liveHeartbeat) { clearInterval(window._liveHeartbeat); window._liveHeartbeat = null; }
+}
+
 async function _lkStopBroadcast() {
     _lkStopCompositor();
+    _lkStopHeartbeat();
     try { if (window._lkRoom) await window._lkRoom.disconnect(); } catch(e) {}
     window._lkRoom = null;
+    window._liveSessionId = null;
     if (window.sb && currentUser) { try { await sb.from('live_sessions').update({ is_live: false, ended_at: new Date().toISOString() }).eq('user_id', currentUser.id).eq('is_live', true); } catch(e) {} }
 }
 
@@ -13273,9 +13349,14 @@ async function openLiveStreamFeed() {
 
     var streams = [];
     try {
+        // Live means live now, not "was live and never said goodbye". A phone
+        // that dies mid-stream leaves the flag set for good, so the heartbeat
+        // is what is trusted: seen in the last minute and a half, or it is over.
+        var _fresh = new Date(Date.now() - 90000).toISOString();
         var liveResp = await window.sb.from('live_sessions')
             .select('username, avatar_url, viewer_count, title, room')
             .eq('is_live', true)
+            .gte('last_seen_at', _fresh)
             .order('viewer_count', { ascending: false })
             .limit(8);
         if (liveResp.data && liveResp.data.length > 0) {
@@ -21564,7 +21645,7 @@ async function openSoundHub(soundName, fallbackVideoUrl) {
                 // Get uploader name
                 if (clips[0].user_id) {
                     try {
-                        var profRes = await sb.from('profiles').select('username').eq('id', clips[0].user_id).maybeSingle();
+                        var profRes = await sb.from('users').select('username').eq('id', clips[0].user_id).maybeSingle();
                         if (profRes.data && profRes.data.username) uploaderName = '@' + profRes.data.username;
                     } catch(e) {}
                 }
@@ -21591,7 +21672,7 @@ async function openSoundHub(soundName, fallbackVideoUrl) {
                 var uids = similarSounds.map(function(s){ return s.userId; }).filter(Boolean);
                 if (uids.length) {
                     try {
-                        var uRes = await sb.from('profiles').select('id,username').in('id', uids);
+                        var uRes = await sb.from('users').select('id,username').in('id', uids);
                         var uMap = {};
                         (uRes.data||[]).forEach(function(u){ uMap[u.id] = u.username; });
                         similarSounds.forEach(function(s){ s.artist = s.userId && uMap[s.userId] ? '@'+uMap[s.userId] : 'Original Audio'; });
@@ -22369,12 +22450,11 @@ function changeProfilePicture() {
                 var urlResult = sb.storage.from('avatars').getPublicUrl(fileName);
                 var publicUrl = urlResult.data.publicUrl;
 
-                // Update both users and profiles tables
+                // `users` only. The second write went to `profiles`, which is a
+                // leftover table with no usernames and no avatars in it, and
+                // nothing in the app reads.
                 var ts = new Date().toISOString();
-                await Promise.all([
-                    sb.from('users').update({ avatar_url: publicUrl, updated_at: ts }).eq('id', currentUser.id),
-                    sb.from('profiles').update({ avatar_url: publicUrl, updated_at: ts }).eq('id', currentUser.id)
-                ]);
+                await sb.from('users').update({ avatar_url: publicUrl, updated_at: ts }).eq('id', currentUser.id);
 
                 if (currentUser) currentUser.avatar_url = publicUrl;
                 secureSave('current_user', currentUser);
@@ -31739,7 +31819,23 @@ function renderNotifCard(notif) {
         mention:       'mentioned you',
         reply:         'replied to your comment',
     };
-    const message = notif.message || messages[notif.type] || 'interacted with you';
+    let message = notif.message || messages[notif.type] || 'interacted with you';
+
+    // The name is printed in bold just before this, so a message that opens
+    // with the same name reads twice. Some writers store a whole sentence;
+    // trim the name off the front of those rather than making every caller
+    // remember the convention.
+    const actorNames = [actor.full_name, actor.username].filter(Boolean);
+    for (const nm of actorNames) {
+        if (message.toLowerCase().indexOf(nm.toLowerCase() + ' ') === 0) {
+            message = message.slice(nm.length + 1);
+            break;
+        }
+    }
+    // Nothing is known about who did it (a link request from an account that
+    // has not been created yet, for instance), so there is no name to lead
+    // with and the message stands on its own.
+    const hasActor = !!(actor.full_name || actor.username);
 
     // Swipe a row left to reveal Turn off / Not interested / Delete. The
     // foreground is opaque so it hides the actions until dragged.
@@ -31759,9 +31855,9 @@ function renderNotifCard(notif) {
                 </div>
                 <div style="flex:1;min-width:0;">
                     <p style="font-size:14px;color:var(--text-primary,#000);margin:0;line-height:1.4;">
-                        <b>${escapeHtml(actor.full_name || actor.username || 'Someone')}</b>
-                        ${actor.verified ? `<i class="fa-solid fa-circle-check ${badgeClass}" style="font-size:10px;"></i>` : ''}
-                        ${message}
+                        ${hasActor ? `<b>${escapeHtml(actor.full_name || actor.username)}</b>` : ''}
+                        ${hasActor && actor.verified ? `<i class="fa-solid fa-circle-check ${badgeClass}" style="font-size:10px;"></i>` : ''}
+                        ${escapeHtml(message)}
                     </p>
                     <small style="color:#aaa;font-size:11px;">${timeAgo}</small>
                 </div>
@@ -33840,7 +33936,10 @@ async function startRealCall(targetUserId, targetUserName, isVideo) {
     var _callerAvatar = '';
     if (window.sb) {
         try {
-            var _pr = await window.sb.from('profiles').select('avatar_url').eq('id', targetUserId).maybeSingle();
+            // `users` is the table the app fills in; `profiles` is an older one
+            // that not everybody has a row in, so the person you were calling
+            // often had no picture on the calling screen.
+            var _pr = await window.sb.from('users').select('avatar_url').eq('id', targetUserId).maybeSingle();
             if (_pr.data) _callerAvatar = _pr.data.avatar_url || '';
         } catch(e) {}
     }
@@ -34056,6 +34155,71 @@ var _vmSeconds          = 0;
 var _callBgBlurEnabled  = false;
 var _callDotsInterval   = null;
 
+// Ring, out loud, until somebody answers.
+//
+// An incoming call put a screen up and buzzed once. A phone in a pocket is not
+// a screen, so a call arrived and nobody knew. The tone is generated rather
+// than loaded: two sine waves at the old exchange frequencies, two seconds on
+// and four off, which costs nothing to host and cannot fail to download.
+//
+// Sound needs a gesture in a browser, and a phone sitting locked has not made
+// one, so vibration runs alongside it rather than after it. When the app is
+// fully closed neither can run at all: only a push notification reaches that,
+// which the native shell handles separately.
+var _tfRing = { ctx: null, timer: null, nodes: [] };
+
+function _tfStartRinging() {
+    _tfStopRinging();
+    try {
+        if (navigator.vibrate) {
+            navigator.vibrate([600, 300, 600, 1500]);
+            _tfRing.buzz = setInterval(function () {
+                try { navigator.vibrate([600, 300, 600, 1500]); } catch (e) {}
+            }, 3000);
+        }
+    } catch (e) {}
+    try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        var ctx = _tfRing.ctx = new AC();
+        if (ctx.state === 'suspended') ctx.resume().catch(function () {});
+        var burst = function () {
+            if (!_tfRing.ctx) return;
+            var gain = ctx.createGain();
+            gain.gain.value = 0.0001;
+            gain.connect(ctx.destination);
+            [440, 480].forEach(function (hz) {
+                var osc = ctx.createOscillator();
+                osc.type = 'sine';
+                osc.frequency.value = hz;
+                osc.connect(gain);
+                osc.start();
+                _tfRing.nodes.push(osc);
+            });
+            var t = ctx.currentTime;
+            gain.gain.exponentialRampToValueAtTime(0.18, t + 0.05);
+            gain.gain.setValueAtTime(0.18, t + 1.9);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t + 2);
+            setTimeout(function () {
+                _tfRing.nodes.forEach(function (o) { try { o.stop(); o.disconnect(); } catch (e) {} });
+                _tfRing.nodes = [];
+                try { gain.disconnect(); } catch (e) {}
+            }, 2100);
+        };
+        burst();
+        _tfRing.timer = setInterval(burst, 6000);
+    } catch (e) {}
+}
+
+function _tfStopRinging() {
+    if (_tfRing.timer) { clearInterval(_tfRing.timer); _tfRing.timer = null; }
+    if (_tfRing.buzz) { clearInterval(_tfRing.buzz); _tfRing.buzz = null; }
+    try { if (navigator.vibrate) navigator.vibrate(0); } catch (e) {}
+    _tfRing.nodes.forEach(function (o) { try { o.stop(); o.disconnect(); } catch (e) {} });
+    _tfRing.nodes = [];
+    if (_tfRing.ctx) { try { _tfRing.ctx.close(); } catch (e) {} _tfRing.ctx = null; }
+}
+
 function _showCallOverlay(name, isVideo, direction, avatarUrl, targetId) {
     _callTargetName   = name || 'Unknown';
     _callTargetId     = targetId || null;
@@ -34106,6 +34270,7 @@ function _showCallOverlay(name, isVideo, direction, avatarUrl, targetId) {
     } else {
         if (statusEl) statusEl.childNodes[0].textContent = 'Incoming call';
         triggerHaptic(100);
+        _tfStartRinging();
     }
 
     // Init local video stream (don't show preview until connected)
@@ -34199,6 +34364,7 @@ function _callConnected() {
 }
 
 function _showNoAnswerScreen() {
+    _tfStopRinging();
     if (_callDotsInterval) { clearInterval(_callDotsInterval); _callDotsInterval = null; }
     var ov = document.getElementById('call-overlay');
     var na = document.getElementById('call-no-answer');
@@ -34223,6 +34389,7 @@ function _toggleCallControls() {
 }
 
 function endRealCall() {
+    _tfStopRinging();
     // Hanging up while sharing left the capture running and the OS bar up.
     if (_tfScreenStream) {
         try { _tfScreenStream.getTracks().forEach(function(t) { t.stop(); }); } catch (e) {}
@@ -34288,6 +34455,7 @@ function endRealCall() {
 }
 
 function acceptCall() {
+    _tfStopRinging();
     if (window._pendingIncomingCallId) {
         acceptIncomingCall(window._pendingIncomingCallId, window._pendingIncomingCallerId);
     }
@@ -34711,8 +34879,12 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+// There were two of these, on the same channel name, doing the same job. The
+// second one showed the caller's raw id where their name goes, and two channels
+// with one topic is how you get told about a call twice.
 function _initIncomingCallListener() {
-    window.sb.channel('incoming_calls_' + currentUser.id)
+    if (window._callChannel) return;
+    window._callChannel = window.sb.channel('incoming_calls_' + currentUser.id)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'calls', filter: 'callee_id=eq.' + currentUser.id },
             async function(payload) {
                 var call = payload.new;
@@ -34720,38 +34892,38 @@ function _initIncomingCallListener() {
                 window._pendingIncomingCallId   = call.id;
                 window._pendingIncomingCallerId = call.caller_id;
                 rtcCallId = call.id;
-                // Fetch caller name + avatar
-                var profile = { full_name: 'Unknown', avatar_url: '' };
+                // Who is calling, from the table the rest of the app uses.
+                // This read `profiles` and asked only for an avatar, then
+                // displayed a full_name it had never fetched, so every call
+                // came in from "Unknown" with no picture.
+                var who = { full_name: '', username: '', avatar_url: '' };
                 try {
-                    var r = await window.sb.from('profiles').select('avatar_url').eq('id', call.caller_id).maybeSingle();
-                    if (r.data) profile = r.data;
+                    var r = await window.sb.from('users')
+                        .select('full_name, username, avatar_url')
+                        .eq('id', call.caller_id).maybeSingle();
+                    if (r.data) who = r.data;
                 } catch(e) {}
-                _showCallOverlay(profile.full_name, call.type === 'video', 'incoming', profile.avatar_url, call.caller_id);
+                _showCallOverlay(who.full_name || who.username || 'Unknown',
+                                 call.type === 'video', 'incoming',
+                                 who.avatar_url, call.caller_id);
+            })
+        // The caller giving up has to reach the phone that is ringing, or it
+        // rings at a call that ended.
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'calls', filter: 'callee_id=eq.' + currentUser.id },
+            function(payload) {
+                var call = payload.new;
+                if (!call || call.id !== window._pendingIncomingCallId) return;
+                if (call.status === 'ringing' || call.status === 'active') return;
+                _tfStopRinging();
+                window._pendingIncomingCallId = null;
+                var ov = document.getElementById('call-overlay');
+                if (ov && ov.getAttribute('data-state') === 'incoming') {
+                    ov.style.display = 'none';
+                    showToast('Missed call');
+                }
             })
         .subscribe();
 }
-
-// Listen for incoming calls from ANY user (Supabase Realtime)
-document.addEventListener('DOMContentLoaded', function() {
-    if (!window.sb || !currentUser) return;
-    window.sb.channel('incoming_calls_' + (currentUser && currentUser.id ? currentUser.id : 'none'))
-        .on('postgres_changes', {
-            event: 'INSERT', schema: 'public', table: 'calls',
-            filter: 'callee_id=eq.' + (currentUser ? currentUser.id : 'none')
-        }, function(payload) {
-            var call = payload.new;
-            if (call.status !== 'ringing') return;
-            window._pendingIncomingCallId     = call.id;
-            window._pendingIncomingCallerId   = call.caller_id;
-            rtcCallId = call.id;
-            // Show incoming call UI
-            _showCallOverlay(call.caller_id, call.type === 'video', 'incoming');
-            var callOverlay = document.getElementById('call-overlay');
-            if (callOverlay) callOverlay.style.display = 'flex';
-            triggerHaptic(100);
-        })
-        .subscribe();
-});
 
 
     // ============================================================
@@ -36324,9 +36496,11 @@ async function setDailyLimit(limit, el) {
     el.closest('div').parentElement.remove();
     var minutes = { '30 min': 30, '1 hour': 60, '1.5 hours': 90, '2 hours': 120, '3 hours': 180 }[limit] || 60;
     localStorage.setItem('tf-daily-limit-minutes', minutes);
-    if (window.sb && currentUser) {
-        await window.sb.from('profiles').update({ daily_limit_minutes: minutes }).eq('id', currentUser.id);
-    }
+    // Kept on this device. The line that used to be here wrote a
+    // daily_limit_minutes column to `profiles`, and that column exists on
+    // neither table, so it failed on every save while the toast said it was
+    // set. Enforcement is local either way until the limit lives on the child's
+    // own row where a parent sets it.
     showToast('Daily limit set: ' + limit);
     triggerHaptic(20);
 }
@@ -50589,9 +50763,13 @@ async function fcSearchUser() {
     if (!window._sb) { resultEl.innerHTML = '<p style="font-size:13px;color:#888;padding:8px 0;">Not connected.</p>'; return; }
     resultEl.innerHTML = '<div style="text-align:center;padding:16px;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;"></i></div>';
     try {
+        // `users`, and columns that exist on it. This asked `profiles` for an
+        // identity_verified column that is on neither table, so PostgREST
+        // rejected the whole query and every search said "no account found",
+        // which is how linking a child to a parent could never work.
         var { data, error } = await window._sb
-            .from('profiles')
-            .select('id,display_name,username,avatar_url,identity_verified,account_type')
+            .from('users')
+            .select('id,display_name,full_name,username,avatar_url,id_verified,account_type')
             .eq('username', username)
             .maybeSingle();
         if (error || !data) {
@@ -50605,10 +50783,10 @@ async function fcSearchUser() {
             '<div style="background:var(--card-bg,#fff);border-radius:16px;padding:14px 16px;border:1.5px solid var(--border-color,#eee);display:flex;align-items:center;gap:12px;">' +
                 avatarHtml +
                 '<div style="flex:1;min-width:0;">' +
-                    '<b style="font-size:15px;color:var(--text-primary,#000);display:block;">' + escapeHtml(data.display_name || data.username) + '</b>' +
+                    '<b style="font-size:15px;color:var(--text-primary,#000);display:block;">' + escapeHtml(data.display_name || data.full_name || data.username) + '</b>' +
                     '<span style="font-size:13px;color:#888;">@' + escapeHtml(data.username) + '</span>' +
                 '</div>' +
-                '<button onclick="fcSendLinkRequest(\'' + data.id + '\',\'' + escapeHtml(data.username) + '\',\'' + escapeHtml(data.display_name || data.username) + '\')" style="padding:10px 16px;border-radius:12px;border:none;background:#007AFF;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Link</button>' +
+                '<button onclick="fcSendLinkRequest(\'' + data.id + '\',\'' + escapeHtml(data.username) + '\',\'' + escapeHtml(data.display_name || data.full_name || data.username) + '\')" style="padding:10px 16px;border-radius:12px;border:none;background:#007AFF;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Link</button>' +
             '</div>';
     } catch(e) {
         resultEl.innerHTML = '<p style="font-size:13px;color:#888;padding:8px 0;">Search failed. Try again.</p>';
