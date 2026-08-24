@@ -434,13 +434,25 @@ def _groq_messages(spec, system):
 # So there is a list, tried in order, and the first one that answers is
 # remembered for the life of the process. Setting EDDIE_GROQ_MODEL pins a
 # specific model and skips all of this.
+#
+# Ordered by how likely each is to actually answer on a free tier, not by size.
+# The biggest model has the smallest per-minute token budget, so gpt-oss-120b
+# sits last: falling off the retired 70b landed straight on it and a one-word
+# "Hi" came back 413.
 _GROQ_FALLBACKS = [
     'llama-3.3-70b-versatile',
     'meta-llama/llama-4-scout-17b-16e-instruct',
-    'openai/gpt-oss-120b',
+    'llama-3.1-8b-instant',          # small, generous limits, always up
     'qwen/qwen3-32b',
-    'llama-3.1-8b-instant',          # smallest and longest-lived, last resort
+    'openai/gpt-oss-120b',           # largest, tightest budget, last resort
 ]
+
+# Groq counts the tokens you *ask* for against the per-minute budget, not the
+# tokens you use. Asking for 8000 against a tier that allows 8000 a minute means
+# a single "Hi" is refused as too large before the model reads a word of it.
+# Enough for any answer this app shows, and far enough under the limit that a
+# short question is never refused for being long.
+_GROQ_MAX_TOKENS = 2000
 
 _GROQ_WORKING = None
 
@@ -457,6 +469,21 @@ def _groq_is_missing_model(exc):
     text = str(exc)
     return ('model_not_found' in text
             or ('404' in text and 'does not exist' in text))
+
+
+def _groq_is_too_large(exc):
+    """413: this model's per-minute token budget is smaller than the request.
+
+    Worth moving on for the same reason a retired model is. The limit belongs to
+    the model and the tier, not to the question, so the next model down may well
+    accept exactly the same request — which is what happened here: falling off a
+    retired 70b landed on a 120b whose free-tier budget is smaller, and a plain
+    "Hi" came back 413.
+    """
+    text = str(exc)
+    return ('413' in text
+            or 'request too large' in text.lower()
+            or 'rate_limit_exceeded' in text and 'tokens per m' in text.lower())
 
 
 def _groq_call(client, **kwargs):
@@ -477,10 +504,11 @@ def _groq_call(client, **kwargs):
             result = client.chat.completions.create(model=name, **kwargs)
         except Exception as exc:
             last = exc
-            if _groq_is_missing_model(exc) and not pinned:
+            if not pinned and (_groq_is_missing_model(exc) or _groq_is_too_large(exc)):
                 import logging
                 logging.getLogger(__name__).warning(
-                    'Groq model %s is gone, trying the next one', name)
+                    'Groq model %s refused (%s), trying the next one', name,
+                    'retired' if _groq_is_missing_model(exc) else 'request too large')
                 continue
             raise
         globals()['_GROQ_WORKING'] = name
@@ -499,7 +527,7 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
     stream = _groq_call(
         client,
         messages=_groq_messages(spec, system),
-        max_tokens=min(max_tokens, 8000),
+        max_tokens=min(max_tokens, _GROQ_MAX_TOKENS),
         stream=True,
     )
     text_open = False
@@ -527,7 +555,7 @@ def _groq_once(spec, system, max_tokens):
     result = _groq_call(
         client,
         messages=_groq_messages(spec, system),
-        max_tokens=min(max_tokens, 8000),
+        max_tokens=min(max_tokens, _GROQ_MAX_TOKENS),
     )
     choices = getattr(result, 'choices', None) or []
     if not choices:

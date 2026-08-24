@@ -2345,7 +2345,7 @@ async function initFeed() {
             // the top of every visit.
             tfMaybeInjectFollowRail(feed);
         } else if (!_cachedFeed || !_cachedFeed.length) {
-            feed.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#aaa;"><i class="fa-regular fa-newspaper" style="font-size:40px;margin-bottom:16px;display:block;"></i><p style="font-weight:600;color:var(--text-primary,#000);margin-bottom:6px;">Nothing here yet</p><p style="font-size:13px;">Follow people to see their posts here.</p></div>';
+            feed.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#aaa;"><i class="fa-regular fa-newspaper" style="font-size:40px;margin-bottom:16px;display:block;"></i><p style="font-weight:600;color:var(--text-primary,#000);margin-bottom:6px;">Nothing here yet</p><p style="font-size:13px;">New posts show up here as people share them.</p></div>';
         }
     } catch(e) {
         console.error('[initFeed]', e);
@@ -6845,12 +6845,67 @@ function closeSharePanel() {
     closePage('share-sheet');
 }
 
+// What each overlay silenced when it opened, so closing it can undo exactly
+// that and nothing else.
+var _tfPausedUnder = {};
+
+// Is something sitting on top of this element right now?
+//
+// An IntersectionObserver measures the viewport, not what the person can see,
+// so a clip under a full-screen overlay is still "visible" to it and gets
+// played again the moment anything makes it re-observe. That is why the clip
+// you were watching carried on talking underneath the composer, out of sight
+// with nothing on screen to pause it: openPage silenced it and the observer
+// immediately started it again.
+//
+// Asking the document what is actually at that point covers every overlay,
+// including ones opened by setting display directly rather than through
+// openPage. The scope is the reel or story page rather than the video itself,
+// because the caption and the play indicator sit over the video and are not
+// something covering it.
+function _tfIsCovered(el) {
+    try {
+        var scope = (el.closest && el.closest('.reel-page, .story-page')) || el.parentElement || el;
+        var r = el.getBoundingClientRect();
+        if (!r.width || !r.height) return true;
+        var x = Math.round(r.left + r.width / 2);
+        var y = Math.round(r.top + r.height / 2);
+        // Outside the window is not covered, it is off screen, which is the
+        // observer's own job to decide.
+        if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return false;
+        var top = document.elementFromPoint(x, y);
+        if (!top) return false;
+        return !(top === el || scope.contains(top) || top.contains(scope));
+    } catch (e) { return false; }
+}
+
 function openPage(id) {
     var el = document.getElementById(id);
     if (!el) {
         console.warn('[Nav] Overlay not found: ' + id);
         return;
     }
+
+    // Silence whatever is playing underneath.
+    //
+    // An overlay covers the screen but does not stop the page below it, so
+    // opening the clip composer left the clip you were watching playing out of
+    // sight, with no way to reach it. closePage learned to pause its own media;
+    // this is the other half.
+    //
+    // Only things actually playing, and only things outside the overlay being
+    // opened, so its own video is untouched. They are remembered by overlay id
+    // so closing it resumes exactly what it stopped.
+    try {
+        var paused = [];
+        document.querySelectorAll('video, audio').forEach(function (m) {
+            if (m.paused || el.contains(m)) return;
+            m.pause();
+            paused.push(m);
+        });
+        if (paused.length) _tfPausedUnder[id] = paused;
+    } catch (e) {}
+
     el.style.display = 'flex';
     el.style.flexDirection = 'column';
     if (id === 'qr-overlay') renderQRCode();
@@ -6874,6 +6929,14 @@ function closePage(id) {
         } catch (e) {}
         el.style.display = 'none';
     }
+
+    // Start again whatever this overlay silenced on the way in, and only that.
+    try {
+        (_tfPausedUnder[id] || []).forEach(function (m) {
+            if (m.isConnected) m.play().catch(function () {});
+        });
+    } catch (e) {}
+    delete _tfPausedUnder[id];
     unlockScroll();
     triggerHaptic(5);
     // Sync nav icon after closing
@@ -14408,7 +14471,9 @@ setTimeout(function() {
         var io = new IntersectionObserver(function(entries) {
             entries.forEach(function(entry) {
                 var vid = entry.target;
-                if (entry.isIntersecting) {
+                // In the viewport is not the same as on screen: if an overlay
+                // is covering the clip, leave it paused.
+                if (entry.isIntersecting && !_tfIsCovered(vid)) {
                     vid.currentTime = 0;
                     vid.muted = window._reelsMuted;
                     var p = vid.play();
@@ -14419,8 +14484,10 @@ setTimeout(function() {
                     if (_ind) _ind.style.opacity = '0';
                 } else {
                     vid.pause();
-                    // Reset so next view starts fresh
-                    vid.currentTime = 0;
+                    // Scrolled away: reset so the next view starts fresh.
+                    // Merely covered: leave the position alone, because the
+                    // overlay closing puts you back where you were watching.
+                    if (!entry.isIntersecting) vid.currentTime = 0;
                 }
             });
         }, { threshold: 0.75, rootMargin: '0px' });
@@ -26558,41 +26625,160 @@ if (!session) { showToast('Please log in'); return null; }
         } catch (e) { console.warn('[Schedule]', e && e.message); return 0; }
     },
 
+    // The one select every feed query uses, kept in one place so the discovery
+    // half and the following half hand back identically shaped rows. A card
+    // rendered from a row missing collab_user or quoted_post renders wrong.
+    _feedSelect: '*, users:user_id (id, full_name, username, avatar_url, badge_tier, verified), collab_user:collab_user_id (id, full_name, username, avatar_url, badge_tier, verified), quoted_post:quoted_post_id (id, text_content, media_url, thumbnail_url, post_type, media_type, users:user_id (full_name, username, avatar_url))',
+
+    // Where each half of the blend has got to. Reset whenever the feed is
+    // loaded from the top, so pull-to-refresh really does start over and an
+    // endless scroll never serves the same post twice.
+    _feedCursor: { follow: 0, pool: 0, seen: null },
+
+    // The ranked pool of people you do not follow, built once per refresh.
+    //
+    // Scoring in the browser rather than in the query is deliberate: PostgREST
+    // cannot order by an expression, and ordering by like_count alone would
+    // pin the same handful of old popular posts to the top of the app forever.
+    // Engagement divided by age gives a post a window to be seen in and then
+    // lets it fall away.
+    _forYouPool: [],
+
+    async _buildForYouPool(client, followIds) {
+        var hidden = [];
+        try {
+            hidden = JSON.parse(localStorage.getItem('tf-blocked-users') || '[]')
+                .concat(JSON.parse(localStorage.getItem('tf-muted-users') || '[]'));
+        } catch (e) {}
+        var skip = followIds.concat(hidden).filter(Boolean).slice(0, 300);
+
+        var q = client.from('posts')
+            .select(this._feedSelect)
+            .eq('is_hidden', false)
+            .or('status.is.null,status.neq.scheduled')
+            .order('created_at', { ascending: false })
+            .limit(200);
+        if (skip.length) {
+            q = q.not('user_id', 'in', '(' + skip.map(function(i) { return '"' + i + '"'; }).join(',') + ')');
+        }
+        var { data, error } = await q;
+        if (error) { console.warn('[ForYou]', error.message); return []; }
+
+        var now = Date.now();
+        return (data || []).map(function(p) {
+            var hours = Math.max(0, (now - new Date(p.created_at).getTime()) / 3600000);
+            var eng = (p.like_count || 0)
+                + 2 * (p.comment_count || 0)
+                + 3 * (p.repost_count || 0)
+                + 0.02 * (p.view_count || 0);
+            p._score = (1 + eng) / Math.pow(hours + 2, 0.8);
+            return p;
+        }).sort(function(a, b) { return b._score - a._score; });
+    },
+
+    // A For You page, not a Following page.
+    //
+    // This used to be follows-only, which gives a new account a problem it
+    // cannot solve from inside the app: it opens to an empty page telling it to
+    // follow people, and offers no way to find anybody to follow. Someone who
+    // posts is invisible until a stranger somehow already knows they exist.
+    //
+    // So every page is a blend. Most of it is the people you follow, because
+    // that is what following is for, and the rest is people you do not, ranked
+    // by _buildForYouPool. Either half fills in for the other when it runs
+    // short, so a feed is only empty when the app itself is.
+    //
+    // Nothing here has to enforce privacy: the read policy on posts already
+    // hides private accounts from non-followers and drops anyone who blocked
+    // you, so a discovery query cannot reach a post it should not.
     async getFeed(page, limit) {
         page = page || 1; limit = limit || 20;
         var client = window._sb || window.sb;
-if (!client) return [];
-var { data: { session } } = await client.auth.getSession();
-if (!session) return [];
-var userId = session.user.id;
-        var offset = (page - 1) * limit;
+        if (!client) return [];
+        var { data: { session } } = await client.auth.getSession();
+        if (!session) return [];
+        var userId = session.user.id;
 
         var followRes = await client.from('follows').select('following_id').eq('follower_id', userId);
         var followIds = (followRes.data || []).map(function(f) { return f.following_id; });
         followIds.push(userId);
 
+        if (page <= 1) {
+            this._feedCursor = { follow: 0, pool: 0, seen: {} };
+            this._forYouPool = await this._buildForYouPool(client, followIds);
+        }
+        var cur = this._feedCursor;
+        if (!cur.seen) cur.seen = {};
+
+        var followWant = Math.max(1, Math.round(limit * 0.6));
+        var poolWant = limit - followWant;
+
         // Anything still waiting for its time is not in the feed yet.
         //
         // There was no status filter here at all, so a post scheduled for next
-        // week appeared the moment it was written, while the profile — which
-        // does filter on published — did not show it. The same post visible in
+        // week appeared the moment it was written, while the profile, which
+        // does filter on published, did not show it. The same post visible in
         // one place and missing from the other, which is exactly backwards from
         // what scheduling is for.
         //
         // Written as an or() so a row with no status at all is still included;
         // status <> 'scheduled' is NULL for a NULL status, and NULL is not true,
         // so a plain neq would silently drop those.
-        var { data, error } = await client.from('posts')
-            .select('*, users:user_id (id, full_name, username, avatar_url, badge_tier, verified), collab_user:collab_user_id (id, full_name, username, avatar_url, badge_tier, verified), quoted_post:quoted_post_id (id, text_content, media_url, thumbnail_url, post_type, media_type, users:user_id (full_name, username, avatar_url))')
-            .in('user_id', followIds)
-            .eq('is_hidden', false)
-            .or('status.is.null,status.neq.scheduled')
-            .order('created_at', { ascending: false })
-            .range(offset, offset + limit - 1);
+        var followRows = [];
+        if (followWant > 0) {
+            var { data, error } = await client.from('posts')
+                .select(this._feedSelect)
+                .in('user_id', followIds)
+                .eq('is_hidden', false)
+                .or('status.is.null,status.neq.scheduled')
+                .order('created_at', { ascending: false })
+                .range(cur.follow, cur.follow + followWant - 1);
+            if (error) { console.error('[Feed]', error); }
+            followRows = data || [];
+            cur.follow += followRows.length;
+        }
 
-        if (error) { console.error('[Feed]', error); return []; }
+        // Whatever the followed half could not fill comes out of the pool, and
+        // if the pool runs dry the followed half keeps going on its own.
+        var take = poolWant + Math.max(0, followWant - followRows.length);
+        var poolRows = this._forYouPool.slice(cur.pool, cur.pool + take);
+        cur.pool += poolRows.length;
 
-        var postIds = (data || []).map(function(p) { return p.id; });
+        if (followRows.length + poolRows.length < limit && followRows.length === followWant) {
+            var short = limit - followRows.length - poolRows.length;
+            var { data: more } = await client.from('posts')
+                .select(this._feedSelect)
+                .in('user_id', followIds)
+                .eq('is_hidden', false)
+                .or('status.is.null,status.neq.scheduled')
+                .order('created_at', { ascending: false })
+                .range(cur.follow, cur.follow + short - 1);
+            if (more && more.length) { followRows = followRows.concat(more); cur.follow += more.length; }
+        }
+
+        // Spread the discoveries through the page instead of stacking them at
+        // the bottom, where an endless scroll would mean nobody ever saw one.
+        var merged = [];
+        var every = poolRows.length ? Math.max(2, Math.round((followRows.length + poolRows.length) / poolRows.length)) : 0;
+        var fi = 0, pi = 0, slot = 0;
+        while (fi < followRows.length || pi < poolRows.length) {
+            slot++;
+            var wantPool = every && (slot % every === 0) && pi < poolRows.length;
+            if (wantPool || fi >= followRows.length) {
+                if (pi < poolRows.length) merged.push(poolRows[pi++]);
+                else if (fi < followRows.length) merged.push(followRows[fi++]);
+            } else {
+                merged.push(followRows[fi++]);
+            }
+        }
+
+        var result = merged.filter(function(p) {
+            if (!p || cur.seen[p.id]) return false;
+            cur.seen[p.id] = 1;
+            return true;
+        });
+
+        var postIds = result.map(function(p) { return p.id; });
         if (postIds.length === 0) return [];
 
         var likeRes = await client.from('likes').select('post_id').eq('user_id', userId).in('post_id', postIds);
@@ -26601,13 +26787,13 @@ var userId = session.user.id;
         var bmRes = await client.from('bookmarks').select('post_id').eq('user_id', userId).in('post_id', postIds);
         var bookmarkedIds = (bmRes.data || []).map(function(b) { return b.post_id; });
 
-        var result = (data || []).map(function(p) {
+        result.forEach(function(p) {
             p._liked = likedIds.indexOf(p.id) > -1;
             p._bookmarked = bookmarkedIds.indexOf(p.id) > -1;
-            return p;
         });
         // Kids-feed separation: child accounts only see content from approved
-        // kids-content creators (white badge) — adult content never reaches the kids feed.
+        // kids-content creators (white badge), so adult content never reaches
+        // the kids feed. Discovery widens who can appear, not what is allowed.
         if (typeof isChildAccount === 'function' && isChildAccount()) {
             result = result.filter(function(p) {
                 return p.users && p.users.badge_tier === 'verify-white';
@@ -44542,6 +44728,22 @@ function openNewTrustClipPost() {
     // Same for the edit itself, for the same reason.
     try { window._pendingClipEdl = _edBuildEdl(); } catch (e) { window._pendingClipEdl = null; }
     _edStopMedia();
+
+    // Carry the edited clip's actual file across, not just a URL for it.
+    //
+    // A blob: URL is a handle that can be revoked, and the editor tears its own
+    // DOM down on the way out. Holding the Blob means the composer, the cover
+    // strip and the upload all still have the video even if the URL it was
+    // reached by has stopped resolving — which is the state that left videoUrl
+    // empty and the clip unsaved with no error anywhere.
+    try {
+        var _edClip = window.edState && edState.clips && edState.clips[0];
+        if (_edClip) {
+            if (_edClip.file && !window._lastRecordedBlob) window._lastRecordedBlob = _edClip.file;
+            if (_edClip.objectUrl && !window._lastPickedVideoSrc) window._lastPickedVideoSrc = _edClip.objectUrl;
+        }
+    } catch (e) {}
+
     closePage('preview-edit-overlay');
     openPage('new-trust-clip-overlay');
     var tcVid = document.getElementById('tcThumbVid');
@@ -44611,20 +44813,43 @@ async function submitTrustClip() {
     var thumbnailUrl = '';
 
     try {
-        // Upload video blob to Supabase Storage
-        var blob = window._lastRecordedBlob || null;
-        var blobUrl = window._lastPickedVideoSrc || '';
+        // Find the video, wherever this screen was reached from.
+        //
+        // This only ever looked at _lastRecordedBlob and _lastPickedVideoSrc,
+        // which are set by the recorder and the file picker. Coming through the
+        // editor, the clip lives in edState.clips[0] instead — so a video that
+        // had been trimmed or edited was invisible here, videoUrl stayed empty,
+        // the insert was skipped and nothing was ever saved. That is the whole
+        // reason the trustclips table is empty.
+        var blob = window._lastRecordedBlob
+                || (window.edState && edState.clips && edState.clips[0] && edState.clips[0].file)
+                || null;
+
+        var blobUrl = window._lastPickedVideoSrc
+                   || (window.edState && edState.clips && edState.clips[0] && edState.clips[0].objectUrl)
+                   || '';
+
+        // Last resort: a video element that is holding the source right now.
+        if (!blob && !blobUrl) {
+            var _anyVid = document.querySelector('#preview-edit-overlay video[src], #new-trust-clip-overlay video[src], #edVideo, #tcThumbVid');
+            if (_anyVid && _anyVid.src) blobUrl = _anyVid.src;
+        }
 
         // If we have a blob URL from file picker, fetch it back to a blob
         if (!blob && blobUrl && blobUrl.startsWith('blob:')) {
             try {
                 var resp = await fetch(blobUrl);
                 blob = await resp.blob();
-            } catch(e) { blob = null; }
+            } catch(e) {
+                console.warn('[TrustClip] could not read the blob URL back:', e && e.message);
+                blob = null;
+            }
         }
 
         if (!blob) {
-            console.warn('[TrustClip] No video blob captured, _lastRecordedBlob/_lastPickedVideoSrc empty');
+            console.warn('[TrustClip] No video blob captured. recorded=%s picked=%s edClip=%s',
+                !!window._lastRecordedBlob, !!window._lastPickedVideoSrc,
+                !!(window.edState && edState.clips && edState.clips[0]));
         }
 
         if (blob && window.sb && currentUser) {
@@ -47767,6 +47992,24 @@ function openEditCoverSuite() {
     // editor, or from a clip already recorded. When every one came up empty the
     // strip captured nothing and sat there grey, saying nothing about why.
     var _ecSrc = (function () {
+        // A live File beats any URL, and is tried first.
+        //
+        // Every other candidate here is a blob: URL, which is a handle to the
+        // video rather than the video. The editor revokes its handles when it
+        // tears its DOM down, so by the time this screen opens the URL can
+        // still look perfectly valid and resolve to nothing: the preview stays
+        // black and every frame in the strip comes back empty. Minting a fresh
+        // URL from the file itself cannot go stale that way.
+        try {
+            if (window._ecObjUrl) { URL.revokeObjectURL(window._ecObjUrl); window._ecObjUrl = null; }
+            var blob = window._lastRecordedBlob
+                    || (window.edState && edState.clips && edState.clips[0] && edState.clips[0].file);
+            if (blob) {
+                window._ecObjUrl = URL.createObjectURL(blob);
+                return window._ecObjUrl;
+            }
+        } catch (e) {}
+
         var candidates = [
             (function(){ var v = document.getElementById('tcThumbVid'); return v && v.src; })(),
             window._lastPickedVideoSrc,
@@ -47801,8 +48044,19 @@ function openEditCoverSuite() {
             // An empty strip is not obviously broken, it just looks like a strip
             // that has not loaded, so it waits forever without saying anything.
             if (!drawn) {
-                console.warn('[Cover] no frames captured from', _ecSrc);
-                showToast('Could not read frames from this video. Use "Add from camera roll" to pick a cover.');
+                console.warn('[Cover] no frames captured from', _ecSrc, 'mediaError=', result.error);
+                // Say the true reason where there is one. An iPhone records
+                // H.265 and a browser that cannot decode it produces a black
+                // video and eighteen empty cells, which looks like a broken
+                // screen rather than a file this browser cannot open.
+                var _blob = window._lastRecordedBlob
+                        || (window.edState && edState.clips && edState.clips[0] && edState.clips[0].file);
+                var _codec = _blob ? await _tfSniffVideoCodec(_blob) : null;
+                if (_codec === 'hevc' && !_tfCanPlayHevc()) {
+                    showToast('This browser cannot open H.265 video, so it cannot read a cover from it. Pick one from your camera roll.');
+                } else {
+                    showToast('Could not read frames from this video. Use "Add from camera roll" to pick a cover.');
+                }
             }
         })();
     } else {
@@ -47827,10 +48081,13 @@ function _ecCaptureCoverFrames(videoSrc, n) {
         var remote = /^https?:/i.test(videoSrc || '') &&
                      (videoSrc || '').indexOf(location.origin) !== 0;
         if (remote) { try { v.crossOrigin = 'anonymous'; } catch(e) {} }
-        var times = [], frames = [], done = false;
-        var finish = function(){ if(!done){ done = true; resolve({ times: times, frames: frames }); } };
-        v.addEventListener('error', finish);
-        setTimeout(finish, 8000); // safety timeout
+        var times = [], frames = [], done = false, why = '';
+        var finish = function(){ if(!done){ done = true; resolve({ times: times, frames: frames, error: why }); } };
+        v.addEventListener('error', function () {
+            why = 'code ' + ((v.error && v.error.code) || '?');
+            finish();
+        });
+        setTimeout(function () { if (!why) why = 'timed out'; finish(); }, 8000);
         v.addEventListener('loadedmetadata', function() {
             var dur = (v.duration && isFinite(v.duration)) ? v.duration : 0;
             for (var i = 0; i < n; i++) times.push(dur > 0 ? Math.min(dur - 0.05, dur * i / n) : 0);
