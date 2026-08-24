@@ -6854,7 +6854,21 @@ function openPage(id) {
 
 function closePage(id) {
     var el = document.getElementById(id);
-    if (el) el.style.display = 'none';
+    if (el) {
+        // Hiding something does not stop it playing. display:none leaves audio
+        // running, so closing the clip editor left its video talking underneath
+        // whatever you went to next, with nothing on screen to pause. Every
+        // overlay gets this, because every overlay can hold a video.
+        //
+        // Paused, not unloaded: reopening should carry on where it was, and
+        // tearing the source out would lose that.
+        try {
+            el.querySelectorAll('video, audio').forEach(function (m) {
+                if (!m.paused) m.pause();
+            });
+        } catch (e) {}
+        el.style.display = 'none';
+    }
     unlockScroll();
     triggerHaptic(5);
     // Sync nav icon after closing
@@ -12674,9 +12688,7 @@ function endLive() {
 // ==========================================================================
 async function _lkToken(room, publish, name) {
     if (!window.sb) throw new Error('no sb');
-    var sess = await sb.auth.getSession();
-    var tok = sess && sess.data && sess.data.session && sess.data.session.access_token;
-    if (!tok) throw new Error('no session');
+    var tok = await _tfAccessToken();      // refreshes an expired token first
     var r = await fetch('/api/live/token/?room=' + encodeURIComponent(room) + '&publish=' + (publish ? '1' : '0') + '&name=' + encodeURIComponent(name || ''), { headers: { 'Authorization': 'Bearer ' + tok } });
     if (!r.ok) throw new Error('token http ' + r.status);
     return r.json(); // { token, url }
@@ -28059,6 +28071,12 @@ async function _eddieAnswerMention(sourceType, sourceId, text, postId, replyingT
             // Out of quota is that person's own limit, and it stops Eddie only
             // for them. Say it once, quietly, and never in the thread itself.
             if (r.status === 429) showToast(j.error || 'You have used up Eddie for today');
+            // 401 and 503 used to be swallowed, so tagging Eddie and getting
+            // nothing back looked like Eddie choosing to ignore you. Both are
+            // worth knowing about and neither is your fault.
+            else if (r.status === 401) showToast('Signed out, so Eddie could not reply. Sign in again.');
+            else if (r.status === 503) showToast(j.error || 'Eddie is not set up on the server yet.');
+            else console.warn('[Eddie] mention failed:', r.status, j && j.error);
             return;
         }
         if (j.duplicate) return;
@@ -44611,6 +44629,20 @@ async function submitTrustClip() {
         window._pendingClipEdl = _edl;
 
         // Insert row into trustclips table
+        //
+        // clipSaved lives out here so the toast at the end can tell the truth.
+        // The whole block is skipped when there is no videoUrl, which happens
+        // when the blob was never captured — and that path said nothing at all
+        // while still reporting success, which is how the table ended up with
+        // no clips in it and nobody any the wiser.
+        var clipSaved = true;
+        if (!videoUrl) {
+            console.error('[TrustClip] no videoUrl, nothing to save');
+            clipSaved = false;
+        } else if (!window.sb || !currentUser) {
+            console.warn('[TrustClip] not signed in, kept on this device only');
+            clipSaved = false;
+        }
         if (window.sb && currentUser && videoUrl) {
             var insertRow = {
                 id: clipId,
@@ -44652,7 +44684,6 @@ is_demo: window._tcIsDemoClip || false,
                     return (fx && fx !== 'none') ? fx : null;
                 })()
             };
-            var clipSaved = true;
             var { error: insertErr } = await sb.from('trustclips').insert(insertRow);
             if (insertErr) {
                 console.warn('[TrustClip] DB insert failed, retrying with core columns:', insertErr.message);
@@ -44688,8 +44719,19 @@ is_demo: window._tcIsDemoClip || false,
             localStorage.setItem('tf-trust-clips', JSON.stringify(clips));
         } catch(e) {}
 
-        showToast('Clip posted ✓');
-        loadFeedStories();
+        // Only say it posted if it posted.
+        //
+        // This fired unconditionally, two lines after the branch that says
+        // "Could not save clip" — so a failed insert showed its error for an
+        // instant and then had "Clip posted ✓" written straight over it. The
+        // clip was gone and the app said it had worked, which is the worst
+        // possible pair.
+        if (clipSaved === false) {
+            showToast('Clip not saved. It is still on this device, try posting again.');
+        } else {
+            showToast('Clip posted ✓');
+            loadFeedStories();
+        }
 
     } catch(e) {
         console.error('[TrustClip] Upload error:', e);
@@ -47676,8 +47718,28 @@ function openEditCoverSuite() {
         '<div style="padding:16px 20px;padding-bottom:max(28px,env(safe-area-inset-bottom));background:#000;">' +
             '<button onclick="edCoverFromCameraRoll()" style="width:100%;padding:16px;border-radius:14px;background:#007AFF;color:#fff;font-size:16px;font-weight:700;border:none;cursor:pointer;">Add from camera roll</button>' +
         '</div>';
-    var src = document.getElementById('tcThumbVid');
-    var _ecSrc = (src && src.src) ? src.src : (window._lastPickedVideoSrc || (function(){ var v = document.getElementById('edVideo'); return v && v.src; })() || (window.edState && edState.clips && edState.clips[0] && edState.clips[0].objectUrl) || '');
+    // Where the video is, asked several ways, because which one holds it depends
+    // on how this screen was reached: straight from the picker, back out of the
+    // editor, or from a clip already recorded. When every one came up empty the
+    // strip captured nothing and sat there grey, saying nothing about why.
+    var _ecSrc = (function () {
+        var candidates = [
+            (function(){ var v = document.getElementById('tcThumbVid'); return v && v.src; })(),
+            window._lastPickedVideoSrc,
+            (function(){ var v = document.getElementById('edVideo'); return v && v.src; })(),
+            (window.edState && edState.clips && edState.clips[0] && edState.clips[0].objectUrl),
+            (function(){ var v = document.getElementById('ecPreviewVid'); return v && v.src; })(),
+            // Last resort: any video on the clip composer that has a source.
+            (function () {
+                var v = document.querySelector('#new-trust-clip-overlay video[src], #preview-edit-overlay video[src]');
+                return v && v.src;
+            })()
+        ];
+        for (var i = 0; i < candidates.length; i++) {
+            if (candidates[i] && candidates[i] !== 'null' && candidates[i].indexOf('undefined') !== 0) return candidates[i];
+        }
+        return '';
+    })();
     if (_ecSrc) { var vid = suite.querySelector('#ecPreviewVid'); if(vid){vid.src=_ecSrc;vid.play().catch(function(){});} }
     (document.getElementById('app')||document.body).appendChild(suite);
 
@@ -47687,11 +47749,21 @@ function openEditCoverSuite() {
         (async function() {
             var result = await _ecCaptureCoverFrames(_ecSrc, 18);
             window._ecTimes = result.times;
+            var drawn = 0;
             result.frames.forEach(function(f, i) {
                 var cell = document.getElementById('ecFrame' + i);
-                if (cell && f) cell.style.backgroundImage = 'url(' + f + ')';
+                if (cell && f) { cell.style.backgroundImage = 'url(' + f + ')'; drawn++; }
             });
+            // An empty strip is not obviously broken, it just looks like a strip
+            // that has not loaded, so it waits forever without saying anything.
+            if (!drawn) {
+                console.warn('[Cover] no frames captured from', _ecSrc);
+                showToast('Could not read frames from this video. Use "Add from camera roll" to pick a cover.');
+            }
         })();
+    } else {
+        console.warn('[Cover] no video source found for the cover strip');
+        showToast('Could not find the video for the cover. Use "Add from camera roll".');
     }
 }
 
@@ -49487,10 +49559,37 @@ function _tfBaseType(file) {
     return String((file && file.type) || 'application/octet-stream').split(';')[0].trim().toLowerCase();
 }
 
-async function _tfSignR2Upload(file, kind) {
+// A usable access token, refreshing once before giving up.
+//
+// "no session" was being thrown the moment getSession came back empty, and an
+// empty getSession is not the same as being signed out: an expired token with a
+// good refresh token reports exactly that until it is refreshed. So an upload
+// failed, fell through to Supabase, and Supabase refused it with a row-level
+// security error — because with no session auth.uid() is null. Two different
+// error messages, one cause, and neither of them said the useful thing.
+//
+// The app looks signed in throughout, because currentUser is set once at load
+// and never re-checked.
+async function _tfAccessToken() {
     var sess = await sb.auth.getSession();
     var tok = sess && sess.data && sess.data.session && sess.data.session.access_token;
-    if (!tok) throw new Error('no session');
+    if (tok) return tok;
+
+    try {
+        var r = await sb.auth.refreshSession();
+        tok = r && r.data && r.data.session && r.data.session.access_token;
+        if (tok) return tok;
+    } catch (e) { /* fall through to the honest failure */ }
+
+    // Genuinely signed out. Say so, because "row-level security policy" is not
+    // something anybody can act on and "sign in again" is.
+    var err = new Error('signed out');
+    err.needsSignIn = true;
+    throw err;
+}
+
+async function _tfSignR2Upload(file, kind) {
+    var tok = await _tfAccessToken();
 
     // Twenty seconds, then give up and let the caller fall back to Supabase.
     //
@@ -49572,6 +49671,14 @@ async function tfUploadPublicMedia(file, kind, bucket, path, onProgress) {
     });
     if (up.error) {
         var mb = (file && file.size) ? (file.size / 1048576).toFixed(1) + 'MB' : '?';
+        // A row-level security refusal on an upload almost always means there is
+        // no session, not that the file was wrong. Say the thing that can be
+        // acted on instead of quoting the database at somebody.
+        if (r2Reason === 'signed out' || /row-level security|JWT|not authenticated/i.test(up.error.message || '')) {
+            var out = new Error('You have been signed out. Sign in again and retry.');
+            out.needsSignIn = true;
+            throw out;
+        }
         var err = new Error((up.error.message || 'storage refused it') +
             ' [' + _tfBaseType(file) + ', ' + mb + '; R2: ' + (r2Reason || 'not tried') + ']');
         err.r2Reason = r2Reason;
@@ -52011,8 +52118,11 @@ function _eddieStyles() {
 
 async function _eddieToken() {
     try {
-        var s = await sb.auth.getSession();
-        return (s && s.data && s.data.session && s.data.session.access_token) || '';
+        // Through the refreshing helper. Reading getSession directly returned ''
+        // for an expired-but-refreshable token, the request went out with an
+        // empty Bearer, the server answered 401, and the caller only reports
+        // 429 — so Eddie ignored a mention and said nothing about why.
+        return await _tfAccessToken();
     } catch (e) { return ''; }
 }
 
