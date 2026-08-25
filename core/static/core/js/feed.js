@@ -2355,8 +2355,11 @@ async function initFeed() {
         }
     }
 
+    // Reload whichever tab is open, not Posts. Refreshing anywhere used to
+    // drop a list of posts into the grid regardless of the tab on screen, so
+    // pulling to refresh on trustclips filled it with posts.
     var _pg1 = document.getElementById('profile-grid');
-    if (_pg1 && typeof loadProfilePosts === 'function') loadProfilePosts(_pg1);
+    if (_pg1 && typeof _loadProfileActiveTab === 'function') _loadProfileActiveTab();
     renderParentRequests();
 }
 
@@ -6209,10 +6212,13 @@ function _updateProfileStickyCount(tabId) {
 }
 
 var _profileTabGen = 0; // generation counter to cancel stale async updates
-function switchprofiletab(tabName, element) {
+// silent is for the reload paths (a refresh, reopening the profile). Without
+// it the phone buzzes every time the feed refreshes, because nobody tapped
+// anything and it still fires the tap haptic.
+function switchprofiletab(tabName, element, silent) {
     document.querySelectorAll('.p-tab').forEach(function(t) { t.classList.remove('active'); });
     if (element) element.classList.add('active');
-    triggerHaptic(15);
+    if (!silent) triggerHaptic(15);
     var grid = document.getElementById('profile-grid');
     if (!grid) return;
     _profileTabGen++; // invalidate any in-flight async updates
@@ -6292,7 +6298,7 @@ function renderProfileTabs() {
     // layout under the wrong tab.
     var _pg = document.getElementById('profile-grid');
     if (_pg && _pg.dataset.tab !== activeTab && typeof switchProfileTab === 'function') {
-        switchProfileTab(activeTab, bar.querySelector('.p-tab.active'));
+        switchProfileTab(activeTab, bar.querySelector('.p-tab.active'), true);
     }
 }
 
@@ -6302,7 +6308,7 @@ function renderProfileTabs() {
 function _loadProfileActiveTab() {
     var actEl = document.querySelector('#profile-tabs-bar .p-tab.active');
     var tab = actEl ? (actEl.getAttribute('data-tab') || 'posts') : 'posts';
-    if (typeof switchProfileTab === 'function') { switchProfileTab(tab, actEl); return; }
+    if (typeof switchProfileTab === 'function') { switchProfileTab(tab, actEl, true); return; }
     var g = document.getElementById('profile-grid');
     if (g && typeof loadProfilePosts === 'function') loadProfilePosts(g);
 }
@@ -6382,18 +6388,47 @@ function loadProfileReels(container) {
     }
 
     if (window.sb && currentUser && currentUser.id) {
-        sb.from('posts')
-            .select('id,media_url,thumbnail_url,view_count')
-            .eq('user_id', currentUser.id)
-            .or('post_type.eq.video,media_type.eq.video')
-            .eq('status', 'published')
-            .order('created_at', { ascending: false })
-            .limit(18)
-            .then(function(r) {
+        // Clips live in `trustclips`. This tab only ever queried `posts` for
+        // anything marked video, so a clip posted through the clip composer
+        // saved correctly and the tab still said "No clips yet". Both are read
+        // now, because clips posted before the composer existed are still rows
+        // in `posts`, and the two lists are merged newest first.
+        Promise.all([
+            sb.from('trustclips')
+                .select('id,video_url,thumbnail_url,view_count,caption,created_at')
+                .eq('user_id', currentUser.id)
+                .eq('is_hidden', false)
+                .order('created_at', { ascending: false })
+                .limit(18),
+            sb.from('posts')
+                .select('id,media_url,thumbnail_url,view_count,created_at')
+                .eq('user_id', currentUser.id)
+                .or('post_type.eq.video,media_type.eq.video')
+                .eq('status', 'published')
+                .order('created_at', { ascending: false })
+                .limit(18)
+        ]).then(function(res) {
+            var clips = (res[0] && res[0].data || []).map(function (c) {
+                return { id: c.id, videoUrl: c.video_url, media_url: c.video_url,
+                         thumbnail_url: c.thumbnail_url, view_count: c.view_count,
+                         caption: c.caption, created_at: c.created_at, _clip: true };
+            });
+            var vids = (res[1] && res[1].data || []).map(function (c) {
+                return { id: c.id, videoUrl: c.media_url, media_url: c.media_url,
+                         thumbnail_url: c.thumbnail_url, view_count: c.view_count,
+                         created_at: c.created_at, _clip: false };
+            });
+            var rows = clips.concat(vids)
+                .filter(function (c) { return c.videoUrl; })
+                .sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); })
+                .slice(0, 18);
+            var r = { data: rows };
+            if (res[0] && res[0].error) console.warn('[ProfileClips]', res[0].error.message);
+            {
                 if (_profileTabGen !== myGen) return;   // tab switched, discard
                 _tcClearSkeleton();
                 if (r.data && r.data.length > 0) {
-                    window._profileClips = r.data.map(function(c){ return { id: c.id, videoUrl: c.media_url, media_url: c.media_url, thumbnail_url: c.thumbnail_url, view_count: c.view_count, username: '@' + (currentUser && currentUser.username || 'me') }; });
+                    window._profileClips = r.data.map(function(c){ return { id: c.id, videoUrl: c.videoUrl, media_url: c.media_url, thumbnail_url: c.thumbnail_url, view_count: c.view_count, caption: c.caption, username: '@' + (currentUser && currentUser.username || 'me') }; });
                     r.data.forEach(function(clip, clipIdx) {
                         var thumb = clip.thumbnail_url || '';
         var videoUrl = clip.media_url || '';
@@ -6411,7 +6446,8 @@ function loadProfileReels(container) {
                 } else if (!totalDraftCount) {
                     container.innerHTML += '<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#888;font-size:13px;"><i class="fa-solid fa-film" style="font-size:32px;color:#ccc;display:block;margin-bottom:12px;"></i>No clips yet</div>';
                 }
-            }).catch(function() {
+            }
+        }).catch(function() {
                 if (_profileTabGen !== myGen) return;
                 if (!totalDraftCount) container.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#888;font-size:13px;">Could not load clips</div>';
             });
@@ -8703,8 +8739,11 @@ document.getElementById('feed-panels').addEventListener('dblclick', function (e)
         var profileOverlay = document.getElementById('profile-overlay');
         addPullToRefresh(profileOverlay, function() {
             if (typeof loadMyProfile === 'function') loadMyProfile();
+            // Refresh the tab you are looking at. Pulling down on trustclips
+            // reloaded Posts into the same grid, so posts appeared under the
+            // clips tab, which is the first thing anyone does on a page.
             var _pg2 = document.getElementById('profile-grid');
-            if (_pg2 && typeof loadProfilePosts === 'function') loadProfilePosts(_pg2);
+            if (_pg2 && typeof _loadProfileActiveTab === 'function') _loadProfileActiveTab();
         });
     }, 1000);
 })();
@@ -9802,17 +9841,29 @@ async function renderLocalCircles() {
         const R = 0.45; // ~50km in degrees
         let nearbyUsers = [];
         if (window.sb && currentUser) {
-            const { data } = await sb.from('users')
-                .select('id,full_name,username,avatar_url,badge_tier,verified,last_lat,last_lng')
-                .neq('id', currentUser.id)
-                .eq('verified', true)
-                .gte('last_lat', lat - R)
-                .lte('last_lat', lat + R)
-                .gte('last_lng', lng - R)
-                .lte('last_lng', lng + R)
-                .not('last_lat', 'is', null)
-                .limit(20);
-            nearbyUsers = data || [];
+            // Where people are is in `user_locations`, not on the user row.
+            // This asked users for last_lat and last_lng, which are not columns
+            // there, so PostgREST refused the query and the screen always said
+            // there was nobody nearby.
+            const near = await sb.from('user_locations')
+                .select('user_id,lat,lng')
+                .neq('user_id', currentUser.id)
+                .gte('lat', lat - R).lte('lat', lat + R)
+                .gte('lng', lng - R).lte('lng', lng + R)
+                .limit(40);
+            if (near.error) console.warn('[Nearby]', near.error.message);
+            const spots = near.data || [];
+            if (spots.length) {
+                const who = await sb.from('users')
+                    .select('id,full_name,username,avatar_url,badge_tier,verified')
+                    .in('id', spots.map(function (s) { return s.user_id; }))
+                    .eq('verified', true);
+                const at = {};
+                spots.forEach(function (s) { at[s.user_id] = s; });
+                nearbyUsers = (who.data || []).map(function (u) {
+                    return Object.assign({}, u, { last_lat: at[u.id].lat, last_lng: at[u.id].lng });
+                }).slice(0, 20);
+            }
         }
 
         // Calculate distances
@@ -10691,11 +10742,19 @@ async function openClipFromComment(clipId) {
     var clip = null;
     if (window.sb) {
         try {
-            var { data } = await sb.from('trustclips')
-                .select('*, users:user_id (full_name, username, avatar_url, badge_tier)')
-                .eq('id', clipId).single();
+            // trustclips.user_id points at auth.users, so there is no
+            // relationship for PostgREST to embed and asking for one fails the
+            // whole request. That is why opening a clip from a comment always
+            // said "Clip unavailable". The author is fetched separately.
+            var { data } = await sb.from('trustclips').select('*').eq('id', clipId).single();
             clip = data;
-        } catch(e) {}
+            if (clip && clip.user_id) {
+                var au = await sb.from('users')
+                    .select('full_name, username, avatar_url, badge_tier')
+                    .eq('id', clip.user_id).maybeSingle();
+                clip.users = au.data || null;
+            }
+        } catch(e) { console.warn('[clip] open from comment', e && e.message); }
     }
     var url = clip && (clip.video_url || clip.media_url);
     if (!url) { showToast('Clip unavailable'); return; }
@@ -14406,10 +14465,17 @@ function tfReelPageHTML(post, avatarHtml, username, verified, likes) {
                         : '<button class="follow-btn' + (tfIsFollowing(post.user_id) ? ' following' : '') + '" onclick="event.stopPropagation();realToggleFollow(this,\'' + escapeHtml(String(post.user_id || '')) + '\')">' + (tfIsFollowing(post.user_id) ? 'Following' : 'Follow') + '</button>') +
                 '</div>' +
                 '<p style="margin:0 0 10px; font-size:14px; line-height:1.35; max-width:88%;">' + escapeHtml(post.text_content || '') + '</p>' +
-                '<div class="sound-ticker" onclick="openSoundHub(\'Original Sound\',\'' + escapeHtml(src) + '\')">' +
-                    '<i class="fa-solid fa-music"></i>' +
-                    '<span style="max-width:150px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; display:inline-block;">Original Sound</span>' +
-                '</div>' +
+                // The sound the clip was posted with, where it has one. This
+                // always said "Original Sound", so a clip made with a track
+                // from the sound hub credited nobody and opening the pill
+                // searched for the wrong thing.
+                (function () {
+                    var sound = post.sound_name || 'Original Sound';
+                    return '<div class="sound-ticker" onclick="openSoundHub(\'' + escapeHtml(sound).replace(/'/g, '&#39;') + '\',\'' + escapeHtml(src) + '\')">' +
+                        '<i class="fa-solid fa-music"></i>' +
+                        '<span style="max-width:150px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; display:inline-block;">' + escapeHtml(sound) + '</span>' +
+                    '</div>';
+                })() +
             '</div>' +
             '<div class="reel-sidebar">' +
                 '<div class="reel-action" onclick="reelHeartTap(this,\'' + escapeHtml(String(post.id)) + '\')"><i class="fa-regular fa-heart"></i><br><span onclick="event.stopPropagation();openReelLikesModal(\'' + escapeHtml(String(post.id)) + '\',\'' + likes + '\',\'' + (post.view_count || 0) + '\')" style="cursor:pointer;">' + likes + '</span></div>' +
@@ -14439,12 +14505,33 @@ async function initReels() {
     setupReelPinchZoom();   // idempotent; binds pinch/zoom once per scroller
     if (c.children.length > 0) c.innerHTML = ''; // force refresh
     try {
+        // Clips come from `trustclips`. This screen only ever read `posts`, so
+        // every clip posted through the clip composer was invisible here: it
+        // saved correctly and then appeared nowhere, and the only reason one
+        // ever showed up was a stripped-down copy kept in this browser.
+        //
+        // Video posts still count, because a clip posted before the composer
+        // existed is a row in `posts` with media_type video. Both are read and
+        // merged newest first, and a trustclips row is reshaped into the same
+        // fields the card renderer already reads.
+        // No users:user_id(...) embed here, on purpose: trustclips.user_id is a
+        // foreign key to auth.users, not to public.users, so PostgREST has no
+        // relationship to follow and refuses the whole query rather than just
+        // the join. The authors are looked up in one extra request below.
+        var clipResp = await window.sb.from('trustclips')
+            .select('id, video_url, thumbnail_url, user_id, caption, sound_name, volume, voice_effect, sources, segments, like_count, comment_count, view_count, created_at')
+            .neq('is_hidden', true)
+            .not('video_url', 'is', null)
+            .order('created_at', { ascending: false })
+            .limit(20);
+        if (clipResp.error) console.warn('[initReels] trustclips query failed:', clipResp.error.message);
+
         // Video posts store the file in media_url with media_type='video'
         // (video_url is a legacy/unused column that stays null). Select only
         // columns that exist and match on media_type, falling back to a
         // join-less retry if the users relationship errors.
         var reelResp = await window.sb.from('posts')
-            .select('id, media_url, video_url, thumbnail_url, user_id, like_count, comment_count, view_count, text_content, users:user_id(username, avatar_url, id_verified)')
+            .select('id, media_url, video_url, thumbnail_url, user_id, like_count, comment_count, view_count, text_content, created_at, users:user_id(username, avatar_url, id_verified)')
             .or('media_type.eq.video,post_type.eq.trustclip,post_type.eq.video')
             .neq('is_hidden', true)
             .not('media_url', 'is', null)
@@ -14454,7 +14541,7 @@ async function initReels() {
         if (reelResp.error) {
             console.warn('[initReels] query failed, retrying without users join:', reelResp.error.message);
             reelResp = await window.sb.from('posts')
-                .select('id, media_url, video_url, thumbnail_url, user_id, like_count, comment_count, view_count, text_content')
+                .select('id, media_url, video_url, thumbnail_url, user_id, like_count, comment_count, view_count, text_content, created_at')
                 .or('media_type.eq.video,post_type.eq.trustclip,post_type.eq.video')
                 .neq('is_hidden', true)
                 .not('media_url', 'is', null)
@@ -14462,10 +14549,38 @@ async function initReels() {
                 .limit(20);
         }
 
-        var reels = (reelResp.data || []);
+        var reels = ((clipResp.data || []).map(function (c) {
+            return {
+                id: c.id, media_url: c.video_url, video_url: c.video_url,
+                thumbnail_url: c.thumbnail_url, user_id: c.user_id,
+                text_content: c.caption, sound_name: c.sound_name,
+                volume: c.volume, voice_effect: c.voice_effect,
+                sources: c.sources, segments: c.segments,
+                like_count: c.like_count, comment_count: c.comment_count,
+                view_count: c.view_count, created_at: c.created_at,
+                users: null, _clip: true
+            };
+        })).concat(reelResp.data || [])
+            .sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); })
+            .slice(0, 20);
+        window._reelIdsOnScreen = reels.map(function (p) { return String(p.id); });
         if (reels.length === 0) {
             c.innerHTML = '<div style="color:rgba(255,255,255,0.4);text-align:center;padding:40px;font-size:14px;">No reels yet. Be the first to post!</div>';
             return;
+        }
+
+        // Who posted the clips, for the rows that could not carry a join.
+        var _needAuthors = reels.filter(function (p) { return !p.users && p.user_id; })
+                                .map(function (p) { return p.user_id; });
+        if (_needAuthors.length) {
+            try {
+                var _ures = await window.sb.from('users')
+                    .select('id, username, avatar_url, verified, id_verified')
+                    .in('id', _needAuthors);
+                var _umap = {};
+                (_ures.data || []).forEach(function (u) { _umap[u.id] = u; });
+                reels.forEach(function (p) { if (!p.users) p.users = _umap[p.user_id] || null; });
+            } catch (e) { console.warn('[initReels] authors', e && e.message); }
         }
 
         // Which reel authors have an active (last 24h) story? Only those get the
@@ -14495,24 +14610,38 @@ async function initReels() {
     } catch(e) {
         c.innerHTML = '<div style="color:rgba(255,255,255,0.4);text-align:center;padding:40px;font-size:14px;">Could not load clips.</div>';
     }
-    // Prepend locally posted clips
+    // Clips this device posted while it could not reach the server.
+    //
+    // Two things were wrong here. It drew its own cut-down card, which is why a
+    // clip you had just posted had no comment, share or save button, no sound,
+    // no avatar and said "You" where the name goes, while the same clip on the
+    // clips page looked completely different. And it drew that card even when
+    // the clip had saved perfectly well, so the good copy and the stub both
+    // appeared. It now skips anything already on screen and builds the card the
+    // same way as everything else.
     try {
+        var onScreen = window._reelIdsOnScreen || [];
         var localClips = JSON.parse(localStorage.getItem('tf-trust-clips') || '[]');
         localClips.forEach(function(clip) {
             var src = clip.videoSrc || '';
-            if (!src) return;
-            var div = document.createElement('div');
-            div.className = 'reel-page';
-            div.innerHTML = '<video src="'+escapeHtml(src)+'" class="reel-video" autoplay muted loop playsinline preload="auto" style="width:100%;height:100%;object-fit:cover;" onclick="reelTogglePlay(this)"></video>' +
-                '<div class="reel-play-indicator" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:82px;height:82px;border-radius:50%;background:rgba(0,0,0,0.42);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;pointer-events:none;z-index:25;"><i class="fa-solid fa-play" style="color:#fff;font-size:32px;margin-left:4px;"></i></div>' +
-                '<button class="reel-mute-btn" onclick="toggleReelMute(this)" style="position:absolute;top:max(54px,env(safe-area-inset-top,54px));right:14px;width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,0.5);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:30;"><i class="fa-solid fa-volume-xmark" style="color:#fff;font-size:15px;"></i></button>' +
-                '<div class="reel-ui"><div><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">' +
-                '<b style="font-weight:900;">You</b></div>' +
-                '<p style="margin:8px 0;font-size:14px;">'+escapeHtml(clip.caption||'')+'</p></div>' +
-                '<div class="reel-sidebar"><div class="reel-action"><i class="fa-regular fa-heart"></i><br><span>0</span></div></div></div>';
-            c.insertBefore(div, c.firstChild);
+            if (!src || onScreen.indexOf(String(clip.id)) > -1) return;
+            var me = currentUser || {};
+            var post = {
+                id: clip.id, media_url: src, user_id: me.id,
+                text_content: clip.caption || '', like_count: 0,
+                comment_count: 0, view_count: 0
+            };
+            // tfReelPageHTML brings its own .reel-page wrapper, so this is
+            // inserted as markup rather than nested inside another one.
+            c.insertAdjacentHTML('afterbegin', tfReelPageHTML(
+                post,
+                tfReelAvatarHTML(post, me, false),
+                me.username || 'you',
+                me.verified ? '<i class="fa-solid fa-circle-check verify-blue" style="font-size:12px;"></i>' : '',
+                0
+            ));
         });
-    } catch(e) {}
+    } catch(e) { console.warn('[initReels] local clips', e && e.message); }
 
     // Guaranteed long-press → context menu (the other gesture setup is gated
     // behind a flag and could be skipped, so bind an independent one here).
@@ -15272,6 +15401,41 @@ function _tfLongCacheUploads(client) {
     client.storage.__tfCachePatched = true;
 }
 
+// One refresh at a time, however many callers ask at once.
+//
+// A refresh token is single use: Supabase rotates it and rejects the old one.
+// The app calls getSession from dozens of places, and getSession refreshes by
+// itself when the token has expired, so two of those landing together fired two
+// refreshes with the same token and the second came back 400. That is the pair
+// of failed POSTs to /auth/v1/token seen a few hundred milliseconds apart, and
+// a rejected refresh is how a signed-in person is suddenly signed out in the
+// middle of something.
+//
+// Concurrent callers share one request and one answer. Once it settles the next
+// call goes to the network as normal, so nothing is ever served stale. A
+// refresh with an explicit token belongs to account switching, which is a
+// different session, and is left alone.
+function _tfSingleFlightAuth(client) {
+    if (!client || !client.auth || client.auth.__tfSingleFlight) return;
+    var auth = client.auth;
+    var inflight = {};
+    ['getSession', 'refreshSession'].forEach(function (name) {
+        if (typeof auth[name] !== 'function') return;
+        var orig = auth[name].bind(auth);
+        auth[name] = function (arg) {
+            if (name === 'refreshSession' && arg && arg.refresh_token) return orig(arg);
+            if (inflight[name]) return inflight[name];
+            inflight[name] = Promise.resolve(orig(arg)).then(function (r) {
+                inflight[name] = null; return r;
+            }, function (e) {
+                inflight[name] = null; throw e;
+            });
+            return inflight[name];
+        };
+    });
+    auth.__tfSingleFlight = true;
+}
+
 function initSupabase() {
     // Supabase JS is loaded via CDN in the <head>; keys come from /api/config/
     // This function is called after loadConfig() resolves
@@ -15283,6 +15447,7 @@ function initSupabase() {
     try {
         window._sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         _tfLongCacheUploads(window._sb);
+        _tfSingleFlightAuth(window._sb);
         window.sb = window._sb;
         sb = window._sb;
         initRealtimeSubscriptions();
@@ -25950,7 +26115,10 @@ function linkParentAccount() {
     // Check if parent exists and is verified
     if (window.sb) {
         sb.from('users')
-            .select('id, username, full_name, name, verified, account_type, badge_tier')
+            // `name` is not a column on users, and PostgREST refuses a select
+            // that names one, so this always came back empty and every parent
+            // Trust-ID was reported as "account not found".
+            .select('id, username, full_name, display_name, verified, account_type, badge_tier')
             .eq('username', parentId.trim().toLowerCase().replace('@',''))
             .maybeSingle()
             .then(function(result) {
@@ -25971,7 +26139,7 @@ function linkParentAccount() {
                 secureSave('parent_link_request', {
                     parent_id: result.data.id,
                     parent_username: result.data.username,
-                    parent_name: result.data.full_name || result.data.name || result.data.username,
+                    parent_name: result.data.full_name || result.data.display_name || result.data.username,
                     parent_badge: result.data.badge_tier,
                     status: 'pending',
                     timestamp: Date.now()
@@ -28534,7 +28702,7 @@ if (posts.length) localStorage.setItem('tf-cached-feed', JSON.stringify({ ts: Da
     });
 
     var _pg3 = document.getElementById('profile-grid');
-    if (_pg3 && typeof loadProfilePosts === 'function') loadProfilePosts(_pg3);
+    if (_pg3 && typeof _loadProfileActiveTab === 'function') _loadProfileActiveTab();
     renderParentRequests();
     loadFeedStories();
 };
@@ -28858,8 +29026,10 @@ async function pinPostToProfile(postId) {
         showToast(newVal ? 'Pinned to profile' : 'Unpinned');
         triggerHaptic(20);
         // Refresh the visible profile posts (pinned float to the top with a label).
+        // Only when Posts is the tab on screen: pinning is a posts thing, and
+        // reloading posts into the clips grid is how they bleed across.
         var pg = document.getElementById('profile-grid');
-        if (pg && typeof loadProfilePosts === 'function') loadProfilePosts(pg);
+        if (pg && (pg.dataset.tab || 'posts') === 'posts' && typeof loadProfilePosts === 'function') loadProfilePosts(pg);
         else if (typeof fillProfileGrid === 'function') fillProfileGrid();
     } catch(e) { showToast('Could not pin'); }
 }
@@ -35950,7 +36120,8 @@ if (feedEl) {
     newCard.scrollIntoView({ behavior:'smooth', block:'start' });
 }
 var profileGrid = document.getElementById('profile-grid');
-if (profileGrid && profileGrid.offsetParent !== null) {
+if (profileGrid && profileGrid.offsetParent !== null &&
+    (profileGrid.dataset.tab || 'posts') === 'posts') {
     loadProfilePosts(profileGrid);
 }
         } // closes if (!saved)
@@ -45031,9 +45202,18 @@ async function submitTrustClip() {
             try {
                 var ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
                 var path = currentUser.id + '/' + clipId + '.' + ext;
-                videoUrl = await tfUploadPublicMedia(blob, 'clip', 'trustclips', path);
-                if (!videoUrl) showToast('Upload failed. Check your connection.');
+                // The ring around the clips icon. showReelUploadProgress was
+                // written and then never called from anywhere, so posting a
+                // clip said "uploading" and showed nothing moving, with no way
+                // to tell a slow upload from a stuck one.
+                showReelUploadProgress(1);
+                videoUrl = await tfUploadPublicMedia(blob, 'clip', 'trustclips', path, function (frac) {
+                    showReelUploadProgress(Math.max(1, Math.min(99, Math.round(frac * 100))));
+                });
+                if (videoUrl) showReelUploadProgress(100);
+                else { _hideReelUploadProgress(); showToast('Upload failed. Check your connection.'); }
             } catch (upEx) {
+                _hideReelUploadProgress();
                 console.warn('[TrustClip] Storage upload threw:', upEx && upEx.message);
                 showToast('Upload error: ' + (upEx && upEx.message || 'unknown'));
             }
@@ -45148,8 +45328,14 @@ is_demo: window._tcIsDemoClip || false,
             }
         }
 
-        // Also save to localStorage for instant profile tab display
+        // Keep a copy on the device only when the server did not take it.
+        //
+        // This was written every time, and the clips feed drew it as an extra
+        // card, so a clip that saved correctly appeared twice: once properly
+        // and once as a stub with no buttons on it. Now it is what its name
+        // says, a clip that has not been posted yet.
         try {
+            if (clipSaved === false) {
             var clips = JSON.parse(localStorage.getItem('tf-trust-clips') || '[]');
             clips.unshift({
                 id: clipId,
@@ -45160,6 +45346,7 @@ is_demo: window._tcIsDemoClip || false,
             });
             if (clips.length > 50) clips = clips.slice(0, 50);
             localStorage.setItem('tf-trust-clips', JSON.stringify(clips));
+            }
         } catch(e) {}
 
         // Only say it posted if it posted.
@@ -48369,8 +48556,11 @@ function openLinkClipGallery() {
         var clips = [];
         try {
             if (window.sb && currentUser) {
+                // trustclips has no media_url column, and PostgREST refuses a
+                // select that names one, so this list was always empty and the
+                // screen always said you had no clips to link.
                 var res = await sb.from('trustclips')
-                    .select('id, media_url, video_url, thumbnail_url, caption, view_count')
+                    .select('id, video_url, thumbnail_url, caption, view_count')
                     .eq('user_id', currentUser.id)
                     .neq('is_hidden', true)
                     .order('created_at', { ascending: false })
@@ -49016,6 +49206,16 @@ window.saveProductDetails = function() {
     showToast('Product added to trustclip 🛍️');
     triggerHaptic(20);
 };
+
+// Put the ring away without pretending the upload finished.
+function _hideReelUploadProgress() {
+    var ring = document.getElementById('nav-reels-ring');
+    var circle = document.getElementById('nav-reels-ring-circle');
+    var icon = document.getElementById('nav-reels');
+    if (ring) ring.style.display = 'none';
+    if (circle) { circle.style.stroke = '#007AFF'; circle.style.strokeDashoffset = 100; }
+    if (icon) icon.className = 'fa-solid fa-clapperboard nav-icon others-only';
+}
 
     function showReelUploadProgress(pct) {
     var ring = document.getElementById('nav-reels-ring');
@@ -54162,11 +54362,15 @@ async function mgOpenActivity() {
 async function mgOpenScheduled() {
     var rows = [];
     try {
-        rows = (await sb.from('posts').select('id,text_content,scheduled_at')
-            .eq('group_id', _mg.groupId).not('scheduled_at', 'is', null)
-            .gte('scheduled_at', new Date().toISOString())
-            .order('scheduled_at', { ascending: true }).limit(50)).data || [];
-    } catch (e) { /* the column may not exist on this schema */ }
+        // The column is scheduled_for. Named as scheduled_at the query was
+        // refused outright, and the catch below turned that into an empty list,
+        // so a group's scheduled posts were never shown.
+        rows = (await sb.from('posts').select('id,text_content,scheduled_for')
+            .eq('group_id', _mg.groupId).not('scheduled_for', 'is', null)
+            .gte('scheduled_for', new Date().toISOString())
+            .order('scheduled_for', { ascending: true }).limit(50)).data || [];
+        rows.forEach(function (p) { p.scheduled_at = p.scheduled_for; });
+    } catch (e) { console.warn('[group] scheduled posts', e && e.message); }
     _mgPage('mgSched', 'Scheduled posts',
         _mgCard(rows.length ? rows.map(function (p) {
             var when = '';
