@@ -13738,9 +13738,11 @@ content.innerHTML = [0,1,2,3].map(function(){return '<div style="display:flex;al
                 // the tab could never show a request, whoever wrote to you.
                 // The same rule Primary uses decides it, inverted.
                 var _acceptedReq = await _tfAcceptedConvoIds();
+                var _spokeReq = await _tfSpokeInConvos((rawReqConvos || []).map(function (c) { return c.id; }));
                 var requests = (rawReqConvos || []).map(function (c) {
                     c._other = reqUserMap[reqOtherIdByConv[c.id]] || {};
                     c._accepted = !!_acceptedReq[c.id];
+                    c._iSpoke = !!_spokeReq[c.id];
                     return c;
                 }).filter(function (c) {
                     return !_tfIsPrimaryConvo(c, reqOtherIdByConv[c.id], _following);
@@ -14164,8 +14166,28 @@ function _tfIsPrimaryConvo(convo, otherId, following) {
     if (convo.type === 'group') return true;                 // groups are never requests
     if (convo.created_by === (currentUser || {}).id) return true;  // you started it
     if (convo._accepted) return true;                        // you said yes to it
+    // Replying to somebody is accepting them. Without this, a chat you have
+    // been having for weeks moved into Requests the moment the inbox learned to
+    // split, because you had never happened to follow the person you were
+    // talking to.
+    if (convo._iSpoke) return true;
     if (!otherId) return true;                               // nobody else in it
     return !!following[otherId];
+}
+
+// Which of these conversations have I sent a message in?
+async function _tfSpokeInConvos(convIds) {
+    var out = {};
+    if (!window.sb || !currentUser || !convIds || !convIds.length) return out;
+    try {
+        var r = await sb.from('messages')
+            .select('conversation_id')
+            .eq('sender_id', currentUser.id)
+            .in('conversation_id', convIds);
+        if (r.error) { console.warn('[Inbox]', r.error.message); return out; }
+        (r.data || []).forEach(function (m) { out[m.conversation_id] = 1; });
+    } catch (e) { console.warn('[Inbox]', e && e.message); }
+    return out;
 }
 
 // Which of my conversations have I already accepted? Accepting is the only way
@@ -14232,6 +14254,8 @@ async function tfShowMsgRequestBar(conversationId, otherId, otherName) {
         var conv = await sb.from('conversations').select('type, created_by')
             .eq('id', conversationId).maybeSingle();
         var following = await _tfFollowingIds();
+        var spoke = await _tfSpokeInConvos([conversationId]);
+        if (conv.data) conv.data._iSpoke = !!spoke[conversationId];
         if (_tfIsPrimaryConvo(conv.data, otherId, following)) return;  // not a request
 
         var host = document.getElementById('chat-interface') || document.getElementById('app') || document.body;
@@ -14379,7 +14403,11 @@ async function fillMsgContent() {
             // the tabs all looked the same.
             var _following = await _tfFollowingIds();
             var _accepted = await _tfAcceptedConvoIds();
-            rawConvos.forEach(function (c) { c._accepted = !!_accepted[c.id]; });
+            var _spoke = await _tfSpokeInConvos(convIds);
+            rawConvos.forEach(function (c) {
+                c._accepted = !!_accepted[c.id];
+                c._iSpoke = !!_spoke[c.id];
+            });
             rawConvos = rawConvos.filter(function (c) {
                 return _tfIsPrimaryConvo(c, otherIdByConv[c.id], _following);
             });
