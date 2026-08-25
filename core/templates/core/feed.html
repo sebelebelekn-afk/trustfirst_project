@@ -1752,7 +1752,10 @@ function authenticateUser() {
 
         <!-- Attached photos and videos. tfRenderComposerMedia() fills this: one
              big preview for a single item, a thumbnail strip for several. -->
-        <div id="composer-media-preview" style="display:none; padding:0 20px 12px; position:relative;"></div>
+        <!-- Room above and below. With no top padding the picture started
+             immediately under the Text/Poll/Quiz row and ran straight into the
+             caption, so the whole screen read as one squashed block. -->
+        <div id="composer-media-preview" style="display:none; padding:14px 20px 18px; position:relative;"></div>
     <!-- Text area -->
     <div style="padding:16px 20px 0;">
         <textarea id="composer-text" placeholder="What's on your mind?" oninput="updateComposerState()" style="width:100%; min-height:140px; border:none; outline:none; font-size:17px; resize:none; background:transparent; color:var(--text-primary,#000); line-height:1.5;"></textarea>
@@ -4258,7 +4261,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=265"></script>
+<script src="{% static 'core/js/feed.js' %}?v=266"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

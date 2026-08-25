@@ -17026,28 +17026,58 @@ function openStoryVideoTrim(file, url) {
     vid.addEventListener('loadedmetadata', function() {
         var duration = vid.duration;
         if (!duration || !isFinite(duration)) return;
-        var numFrames = Math.min(Math.max(Math.ceil(duration * 3), 8), 30);
+        // The strip: one video, seeked through in order.
+        //
+        // It used to create a separate <video> per frame, up to thirty of them,
+        // all decoding the same file at once with preload="metadata". A phone
+        // will not do that: most never fired 'seeked' at all, so most of the
+        // strip stayed blank and the few frames that did arrive were not the
+        // moments they sat above. One element, one seek at a time, each frame
+        // drawn when it actually lands.
+        var numFrames = Math.min(Math.max(Math.ceil(duration * 3), 8), 20);
         var frameW = 48;
         var spacer1 = document.createElement('div');
         spacer1.style.cssText = 'flex-shrink:0;width:50%;background:#111;';
         strip.appendChild(spacer1);
+        var cells = [];
         for (var i = 0; i < numFrames; i++) {
             var canvas = document.createElement('canvas');
             canvas.width = frameW; canvas.height = 80;
-            canvas.style.cssText = 'flex-shrink:0;width:'+frameW+'px;height:80px;display:block;';
+            canvas.style.cssText = 'flex-shrink:0;width:'+frameW+'px;height:80px;display:block;background:#222;';
             strip.appendChild(canvas);
-            (function(c, t) {
-                var tv = document.createElement('video');
-                tv.src = url; tv.muted = true; tv.preload = 'metadata'; tv.playsInline = true;
-                tv.addEventListener('seeked', function() {
-                    try { c.getContext('2d').drawImage(tv, 0, 0, frameW, 80); } catch(e) {
-                        var ctx = c.getContext('2d'); ctx.fillStyle='#222'; ctx.fillRect(0,0,frameW,80);
-                    }
-                    tv.src = '';
-                }, { once: true });
-                tv.addEventListener('loadedmetadata', function() { tv.currentTime = t; });
-            })(canvas, (i / numFrames) * duration);
+            cells.push(canvas);
         }
+        (function () {
+            var tv = document.createElement('video');
+            tv.muted = true; tv.playsInline = true; tv.preload = 'auto';
+            var at = 0, done = false;
+            function stop() {
+                if (done) return;
+                done = true;
+                try { tv.removeAttribute('src'); tv.load(); } catch (e) {}
+            }
+            function next() {
+                if (done || at >= cells.length) { stop(); return; }
+                // Never the very last frame: a lot of videos end on black.
+                var t = Math.min(duration * 0.995, (at / numFrames) * duration);
+                try { tv.currentTime = t; } catch (e) { stop(); }
+            }
+            tv.addEventListener('seeked', function () {
+                var c = cells[at];
+                if (c) {
+                    try { c.getContext('2d').drawImage(tv, 0, 0, frameW, 80); }
+                    catch (e) { /* leave the placeholder colour */ }
+                }
+                at++;
+                next();
+            });
+            tv.addEventListener('loadeddata', next);
+            tv.addEventListener('error', stop);
+            // A file this browser cannot decode would otherwise hold the element
+            // open for the life of the screen.
+            setTimeout(stop, 15000);
+            tv.src = url;
+        })();
         var spacer2 = document.createElement('div');
         spacer2.style.cssText = 'flex-shrink:0;width:50%;background:#111;';
         strip.appendChild(spacer2);
@@ -17102,7 +17132,10 @@ function openStoryVideoTrim(file, url) {
         // playback the same way a clip's cuts are.
         window._storyTrimStart = function() { return leftPct; };
         window._storyTrimEnd   = function() { return rightPct; };
-        window._storyTrim = { start: leftPct * duration, end: rightPct * duration, duration: duration };
+        // Tagged with the video it belongs to. Without that, trimming one clip
+        // and then picking a different one would apply the first one's cut to
+        // the second.
+        window._storyTrim = { start: leftPct * duration, end: rightPct * duration, duration: duration, url: url };
 
         // Play the selected stretch while trimming, so what you hear and see is
         // what you are choosing.
@@ -50914,7 +50947,12 @@ function _tfComposerItemHTML(m, i, big) {
     } else if (m.status === 'failed') {
         cover = '<div onclick="tfRetryComposerMedia(' + i + ')" style="position:absolute;inset:0;background:rgba(0,0,0,0.55);display:flex;flex-direction:column;gap:4px;align-items:center;justify-content:center;border-radius:14px;cursor:pointer;"><i class="fa-solid fa-rotate-right" style="color:#fff;font-size:16px;"></i><small style="color:#fff;font-size:10px;font-weight:700;">Retry</small></div>';
     }
-    var remove = '<div onclick="tfRemoveComposerMedia(' + i + ')" style="position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:3;"><i class="fa-solid fa-xmark" style="color:#fff;font-size:11px;"></i></div>';
+    // Inset from the corner, and bigger on the single-item preview: at 6px it
+    // sat on the very edge of the picture with nothing between them, and 24px
+    // is under the size a thumb reliably hits.
+    var rInset = big ? '12px' : '6px';
+    var rSize = big ? 30 : 24;
+    var remove = '<div onclick="tfRemoveComposerMedia(' + i + ')" style="position:absolute;top:' + rInset + ';right:' + rInset + ';width:' + rSize + 'px;height:' + rSize + 'px;border-radius:50%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:3;"><i class="fa-solid fa-xmark" style="color:#fff;font-size:' + (big ? 13 : 11) + 'px;"></i></div>';
     return '<div class="' + (big ? 'tf-composer-single' : 'tf-composer-thumb') + '">' + media + cover + remove + '</div>';
 }
 
@@ -52028,8 +52066,27 @@ function openStoryPostArea(file, url) {
     if (isVideo) {
         var vid = document.getElementById('storyPostVid');
         if (vid) {
+            // This is the last look before posting, so it has to be the story
+            // as it will go out. It played the whole file, ignoring the trim
+            // that had just been set two screens earlier, which makes the
+            // trimmer look like it did nothing.
+            var _t = window._storyTrim;
+            var _trimmed = !!(_t && _t.url === url && isFinite(_t.start) && isFinite(_t.end) && _t.end > _t.start);
+            if (_trimmed) {
+                vid.removeAttribute('loop');   // the loop is driven by hand below
+                vid.addEventListener('loadedmetadata', function () {
+                    try { vid.currentTime = _t.start; } catch (e) {}
+                }, { once: true });
+                vid.addEventListener('timeupdate', function () {
+                    if (vid.currentTime >= _t.end - 0.03 || vid.currentTime < _t.start - 0.25) {
+                        try { vid.currentTime = _t.start; } catch (e) {}
+                        vid.play().catch(function () {});
+                    }
+                });
+            }
             vid.load();
             vid.addEventListener('canplaythrough', function () {
+                if (_trimmed) { try { vid.currentTime = _t.start; } catch (e) {} }
                 vid.play().catch(function () {
                     // Refused with sound: play it silently rather than freezing,
                     // and offer the one tap that turns audio on for good.
@@ -52461,7 +52518,8 @@ async function submitStoryPost(url, isVideo, audience) {
     // Where the trim screen left the handles, if it was used at all and the
     // person moved them off the ends.
     var _trim = null;
-    if (isVideo && window._storyTrim && window._storyTrim.duration) {
+    if (isVideo && window._storyTrim && window._storyTrim.duration &&
+        window._storyTrim.url === url) {
         var _t = window._storyTrim;
         var _moved = _t.start > 0.05 || _t.end < _t.duration - 0.05;
         if (_moved && _t.end > _t.start) _trim = { start: _t.start, end: _t.end };
