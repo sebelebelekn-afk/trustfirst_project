@@ -6395,7 +6395,7 @@ function loadProfileReels(container) {
         // in `posts`, and the two lists are merged newest first.
         Promise.all([
             sb.from('trustclips')
-                .select('id,video_url,thumbnail_url,view_count,caption,created_at')
+                .select('id,video_url,thumbnail_url,view_count,caption,sound_name,volume,voice_effect,segments,like_count,comment_count,created_at')
                 .eq('user_id', currentUser.id)
                 .eq('is_hidden', false)
                 .order('created_at', { ascending: false })
@@ -6411,7 +6411,11 @@ function loadProfileReels(container) {
             var clips = (res[0] && res[0].data || []).map(function (c) {
                 return { id: c.id, videoUrl: c.video_url, media_url: c.video_url,
                          thumbnail_url: c.thumbnail_url, view_count: c.view_count,
-                         caption: c.caption, created_at: c.created_at, _clip: true };
+                         caption: c.caption, sound_name: c.sound_name,
+                         volume: c.volume, voice_effect: c.voice_effect,
+                         segments: c.segments, like_count: c.like_count,
+                         comment_count: c.comment_count,
+                         created_at: c.created_at, _clip: true };
             });
             var vids = (res[1] && res[1].data || []).map(function (c) {
                 return { id: c.id, videoUrl: c.media_url, media_url: c.media_url,
@@ -6428,7 +6432,7 @@ function loadProfileReels(container) {
                 if (_profileTabGen !== myGen) return;   // tab switched, discard
                 _tcClearSkeleton();
                 if (r.data && r.data.length > 0) {
-                    window._profileClips = r.data.map(function(c){ return { id: c.id, videoUrl: c.videoUrl, media_url: c.media_url, thumbnail_url: c.thumbnail_url, view_count: c.view_count, caption: c.caption, username: '@' + (currentUser && currentUser.username || 'me') }; });
+                    window._profileClips = r.data.map(function(c){ return { id: c.id, videoUrl: c.videoUrl, media_url: c.media_url, thumbnail_url: c.thumbnail_url, view_count: c.view_count, caption: c.caption, like_count: c.like_count || 0, comment_count: c.comment_count || 0, sound_name: c.sound_name || null, volume: c.volume, segments: c.segments || null, voice_effect: c.voice_effect || null, user_id: (currentUser && currentUser.id) || '', _clip: !!c._clip, username: '@' + (currentUser && currentUser.username || 'me') }; });
                     r.data.forEach(function(clip, clipIdx) {
                         var thumb = clip.thumbnail_url || '';
         var videoUrl = clip.media_url || '';
@@ -6884,6 +6888,34 @@ function closeSharePanel() {
 // What each overlay silenced when it opened, so closing it can undo exactly
 // that and nothing else.
 var _tfPausedUnder = {};
+
+// Silence whatever is playing behind a viewer that is not an openPage overlay.
+//
+// The clip viewer and the full-screen media viewer append themselves straight
+// to the page, so they never went through openPage and never stopped the video
+// underneath. Opening a clip over a playing feed left two videos going at once,
+// one of them out of sight with no way to reach it. Same bookkeeping openPage
+// uses: remember exactly what was silenced, restart exactly that.
+function _tfSilenceUnder(key, el) {
+    try {
+        var paused = [];
+        document.querySelectorAll('video, audio').forEach(function (m) {
+            if (m.paused || (el && el.contains(m))) return;
+            m.pause();
+            paused.push(m);
+        });
+        if (paused.length) _tfPausedUnder[key] = paused;
+    } catch (e) {}
+}
+
+function _tfRestoreUnder(key) {
+    try {
+        (_tfPausedUnder[key] || []).forEach(function (m) {
+            if (m.isConnected) m.play().catch(function () {});
+        });
+    } catch (e) {}
+    delete _tfPausedUnder[key];
+}
 
 // Is something sitting on top of this element right now?
 //
@@ -14443,7 +14475,12 @@ function setupReelPinchZoom() {
 function tfReelPageHTML(post, avatarHtml, username, verified, likes) {
     var src = post.media_url || post.video_url || '';
     return '' +
-    '<div class="reel-page" data-post-id="' + escapeHtml(String(post.id)) + '">' +
+    // data-clip says which table this row came from, so a view is recorded
+    // against clip_views rather than post_views; data-user-id is what the view
+    // tracker checks to avoid counting the author's own watch.
+    '<div class="reel-page" data-post-id="' + escapeHtml(String(post.id)) + '"' +
+        (post._clip ? ' data-clip="1"' : '') +
+        ' data-user-id="' + escapeHtml(String(post.user_id || '')) + '">' +
         // data-edl carries the editor's cuts; _tfEdlAttach honours them on play and
         // takes over looping. Absent on any clip that was never edited.
         '<video src="' + escapeHtml(src) + '" class="reel-video" data-vol="' + (post.volume == null ? 100 : post.volume) + '"' + _tfEdlAttr(post) +
@@ -14720,14 +14757,24 @@ setTimeout(function() {
         if (vids[idx+2]) { vids[idx+2].preload = 'auto'; vids[idx+2].load(); }
         if (vids[idx+3]) { vids[idx+3].preload = 'auto'; vids[idx+3].load(); }
         if (vids[idx+4]) { vids[idx+4].preload = 'auto'; vids[idx+4].load(); }
-        // Reaching the last clip used to just stop dead with no explanation.
-        // Say so once, and only again after they scroll back up.
-        var atEnd = (scroller.scrollTop + scroller.clientHeight) >= (scroller.scrollHeight - 40);
-        if (atEnd && !scroller._endToldAt) {
+    }, { passive: true });
+
+    // "No more clips" belongs to trying to go past the last one, not to
+    // arriving at it. It used to fire the moment the last clip came within
+    // 40px of the bottom, which is while that clip is still sliding in, so the
+    // toast said there was nothing left over a video that was about to play.
+    var _swipeFrom = 0;
+    scroller.addEventListener('touchstart', function (e) {
+        _swipeFrom = (e.touches && e.touches[0]) ? e.touches[0].clientY : 0;
+    }, { passive: true });
+    scroller.addEventListener('touchend', function (e) {
+        var t = e.changedTouches && e.changedTouches[0];
+        if (!t || !_swipeFrom) return;
+        var wentForNext = (_swipeFrom - t.clientY) > 60;   // finger up = next clip
+        var atEnd = (scroller.scrollTop + scroller.clientHeight) >= (scroller.scrollHeight - 4);
+        if (wentForNext && atEnd && Date.now() - (scroller._endToldAt || 0) > 2500) {
             scroller._endToldAt = Date.now();
             showToast('No more clips for now');
-        } else if (!atEnd && scroller._endToldAt && Date.now() - scroller._endToldAt > 1200) {
-            scroller._endToldAt = 0;
         }
     }, { passive: true });
 }, 400);
@@ -19278,7 +19325,9 @@ function openContextualVideo(videoUrl, context, startIndex, clipArray) {
             view_count: c.view_count || 0,
             volume: c.volume,
             segments: c.segments || null,        // the editor's cuts, honoured at playback
-            voice_effect: c.voice_effect || null // and its voice effect, likewise
+            voice_effect: c.voice_effect || null, // and its voice effect, likewise
+            sound_name: c.sound_name || null,
+            _clip: !!c._clip                     // which table a view belongs in
         };
         var profile = c.users || {};
         if (!profile.username && typeof c.username === 'string') profile.username = c.username.replace(/^@/, '');
@@ -19296,6 +19345,7 @@ function openContextualVideo(videoUrl, context, startIndex, clipArray) {
 
     var navBar = document.querySelector('.nav-container');
     if (navBar) navBar.style.display = 'none';
+    _tfSilenceUnder('tfClipViewer', ov);
     (document.getElementById('app') || document.body).appendChild(ov);
 
     var scroller = document.getElementById('tfClipScroller');
@@ -19306,37 +19356,71 @@ function openContextualVideo(videoUrl, context, startIndex, clipArray) {
     // clip counted for nothing. The observer picks up any [data-post-id]; it
     // just needed telling that new ones exist.
     if (typeof _tfObserveNewPosts === 'function') _tfObserveNewPosts();
+    _tfPlayOneAtATime(scroller);
     return;
 }
 
-// Opens profile clips in a lightweight in-profile viewer (not the global TrustClip page)
+// Play the clip you are looking at, and only that one.
+//
+// The cards carry autoplay, so a viewer built from ten clips started ten
+// videos at once: nine of them playing out of sight, which is most of what
+// "it plays in the background" was. The clips page has an observer that does
+// this; the viewer a feed or profile video opens never had one.
+function _tfPlayOneAtATime(scroller) {
+    if (!scroller || typeof IntersectionObserver === 'undefined') return;
+    var vids = scroller.querySelectorAll('video');
+    // Stop the lot; the observer starts whichever one is on screen as soon as
+    // it is observed, so this is not a visible pause.
+    vids.forEach(function (v) { try { v.pause(); } catch (e) {} });
+    var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+            var v = entry.target;
+            if (entry.isIntersecting && entry.intersectionRatio >= 0.6 && !_tfIsCovered(v)) {
+                v.play().catch(function () {});
+            } else {
+                v.pause();
+                if (!entry.isIntersecting) { try { v.currentTime = 0; } catch (e) {} }
+            }
+        });
+    }, { root: scroller, threshold: 0.6 });
+    vids.forEach(function (v) { io.observe(v); });
+    scroller._tfIo = io;
+}
+
+// A clip opened from a profile is the same clip, so it gets the same player.
+//
+// This used to be its own cut-down viewer: a bare <video autoplay controls>
+// with arrows either side. It had no like, comment, share or save, no sound,
+// no author, it left the nav bar sitting over the video, and because the video
+// was not muted the browser refused to autoplay it, so tapping a clip showed a
+// still frame and nothing happened. All of that goes away by handing the list
+// to the clip player everything else uses.
 function openProfileClipViewer(startIdx) {
     var clips = window._profileClips || [];
     if (!clips.length) return;
-    var idx = startIdx || 0;
-    var existing = document.getElementById('profileClipViewer');
-    if (existing) existing.remove();
-    var ov = document.createElement('div');
-    ov.id = 'profileClipViewer';
-    ov.style.cssText = 'position:absolute;inset:0;z-index:20000;background:#000;display:flex;flex-direction:column;overflow:hidden;';
-    function renderClip(i) {
-        var clip = clips[i] || {};
-        var url = clip.videoUrl || clip.media_url || '';
-        ov.innerHTML =
-            '<button onclick="document.getElementById(\'profileClipViewer\').remove()" style="position:absolute;top:max(50px,env(safe-area-inset-top,50px));left:16px;z-index:10;background:rgba(0,0,0,0.4);border:none;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(10px);">' +
-                '<svg width="20" height="20" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>' +
-            '</button>' +
-            (i > 0 ? '<button onclick="window._profileClipViewerGo(' + (i-1) + ')" style="position:absolute;left:16px;top:50%;transform:translateY(-50%);z-index:10;background:rgba(0,0,0,0.35);border:none;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;"><svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>' : '') +
-            (i < clips.length - 1 ? '<button onclick="window._profileClipViewerGo(' + (i+1) + ')" style="position:absolute;right:16px;top:50%;transform:translateY(-50%);z-index:10;background:rgba(0,0,0,0.35);border:none;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;"><svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></button>' : '') +
-            '<video src="' + escapeHtml(url) + '" autoplay playsinline controls style="width:100%;height:100%;object-fit:contain;background:#000;"></video>' +
-            '<div style="position:absolute;bottom:max(24px,env(safe-area-inset-bottom,24px));left:0;right:0;text-align:center;pointer-events:none;">' +
-                '<small style="color:rgba(255,255,255,0.5);font-size:12px;">' + (i+1) + ' / ' + clips.length + '</small>' +
-            '</div>';
-    }
-    window._profileClipViewerGo = function(i) { idx = i; renderClip(i); };
-    renderClip(idx);
-    var profileOv = document.getElementById('profile-overlay') || document.querySelector('.app') || document.body;
-    profileOv.appendChild(ov);
+    var me = currentUser || {};
+    var items = clips.map(function (c) {
+        return {
+            id: c.id,
+            media_url: c.videoUrl || c.media_url || '',
+            user_id: c.user_id || me.id || '',
+            users: c.users || (c.user_id && c.user_id !== me.id ? null : {
+                id: me.id, username: me.username, avatar_url: me.avatar_url,
+                verified: me.verified, id_verified: me.id_verified
+            }),
+            username: c.username || ('@' + (me.username || 'you')),
+            caption: c.caption || '',
+            sound_name: c.sound_name || null,
+            like_count: c.like_count || 0,
+            comment_count: c.comment_count || 0,
+            view_count: c.view_count || 0,
+            volume: c.volume,
+            segments: c.segments || null,
+            voice_effect: c.voice_effect || null,
+            _clip: c._clip !== false
+        };
+    });
+    openContextualVideo(items[0].media_url, 'profile', startIdx || 0, items);
 }
 
 function openFullScreenMedia(url, type) {
@@ -19348,7 +19432,13 @@ function openFullScreenMedia(url, type) {
     var closeBtn = document.createElement('button');
     closeBtn.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>';
     closeBtn.style.cssText = 'position:absolute;top:max(46px,env(safe-area-inset-top,46px));left:16px;z-index:5;background:rgba(0,0,0,0.45);border:none;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(10px);';
-    closeBtn.onclick = function() { try { var v = ov.querySelector('video'); if (v) v.pause(); } catch(e){} ov.remove(); };
+    closeBtn.onclick = function() {
+        try { var v = ov.querySelector('video'); if (v) v.pause(); } catch(e){}
+        ov.remove();
+        var nb = document.querySelector('.nav-container');
+        if (nb) nb.style.display = 'flex';
+        _tfRestoreUnder('fsMediaOverlay');
+    };
     ov.appendChild(closeBtn);
 
     var media;
@@ -19361,9 +19451,20 @@ function openFullScreenMedia(url, type) {
         media = document.createElement('img');
         media.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;';
         ov.style.cursor = 'pointer';
-        ov.onclick = function(e) { if (e.target === ov) ov.remove(); };
+        ov.onclick = function(e) {
+            if (e.target !== ov) return;
+            ov.remove();
+            var nb = document.querySelector('.nav-container');
+            if (nb) nb.style.display = 'flex';
+            _tfRestoreUnder('fsMediaOverlay');
+        };
     }
     ov.appendChild(media);
+    // Full screen means full screen: the nav bar sat over the video, and the
+    // page underneath carried on playing behind it.
+    var _nb = document.querySelector('.nav-container');
+    if (_nb) _nb.style.display = 'none';
+    _tfSilenceUnder('fsMediaOverlay', ov);
     document.body.appendChild(ov);
 
     // Private chat media needs a signed URL; public assets pass through.
@@ -20131,6 +20232,8 @@ function closeReelsPage() {
     // The viewer a feed video opens owns its own element now.
     var clipViewer = document.getElementById('tfClipViewer');
     if (clipViewer) {
+        var _sc = document.getElementById('tfClipScroller');
+        if (_sc && _sc._tfIo) { try { _sc._tfIo.disconnect(); } catch (e) {} _sc._tfIo = null; }
         clipViewer.querySelectorAll('video').forEach(function(v){ try { v.pause(); v.src = ''; } catch(e){} });
         clipViewer.remove();
     }
@@ -20143,6 +20246,9 @@ function closeReelsPage() {
     // Restore nav bar
     var navBar = document.querySelector('.nav-container');
     if (navBar) navBar.style.display = 'flex';
+
+    // Start again whatever opening the viewer silenced, and only that.
+    _tfRestoreUnder('tfClipViewer');
 
     // Navigate back to where the user came from
     if (_videoFeedContext === 'profile') {
@@ -20666,14 +20772,29 @@ function _tfIsUuid(v) {
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 }
 
-function _tfRecordView(postId) {
+function _tfRecordView(postId, el) {
     if (!window.sb || !currentUser || !_tfIsUuid(postId)) return;
     if (_tfSeenPosts.has(postId)) return;
     // Looking at your own post is not a view. The server ignores it as well,
     // this just saves the round trip.
-    var _card = document.querySelector('[data-post-id="' + postId + '"]');
+    //
+    // The element comes from the observer that saw it. Looking it up by id
+    // instead finds whichever copy is first in the document, and the same clip
+    // can be on the page twice (a feed card and the open viewer).
+    var _card = el || document.querySelector('[data-post-id="' + postId + '"]');
     if (_card && _card.getAttribute('data-user-id') === currentUser.id) return;
     _tfSeenPosts.add(postId);       // optimistic: never queue the same post twice
+
+    // A clip is not a post. post_views.post_id is a foreign key to posts, so
+    // every clip view was refused with a 409 and trustclips.view_count stayed
+    // at zero no matter how many people watched. Clips have their own table.
+    var isClip = _card && _card.getAttribute('data-clip') === '1';
+    if (isClip) {
+        sb.from('clip_views')
+            .insert({ clip_id: postId, viewer_id: currentUser.id })
+            .then(function () {}, function () {});
+        return;
+    }
     sb.from('post_views')
         .insert({ post_id: postId, viewer_id: currentUser.id })
         .then(function () {}, function () {});   // duplicate rows are fine to lose
@@ -20689,10 +20810,11 @@ function initViewTracking() {
             if (!id) return;
             if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
                 if (_tfViewTimers[id]) return;
+                var _seenEl = entry.target;
                 _tfViewTimers[id] = setTimeout(function () {
                     delete _tfViewTimers[id];
-                    _tfRecordView(id);
-                    _tfViewObserver.unobserve(entry.target);
+                    _tfRecordView(id, _seenEl);
+                    _tfViewObserver.unobserve(_seenEl);
                 }, 1000);
             } else if (_tfViewTimers[id]) {
                 // Scrolled away before the second was up: not a real view.
@@ -29843,6 +29965,27 @@ async function switchUserProfileTab(tab, el, userId) {
             if (tab === 'pictures') q = q.or('post_type.eq.image,media_type.eq.image');
             var r = await q.order('created_at', { ascending: false }).limit(20);
             rows = r.data || [];
+            // Somebody else's clips live in trustclips too, and this tab only
+            // ever asked posts, so another person's profile always looked like
+            // they had never posted a clip.
+            if (tab === 'reels') {
+                var tc = await sb.from('trustclips')
+                    .select('id, video_url, thumbnail_url, user_id, caption, sound_name, volume, voice_effect, segments, like_count, comment_count, view_count, created_at')
+                    .eq('user_id', userId).neq('is_hidden', true)
+                    .not('video_url', 'is', null)
+                    .order('created_at', { ascending: false }).limit(20);
+                if (tc.error) console.warn('[UserClips]', tc.error.message);
+                rows = (tc.data || []).map(function (c) {
+                    return { id: c.id, media_url: c.video_url, thumbnail_url: c.thumbnail_url,
+                             user_id: c.user_id, text_content: c.caption, caption: c.caption,
+                             sound_name: c.sound_name, volume: c.volume,
+                             voice_effect: c.voice_effect, segments: c.segments,
+                             like_count: c.like_count, comment_count: c.comment_count,
+                             view_count: c.view_count, created_at: c.created_at, _clip: true };
+                }).concat(rows)
+                  .sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); })
+                  .slice(0, 20);
+            }
             if (tab === 'pictures') {
                 rows = rows.filter(function(p) {
                     return (p.media_urls && p.media_urls.length) || p.media_url || p.thumbnail_url;
@@ -29865,6 +30008,12 @@ async function switchUserProfileTab(tab, el, userId) {
             window._upClips = rows.map(function (c) {
                 return { id: c.id, videoUrl: c.media_url, media_url: c.media_url,
                          thumbnail_url: c.thumbnail_url, view_count: c.view_count,
+                         user_id: c.user_id, users: c.users || null,
+                         caption: c.caption || c.text_content || '',
+                         sound_name: c.sound_name || null,
+                         like_count: c.like_count || 0, comment_count: c.comment_count || 0,
+                         volume: c.volume, segments: c.segments || null,
+                         voice_effect: c.voice_effect || null, _clip: !!c._clip,
                          username: '@' + ((c.users && c.users.username) || '') };
             });
             box.innerHTML = rows.map(function (clip, idx) {
