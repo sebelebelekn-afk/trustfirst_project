@@ -2340,6 +2340,10 @@ async function initFeed() {
         if (posts && posts.length) {
             feed.innerHTML = '';
             posts.filter(function(p) { return !isTrustClipPost(p); }).forEach(function(p) { feed.appendChild(renderRealPostCard(p)); });
+            // Show what this person already answered, wherever they answered it.
+            _tfSeedVotes(posts.filter(function (p) {
+                return p.post_type === 'poll' || p.post_type === 'quiz';
+            }).map(function (p) { return p.id; }));
             try { localStorage.setItem('tf_feed_cache', JSON.stringify(posts.slice(0, 12))); } catch (e) {}
             // People to follow, dropped in among the posts rather than pinned to
             // the top of every visit.
@@ -11306,12 +11310,26 @@ function _tfDriveSegmentFromVideo(video, index) {
     // animation frame is just as truthful and moves at the screen's refresh
     // rate. When the video stalls, currentTime stops changing and the bar stops
     // with it, which is the whole point.
+    // A trimmed story plays only the stretch that was kept, and the progress
+    // bar measures that stretch rather than the whole file. The cut is applied
+    // here because the browser never re-encoded the video: what was uploaded is
+    // the whole thing, with the in and out points stored beside it.
+    var trimA = parseFloat(video.getAttribute('data-trim-start'));
+    var trimB = parseFloat(video.getAttribute('data-trim-end'));
+    var trimmed = isFinite(trimA) && isFinite(trimB) && trimB > trimA;
+    if (trimmed && Math.abs(video.currentTime - trimA) > 0.25) {
+        try { video.currentTime = trimA; } catch (e) {}
+    }
+
     function frame() {
         if (index !== currentStoryIndex) return;
         var el = document.getElementById('seg-' + index);
         var d = video.duration;
-        if (el && isFinite(d) && d > 0) {
-            el.style.width = Math.max(0, Math.min(100, (video.currentTime / d) * 100)) + '%';
+        var from = trimmed ? trimA : 0;
+        var span = trimmed ? (trimB - trimA) : d;
+        if (trimmed && video.currentTime >= trimB - 0.03) { advance(); return; }
+        if (el && isFinite(span) && span > 0) {
+            el.style.width = Math.max(0, Math.min(100, ((video.currentTime - from) / span) * 100)) + '%';
         }
         _tfStoryRaf = requestAnimationFrame(frame);
     }
@@ -11439,7 +11457,7 @@ function openStoryViewer(userId) {
     var since = new Date(Date.now() - 86400000).toISOString();
     if (window.sb) {
         sb.from('stories')
-            .select('id,user_id,media_url,media_type,caption,created_at,audience,sound_name,sound_url,sound_start,sound_duration,music_style,overlays,users:user_id(full_name,username,avatar_url)')
+            .select('id,user_id,media_url,media_type,caption,created_at,audience,sound_name,sound_url,sound_start,sound_duration,music_style,overlays,trim_start,trim_end,users:user_id(full_name,username,avatar_url)')
             .is('deleted_at', null)
             .eq('user_id', userId)
             .gte('created_at', since)
@@ -11588,7 +11606,14 @@ function showStorySegment() {
         // opening a story is one, so this usually just plays. Where a browser
         // refuses anyway, the catch mutes and plays rather than leaving a still
         // frame, and _tfStoryUnmuteChip offers a tap to turn the sound on.
-        if (content) content.innerHTML = '<video src="' + escapeHtml(mediaUrl) + '" autoplay playsinline style="width:100%;height:100%;object-fit:cover;" onerror="_tfStoryVideoFailed(this)"></video>' + captionHtml;
+        // The trim travels as data attributes; the driver seeks to the start
+        // and stops at the end, because the file itself was never cut.
+        var _trimAttr = '';
+        if (typeof story.trim_start === 'number' && typeof story.trim_end === 'number' &&
+            story.trim_end > story.trim_start) {
+            _trimAttr = ' data-trim-start="' + story.trim_start + '" data-trim-end="' + story.trim_end + '"';
+        }
+        if (content) content.innerHTML = '<video src="' + escapeHtml(mediaUrl) + '"' + _trimAttr + ' autoplay playsinline style="width:100%;height:100%;object-fit:cover;" onerror="_tfStoryVideoFailed(this)"></video>' + captionHtml;
         var _sv = content && content.querySelector('video');
         if (_sv) {
             // Sound is remembered, so it is asked for once and never again.
@@ -13852,16 +13877,43 @@ function _mentionOnInput(el) {
 async function _mentionSearchUsers(q, el, start, end) {
     if (!window.sb) return;
     var rows = [];
+
+    // Typing @ used to list whoever had the most followers, which is a list of
+    // strangers and gets worse the bigger the app gets: with fifty thousand
+    // people on it, scrolling six of them finds nobody. It is a search now. With
+    // nothing typed it offers the people you follow, because those are the ones
+    // you are most likely to be tagging, and says to keep typing to reach
+    // everyone else.
     try {
-        var query = sb.from('users').select('username,full_name,avatar_url,verified,badge_tier').neq('is_banned', true).neq('is_locked', true).limit(6);
-        query = q ? query.or('username.ilike.' + q + '%,full_name.ilike.%' + q + '%') : query.order('follower_count', { ascending: false });
-        var r = await query; rows = r.data || [];
-    } catch (e) {}
+        if (!q) {
+            var mine = await sb.from('follows').select('following_id').eq('follower_id', (currentUser || {}).id || '').limit(50);
+            var ids = (mine.data || []).map(function (f) { return f.following_id; });
+            if (ids.length) {
+                var f = await sb.from('users')
+                    .select('username,full_name,avatar_url,verified,badge_tier')
+                    .in('id', ids).neq('is_banned', true).neq('is_locked', true).limit(6);
+                rows = f.data || [];
+            }
+        } else {
+            var r = await sb.from('users')
+                .select('username,full_name,avatar_url,verified,badge_tier')
+                .neq('is_banned', true).neq('is_locked', true)
+                .or('username.ilike.' + q + '%,full_name.ilike.%' + q + '%')
+                .limit(8);
+            if (r.error) console.warn('[Mention]', r.error.message);
+            rows = r.data || [];
+        }
+    } catch (e) { console.warn('[Mention]', e && e.message); }
+
+    var hint = q
+        ? (rows.length ? null : 'No one found for "' + q + '"')
+        : (rows.length ? 'People you follow. Keep typing to search everyone.'
+                       : 'Type a name or username to search');
     _mentionRenderDropdown(el, start, end, rows.filter(function(u){ return u.username; }).map(function(u) {
         return { insert: '@' + u.username + ' ',
             html: '<img src="' + escapeHtml(u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || u.username || 'U') + '&background=007AFF&color=fff&size=60')) + '" style="width:34px;height:34px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
                 '<div style="flex:1;min-width:0;"><div style="font-size:14px;font-weight:600;color:var(--text-primary,#000);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(u.full_name || u.username) + (u.verified ? ' <i class="fa-solid fa-circle-check ' + escapeHtml(u.badge_tier || 'verify-blue') + '" style="font-size:9px;"></i>' : '') + '</div><div style="font-size:12px;color:#888;">@' + escapeHtml(u.username) + '</div></div>' };
-    }));
+    }), hint);
 }
 async function _mentionSearchTags(q, el, start, end) {
     if (!window.sb) return;
@@ -13873,9 +13925,9 @@ async function _mentionSearchTags(q, el, start, end) {
                 '<div style="flex:1;min-width:0;"><div style="font-size:14px;font-weight:600;color:var(--text-primary,#000);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">#' + escapeHtml(t.tag) + '</div><div style="font-size:12px;color:#888;">' + Number(t.cnt || 0).toLocaleString() + ' post' + (Number(t.cnt) === 1 ? '' : 's') + '</div></div>' };
     }));
 }
-function _mentionRenderDropdown(el, start, end, items) {
+function _mentionRenderDropdown(el, start, end, items, hint) {
     _mentionCloseDropdown();
-    if (!items.length) return;
+    if (!items.length && !hint) return;
     var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     var rect = el.getBoundingClientRect();
     var appEl = document.getElementById('app') || document.body;
@@ -13883,7 +13935,14 @@ function _mentionRenderDropdown(el, start, end, items) {
     var d = document.createElement('div');
     d.id = 'tfMentionDropdown';
     d.style.cssText = 'position:absolute;left:' + (rect.left - app.left) + 'px;top:' + (rect.top - app.top - 8) + 'px;transform:translateY(-100%);width:' + Math.min(rect.width, 320) + 'px;z-index:30000;background:' + (isDark ? '#1c1c22' : '#fff') + ';border:0.5px solid ' + (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)') + ';border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,0.25);overflow:hidden;max-height:230px;overflow-y:auto;';
-    d.innerHTML = items.map(function(it, i) {
+    // A line saying what this list is, so an empty one is not a dead box and a
+    // short one does not look like the whole app.
+    var hintHTML = hint
+        ? '<div style="padding:9px 12px;font-size:12px;color:#888;' +
+          (items.length ? 'border-bottom:0.5px solid ' + (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)') + ';' : '') +
+          '">' + escapeHtml(hint) + '</div>'
+        : '';
+    d.innerHTML = hintHTML + items.map(function(it, i) {
         return '<div data-ins="' + escapeHtml(it.insert) + '" style="display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;' + (i < items.length - 1 ? 'border-bottom:0.5px solid ' + (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)') + ';' : '') + '">' + it.html + '</div>';
     }).join('');
     appEl.appendChild(d);
@@ -14328,14 +14387,43 @@ function reelHeartTap(el, postId) {
     if (!icon) return;
     var liked = icon.classList.contains('fa-solid');
     var n = span ? (parseInt((span.textContent || '0').replace(/[^\d]/g, '')) || 0) : 0;
+
+    // A clip is not a post, and likes.post_id is a foreign key into posts, so
+    // liking a clip was refused by the database. The heart filled in, the count
+    // went up on screen, nothing was written, and the trigger that sends
+    // "X liked your clip" never ran because there was no row to fire it.
+    var page = el.closest ? el.closest('.reel-page') : null;
+    var isClip = !!(page && page.getAttribute('data-clip') === '1');
+    var table = isClip ? 'clip_likes' : 'likes';
+    var key = isClip ? 'clip_id' : 'post_id';
+
     if (liked) {
         icon.classList.replace('fa-solid', 'fa-regular'); icon.style.color = '';
         if (span) span.textContent = Math.max(0, n - 1);
-        if (postId && window.sb && currentUser) sb.from('likes').delete().eq('user_id', currentUser.id).eq('post_id', postId).then(function(){}).catch(function(){});
+        if (postId && window.sb && currentUser) {
+            sb.from(table).delete().eq('user_id', currentUser.id).eq(key, postId)
+                .then(function (r) { if (r && r.error) console.warn('[Like]', r.error.message); },
+                      function (e) { console.warn('[Like]', e && e.message); });
+        }
     } else {
         icon.classList.replace('fa-regular', 'fa-solid'); icon.style.color = '#FF3B30';
         if (span) span.textContent = n + 1;
-        if (postId && window.sb && currentUser) { sb.from('likes').insert({ user_id: currentUser.id, post_id: postId }).then(function(){}).catch(function(){}); tfNotifyLike(postId); }
+        if (postId && window.sb && currentUser) {
+            var row = { user_id: currentUser.id };
+            row[key] = postId;
+            sb.from(table).insert(row)
+                .then(function (r) {
+                    if (r && r.error) {
+                        console.warn('[Like]', r.error.message);
+                        // Put the heart back rather than showing a like that is
+                        // not there. A silent catch is what hid this for months.
+                        icon.classList.replace('fa-solid', 'fa-regular');
+                        icon.style.color = '';
+                        if (span) span.textContent = n;
+                        showToast('Could not save that like');
+                    }
+                }, function (e) { console.warn('[Like]', e && e.message); });
+        }
     }
     if (typeof triggerHaptic === 'function') triggerHaptic(20);
 }
@@ -16979,6 +17067,10 @@ function openStoryVideoTrim(file, url) {
             var trimDur = (rightPct - leftPct) * duration;
             if (trimLabel) trimLabel.textContent = trimDur.toFixed(1) + 's selected';
             vid.currentTime = leftPct * duration;
+            if (window._storyTrim) {
+                window._storyTrim.start = leftPct * duration;
+                window._storyTrim.end = rightPct * duration;
+            }
         }
 
         function makeDraggable(handle, isLeft) {
@@ -17000,9 +17092,26 @@ function openStoryVideoTrim(file, url) {
         makeDraggable(rightHandle, false);
         updateTrimOverlay();
 
-        // Store trim on Done
+        // Store trim on Done.
+        //
+        // These two were the whole of "trimming": handles moved, a label
+        // updated, and the full video posted anyway, because nothing ever read
+        // them. The in and out points now travel with the story in seconds and
+        // the viewer plays only that stretch. A browser cannot re-encode the
+        // file without a long wait and a quality loss, so the cut is applied at
+        // playback the same way a clip's cuts are.
         window._storyTrimStart = function() { return leftPct; };
         window._storyTrimEnd   = function() { return rightPct; };
+        window._storyTrim = { start: leftPct * duration, end: rightPct * duration, duration: duration };
+
+        // Play the selected stretch while trimming, so what you hear and see is
+        // what you are choosing.
+        vid.addEventListener('timeupdate', function () {
+            var s = leftPct * duration, e = rightPct * duration;
+            if (vid.currentTime > e - 0.02 || vid.currentTime < s - 0.02) {
+                try { vid.currentTime = s; } catch (err) {}
+            }
+        });
     });
 }
 
@@ -17050,6 +17159,26 @@ function storyPickerLoadFiles(files) {
 // little way in and drawing that frame to a canvas gives a picture on every
 // platform, and avoids the first frame being the black one a lot of videos open
 // on.
+// When no frame can be read, say that it is a video rather than leaving a
+// blank grey tile. An iPhone records H.265, which a lot of browsers will not
+// decode, so the canvas comes back empty and the picker looked broken: an
+// empty square with a tick on it and nothing to tell you what you had picked.
+function _tfPosterFallback(imgEl) {
+    try {
+        var host = imgEl && imgEl.parentElement;
+        if (!host || host.querySelector('.tf-poster-fallback')) return;
+        imgEl.style.display = 'none';
+        var ph = document.createElement('div');
+        ph.className = 'tf-poster-fallback';
+        ph.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;' +
+            'align-items:center;justify-content:center;gap:6px;background:#1c1c1e;color:rgba(255,255,255,0.55);';
+        ph.innerHTML = '<i class="fa-solid fa-film" style="font-size:18px;"></i>' +
+            '<span style="font-size:9px;font-weight:700;letter-spacing:0.04em;">VIDEO</span>';
+        if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+        host.appendChild(ph);
+    } catch (e) {}
+}
+
 function _tfVideoPoster(url, imgEl, atSeconds) {
     if (!imgEl) return;
     var v = document.createElement('video');
@@ -17063,6 +17192,7 @@ function _tfVideoPoster(url, imgEl, atSeconds) {
         if (settled) return;
         settled = true;
         if (dataUrl) imgEl.src = dataUrl;
+        else _tfPosterFallback(imgEl);
         try { v.removeAttribute('src'); v.load(); } catch (e) {}
     }
 
@@ -17101,7 +17231,7 @@ function spUpdateNextBtn() {
     if (!sel.length) return;
     var btn = document.createElement('button');
     btn.id = 'spNextBtn';
-    btn.style.cssText = 'position:absolute;bottom:max(32px,env(safe-area-inset-bottom,32px));right:20px;z-index:50;background:#007AFF;border:none;border-radius:50px;padding:14px 28px;color:white;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;box-shadow:0 4px 20px rgba(0,122,255,0.45);';
+    btn.style.cssText = 'position:absolute;bottom:max(32px,env(safe-area-inset-bottom,32px));right:20px;z-index:50;background:#007AFF;border:none;border-radius:50px;padding:14px 28px;color:white;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;';
     btn.innerHTML = 'Next <i class="fa-solid fa-arrow-right"></i>';
     btn.onclick = function() {
         var chosen = (window._spFiles || []).filter(function(f){ return f.selected; });
@@ -19360,6 +19490,41 @@ function openContextualVideo(videoUrl, context, startIndex, clipArray) {
     return;
 }
 
+// Open one clip by its id, in the clip player.
+//
+// Search results and clip notifications both called this and it did not exist
+// anywhere, so tapping either did nothing at all.
+async function openClipById(clipId) {
+    if (!clipId || !window.sb) return;
+    try {
+        var r = await sb.from('trustclips')
+            .select('id, video_url, thumbnail_url, user_id, caption, sound_name, volume, voice_effect, segments, like_count, comment_count, view_count')
+            .eq('id', clipId).maybeSingle();
+        if (r.error || !r.data) { showToast('That clip is not available'); return; }
+        var c = r.data, who = null;
+        // The author is fetched separately: trustclips.user_id keys auth.users,
+        // which PostgREST cannot embed through.
+        try {
+            var u = await sb.from('users')
+                .select('id, username, full_name, avatar_url, verified, id_verified')
+                .eq('id', c.user_id).maybeSingle();
+            who = u.data || null;
+        } catch (e) {}
+        openContextualVideo(c.video_url, 'feed', 0, [{
+            id: c.id, media_url: c.video_url, user_id: c.user_id, users: who,
+            username: '@' + ((who && who.username) || 'user'),
+            caption: c.caption || '', sound_name: c.sound_name || null,
+            like_count: c.like_count || 0, comment_count: c.comment_count || 0,
+            view_count: c.view_count || 0, volume: c.volume,
+            segments: c.segments || null, voice_effect: c.voice_effect || null,
+            _clip: true
+        }]);
+    } catch (e) {
+        console.warn('[clip] open by id', e && e.message);
+        showToast('That clip is not available');
+    }
+}
+
 // Play the clip you are looking at, and only that one.
 //
 // The cards carry autoplay, so a viewer built from ten clips started ten
@@ -19421,6 +19586,92 @@ function openProfileClipViewer(startIdx) {
         };
     });
     openContextualVideo(items[0].media_url, 'profile', startIdx || 0, items);
+    _tfSwipeBackToGrid(startIdx || 0);
+}
+
+// Swipe right to put the clip back where it came from.
+//
+// The viewer follows the finger, and letting go past a third of the width
+// shrinks it into the tile it was opened from rather than blinking out, so it
+// is obvious which one you were watching. Anything less than that springs back.
+function _tfSwipeBackToGrid(startIdx) {
+    var ov = document.getElementById('tfClipViewer');
+    if (!ov) return;
+    var startX = 0, startY = 0, dx = 0, tracking = false, decided = false;
+
+    function tileFor(i) {
+        // Your own profile grid, or the one on somebody else's profile,
+        // whichever is the one on screen behind the viewer.
+        var grid = document.getElementById('up-tab-content');
+        if (!grid || !grid.offsetParent) grid = document.getElementById('profile-grid');
+        if (!grid) return null;
+        var tiles = grid.children;
+        return tiles && tiles[i] ? tiles[i] : (tiles && tiles[0]) || null;
+    }
+
+    ov.addEventListener('touchstart', function (e) {
+        if (e.touches.length !== 1) return;
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        dx = 0; tracking = true; decided = false;
+        ov.style.transition = 'none';
+    }, { passive: true });
+
+    ov.addEventListener('touchmove', function (e) {
+        if (!tracking || e.touches.length !== 1) return;
+        var x = e.touches[0].clientX - startX;
+        var y = e.touches[0].clientY - startY;
+        // Decide once whether this is a horizontal gesture, so a normal
+        // up-and-down scroll through the clips is never hijacked.
+        if (!decided) {
+            if (Math.abs(x) < 10 && Math.abs(y) < 10) return;
+            decided = true;
+            if (Math.abs(y) > Math.abs(x) || x < 0) { tracking = false; return; }
+        }
+        dx = Math.max(0, x);
+        var w = ov.offsetWidth || window.innerWidth;
+        ov.style.transform = 'translateX(' + dx + 'px) scale(' + (1 - Math.min(0.12, dx / w * 0.3)) + ')';
+        ov.style.borderRadius = dx > 8 ? '18px' : '0';
+        ov.style.opacity = String(1 - Math.min(0.35, dx / w));
+    }, { passive: true });
+
+    ov.addEventListener('touchend', function () {
+        if (!tracking) return;
+        tracking = false;
+        var w = ov.offsetWidth || window.innerWidth;
+        ov.style.transition = 'transform 0.28s cubic-bezier(0.32,0.72,0,1), opacity 0.28s ease, border-radius 0.28s ease';
+
+        if (dx < w / 3) {                       // not far enough: spring back
+            ov.style.transform = '';
+            ov.style.opacity = '1';
+            ov.style.borderRadius = '0';
+            return;
+        }
+
+        // Far enough: fold into the tile it came from.
+        var idx = (function () {
+            var sc = document.getElementById('tfClipScroller');
+            if (!sc || !sc.clientHeight) return startIdx;
+            return Math.round(sc.scrollTop / sc.clientHeight);
+        })();
+        var tile = tileFor(idx);
+        if (tile && tile.getBoundingClientRect) {
+            var r = tile.getBoundingClientRect();
+            var o = ov.getBoundingClientRect();
+            if (r.width && r.height) {
+                ov.style.transformOrigin = 'top left';
+                ov.style.transform =
+                    'translate(' + (r.left - o.left) + 'px,' + (r.top - o.top) + 'px) ' +
+                    'scale(' + (r.width / (o.width || 1)) + ',' + (r.height / (o.height || 1)) + ')';
+                ov.style.opacity = '0';
+                ov.style.borderRadius = '10px';
+            }
+        } else {
+            ov.style.transform = 'translateX(' + w + 'px)';
+            ov.style.opacity = '0';
+        }
+        setTimeout(function () { closeReelsPage(); }, 280);
+    }, { passive: true });
 }
 
 function openFullScreenMedia(url, type) {
@@ -27702,7 +27953,7 @@ function renderRealPostCard(post) {
     // helper so votePoll/answerQuiz can re-render just this block (no full reload).
     var interactiveHTML = '';
     if (post.post_type && ['poll', 'quiz', 'question'].indexOf(post.post_type) >= 0) {
-        interactiveHTML = '<div id="ixblock_' + escapeHtml(String(post.id)) + '" data-opts="' + escapeHtml(JSON.stringify(post.poll_options || [])) + '" data-votes="' + escapeHtml(JSON.stringify(post.poll_votes || {})) + '" data-ct="' + (post.quiz_correct_answer || 0) + '">' + renderPollQuizBlock(post) + '</div>';
+        interactiveHTML = '<div id="ixblock_' + escapeHtml(String(post.id)) + '" data-opts="' + escapeHtml(JSON.stringify(post.poll_options || [])) + '" data-votes="' + escapeHtml(JSON.stringify(post.poll_votes || {})) + '" data-ct="' + (post.quiz_correct_answer || 0) + '"' + (post.post_type === 'quiz' ? ' data-quiz="1"' : '') + '>' + renderPollQuizBlock(post) + '</div>';
     }
 
     var collabUser = post.collab_user || null;
@@ -30042,6 +30293,9 @@ async function switchUserProfileTab(tab, el, userId) {
 // list off window._profileClips, so point that at the public set first.
 function openUserClipViewer(idx) {
     window._profileClips = window._upClips || [];
+    // Their clips, not yours: the viewer builds the author from the row rather
+    // than falling back to the signed-in person.
+    (window._profileClips || []).forEach(function (c) { if (c.users) c.user_id = c.user_id || c.users.id; });
     if (typeof openProfileClipViewer === 'function') openProfileClipViewer(idx || 0);
 }
 
@@ -30439,10 +30693,55 @@ async function answerQuiz(postId, selectedIndex, correctIndex) {
     localStorage.setItem('quiz_answered_' + postId, String(selectedIndex));
     triggerHaptic(selectedIndex === correctIndex ? 50 : 20);
     var block = document.getElementById('ixblock_' + postId);
+    var options = [];
     if (block) {
-        var options = []; try { options = JSON.parse(block.getAttribute('data-opts') || '[]'); } catch (e) {}
+        try { options = JSON.parse(block.getAttribute('data-opts') || '[]'); } catch (e) {}
         block.innerHTML = renderPollQuizBlock({ id: postId, post_type: 'quiz', poll_options: options, quiz_correct_answer: correctIndex });
     }
+    // The answer was only ever written to this device. Clearing site data, or
+    // opening the app anywhere else, and the quiz was unanswered again, and the
+    // person who posted it could never see what anybody picked. Polls already
+    // record theirs in the same table.
+    if (window.sb && currentUser) {
+        try {
+            var res = await sb.from('poll_user_votes').upsert({
+                post_id: postId, user_id: currentUser.id,
+                option_index: selectedIndex, option_label: options[selectedIndex] || ''
+            }, { onConflict: 'post_id,user_id' });
+            if (res.error) console.warn('[Quiz]', res.error.message);
+        } catch (e) { console.warn('[Quiz]', e && e.message); }
+    }
+}
+
+// Fill in what this person already answered, from the server.
+//
+// Whether a poll or quiz shows its result or its buttons is read out of
+// localStorage, which is per device. The votes are in poll_user_votes, so on a
+// new device they are recoverable; nothing was reading them back.
+async function _tfSeedVotes(postIds) {
+    if (!window.sb || !currentUser || !postIds || !postIds.length) return;
+    try {
+        var r = await sb.from('poll_user_votes')
+            .select('post_id, option_index')
+            .eq('user_id', currentUser.id)
+            .in('post_id', postIds);
+        if (r.error) { console.warn('[Votes]', r.error.message); return; }
+        (r.data || []).forEach(function (v) {
+            var block = document.getElementById('ixblock_' + v.post_id);
+            if (!block) return;
+            var isQuiz = block.getAttribute('data-ct') != null && block.getAttribute('data-quiz') === '1';
+            var key = (isQuiz ? 'quiz_answered_' : 'poll_voted_') + v.post_id;
+            if (localStorage.getItem(key) !== null) return;      // already known here
+            localStorage.setItem(key, String(v.option_index));
+            var opts = [], votes = {};
+            try { opts = JSON.parse(block.getAttribute('data-opts') || '[]'); } catch (e) {}
+            try { votes = JSON.parse(block.getAttribute('data-votes') || '{}'); } catch (e) {}
+            block.innerHTML = renderPollQuizBlock(isQuiz
+                ? { id: v.post_id, post_type: 'quiz', poll_options: opts,
+                    quiz_correct_answer: parseInt(block.getAttribute('data-ct') || '0', 10) }
+                : { id: v.post_id, post_type: 'poll', poll_options: opts, poll_votes: votes });
+        });
+    } catch (e) { console.warn('[Votes]', e && e.message); }
 }
 
 function openAnswerSheet(postId) {
@@ -32138,7 +32437,10 @@ function renderNotifCard(notif) {
         mention:       'mentioned you',
         reply:         'replied to your comment',
     };
-    let message = notif.message || messages[notif.type] || 'interacted with you';
+    const clipWords = { like: 'liked your clip', comment: 'commented on your clip' };
+    let message = notif.message ||
+        (notif.clip_id && clipWords[notif.type]) ||
+        messages[notif.type] || 'interacted with you';
 
     // The name is printed in bold just before this, so a message that opens
     // with the same name reads twice. Some writers store a whole sentence;
@@ -32194,6 +32496,12 @@ function openNotification(notifId) {
     var t = n.type || '';
     if (t === 'follow' || t === 'follow_back' || t === 'suggested' || t === 'suggested_follow' || t === 'follow_suggestion') {
         if (typeof viewUserProfile === 'function') viewUserProfile(n.actor_id || '');
+        return;
+    }
+    // A notification about a clip carries clip_id, because post_id is a key
+    // into posts and cannot hold one.
+    if (n.clip_id) {
+        if (typeof openClipById === 'function') { try { openClipById(n.clip_id); } catch (e) {} }
         return;
     }
     if (n.post_id) {
@@ -52150,6 +52458,16 @@ async function submitStoryPost(url, isVideo, audience) {
     // and the story posts bare — which is precisely what used to happen.
     var _overlays = _tfCollectStoryOverlays();
 
+    // Where the trim screen left the handles, if it was used at all and the
+    // person moved them off the ends.
+    var _trim = null;
+    if (isVideo && window._storyTrim && window._storyTrim.duration) {
+        var _t = window._storyTrim;
+        var _moved = _t.start > 0.05 || _t.end < _t.duration - 0.05;
+        if (_moved && _t.end > _t.start) _trim = { start: _t.start, end: _t.end };
+    }
+    window._storyTrim = null;
+
     // Warn about H.265 before it goes out, not after somebody cannot watch it.
     // An iPhone records in it by default and plays it back perfectly, so there
     // is nothing on this end to suggest half the people it reaches will get a
@@ -52237,7 +52555,12 @@ async function submitStoryPost(url, isVideo, audience) {
                 sound_start: _sMusic && typeof _sMusic.start === 'number' ? _sMusic.start : null,
                 sound_duration: _sMusic && typeof _sMusic.duration === 'number' ? _sMusic.duration : null,
                 music_style: _sMusic ? (window._spMusicOnly ? 'disc' : 'box') : null,
-                overlays: _overlays
+                overlays: _overlays,
+                // Only when the person actually moved a handle. A trim that
+                // covers the whole video is not a trim, and writing it would
+                // pin the story to a length it never needed.
+                trim_start: _trim ? _trim.start : null,
+                trim_end: _trim ? _trim.end : null
             });
             if (storyDbErr) {
                 console.error('[Story] DB insert FAILED:', storyDbErr);
