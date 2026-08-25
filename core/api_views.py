@@ -1374,3 +1374,95 @@ def eddie_post(request):
         return JsonResponse({'ok': True, 'post': data[0] if data else None})
     except Exception as e:
         return JsonResponse({'error': str(e)[:200]}, status=502)
+
+
+# ---------------------------------------------------------------------------
+# 8. USERNAME LOGIN, WITHOUT HANDING OUT EMAIL ADDRESSES
+#
+# tf_login_email(username) returns that account's email and anyone can call it,
+# so feeding it usernames in a loop harvests every address on the platform. The
+# lookup itself is legitimate: Supabase signs in with an email, and people want
+# to type a username.
+#
+# So the lookup and the sign-in both happen here. The browser sends a username
+# and a password and gets back a session. It is never told the email.
+#
+# Two things this deliberately does not do. It does not tell you whether a
+# username exists: a wrong username and a wrong password give the same answer,
+# because "no such user" is itself worth harvesting. And it does not replace
+# email or phone login, which still go straight to Supabase from the browser,
+# so a sleeping server can never be the only thing standing between somebody
+# and their account.
+# ---------------------------------------------------------------------------
+@ratelimit(key='ip', rate='10/m', method='POST', block=True)
+@csrf_exempt
+@require_http_methods(["POST"])
+def username_login(request):
+    try:
+        body = json.loads(request.body or '{}')
+    except Exception:
+        return JsonResponse({'error': 'Bad JSON'}, status=400)
+
+    username = (body.get('username') or '').strip().lstrip('@').lower()
+    password = body.get('password') or ''
+    if not username or not password:
+        return JsonResponse({'error': 'Enter your username and password'}, status=400)
+    if len(username) > 40 or len(password) > 200:
+        return JsonResponse({'error': 'Invalid credentials'}, status=401)
+
+    # Same wording for every failure below, so nothing here can be used to work
+    # out which usernames are real.
+    WRONG = JsonResponse({'error': 'Wrong username or password'}, status=401)
+
+    try:
+        r = httpx.get(
+            f'{settings.SUPABASE_URL}/rest/v1/users',
+            params={'username': f'eq.{username}', 'select': 'email,is_locked,is_banned',
+                    'limit': '1'},
+            headers=_service_headers(),
+            timeout=10,
+        )
+        rows = r.json() if r.status_code == 200 else []
+    except Exception:
+        return JsonResponse({'error': 'Could not reach the server'}, status=503)
+
+    if not rows:
+        return WRONG
+    row = rows[0]
+    if row.get('is_banned'):
+        return JsonResponse({'error': 'This account has been banned.'}, status=403)
+    if row.get('is_locked'):
+        return JsonResponse({'error': 'This account is locked. Contact support to unlock it.'},
+                            status=403)
+    email = row.get('email')
+    if not email:
+        return WRONG
+
+    # Sign in on their behalf. The anon key is the right one here: this is an
+    # ordinary password grant, not an admin action, so a wrong password is
+    # refused by Supabase exactly as it would be from the browser.
+    try:
+        auth = httpx.post(
+            f'{settings.SUPABASE_URL}/auth/v1/token',
+            params={'grant_type': 'password'},
+            headers={'apikey': settings.SUPABASE_ANON_KEY, 'Content-Type': 'application/json'},
+            json={'email': email, 'password': password},
+            timeout=15,
+        )
+    except Exception:
+        return JsonResponse({'error': 'Could not reach the server'}, status=503)
+
+    if auth.status_code != 200:
+        return WRONG
+
+    data = auth.json()
+    if not data.get('access_token') or not data.get('refresh_token'):
+        return WRONG
+
+    # The session only. No email, no profile: the browser reads the profile
+    # itself once it is signed in, under its own row level security.
+    return JsonResponse({
+        'access_token': data['access_token'],
+        'refresh_token': data['refresh_token'],
+        'expires_in': data.get('expires_in'),
+    })

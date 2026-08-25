@@ -1074,32 +1074,56 @@ localStorage.setItem('tf_burst', JSON.stringify(burstAttempts));
             return _finishPhoneLogin(phoneAuth.data.user);
         }
 
-        // If user entered a username instead of email, look up the email
-       if (!isValidEmail(identifier)) {
-    const cleanUsername = identifier.replace('@', '').toLowerCase();
-    const userProfile = await DB.getUserByUsername(cleanUsername);
+        var _preAuthedUser = null;
 
-    if (!userProfile) {
-        // Could be a user added directly via Supabase dashboard (no users table profile)
-        // We can't look up their email by username, so tell them to use their email instead
-        return showAuthError(
-            'Account not found by username. Try logging in with your email address instead.',
-            returnStep
-        );
-    }
+        // Logging in with a username goes through our own server.
+        //
+        // Supabase signs in with an email, so a username has to be turned into
+        // one first. That lookup used to happen in the browser, which meant the
+        // app would hand anybody the email address behind any username. The
+        // server does the lookup and the sign-in together now and returns only
+        // the session, so the address never comes back here.
+        //
+        // If the server cannot be reached, this falls through to the old path
+        // rather than locking anybody out. Render's free tier sleeps, and a
+        // cold start must never be the reason somebody cannot get in.
+        if (!isValidEmail(identifier)) {
+            const cleanUsername = identifier.replace('@', '').toLowerCase();
+            const viaServer = await _tfUsernameLogin(cleanUsername, password);
 
-    if (userProfile.is_locked) {
-        return showAuthError(
-            'This account is locked. Contact support to unlock it.',
-            returnStep
-        );
-    }
+            if (viaServer.ok) {
+                await sb.auth.setSession({
+                    access_token: viaServer.session.access_token,
+                    refresh_token: viaServer.session.refresh_token
+                });
+                const s = await sb.auth.getSession();
+                _preAuthedUser = s && s.data && s.data.session && s.data.session.user;
+                if (!_preAuthedUser) return showAuthError('Could not sign in. Try again.', returnStep);
+            }
 
-    email = userProfile.email;
-}
+            if (viaServer.rejected) {
+                // The server reached Supabase and Supabase said no.
+                return showAuthError(viaServer.message || 'Wrong username or password', returnStep);
+            }
 
-        // Sign in with Supabase
-        const authData = await DB.signIn(email, password);
+            // The server could not be reached at all. Old path, so nobody is
+            // stuck behind a sleeping server.
+            console.warn('[Login] server unreachable, falling back:', viaServer.why);
+            const userProfile = await DB.getUserByUsername(cleanUsername);
+            if (!userProfile) {
+                return showAuthError(
+                    'Account not found by username. Try logging in with your email address instead.',
+                    returnStep
+                );
+            }
+            if (userProfile.is_locked) {
+                return showAuthError('This account is locked. Contact support to unlock it.', returnStep);
+            }
+            email = userProfile.email;
+        }
+
+        // Sign in with Supabase, unless the server already did it for us.
+        const authData = _preAuthedUser ? { user: _preAuthedUser } : await DB.signIn(email, password);
 
         if (!authData.user) {
             return showAuthError('Invalid credentials', returnStep);
@@ -12445,12 +12469,7 @@ function sendStoryReaction(emoji) {
     triggerHaptic(20);
 }
 
-function sendStoryMessage(text) {
-    if (!text.trim()) return;
-    document.getElementById('storyInteractionOverlay')?.remove();
-    showToast('Message sent!');
-    triggerHaptic(15);
-}
+// sendStoryMessage moved to the end of this file, where it actually sends.
 
 function openStorySendModal() {
     var existing = document.getElementById('storySendModal'); if (existing) existing.remove();
@@ -16007,8 +16026,51 @@ DB.getUserProfile = async function(userId) {
     return data;
 };
 
+// Sign in by username, on the server, so the email never comes back here.
+//
+// Three outcomes, and the caller has to tell them apart: signed in, refused by
+// Supabase, or the server could not be reached. Only the middle one is a real
+// "wrong password"; the last has to fall back, or a sleeping free-tier server
+// becomes a locked door.
+async function _tfUsernameLogin(username, password) {
+    var ctl = null, timer = null;
+    try {
+        if (typeof AbortController !== 'undefined') {
+            ctl = new AbortController();
+            timer = setTimeout(function () { ctl.abort(); }, 25000);
+        }
+        var r = await fetch('/api/auth/username-login/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: username, password: password }),
+            signal: ctl ? ctl.signal : undefined
+        });
+        if (timer) clearTimeout(timer);
+
+        if (r.ok) {
+            var s = await r.json();
+            if (s && s.access_token && s.refresh_token) return { ok: true, session: s };
+            return { ok: false, rejected: false, why: 'no session in reply' };
+        }
+        // 401 and 403 are answers, not outages: Supabase saw the password, or
+        // the account is locked or banned. Anything else is our problem.
+        if (r.status === 401 || r.status === 403) {
+            var e = await r.json().catch(function () { return {}; });
+            return { ok: false, rejected: true, message: e.error };
+        }
+        return { ok: false, rejected: false, why: 'http ' + r.status };
+    } catch (err) {
+        if (timer) clearTimeout(timer);
+        return { ok: false, rejected: false, why: (err && err.message) || 'network' };
+    }
+}
+
 // Login only: resolves a username to the email Supabase auth needs. Returns
 // just email + lock state, never a whole profile.
+//
+// Still here on purpose. It is the fallback for when the server cannot be
+// reached, and it is what everybody's app is still running until they load a
+// fresh copy. It stops being reachable once the new path is proven.
 DB.getUserByUsername = async function(username) {
     const { data, error } = await sb.rpc('tf_login_email', { uname: username });
     if (error) return null;
@@ -55549,4 +55611,188 @@ async function mgDelete() {
         showToast('Group deleted');
         if (typeof loadGroups === 'function') loadGroups();
     } catch (e) { showToast('Could not delete the group'); }
+}
+
+// ==========================================================================
+// THE CONTROLS THAT CALLED NOTHING
+//
+// The interface is assembled from strings, so an onclick naming a function
+// nobody wrote is not an error. It is a button that does nothing when pressed,
+// silently, forever. An audit of every inline handler against every definition
+// turned up six of these. They are written here.
+// ==========================================================================
+
+// Find the direct conversation with someone, or start one. The same
+// find-or-create openChat does, pulled out so a story reply does not need the
+// chat screen to be open.
+async function _tfDirectConversationWith(otherId) {
+    if (!window.sb || !currentUser || !otherId) return null;
+    var me = currentUser.id;
+    try {
+        var mine = await sb.from('conversation_participants').select('conversation_id').eq('user_id', me);
+        var myIds = (mine.data || []).map(function (p) { return p.conversation_id; });
+        if (myIds.length) {
+            var theirs = await sb.from('conversation_participants')
+                .select('conversation_id').eq('user_id', otherId).in('conversation_id', myIds);
+            var shared = (theirs.data || [])[0];
+            if (shared) return shared.conversation_id;
+        }
+        var now = new Date().toISOString();
+        var cr = await sb.from('conversations').insert({
+            type: 'direct', created_by: me, created_at: now, updated_at: now
+        }).select('id').single();
+        if (cr.error || !cr.data) { console.warn('[DM]', cr.error && cr.error.message); return null; }
+        var parts = await sb.from('conversation_participants').insert([
+            { conversation_id: cr.data.id, user_id: me, is_blocked: false },
+            { conversation_id: cr.data.id, user_id: otherId, is_blocked: false }
+        ]);
+        if (parts.error) console.warn('[DM]', parts.error.message);
+        return cr.data.id;
+    } catch (e) {
+        console.warn('[DM]', e && e.message);
+        return null;
+    }
+}
+
+// Whose story is on screen.
+function _tfCurrentStoryOwner() {
+    var s = (typeof _storyItems !== 'undefined' && _storyItems)
+        ? _storyItems[typeof currentStoryIndex !== 'undefined' ? currentStoryIndex : 0] : null;
+    return (s && (s.user_id || (s.users && s.users.id))) || window._storyViewerUserId || null;
+}
+
+// Edit Profile: tapping a row puts the cursor in that row's field.
+function epFocusField(inputId) {
+    var el = document.getElementById(inputId);
+    if (!el) return;
+    try { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } catch (e) {}
+    if (el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+// A search result opens the post it belongs to.
+function openPostById(postId) {
+    if (!postId) return;
+    if (typeof openPostDetail === 'function') { openPostDetail(postId); return; }
+    showToast('Could not open that post');
+}
+
+// The camera in the chat composer.
+function startChatCamera() {
+    var id = window._currentChatUserId || null;
+    var nameEl = document.getElementById('chat-header-name') || document.getElementById('chat-user-name');
+    var name = nameEl ? nameEl.textContent.trim() : '';
+    if (typeof openLiquidGlassCameraFromChat === 'function') {
+        openLiquidGlassCameraFromChat(id, name);
+        return true;
+    }
+    if (typeof openLiquidGlassCamera === 'function') { openLiquidGlassCamera(); return true; }
+    return false;
+}
+
+// The GIF and sticker button in the channel composer.
+function toggleGifsticker(channelId) {
+    window._gifTargetChannel = channelId || null;
+    var panel = document.getElementById('gif-panel');
+    if (!panel) {
+        showToast('GIFs are not available here yet');
+        return;
+    }
+    var showing = panel.style.display !== 'none' && panel.style.display !== '';
+    panel.style.display = showing ? 'none' : 'block';
+    if (!showing && typeof loadTrendingGifs === 'function') { try { loadTrendingGifs(); } catch (e) {} }
+    triggerHaptic(10);
+}
+
+// The Follow button on a profile header.
+function toggleFollowFromProfile() {
+    var btn = document.getElementById('profile-follow-btn');
+    var uid = (btn && btn.getAttribute('data-uid')) || window._viewingUserId || window._upUserId || null;
+    if (!uid) { showToast('Could not tell whose profile this is'); return; }
+    if (typeof realToggleFollow === 'function') realToggleFollow(btn, uid);
+}
+
+// Replying to a story actually sends the reply.
+//
+// This used to close the overlay and toast "Message sent!" without writing
+// anything anywhere. Nothing was ever sent, and the person who wrote it had no
+// way to know. It goes to the story owner as a direct message now, and says so
+// honestly when it cannot.
+async function sendStoryMessage(text) {
+    text = (text || '').trim();
+    if (!text) return;
+    var owner = _tfCurrentStoryOwner();
+    if (!owner || !window.sb || !currentUser) { showToast('Could not send that'); return; }
+    if (owner === currentUser.id) { showToast('That is your own story'); return; }
+
+    var ov = document.getElementById('storyInteractionOverlay');
+    if (ov) ov.remove();
+    triggerHaptic(15);
+    try {
+        var convId = await _tfDirectConversationWith(owner);
+        if (!convId) { showToast('Could not send that'); return; }
+        var res = await sb.from('messages').insert({
+            conversation_id: convId,
+            sender_id: currentUser.id,
+            ciphertext: text,
+            message_type: 'text',
+            created_at: new Date().toISOString()
+        });
+        if (res.error) { console.warn('[StoryReply]', res.error.message); showToast('Could not send that'); return; }
+        await sb.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', convId);
+        showToast('Sent');
+    } catch (e) {
+        console.warn('[StoryReply]', e && e.message);
+        showToast('Could not send that');
+    }
+}
+
+// The plus beside the story reply box: send a photo or clip instead of words.
+function openStoryAttach() {
+    var owner = _tfCurrentStoryOwner();
+    if (!owner || !currentUser) { showToast('Could not send that'); return; }
+    if (owner === currentUser.id) { showToast('That is your own story'); return; }
+
+    var inp = document.getElementById('_tfStoryAttachInput');
+    if (!inp) {
+        inp = document.createElement('input');
+        inp.type = 'file';
+        inp.id = '_tfStoryAttachInput';
+        inp.accept = 'image/*,video/*';
+        inp.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px;opacity:0;';
+        inp.addEventListener('change', async function () {
+            var f = inp.files && inp.files[0];
+            if (!f) return;
+            var to = window._tfStoryAttachTo;
+            if (!to) return;
+            var ov2 = document.getElementById('storyInteractionOverlay');
+            if (ov2) ov2.remove();
+            showToast('Sending...');
+            try {
+                var isVid = (f.type || '').indexOf('video/') === 0;
+                var path = currentUser.id + '/' + Date.now() + '_' + f.name.replace(/[^\w.\-]/g, '_');
+                var url = await tfUploadPublicMedia(f, isVid ? 'video' : 'image', 'media', path);
+                if (!url) throw new Error('upload failed');
+                var convId = await _tfDirectConversationWith(to);
+                if (!convId) throw new Error('no conversation');
+                var res = await sb.from('messages').insert({
+                    conversation_id: convId,
+                    sender_id: currentUser.id,
+                    ciphertext: '',
+                    media_url: url,
+                    message_type: isVid ? 'video' : 'image',
+                    created_at: new Date().toISOString()
+                });
+                if (res.error) throw new Error(res.error.message);
+                await sb.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', convId);
+                showToast('Sent');
+            } catch (e) {
+                console.warn('[StoryAttach]', e && e.message);
+                showToast('Could not send that');
+            }
+        });
+        document.body.appendChild(inp);
+    }
+    window._tfStoryAttachTo = owner;
+    try { inp.value = ''; } catch (e) {}
+    inp.click();
 }
