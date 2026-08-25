@@ -441,6 +441,29 @@ function tfClaimCacheOwner(userId) {
 function tfFollowedSet() {
     try { return JSON.parse(localStorage.getItem('tf-followed-users') || '[]'); } catch (e) { return []; }
 }
+// Is this id a clip or a post?
+//
+// The two live in different tables and the comment and like paths need to know
+// which, because the foreign keys are separate. Answered from whatever is
+// already on screen where possible, and remembered, so this does not become a
+// query per comment.
+var _tfClipIdCache = {};
+async function _tfIsClipId(id) {
+    if (!id) return false;
+    if (_tfClipIdCache[id] != null) return _tfClipIdCache[id];
+    var card = document.querySelector('[data-post-id="' + id + '"]');
+    if (card) {
+        _tfClipIdCache[id] = card.getAttribute('data-clip') === '1';
+        return _tfClipIdCache[id];
+    }
+    if (!window.sb) return false;
+    try {
+        var r = await sb.from('trustclips').select('id').eq('id', id).maybeSingle();
+        _tfClipIdCache[id] = !!(r.data && r.data.id);
+    } catch (e) { _tfClipIdCache[id] = false; }
+    return _tfClipIdCache[id];
+}
+
 // Is this account private? Asked once per person and kept, because it decides
 // whether a Follow tap follows or asks, and it is checked on every card.
 var _tfPrivateCache = {};
@@ -10266,12 +10289,29 @@ async function renderComments() {
     list.innerHTML = renderSkeletonHTML('message', 5);
     var comments = [];
     if (window.sb && currentCommentPostId && !String(currentCommentPostId).startsWith('local_')) {
-        var { data } = await sb.from('comments')
-            .select('id, text, created_at, user_id, users(full_name, avatar_url)')
-            .eq('post_id', currentCommentPostId)
+        // The column is text_content. Asked for as `text` the whole select was
+        // refused, so this list has always come back empty and said "No
+        // comments yet" over comments that exist. The renderer below reads
+        // c.text, c.user and c.avatar_url, so the rows are shaped to that here
+        // rather than renaming twenty lines of markup.
+        var _isClip = await _tfIsClipId(currentCommentPostId);
+        var { data, error: _cErr } = await sb.from('comments')
+            .select('id, text_content, created_at, user_id, users:user_id(full_name, username, avatar_url)')
+            .eq(_isClip ? 'clip_id' : 'post_id', currentCommentPostId)
             .eq('is_hidden', false)
             .order('created_at', { ascending: true });
-        comments = data || [];
+        if (_cErr) console.warn('[Comments]', _cErr.message);
+        comments = (data || []).map(function (c) {
+            var u = c.users || {};
+            return {
+                id: c.id,
+                text: c.text_content || '',
+                created_at: c.created_at,
+                user_id: c.user_id,
+                user: u.full_name || u.username || 'User',
+                avatar_url: u.avatar_url || ''
+            };
+        });
     }
     // If this post is a poll, map who voted what so we can show "voted <option>".
     var _voteMap = {};
@@ -11214,12 +11254,10 @@ async function postGifComment(src) {
     // Save GIF comment to DB and update count
     if (window.sb && currentUser && currentCommentPostId) {
         try {
-            var gifRes = await sb.from('comments').insert({
-                user_id: currentUser.id,
-                post_id: currentCommentPostId,
-                text_content: '',
-                gif_url: src
-            }).select('id').single();
+            // Same split as a written comment: a clip id cannot go in post_id.
+            var _gifRow = { user_id: currentUser.id, text_content: '', gif_url: src };
+            _gifRow[(await _tfIsClipId(currentCommentPostId)) ? 'clip_id' : 'post_id'] = currentCommentPostId;
+            var gifRes = await sb.from('comments').insert(_gifRow).select('id').single();
             if (gifRes && gifRes.error) { console.warn('[GIF Comment] insert failed:', gifRes.error.message); showToast('Could not post GIF'); }
             else if (gifRes && gifRes.data && gifRes.data.id) { _moderateCommentImage(gifRes.data.id, src); }
             // Update comment count on the post card
@@ -27779,20 +27817,27 @@ if (!session) { showToast('Please log in'); return null; }
     async postComment(postId, text, parentCommentId) {
         var session = await DB.getSession();
         if (!session) return null;
-        var { data, error } = await sb.from('comments').insert({
+        // A clip is not a post. comments.post_id is a foreign key into posts, so
+        // every comment on a clip was refused by the database and the comment
+        // button on a clip card has never worked. Clips have their own column.
+        var isClip = await _tfIsClipId(postId);
+        var row = {
             user_id: session.user.id,
-            post_id: postId,
             text_content: text,
             parent_comment_id: parentCommentId || null
-        }).select('*, users:user_id (full_name, username, avatar_url, badge_tier, verified)').single();
+        };
+        row[isClip ? 'clip_id' : 'post_id'] = postId;
+        var { data, error } = await sb.from('comments').insert(row)
+            .select('*, users:user_id (full_name, username, avatar_url, badge_tier, verified)').single();
         if (error) { console.error('[Comment]', error); return null; }
         return data;
     },
 
     async getComments(postId) {
+        var isClip = await _tfIsClipId(postId);
         var { data } = await sb.from('comments')
             .select('*, users:user_id (full_name, username, avatar_url, badge_tier, verified)')
-            .eq('post_id', postId)
+            .eq(isClip ? 'clip_id' : 'post_id', postId)
             .eq('is_hidden', false)
             .order('created_at', { ascending: false })
             .limit(50);
