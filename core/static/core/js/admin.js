@@ -100,6 +100,25 @@ async function adminLoadEddie(body) {
             '</div>' +
             '<button onclick="adminEddieSave()" style="width:100%;padding:13px;border-radius:12px;border:none;background:#007AFF;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-top:10px;">Save profile</button>'
         ) +
+        // Posting as Eddie. Eddie has no login, so nothing it writes can pass
+        // the insert policies, which are all "the author is the signed-in
+        // person". The server does the write instead, with the service key, and
+        // only for an admin. It is the same route Eddie uses when it starts
+        // posting on its own.
+        _adminCard(
+            '<label style="display:block;font-size:12px;font-weight:700;color:#888;margin-bottom:6px;">Post as Eddie</label>' +
+            '<textarea id="admEddieText" rows="4" placeholder="What is Eddie saying?" style="width:100%;padding:11px 13px;border-radius:11px;border:1px solid var(--border-color,#e5e5e5);background:var(--input-bg,#f7f7f7);color:var(--text-primary,#000);font-size:15px;outline:none;box-sizing:border-box;resize:none;font-family:inherit;"></textarea>' +
+            '<div id="admEddieMediaRow" style="display:none;align-items:center;gap:10px;margin-top:10px;">' +
+                '<img id="admEddieMediaPrev" style="width:54px;height:54px;border-radius:10px;object-fit:cover;background:#111;">' +
+                '<span id="admEddieMediaName" style="flex:1;min-width:0;font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>' +
+                '<button onclick="adminEddieClearMedia()" style="border:none;background:none;color:#FF3B30;font-size:13px;font-weight:700;cursor:pointer;">Remove</button>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">' +
+                '<button onclick="adminEddiePickMedia()" style="flex:1;min-width:130px;padding:12px;border-radius:12px;border:1px solid var(--border-color,#e5e5e5);background:var(--bg-secondary,#f0f0f0);color:var(--text-primary,#000);font-size:14px;font-weight:700;cursor:pointer;">Add photo or clip</button>' +
+                '<button id="admEddiePostBtn" onclick="adminEddiePost()" style="flex:1;min-width:130px;padding:12px;border-radius:12px;border:none;background:#007AFF;color:#fff;font-size:14px;font-weight:800;cursor:pointer;">Post</button>' +
+            '</div>' +
+            '<p style="font-size:12px;color:#888;margin:10px 0 0;line-height:1.5;">This goes out publicly from Eddie\'s account.</p>'
+        ) +
         _adminCard(
             '<div style="font-size:14px;font-weight:700;color:var(--text-primary,#000);margin-bottom:8px;">Open Eddie\'s profile</div>' +
             '<p style="font-size:12px;color:#888;margin:0 0 12px;line-height:1.5;">View the account as anyone else sees it, including its posts and replies.</p>' +
@@ -409,3 +428,95 @@ async function unbanUserRow(userId, btn) {
         };
     }
 })();
+
+// ============================================================
+// POSTING AS EDDIE
+//
+// The media is uploaded from here the same way any other media is, so it lands
+// in R2 and costs no egress. Only the database write goes through the server,
+// because that is the part Eddie's missing login makes impossible.
+// ============================================================
+window._admEddieMedia = null;
+
+window.adminEddieClearMedia = function () {
+    window._admEddieMedia = null;
+    var row = document.getElementById('admEddieMediaRow');
+    if (row) row.style.display = 'none';
+};
+
+window.adminEddiePickMedia = function () {
+    var inp = document.getElementById('_admEddieFile');
+    if (!inp) {
+        inp = document.createElement('input');
+        inp.type = 'file';
+        inp.id = '_admEddieFile';
+        inp.accept = 'image/*,video/*';
+        inp.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px;opacity:0;';
+        inp.addEventListener('change', async function () {
+            var f = inp.files && inp.files[0];
+            if (!f) return;
+            var isVid = (f.type || '').indexOf('video/') === 0;
+            var row = document.getElementById('admEddieMediaRow');
+            var name = document.getElementById('admEddieMediaName');
+            var prev = document.getElementById('admEddieMediaPrev');
+            if (row) row.style.display = 'flex';
+            if (name) name.textContent = 'Uploading ' + f.name + '…';
+            if (prev && !isVid) prev.src = URL.createObjectURL(f);
+            try {
+                var path = 'eddie/' + Date.now() + '_' + f.name.replace(/[^\w.\-]/g, '_');
+                var url = await tfUploadPublicMedia(f, isVid ? 'video' : 'image', 'media', path);
+                if (!url) throw new Error('no url');
+                window._admEddieMedia = { url: url, type: isVid ? 'video' : 'image' };
+                if (name) name.textContent = f.name;
+                if (prev && isVid) _tfVideoPoster(url, prev);
+            } catch (e) {
+                console.warn('[Eddie] upload', e && e.message);
+                if (name) name.textContent = 'Upload failed';
+                window._admEddieMedia = null;
+            }
+        });
+        document.body.appendChild(inp);
+    }
+    try { inp.value = ''; } catch (e) {}
+    inp.click();
+};
+
+window.adminEddiePost = async function () {
+    var ta = document.getElementById('admEddieText');
+    var btn = document.getElementById('admEddiePostBtn');
+    var text = ta ? ta.value.trim() : '';
+    var media = window._admEddieMedia;
+    if (!text && !media) { showToast('Write something or add a photo'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Posting…'; }
+    try {
+        var tok = await _tfAccessToken();
+        var r = await fetch('/api/eddie/post/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+            body: JSON.stringify({
+                text: text,
+                media_url: media ? media.url : null,
+                media_type: media ? media.type : null
+            })
+        });
+        var out = await r.json().catch(function () { return {}; });
+        if (!r.ok) {
+            // Say which wall it hit. "Could not post" covers a missing admin
+            // flag and a broken server equally, and those want different fixes.
+            showToast(r.status === 403 ? 'That account is not an admin'
+                    : r.status === 401 ? 'Sign in again to post as Eddie'
+                    : (out.error || 'Could not post as Eddie'));
+            return;
+        }
+        if (ta) ta.value = '';
+        adminEddieClearMedia();
+        showToast('Posted as Eddie');
+        triggerHaptic(25);
+        if (typeof initFeed === 'function') initFeed();
+    } catch (e) {
+        console.warn('[Eddie] post', e && e.message);
+        showToast('Could not reach the server');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Post'; }
+    }
+};

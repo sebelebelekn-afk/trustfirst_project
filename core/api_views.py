@@ -1260,3 +1260,117 @@ def livekit_token(request):
     if isinstance(token, bytes):
         token = token.decode('utf-8')
     return JsonResponse({'token': token, 'url': lk_url, 'identity': identity})
+
+
+# ---------------------------------------------------------------------------
+# 7. POSTING AS EDDIE
+#
+# Eddie has a row in public.users but none in auth.users, so there is no
+# auth.uid() that equals its id and every insert policy refuses anything it
+# authors. That is why the account exists, is reachable, and cannot post: it is
+# a profile, not a login.
+#
+# Giving it a password would fix posting and create a shared credential, and it
+# still would not let Eddie post by itself later. So the write happens here
+# instead, with the service key that already lives on this server, behind an
+# admin check. The same endpoint is what Eddie calls when it starts posting on
+# its own.
+# ---------------------------------------------------------------------------
+EDDIE_USER_ID = 'edd1e000-0000-4000-8000-000000000001'
+
+
+def _service_headers(extra=None):
+    h = {
+        'apikey': settings.SUPABASE_SERVICE_KEY,
+        'Authorization': f'Bearer {settings.SUPABASE_SERVICE_KEY}',
+        'Content-Type': 'application/json',
+    }
+    if extra:
+        h.update(extra)
+    return h
+
+
+def _require_admin(request):
+    """The signed-in caller's id, but only if users.is_admin is true.
+
+    Raises ValueError otherwise. The flag is read with the service key rather
+    than trusted from the token, because a token says who somebody is and never
+    what they are allowed to do.
+    """
+    payload = _verify_supabase_jwt(request)      # raises on a bad or missing token
+    uid = payload.get('sub')
+    if not uid or not _is_valid_uuid(uid):
+        raise ValueError('unauthorized')
+    r = httpx.get(
+        f'{settings.SUPABASE_URL}/rest/v1/users',
+        params={'id': f'eq.{uid}', 'select': 'is_admin'},
+        headers=_service_headers(),
+        timeout=10,
+    )
+    rows = r.json() if r.status_code == 200 else []
+    if not rows or not rows[0].get('is_admin'):
+        raise ValueError('forbidden')
+    return uid
+
+
+@ratelimit(key='ip', rate='20/m', method='POST', block=True)
+@csrf_exempt
+@require_http_methods(["POST"])
+def eddie_post(request):
+    """Publish a post authored by Eddie. Admin only.
+
+    Body: {"text": str, "media_url": str|null, "media_type": "image"|"video"|null,
+           "thumbnail_url": str|null}
+    """
+    try:
+        _require_admin(request)
+    except ValueError as e:
+        code = 403 if str(e) == 'forbidden' else 401
+        return JsonResponse({'error': str(e)}, status=code)
+    except Exception:
+        return JsonResponse({'error': 'unauthorized'}, status=401)
+
+    try:
+        body = json.loads(request.body or '{}')
+    except Exception:
+        return JsonResponse({'error': 'Bad JSON'}, status=400)
+
+    text = (body.get('text') or '').strip()
+    media_url = (body.get('media_url') or '').strip() or None
+    media_type = (body.get('media_type') or '').strip().lower() or None
+    thumb = (body.get('thumbnail_url') or '').strip() or None
+
+    if not text and not media_url:
+        return JsonResponse({'error': 'Nothing to post'}, status=400)
+    if len(text) > 5000:
+        return JsonResponse({'error': 'Text too long'}, status=400)
+    if media_type and media_type not in ('image', 'video'):
+        return JsonResponse({'error': 'media_type must be image or video'}, status=400)
+    for url in (media_url, thumb):
+        if url and not url.startswith('https://'):
+            return JsonResponse({'error': 'Media must be an https URL'}, status=400)
+
+    row = {
+        'user_id': EDDIE_USER_ID,
+        'text_content': text or None,
+        'media_url': media_url,
+        'media_type': media_type,
+        'post_type': media_type or 'text',
+        'thumbnail_url': thumb,
+        'status': 'published',
+        'is_hidden': False,
+    }
+    try:
+        r = httpx.post(
+            f'{settings.SUPABASE_URL}/rest/v1/posts',
+            headers=_service_headers({'Prefer': 'return=representation'}),
+            json=row,
+            timeout=15,
+        )
+        if r.status_code not in (200, 201):
+            return JsonResponse({'error': 'Could not save', 'detail': r.text[:300]},
+                                status=502)
+        data = r.json()
+        return JsonResponse({'ok': True, 'post': data[0] if data else None})
+    except Exception as e:
+        return JsonResponse({'error': str(e)[:200]}, status=502)

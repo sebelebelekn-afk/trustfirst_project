@@ -50,6 +50,7 @@ urlpatterns = [
     path('api/moderate/comment-image/', api_views.moderate_comment_image, name='api_moderate_comment_image'),
     path('api/push/test/', api_views.push_test, name='api_push_test'),
     path('api/live/token/', api_views.livekit_token, name='api_live_token'),
+    path('api/eddie/post/', api_views.eddie_post, name='api_eddie_post'),
     path('sw.js', views.service_worker, name='sw'),
     path('manifest.json', views.manifest, name='manifest'),
 path('api/giphy/search/', api_views.giphy_search, name='api_giphy'),
