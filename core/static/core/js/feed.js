@@ -441,6 +441,30 @@ function tfClaimCacheOwner(userId) {
 function tfFollowedSet() {
     try { return JSON.parse(localStorage.getItem('tf-followed-users') || '[]'); } catch (e) { return []; }
 }
+// Is this account private? Asked once per person and kept, because it decides
+// whether a Follow tap follows or asks, and it is checked on every card.
+var _tfPrivateCache = {};
+async function tfIsPrivateAccount(userId) {
+    if (!userId || !window.sb) return false;
+    if (_tfPrivateCache[userId] != null) return _tfPrivateCache[userId];
+    try {
+        var r = await sb.from('users').select('privacy_settings').eq('id', userId).maybeSingle();
+        var ps = (r.data && r.data.privacy_settings) || {};
+        _tfPrivateCache[userId] = !!(ps && ps.private_account);
+    } catch (e) { _tfPrivateCache[userId] = false; }
+    return _tfPrivateCache[userId];
+}
+
+// Have I asked to follow this person and not heard back yet?
+async function tfHasPendingRequest(userId) {
+    if (!userId || !window.sb || !currentUser) return false;
+    try {
+        var r = await sb.from('follow_requests').select('id')
+            .eq('requester_id', currentUser.id).eq('target_id', userId).maybeSingle();
+        return !!(r.data && r.data.id);
+    } catch (e) { return false; }
+}
+
 function tfIsFollowing(userId) {
     return !!userId && tfFollowedSet().indexOf(userId) > -1;
 }
@@ -4777,6 +4801,11 @@ function _openMsgRow(el) {
     currentConversationId = el.getAttribute('data-cid') || null;
     var name = el.getAttribute('data-name') || 'User';
     openChat(name);
+    // A chat from someone you do not follow is a request until you say
+    // otherwise. They can write; whether it reaches your inbox is your call.
+    if (typeof tfShowMsgRequestBar === 'function') {
+        tfShowMsgRequestBar(currentConversationId, window._currentChatUserId, name);
+    }
 }
 
 function sendMessageNew() {
@@ -13708,8 +13737,10 @@ content.innerHTML = [0,1,2,3].map(function(){return '<div style="display:flex;al
                 // always an empty object and the filter threw everything away:
                 // the tab could never show a request, whoever wrote to you.
                 // The same rule Primary uses decides it, inverted.
+                var _acceptedReq = await _tfAcceptedConvoIds();
                 var requests = (rawReqConvos || []).map(function (c) {
                     c._other = reqUserMap[reqOtherIdByConv[c.id]] || {};
+                    c._accepted = !!_acceptedReq[c.id];
                     return c;
                 }).filter(function (c) {
                     return !_tfIsPrimaryConvo(c, reqOtherIdByConv[c.id], _following);
@@ -14132,8 +14163,93 @@ function _tfIsPrimaryConvo(convo, otherId, following) {
     if (!convo) return true;
     if (convo.type === 'group') return true;                 // groups are never requests
     if (convo.created_by === (currentUser || {}).id) return true;  // you started it
+    if (convo._accepted) return true;                        // you said yes to it
     if (!otherId) return true;                               // nobody else in it
     return !!following[otherId];
+}
+
+// Which of my conversations have I already accepted? Accepting is the only way
+// a chat with someone I do not follow becomes Primary, so it has to be written
+// down rather than worked out.
+async function _tfAcceptedConvoIds() {
+    var out = {};
+    if (!window.sb || !currentUser) return out;
+    try {
+        var r = await sb.from('conversation_participants')
+            .select('conversation_id, request_accepted')
+            .eq('user_id', currentUser.id).eq('request_accepted', true);
+        if (r.error) { console.warn('[Inbox]', r.error.message); return out; }
+        (r.data || []).forEach(function (p) { out[p.conversation_id] = 1; });
+    } catch (e) { console.warn('[Inbox]', e && e.message); }
+    return out;
+}
+
+// Accept, delete or block a message request. The sender is told nothing either
+// way: they sent a message, and what happens to it is the receiver's business.
+async function tfAnswerMsgRequest(conversationId, action, otherId) {
+    if (!window.sb || !currentUser || !conversationId) return;
+    try {
+        if (action === 'accept') {
+            var r = await sb.from('conversation_participants')
+                .update({ request_accepted: true })
+                .eq('conversation_id', conversationId).eq('user_id', currentUser.id);
+            if (r.error) throw r.error;
+            var banner = document.getElementById('tfMsgRequestBar');
+            if (banner) banner.remove();
+            showToast('Message request accepted');
+            triggerHaptic(20);
+            return;
+        }
+        if (action === 'block' && otherId && typeof tfSetBlocked === 'function') {
+            await tfSetBlocked(otherId, true);
+        }
+        // Delete and block both take the conversation out of my inbox. Leaving
+        // is only ever my own participant row; their copy is theirs.
+        await sb.from('conversation_participants').delete()
+            .eq('conversation_id', conversationId).eq('user_id', currentUser.id);
+        if (typeof closeChat === 'function') closeChat();
+        else if (typeof closePage === 'function') closePage('chat-interface');
+        showToast(action === 'block' ? 'Blocked' : 'Request deleted');
+        triggerHaptic(20);
+        if (typeof fillMsgContent === 'function') fillMsgContent();
+    } catch (e) {
+        console.warn('[MsgRequest]', e && e.message);
+        showToast('Could not do that');
+    }
+}
+
+// The bar at the bottom of a chat you have not accepted yet.
+async function tfShowMsgRequestBar(conversationId, otherId, otherName) {
+    var old = document.getElementById('tfMsgRequestBar');
+    if (old) old.remove();
+    if (!conversationId || !window.sb || !currentUser || !otherId) return;
+    try {
+        var mine = await sb.from('conversation_participants')
+            .select('request_accepted').eq('conversation_id', conversationId)
+            .eq('user_id', currentUser.id).maybeSingle();
+        if (!mine.data || mine.data.request_accepted) return;   // already accepted
+
+        var conv = await sb.from('conversations').select('type, created_by')
+            .eq('id', conversationId).maybeSingle();
+        var following = await _tfFollowingIds();
+        if (_tfIsPrimaryConvo(conv.data, otherId, following)) return;  // not a request
+
+        var host = document.getElementById('chat-interface') || document.getElementById('app') || document.body;
+        var bar = document.createElement('div');
+        bar.id = 'tfMsgRequestBar';
+        bar.style.cssText = 'position:absolute;left:0;right:0;bottom:0;z-index:60;background:var(--bg-primary,#fff);' +
+            'border-top:0.5px solid var(--border-color,rgba(0,0,0,0.12));padding:18px 20px max(24px,env(safe-area-inset-bottom,24px));text-align:center;';
+        bar.innerHTML =
+            '<b style="display:block;font-size:16px;color:var(--text-primary,#000);line-height:1.35;">Accept message request from ' + escapeHtml(otherName || 'them') + '?</b>' +
+            '<p style="font-size:13px;color:#888;line-height:1.45;margin:8px 0 16px;">If you accept, they will also be able to call you and see when you are active and when you have read messages.</p>' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">' +
+                '<button onclick="tfAnswerMsgRequest(\'' + escapeHtml(conversationId) + '\',\'block\',\'' + escapeHtml(otherId) + '\')" style="flex:1;padding:14px 8px;border:none;background:none;color:#FF3B30;font-size:15px;font-weight:700;cursor:pointer;">Block</button>' +
+                '<button onclick="tfAnswerMsgRequest(\'' + escapeHtml(conversationId) + '\',\'delete\')" style="flex:1;padding:14px 8px;border:none;background:none;color:#FF3B30;font-size:15px;font-weight:700;cursor:pointer;">Delete</button>' +
+                '<button onclick="tfAnswerMsgRequest(\'' + escapeHtml(conversationId) + '\',\'accept\')" style="flex:1;padding:14px 8px;border:none;border-radius:12px;background:var(--bg-secondary,#eef0f3);color:var(--text-primary,#000);font-size:15px;font-weight:800;cursor:pointer;">Accept</button>' +
+            '</div>';
+        if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+        host.appendChild(bar);
+    } catch (e) { console.warn('[MsgRequest]', e && e.message); }
 }
 
 async function fillMsgContent() {
@@ -14262,6 +14378,8 @@ async function fillMsgContent() {
             // Primary and was supposed to be in Requests as well, which is why
             // the tabs all looked the same.
             var _following = await _tfFollowingIds();
+            var _accepted = await _tfAcceptedConvoIds();
+            rawConvos.forEach(function (c) { c._accepted = !!_accepted[c.id]; });
             rawConvos = rawConvos.filter(function (c) {
                 return _tfIsPrimaryConvo(c, otherIdByConv[c.id], _following);
             });
@@ -27593,20 +27711,41 @@ if (!session) { showToast('Please log in'); return null; }
         }
     },
 
+    // Following a private account asks first.
+    //
+    // Returns true (now following), false (no longer following), or the string
+    // 'requested' / 'withdrawn' when the account is private and the follow has
+    // to be approved by them.
     async toggleFollow(targetUserId) {
         var session = await DB.getSession();
         if (!session) return;
         var userId = session.user.id;
         if (userId === targetUserId) return;
+
         var check = await sb.from('follows').select('id').eq('follower_id', userId).eq('following_id', targetUserId).maybeSingle();
         if (check.data) {
             await sb.from('follows').delete().eq('id', check.data.id);
             return false;
-        } else {
-            await sb.from('follows').insert({ follower_id: userId, following_id: targetUserId });
-            tfNotifyFollow(targetUserId);
-            return true;
         }
+
+        // Already asked? Tapping again takes the request back.
+        var pending = await sb.from('follow_requests').select('id')
+            .eq('requester_id', userId).eq('target_id', targetUserId).maybeSingle();
+        if (pending.data) {
+            await sb.from('follow_requests').delete().eq('id', pending.data.id);
+            return 'withdrawn';
+        }
+
+        if (await tfIsPrivateAccount(targetUserId)) {
+            var req = await sb.from('follow_requests')
+                .insert({ requester_id: userId, target_id: targetUserId });
+            if (req.error) { console.warn('[Follow]', req.error.message); return null; }
+            return 'requested';
+        }
+
+        var ins = await sb.from('follows').insert({ follower_id: userId, following_id: targetUserId });
+        if (ins.error) { console.warn('[Follow]', ins.error.message); return null; }
+        return true;
     },
 
     async postComment(postId, text, parentCommentId) {
@@ -32547,7 +32686,9 @@ function renderNotifCard(notif) {
         like:          { icon: 'fa-heart',      color: '#FF2D55', bg: '#FF2D5512' },
         comment:       { icon: 'fa-comment',    color: '#007AFF', bg: '#007AFF12' },
         comment_reply: { icon: 'fa-reply',      color: '#007AFF', bg: '#007AFF12' },
-        follow:        { icon: 'fa-user-plus',  color: '#34C759', bg: '#34C75912' },
+        follow:         { icon: 'fa-user-plus',   color: '#34C759', bg: '#34C75912' },
+        follow_request: { icon: 'fa-user-clock',  color: '#FF9500', bg: '#FF950012' },
+        follow_accepted:{ icon: 'fa-user-check',  color: '#34C759', bg: '#34C75912' },
         repost:        { icon: 'fa-retweet',    color: '#34C759', bg: '#34C75912' },
         mention:       { icon: 'fa-at',         color: '#5856D6', bg: '#5856D612' },
         reply:         { icon: 'fa-reply',      color: '#007AFF', bg: '#007AFF12' },
@@ -32564,6 +32705,8 @@ function renderNotifCard(notif) {
         reply:         'replied to your comment',
     };
     const clipWords = { like: 'liked your clip', comment: 'commented on your clip' };
+    messages.follow_request = 'wants to follow you';
+    messages.follow_accepted = 'accepted your follow request';
     let message = notif.message ||
         (notif.clip_id && clipWords[notif.type]) ||
         messages[notif.type] || 'interacted with you';
@@ -32608,9 +32751,53 @@ function renderNotifCard(notif) {
                     </p>
                     <small style="color:#aaa;font-size:11px;">${timeAgo}</small>
                 </div>
+                ${notif.type === 'follow_request' ? `
+                <div data-fr-actions="${escapeHtml(notif.actor_id || '')}" style="display:flex;gap:8px;flex-shrink:0;" onclick="event.stopPropagation();">
+                    <button onclick="tfAnswerFollowRequest(this,'${escapeHtml(notif.actor_id || '')}',true)" style="padding:8px 14px;border-radius:18px;border:none;background:#007AFF;color:#fff;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Accept</button>
+                    <button onclick="tfAnswerFollowRequest(this,'${escapeHtml(notif.actor_id || '')}',false)" style="padding:8px 14px;border-radius:18px;border:1px solid var(--border-color,#ddd);background:transparent;color:var(--text-primary,#000);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Reject</button>
+                </div>` : ''}
                 ${!notif.read ? '<div style="width:8px;height:8px;border-radius:50%;background:#007AFF;flex-shrink:0;"></div>' : ''}
             </div>
         </div>`;
+}
+
+// Accept or reject a request to follow you.
+//
+// Accepting has to create a follows row for somebody else, which the insert
+// policy on follows rightly refuses, so the database does it in a function that
+// first checks the request was addressed to you. On success the two buttons are
+// replaced by Follow back, which is the only thing left to decide.
+async function tfAnswerFollowRequest(btn, requesterId, accept) {
+    if (!window.sb || !currentUser || !requesterId) return;
+    var row = btn.closest('[data-fr-actions]');
+    if (row) row.innerHTML = '<small style="color:#888;font-size:12px;">…</small>';
+    try {
+        var q = await sb.from('follow_requests').select('id')
+            .eq('requester_id', requesterId).eq('target_id', currentUser.id).maybeSingle();
+        if (!q.data) {
+            if (row) row.innerHTML = '<small style="color:#888;font-size:12px;">No longer pending</small>';
+            return;
+        }
+        var fn = accept ? 'accept_follow_request' : 'reject_follow_request';
+        var r = await sb.rpc(fn, { p_request_id: q.data.id });
+        if (r.error) throw r.error;
+        triggerHaptic(25);
+        if (!accept) {
+            if (row) row.innerHTML = '<small style="color:#888;font-size:12px;">Rejected</small>';
+            return;
+        }
+        // They follow you now. Following them back is a separate decision.
+        var already = tfIsFollowing(requesterId);
+        if (row) {
+            row.innerHTML = already
+                ? '<small style="color:#888;font-size:12px;">Following each other</small>'
+                : '<button onclick="realToggleFollow(this,\'' + requesterId + '\')" class="follow-btn" style="padding:8px 14px;border-radius:18px;border:none;background:#007AFF;color:#fff;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Follow back</button>';
+        }
+        showToast('Request accepted');
+    } catch (e) {
+        console.warn('[FollowRequest]', e && e.message);
+        if (row) row.innerHTML = '<small style="color:#FF3B30;font-size:12px;">Could not do that</small>';
+    }
 }
 
 // Route a notification tap by type: follows -> the person's profile (Follow /
@@ -36323,6 +36510,32 @@ function sendGifMessage(content) {
     var followedUsers = JSON.parse(localStorage.getItem('tf-followed-users') || '[]');
     var isFollowing = followedUsers.indexOf(userId) > -1;
     triggerHaptic(20);
+
+    // A private account is asked, not followed. Everything below assumed the
+    // follow happened the moment the button was tapped, so following a private
+    // account showed "Following" over a follow that had not been agreed to.
+    if (!isFollowing && window.sb && currentUser) {
+        if (btn.classList.contains('requested')) {
+            var out = await RealData.toggleFollow(userId);
+            if (out === 'withdrawn') {
+                btn.classList.remove('requested');
+                btn.textContent = 'Follow';
+                showToast('Request withdrawn');
+            }
+            return;
+        }
+        if (await tfIsPrivateAccount(userId)) {
+            var res = await RealData.toggleFollow(userId);
+            if (res === 'requested') {
+                btn.classList.add('requested');
+                btn.textContent = 'Requested';
+                showToast('Request sent. They will decide.');
+            } else if (res === null) {
+                showToast('Could not send that request');
+            }
+            return;
+        }
+    }
 
     if (isFollowing) {
         followedUsers = followedUsers.filter(function(id) { return id !== userId; });

@@ -486,6 +486,68 @@ def _groq_is_too_large(exc):
             or 'rate_limit_exceeded' in text and 'tokens per m' in text.lower())
 
 
+# What Groq is actually serving today, asked once an hour.
+#
+# The list above is a guess written down at a point in time, and every name on
+# it will be retired eventually: that is exactly how Eddie went silent before,
+# when llama-3.3-70b-versatile was withdrawn and the list had no way to know.
+# Groq publishes what it currently serves, so ask it, and keep the written list
+# only as the order of preference and as the answer when the network is down.
+_GROQ_LIVE = {'at': 0.0, 'names': []}
+_GROQ_LIVE_TTL = 3600
+
+
+def _groq_param_size(name):
+    """Billions of parameters read off the model name, or 32 when it says none.
+
+    Model ids carry it by convention: llama-3.1-8b-instant, gpt-oss-120b. The
+    version number must not be mistaken for it, so only a number immediately
+    followed by 'b' at a word boundary counts.
+    """
+    import re
+    sizes = re.findall(r'(\d+(?:\.\d+)?)\s*b\b', name.lower())
+    if not sizes:
+        return 32.0
+    return max(float(s) for s in sizes)
+
+
+def _groq_live_models(client):
+    """Model ids Groq will accept right now, best-first. Never raises."""
+    if time.time() - _GROQ_LIVE['at'] < _GROQ_LIVE_TTL and _GROQ_LIVE['names']:
+        return _GROQ_LIVE['names']
+    names = []
+    try:
+        listing = client.models.list()
+        for m in (getattr(listing, 'data', None) or []):
+            mid = _attr(m, 'id')
+            # Only text chat models. Whisper and the guard models are on the
+            # same list and cannot answer a message.
+            if not mid or not _attr(m, 'active', True):
+                continue
+            low = mid.lower()
+            if any(s in low for s in ('whisper', 'guard', 'tts', 'embed', 'prompt-guard')):
+                continue
+            names.append(mid)
+    except Exception:
+        return _GROQ_FALLBACKS            # offline, or an older SDK: use the list
+
+    if not names:
+        return _GROQ_FALLBACKS
+
+    # Keep our preference order for the ones we know, then anything new Groq has
+    # added, so a replacement model is reachable without a code change.
+    known = [m for m in _GROQ_FALLBACKS if m in names]
+    rest = [m for m in names if m not in _GROQ_FALLBACKS]
+    # Smallest first among the unknown. On a free tier the per-minute token
+    # budget shrinks as the model grows, so the big ones are the ones that
+    # refuse a short question for being too large. A name with no size in it
+    # sorts as mid-range rather than being pushed to either end.
+    rest.sort(key=lambda n: (_groq_param_size(n), n))
+    _GROQ_LIVE['names'] = known + rest
+    _GROQ_LIVE['at'] = time.time()
+    return _GROQ_LIVE['names']
+
+
 def _groq_call(client, **kwargs):
     """Call Groq, moving down the list when a model has been retired.
 
@@ -494,9 +556,10 @@ def _groq_call(client, **kwargs):
     clear error into four confusing ones.
     """
     pinned = getattr(settings, 'EDDIE_GROQ_MODEL', '')
+    available = _groq_live_models(client)
     candidates = [pinned] if pinned else (
-        ([_GROQ_WORKING] if _GROQ_WORKING else []) +
-        [m for m in _GROQ_FALLBACKS if m != _GROQ_WORKING]
+        ([_GROQ_WORKING] if _GROQ_WORKING in available else []) +
+        [m for m in available if m != _GROQ_WORKING]
     )
     last = None
     for name in candidates:
@@ -509,6 +572,10 @@ def _groq_call(client, **kwargs):
                 logging.getLogger(__name__).warning(
                     'Groq model %s refused (%s), trying the next one', name,
                     'retired' if _groq_is_missing_model(exc) else 'request too large')
+                # A retirement means the cached list is stale, so throw it away
+                # and ask Groq again rather than walking a list of dead names.
+                if _groq_is_missing_model(exc):
+                    _GROQ_LIVE['at'] = 0.0
                 continue
             raise
         globals()['_GROQ_WORKING'] = name
