@@ -2028,7 +2028,7 @@ async function searchUsersForMessage(query) {
     }
     results.innerHTML = '';
     users.forEach(function(u) {
-        var avatar = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff');
+        var avatar = u.avatar_url || (tfAvatarFor(u.full_name || 'U', '007AFF'));
         var badge = u.badge_tier || 'verify-blue';
         var div = document.createElement('div');
         div.style.cssText = 'display:flex; align-items:center; gap:12px; padding:13px 0; border-bottom:1px solid var(--border-color,#f5f5f5); cursor:pointer;';
@@ -5583,7 +5583,7 @@ function editProfile() {
     var displayName = u.name || secureLoad('user_name') || 'Your Name';
     var username = (u.handle || secureLoad('user_handle') || '@username').replace('@','');
     var bio = secureLoad('user_bio') || '';
-    var avatarSrc = (document.getElementById('profile-avatar-img') || {}).src || 'https://ui-avatars.com/api/?name=U&background=007AFF&color=fff';
+    var avatarSrc = (document.getElementById('profile-avatar-img') || {}).src || tfAvatarFor('U', '007AFF');
     // Reorderable list mirrors the real profile tabs, in the user's saved order.
     var ORDER_ITEMS = _getProfileTabOrder().map(function(id){
         return { id: id, icon: PROFILE_TAB_DEFS[id].icon, label: PROFILE_TAB_DEFS[id].label };
@@ -6921,6 +6921,53 @@ function _tfRestoreUnder(key) {
     delete _tfPausedUnder[key];
 }
 
+// An initials avatar, drawn here rather than fetched.
+//
+// Every avatar without a picture was a request to ui-avatars.com, in
+// seventy-eight places. Two things wrong with that. It is a network round trip
+// per avatar, so faces flash in on every screen and every scroll, which is what
+// makes the app feel like it is always loading. And the URL carries the
+// person's real name to a third party, on every render, for an app whose whole
+// point is that it is the safe one.
+//
+// An inline SVG is the same picture with no request at all: it paints with the
+// first frame, works offline, and nothing leaves the device. Results are kept
+// so the same person is not re-encoded on every re-render.
+var _tfAvatarCache = {};
+
+function tfAvatarFor(name, bg, size) {
+    var label = String(name == null ? '' : name).trim();
+    var initials = (function () {
+        if (!label || label === 'U') return 'U';
+        var parts = label.replace(/^@/, '').split(/[\s._-]+/).filter(Boolean);
+        if (!parts.length) return 'U';
+        var a = parts[0].charAt(0);
+        var b = parts.length > 1 ? parts[parts.length - 1].charAt(0) : '';
+        return (a + b).toUpperCase();
+    })();
+    var colour = bg || '007AFF';
+    if (colour === 'random') {
+        // Stable per name, so somebody's avatar is not a different colour every
+        // time the list is drawn.
+        var h = 0;
+        for (var i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) & 0xffffff;
+        var palette = ['007AFF', '34C759', 'FF9500', 'FF2D55', '5856D6', 'AF52DE', '00C7BE'];
+        colour = palette[Math.abs(h) % palette.length];
+    }
+    var key = initials + '|' + colour;
+    if (_tfAvatarCache[key]) return _tfAvatarCache[key];
+
+    var px = size || 80;
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + px + '" height="' + px + '" viewBox="0 0 80 80">' +
+        '<rect width="80" height="80" fill="#' + colour + '"/>' +
+        '<text x="40" y="40" fill="#fff" font-family="-apple-system,Segoe UI,Roboto,sans-serif" ' +
+        'font-size="' + (initials.length > 1 ? 30 : 36) + '" font-weight="600" text-anchor="middle" ' +
+        'dominant-baseline="central">' + initials.replace(/[<>&]/g, '') + '</text></svg>';
+    var url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    _tfAvatarCache[key] = url;
+    return url;
+}
+
 // Is something sitting on top of this element right now?
 //
 // An IntersectionObserver measures the viewport, not what the person can see,
@@ -7054,7 +7101,7 @@ function triggerThought() {
     window._thoughtGifUrl = null; // fresh composer, drop any previously picked GIF
     try { window._thoughtAudience = localStorage.getItem('tf_thought_audience') || 'everyone'; } catch (e) { window._thoughtAudience = 'everyone'; }
 
-    var avatarUrl = currentUser?.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(currentUser?.name || 'U') + '&background=007AFF&color=fff&bold=true&size=200';
+    var avatarUrl = currentUser?.avatar_url || tfAvatarFor(currentUser?.name || 'U', '007AFF');
     var userName = currentUser?.name || 'Your Name';
 
     var dark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -7765,7 +7812,7 @@ function selectRealMusicTrack(trackName, artistName, artUrl, previewUrl) {
         window._storyPickerMusicPending = false;
         window._spMusicOnly = true; // music-only story -> spinning album-cover disc
         // Use album art as story background (music-only story, image 6 style)
-        var _bgUrl = artUrl || 'https://ui-avatars.com/api/?name=Music&background=1c1c1e&color=fff&size=800';
+        var _bgUrl = artUrl || tfAvatarFor('Music', '1c1c1e');
         window._spPendingMusicInfo = { name: trackName, artist: artistName, artUrl: artUrl, previewUrl: previewUrl };
         openStoryPostArea({ type: 'image/jpeg', name: 'music-story' }, _bgUrl);
         return;
@@ -8470,7 +8517,7 @@ function openThoughtOverviewSheet(thoughtText, musicName, hasMusic) {
 
     var avatarUrl = (currentUser && currentUser.avatar_url)
         ? currentUser.avatar_url
-        : 'https://ui-avatars.com/api/?name=' + encodeURIComponent((currentUser && (currentUser.full_name||currentUser.username)) || 'U') + '&background=007AFF&color=fff&size=200';
+        : tfAvatarFor((currentUser && (currentUser.full_name||currentUser.username)) || 'U', '007AFF', 200);
 
     var sheet = document.createElement('div');
     sheet.id = 'thoughtOverviewSheet';
@@ -9923,7 +9970,7 @@ async function renderLocalCircles() {
                 'No verified users found nearby yet</div>';
         } else {
             nearbyUsers.forEach(function(u) {
-                const avatar = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff');
+                const avatar = u.avatar_url || (tfAvatarFor(u.full_name || 'U', '007AFF'));
                 const dist = u.distanceKm < 1 ? Math.round(u.distanceKm * 1000) + 'm away' : u.distanceKm.toFixed(1) + ' km away';
                 html += '<div class="local-user-card" onclick="viewUserProfile(\'' + u.id + '\')" style="cursor:pointer;">' +
                     '<img src="' + escapeHtml(avatar) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;">' +
@@ -10213,7 +10260,7 @@ async function renderComments() {
         item.style.cssText = 'align-items:flex-start;';
 
         var avatar = document.createElement('img');
-        avatar.src = c.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(c.user || 'U') + '&background=random&color=fff&bold=true&size=80';
+        avatar.src = c.avatar_url || tfAvatarFor(c.user || 'U', 'random');
         avatar.className = 'comment-avatar';
         avatar.style.alignSelf = 'flex-start';
 
@@ -10301,7 +10348,7 @@ function postComment() {
     var tier = currentUser ? currentUser.tier : 'verify-blue';
     var avatarSrc = (currentUser && currentUser.avatar_url)
         ? currentUser.avatar_url
-        : 'https://ui-avatars.com/api/?name=' + encodeURIComponent(currentUser ? currentUser.name : 'U') + '&background=007AFF&color=fff&bold=true&size=80';
+        : tfAvatarFor(currentUser ? currentUser.name : 'U', '007AFF');
 
     var item = document.createElement('div');
     item.className = 'comment-item';
@@ -10636,7 +10683,7 @@ async function _cShareLoadPeople() {
 }
 function _cSharePersonRow(u) {
     var name = u.full_name || u.username || 'User';
-    var avatar = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=007AFF&color=fff');
+    var avatar = u.avatar_url || (tfAvatarFor(name, '007AFF'));
     return '<div class="cshare-person" data-q="' + escapeHtml((name + ' ' + (u.username || '')).toLowerCase()) + '" onclick="_cShareToPerson(\'' + escapeHtml(u.id) + '\')" style="display:flex;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;border-radius:12px;">' +
         '<img src="' + escapeHtml(avatar) + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
         '<div style="flex:1;min-width:0;">' +
@@ -10834,7 +10881,7 @@ function _buildCommentStoryEditor(meta, bgUrl) {
     window._csBgUrl = bgUrl || '';
     var name = escapeHtml(meta.username || 'User');
     var body = escapeHtml(meta.text || '');
-    var avatar = meta.avatar || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(meta.username || 'U') + '&background=007AFF&color=fff&size=120');
+    var avatar = meta.avatar || (tfAvatarFor(meta.username || 'U', '007AFF'));
 
     var screen = document.createElement('div');
     screen.id = 'commentStoryScreen';
@@ -11108,7 +11155,7 @@ async function postGifComment(src) {
     var list = document.getElementById('comment-list');
     var name = currentUser ? currentUser.name : 'You';
     var tier = currentUser ? currentUser.tier : 'verify-blue';
-    var avatar = currentUser?.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(name||'U') + '&background=007AFF&color=fff&size=80');
+    var avatar = currentUser?.avatar_url || (tfAvatarFor(name||'U', '007AFF'));
     var newComment = document.createElement('div');
     newComment.className = 'comment-item';
     newComment.style.alignItems = 'flex-start';
@@ -11482,7 +11529,7 @@ function openStoryViewer(userId) {
                 _storyItems = stories;
                 var u = stories[0].users || {};
                 var name = u.full_name || u.username || 'User';
-                var avatar = u.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(name.charAt(0)) + '&background=007AFF&color=fff&size=100';
+                var avatar = u.avatar_url || tfAvatarFor(name.charAt(0), '007AFF');
                 var imgEl = document.getElementById('story-avatar');
                 var nameEl = document.getElementById('story-username');
                 var timeEl = document.getElementById('story-time');
@@ -11659,7 +11706,7 @@ function showStorySegment() {
         discEl.id = 'storyDiscOverlay';
         discEl.style.cssText = 'position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;';
         discEl.innerHTML = '<div id="storyDiscWrap" style="position:relative;width:220px;height:220px;border-radius:50%;overflow:hidden;box-shadow:0 16px 60px rgba(0,0,0,0.7);animation:discSpin 4s linear infinite;" title="' + escapeHtml(story.sound_name) + '">' +
-            '<img src="' + escapeHtml(story.media_url || '') + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.src=\'https://ui-avatars.com/api/?name=Music&background=111&color=fff&size=300\'">' +
+            '<img src="' + escapeHtml(story.media_url || '') + '" style="width:100%;height:100%;object-fit:cover;" data-fallback="' + escapeHtml(tfAvatarFor('Music', '111')) + '" onerror="this.onerror=null;this.src=this.getAttribute(\'data-fallback\');">' +
             '<div style="position:absolute;inset:0;border-radius:50%;border:3px solid rgba(255,255,255,0.12);"></div>' +
             '<div style="position:absolute;inset:0;background:radial-gradient(circle at 50%,rgba(0,0,0,0.6) 22%,transparent 55%);"></div>' +
             '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:28px;height:28px;border-radius:50%;background:#111;border:3px solid rgba(255,255,255,0.25);"></div>' +
@@ -11943,7 +11990,7 @@ function openStoryViewers() {
                 list.innerHTML = viewers.map(function(v) {
                     var p = v.profiles || {};
                     var name = p.full_name || p.username || 'User';
-                    var avatar = p.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(name.charAt(0)) + '&background=007AFF&color=fff&size=100';
+                    var avatar = p.avatar_url || tfAvatarFor(name.charAt(0), '007AFF');
                     var diff = Date.now() - new Date(v.viewed_at).getTime();
                     var timeStr = diff < 3600000 ? Math.floor(diff/60000) + 'm ago' : Math.floor(diff/3600000) + 'h ago';
                     return '<div style="display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:0.5px solid #f5f5f5;cursor:pointer;" onclick="closeStoryViewersPanel();openProfile(\'' + escapeHtml(v.viewer_id || '') + '\')">' +
@@ -12408,7 +12455,7 @@ function storySendRender(list, users) {
     if (!users.length) { list.innerHTML = '<p style="color:rgba(255,255,255,0.4);text-align:center;padding:20px 0;">No recent chats</p>'; return; }
     list.innerHTML = users.map(function(item) {
         var u = item.user;
-        var av = u.avatar_url || 'https://ui-avatars.com/api/?name='+encodeURIComponent(u.full_name||u.username||'U')+'&background=007AFF&color=fff&size=80';
+        var av = u.avatar_url || tfAvatarFor(u.full_name||u.username||'U', '007AFF');
         return '<div onclick="storySendToPerson(\''+escapeHtml(u.id)+'\',\''+escapeHtml(u.full_name||u.username||'User')+'\')" style="display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:0.5px solid rgba(255,255,255,0.06);cursor:pointer;">' +
             '<img src="'+escapeHtml(av)+'" style="width:46px;height:46px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
             '<div style="flex:1;"><b style="color:white;font-size:15px;">'+escapeHtml(u.full_name||u.username||'User')+'</b></div>' +
@@ -13224,7 +13271,7 @@ function _liveHostAddRequest(req) {
     var card = document.createElement('div');
     card.id = 'ljr-card-' + req.id;
     card.style.cssText = 'pointer-events:auto;background:rgba(20,20,22,0.92);backdrop-filter:blur(16px);border:0.5px solid rgba(255,255,255,0.14);border-radius:16px;padding:10px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 30px rgba(0,0,0,0.4);animation:msgMenuPop 0.28s cubic-bezier(0.32,0.72,0,1) both;';
-    var av = req.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(req.username || 'U') + '&background=007AFF&color=fff&size=64');
+    var av = req.avatar_url || (tfAvatarFor(req.username || 'U', '007AFF'));
     card.innerHTML =
         '<img src="' + av + '" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.style.visibility=\'hidden\'">' +
         '<div style="flex:1;min-width:0;">' +
@@ -13329,7 +13376,7 @@ async function openLiveRanks() {
         }
         body.innerHTML = rows.map(function (u, i) {
             var medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : ('<span style="color:rgba(255,255,255,0.4);font-weight:800;font-size:13px;">' + (i + 1) + '</span>');
-            var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.username || 'U') + '&background=007AFF&color=fff&size=64');
+            var av = u.avatar_url || (tfAvatarFor(u.username || 'U', '007AFF'));
             return '<div style="display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:0.5px solid rgba(255,255,255,0.06);">' +
                 '<div style="width:26px;text-align:center;font-size:16px;">' + medal + '</div>' +
                 '<img src="' + av + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.style.visibility=\'hidden\'">' +
@@ -13479,7 +13526,7 @@ async function openLiveStreamFeed() {
             streams = liveResp.data.map(function(s) {
                 return {
                     name: '@' + s.username,
-                    avatar: s.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(s.username || 'L') + '&background=007AFF&color=fff&size=80'),
+                    avatar: s.avatar_url || (tfAvatarFor(s.username || 'L', '007AFF')),
                     viewers: s.viewer_count > 999 ? (s.viewer_count/1000).toFixed(1)+'K' : String(s.viewer_count || 0),
                     title: s.title || 'Live now',
                     room: s.room || ''
@@ -13490,7 +13537,7 @@ async function openLiveStreamFeed() {
 
     var myAvatar = (currentUser && currentUser.avatar_url)
         ? currentUser.avatar_url
-        : 'https://ui-avatars.com/api/?name=' + encodeURIComponent((currentUser && (currentUser.full_name || currentUser.username)) || 'Me') + '&background=007AFF&color=fff&size=80';
+        : tfAvatarFor((currentUser && (currentUser.full_name || currentUser.username)) || 'Me', '007AFF');
 
     var cards = streams.map(function(s, i) {
         return '<div onclick="openViewerLive(\'' + s.name + '\',\'' + s.avatar + '\',\'' + (s.room || '') + '\')" style="position:relative;border-radius:16px;overflow:hidden;background:#111;aspect-ratio:9/16;cursor:pointer;flex-shrink:0;width:calc(50% - 6px);">' +
@@ -13551,7 +13598,7 @@ function minimizeLiveFeedPage() {
     _miniLiveMode = 'browse';
     var avatar = (currentUser && currentUser.avatar_url)
         ? currentUser.avatar_url
-        : 'https://ui-avatars.com/api/?name=Live&background=FF3B30&color=fff&size=80';
+        : tfAvatarFor('Live', 'FF3B30');
     _showMiniPlayer('Live Now', '0', avatar);
 }
 
@@ -13627,14 +13674,13 @@ content.innerHTML = [0,1,2,3].map(function(){return '<div style="display:flex;al
                 return;
             }
             try {
-                var { data: follows } = await window.sb.from('follows').select('follower_id').eq('following_id', currentUser.id);
-                var followerIds = (follows||[]).map(function(f){ return f.follower_id; });
+                var _following = await _tfFollowingIds(true);
                 var { data: myReqParts } = await window.sb.from('conversation_participants')
                     .select('conversation_id').eq('user_id', currentUser.id).eq('is_blocked', false);
                 var myReqConvIds = (myReqParts || []).map(function(p){ return p.conversation_id; });
                 var rawReqConvos = [], reqErr = null;
                 if (myReqConvIds.length) {
-                    var rr = await window.sb.from('conversations').select('id,updated_at')
+                    var rr = await window.sb.from('conversations').select('id,updated_at,type,created_by')
                         .in('id', myReqConvIds).order('updated_at',{ascending:false}).limit(30);
                     rawReqConvos = rr.data || []; reqErr = rr.error;
                 }
@@ -13657,13 +13703,16 @@ content.innerHTML = [0,1,2,3].map(function(){return '<div style="display:flex;al
                         (rURows||[]).forEach(function(u){ reqUserMap[u.id]=u; });
                     }
                 }
-                var convos = (rawReqConvos||[]).map(function(c){
-                    var oid = c.participant1_id === currentUser.id ? c.participant2_id : c.participant1_id;
-                    c._other = reqUserMap[reqOtherIdByConv[c.id]] || {}; return c;
-                });
-                var requests = (convos||[]).filter(function(c) {
-                    var other = c.participant1_id === currentUser.id ? (c.users2||{}) : (c.users1||{});
-                    return other.id && !followerIds.includes(other.id) && other.id !== currentUser.id;
+                // This read participant1_id, participant2_id, users1 and users2,
+                // none of which are columns on conversations, so `other` was
+                // always an empty object and the filter threw everything away:
+                // the tab could never show a request, whoever wrote to you.
+                // The same rule Primary uses decides it, inverted.
+                var requests = (rawReqConvos || []).map(function (c) {
+                    c._other = reqUserMap[reqOtherIdByConv[c.id]] || {};
+                    return c;
+                }).filter(function (c) {
+                    return !_tfIsPrimaryConvo(c, reqOtherIdByConv[c.id], _following);
                 });
                 if (!requests.length) {
                     content.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#888;"><i class="fa-regular fa-envelope-open" style="font-size:40px;color:#ccc;display:block;margin-bottom:15px;"></i><b style="color:var(--text-primary,#333);display:block;margin-bottom:8px;">No requests yet</b><p style="font-size:13px;">People you don\'t follow will appear here</p></div>';
@@ -13911,7 +13960,7 @@ async function _mentionSearchUsers(q, el, start, end) {
                        : 'Type a name or username to search');
     _mentionRenderDropdown(el, start, end, rows.filter(function(u){ return u.username; }).map(function(u) {
         return { insert: '@' + u.username + ' ',
-            html: '<img src="' + escapeHtml(u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || u.username || 'U') + '&background=007AFF&color=fff&size=60')) + '" style="width:34px;height:34px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
+            html: '<img src="' + escapeHtml(u.avatar_url || (tfAvatarFor(u.full_name || u.username || 'U', '007AFF'))) + '" style="width:34px;height:34px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
                 '<div style="flex:1;min-width:0;"><div style="font-size:14px;font-weight:600;color:var(--text-primary,#000);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(u.full_name || u.username) + (u.verified ? ' <i class="fa-solid fa-circle-check ' + escapeHtml(u.badge_tier || 'verify-blue') + '" style="font-size:9px;"></i>' : '') + '</div><div style="font-size:12px;color:#888;">@' + escapeHtml(u.username) + '</div></div>' };
     }), hint);
 }
@@ -14056,6 +14105,37 @@ function _previewForMessage(m, meId) {
     }
 }
 
+// Who counts as someone you already know, for splitting the inbox.
+//
+// The Requests tab's own empty state says "people you don't follow will appear
+// here", so following them is the line. A conversation you started yourself is
+// Primary whoever it is with, because you went looking for them.
+var _tfFollowingCache = null;
+async function _tfFollowingIds(force) {
+    if (_tfFollowingCache && !force) return _tfFollowingCache;
+    var set = {};
+    if (window.sb && currentUser) {
+        try {
+            var r = await sb.from('follows').select('following_id')
+                .eq('follower_id', currentUser.id).limit(2000);
+            if (r.error) console.warn('[Inbox]', r.error.message);
+            (r.data || []).forEach(function (f) { set[f.following_id] = 1; });
+        } catch (e) { console.warn('[Inbox]', e && e.message); }
+    }
+    _tfFollowingCache = set;
+    return set;
+}
+
+// Primary or a request? One rule, used by both tabs, so a conversation cannot
+// be in both or in neither.
+function _tfIsPrimaryConvo(convo, otherId, following) {
+    if (!convo) return true;
+    if (convo.type === 'group') return true;                 // groups are never requests
+    if (convo.created_by === (currentUser || {}).id) return true;  // you started it
+    if (!otherId) return true;                               // nobody else in it
+    return !!following[otherId];
+}
+
 async function fillMsgContent() {
     // Don't clobber the Channels/Requests tab if a refresh fires while it's open.
     if (window._activeMsgTab === 'channels' || window._activeMsgTab === 'requests') return;
@@ -14086,7 +14166,7 @@ async function fillMsgContent() {
     stories.innerHTML = '';
     stories.innerHTML = '<div class="story-item" onclick="' + myStoryClick + '">' +
         '<div style="width:68px;height:68px;border-radius:50%;padding:3px;' + _ringBg + 'display:flex;align-items:center;justify-content:center;position:relative;">' +
-        '<img src="' + (currentUser && currentUser.avatar_url ? currentUser.avatar_url : 'https://ui-avatars.com/api/?name=' + encodeURIComponent((currentUser && currentUser.username) || 'U') + '&background=007AFF&color=fff&size=100') + '" class="story-pic" style="width:62px;height:62px;">' +
+        '<img src="' + (currentUser && currentUser.avatar_url ? currentUser.avatar_url : tfAvatarFor((currentUser && currentUser.username) || 'U', '007AFF')) + '" class="story-pic" style="width:62px;height:62px;">' +
         '<div style="position:absolute;bottom:0;right:0;width:22px;height:22px;border-radius:50%;background:#007AFF;border:2px solid white;display:flex;align-items:center;justify-content:center;">' +
         '<i class="fa-solid fa-plus" style="color:white;font-size:10px;"></i></div></div>' +
         '<small style="font-size:11px;">Your Story</small></div>';
@@ -14121,9 +14201,9 @@ async function fillMsgContent() {
                 if (!u.id || _seenStoryUsers[u.id]) return;
                 _seenStoryUsers[u.id] = true;
                 var name = u.full_name || u.username || 'User';
-                var avatar = u.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=007AFF&color=fff&size=100';
+                var avatar = u.avatar_url || tfAvatarFor(name, '007AFF');
                 stories.innerHTML += '<div class="story-item" onclick="openStoryViewer(\'' + escapeHtml(u.id || '') + '\')">' +
-                    '<div class="ring-blue"><img src="' + escapeHtml(avatar) + '" class="story-pic" onerror="this.src=\'https://ui-avatars.com/api/?name=' + encodeURIComponent(name.charAt(0)) + '&background=007AFF&color=fff&size=100\'"></div>' +
+                    '<div class="ring-blue"><img src="' + escapeHtml(avatar) + '" class="story-pic" data-fallback="' + escapeHtml(tfAvatarFor(name, '007AFF')) + '" onerror="this.onerror=null;this.src=this.getAttribute(\'data-fallback\');"></div>' +
                     '<small style="font-size:11px;">' + escapeHtml(name.split(' ')[0]) + '</small></div>';
             });
         } catch(e) { console.warn('[Stories]', e); }
@@ -14155,7 +14235,7 @@ async function fillMsgContent() {
         // Step 2: get conversations
         var { data: rawConvos, error: convErr } = await sb
             .from('conversations')
-            .select('id, updated_at, type, name, avatar_url')
+            .select('id, updated_at, type, name, avatar_url, created_by')
             .in('id', myConvIds)
             .order('updated_at', { ascending: false, nullsFirst: false })
             .limit(50);
@@ -14176,6 +14256,20 @@ async function fillMsgContent() {
                 if (!otherIdByConv[p.conversation_id]) otherIdByConv[p.conversation_id] = p.user_id;
                 (othersByConv[p.conversation_id] = othersByConv[p.conversation_id] || []).push(p.user_id);
             });
+
+            // Step 3b: Primary is people you know. This listed every
+            // conversation you were in, so a message from a stranger sat in
+            // Primary and was supposed to be in Requests as well, which is why
+            // the tabs all looked the same.
+            var _following = await _tfFollowingIds();
+            rawConvos = rawConvos.filter(function (c) {
+                return _tfIsPrimaryConvo(c, otherIdByConv[c.id], _following);
+            });
+            if (!rawConvos.length) {
+                list.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#888;"><i class="fa-regular fa-comment" style="font-size:36px;color:#ccc;display:block;margin-bottom:12px;"></i>No messages yet<p style="font-size:13px;margin-top:6px;">Anything from someone you do not follow is under Requests.</p></div>';
+                return;
+            }
+            convIds = rawConvos.map(function(c){ return c.id; });
 
             // Step 4: hydrate user details (all participants, so group avatars work)
             var uniqueOtherIds = [];
@@ -14274,7 +14368,7 @@ function showContactThought(contactName, thoughtText, musicName, hasMusic) {
 
             <!-- Contact name + time -->
             <div style="display:flex;align-items:center;gap:10px;padding:16px 20px 8px;">
-                <img src="https://ui-avatars.com/api/?name=${encodeURIComponent(contactName||'U')}&background=007AFF&color=fff&size=120"
+                <img src="${tfAvatarFor(contactName||'U', '007AFF', 120)}"
                 <div>
                     <b style="color:white;font-size:15px;display:block;">${escapeHtml(contactName)}</b>
                     <small style="color:rgba(255,255,255,0.45);font-size:11px;">Just now</small>
@@ -14617,7 +14711,7 @@ function tfReelPageHTML(post, avatarHtml, username, verified, likes) {
 // Avatar block for a clip card, so both callers build it the same way.
 function tfReelAvatarHTML(post, profile, hasStory) {
     var username = profile.username || 'user';
-    var avatar = profile.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(username) + '&background=007AFF&color=fff&size=80');
+    var avatar = profile.avatar_url || (tfAvatarFor(username, '007AFF'));
     return hasStory
         ? '<div onclick="openStoryViewer(\'' + escapeHtml(String(post.user_id || '')) + '\')" style="width:42px;height:42px;border-radius:50%;padding:2.5px;background:linear-gradient(135deg,#007AFF,#00C7FF);flex-shrink:0;cursor:pointer;" title="View story">' +
               '<img src="' + escapeHtml(avatar) + '" style="width:100%;height:100%;border-radius:50%;border:2px solid #000;object-fit:cover;display:block;">' +
@@ -14723,7 +14817,7 @@ async function initReels() {
         reels.forEach(function(post) {
             var profile = post.users || {};
             var username = profile.username || 'user';
-            var avatar = profile.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(username) + '&background=007AFF&color=fff&size=80');
+            var avatar = profile.avatar_url || (tfAvatarFor(username, '007AFF'));
             var likes = post.like_count > 999 ? (post.like_count/1000).toFixed(1)+'K' : (post.like_count || 0);
             var verified = profile.id_verified ? '<i class="fa-solid fa-circle-check verify-blue" style="font-size:12px;"></i>' : '';
             var hasStory = !!_storyAuthors[post.user_id];
@@ -14968,7 +15062,7 @@ function createPost(i) {
         safeCard.id = `post-${i}`;
         safeCard.innerHTML = `
             <div class="post-header">
-                <img src="https://ui-avatars.com/api/?name=User&background=34C759&color=fff&size=100" class="post-avatar">
+                <img src="${tfAvatarFor("User", "34C759", 100)}" class="post-avatar">
                 <div style="flex:1;">
                     <div class="post-info"><b>TrustFirst Kids <i class="fa-solid fa-circle-check verify-green"></i></b></div>
                     <div class="post-info"><small>@trustfirst_kids • Safe Content</small></div>
@@ -17703,9 +17797,9 @@ function hsfRender(list, users, hiddenIds) {
     if (!users.length) { list.innerHTML = '<p style="color:rgba(255,255,255,0.4);text-align:center;padding:30px 0;">No followers yet</p>'; return; }
     list.innerHTML = users.map(function(u) {
         var sel = hiddenIds.has(u.id);
-        var av = u.avatar_url || 'https://ui-avatars.com/api/?name='+encodeURIComponent(u.full_name||u.username||'U')+'&background=007AFF&color=fff&size=80';
+        var av = u.avatar_url || tfAvatarFor(u.full_name||u.username||'U', '007AFF');
         return '<div data-hsf-uid="'+u.id+'" data-selected="'+sel+'" onclick="hsfToggle(this)" style="display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:0.5px solid rgba(255,255,255,0.06);cursor:pointer;">' +
-            '<img src="'+escapeHtml(av)+'" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=007AFF&color=fff&size=80\'">' +
+            '<img src="'+escapeHtml(av)+'" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.onerror=null;this.src=\'' + tfAvatarFor('U', '007AFF') + '\'">' +
             '<div style="flex:1;"><b style="color:white;font-size:15px;display:block;">'+escapeHtml(u.full_name||u.username||'User')+'</b><small style="color:rgba(255,255,255,0.4);font-size:12px;">@'+escapeHtml(u.username||'')+'</small></div>' +
             '<div class="hsf-check" style="width:24px;height:24px;border-radius:50%;border:2px solid '+(sel?'#007AFF':'rgba(255,255,255,0.3)')+';background:'+(sel?'#007AFF':'transparent')+';display:flex;align-items:center;justify-content:center;transition:all 0.2s;">' +
                 (sel?'<i class="fa-solid fa-check" style="color:white;font-size:11px;"></i>':'') +
@@ -19891,8 +19985,7 @@ async function _tcFetchSuggestSlide() {
 
 function _tcSuggestCardHtml(u, clips) {
     var label = u.display_name || u.full_name || u.username || 'User';
-    var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' +
-        encodeURIComponent(label) + '&background=222&color=fff&size=200');
+    var av = u.avatar_url || (tfAvatarFor(label, '222'));
     var uid = escapeHtml(u.id);
     var isBack = u._kind === 'followback';
 
@@ -19909,7 +20002,7 @@ function _tcSuggestCardHtml(u, clips) {
     return '<div class="tc-sg-card" data-uid="' + uid + '" ' +
             'onclick="tcSuggestOpen(\'' + uid + '\')">' +
         '<img src="' + escapeHtml(av) + '" ' +
-            'onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=888&color=fff&size=200\'">' +
+            'onerror="this.onerror=null;this.src=\'' + tfAvatarFor('U', '888') + '\'">' +
         '<span class="tc-sg-name">' + escapeHtml(label) +
             (u.verified ? ' <i class="fa-solid fa-circle-check verify-blue" style="font-size:11px;"></i>' : '') +
         '</span>' +
@@ -21168,14 +21261,14 @@ async function tfFetchFollowSuggestions(kind, limit) {
 
 function _tfSuggestCard(u, kind) {
     var label = u.display_name || u.full_name || u.username || 'User';
-    var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(label) + '&background=007AFF&color=fff&size=160');
+    var av = u.avatar_url || (tfAvatarFor(label, '007AFF'));
     var sub = kind === 'followback' ? 'Follows you' : 'Suggested for you';
     var btn = kind === 'followback' ? 'Follow back' : 'Follow';
     return '<div class="tf-sg-card" data-uid="' + escapeHtml(u.id) + '">' +
         '<div class="tf-sg-x" onclick="tfDismissSuggestion(this,\'' + escapeHtml(u.id) + '\')" title="Not interested">' +
             '<i class="fa-solid fa-xmark"></i></div>' +
         '<img src="' + escapeHtml(av) + '" onclick="viewUserProfile(\'' + escapeHtml(u.id) + '\')" ' +
-            'onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=888&color=fff&size=160\'">' +
+            'onerror="this.onerror=null;this.src=\'' + tfAvatarFor('U', '888') + '\'">' +
         '<b onclick="viewUserProfile(\'' + escapeHtml(u.id) + '\')">' + escapeHtml(label) +
             (u.verified ? ' <i class="fa-solid fa-circle-check verify-blue" style="font-size:10px;"></i>' : '') + '</b>' +
         '<small>' + sub + '</small>' +
@@ -22830,7 +22923,7 @@ function _tfAvatarHasStory() {
 }
 
 function showProfilePictureOptions(imageUrl) {
-    var currentPic = sanitizeUrl(imageUrl || currentUser?.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(currentUser?.name || 'U') + '&background=007AFF&color=fff&bold=true&size=200');
+    var currentPic = sanitizeUrl(imageUrl || currentUser?.avatar_url || tfAvatarFor(currentUser?.name || 'U', '007AFF'));
 
     var overlay = document.createElement('div');
     overlay.id = 'profilePicOptions';
@@ -23072,7 +23165,7 @@ function removeProfilePicture() {
 
     if (!confirm('Remove your profile picture?')) return;
 
-    var defaultPic = currentUser?.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(currentUser?.name || 'U') + '&background=007AFF&color=fff&bold=true&size=200';
+    var defaultPic = currentUser?.avatar_url || tfAvatarFor(currentUser?.name || 'U', '007AFF');
 
     if (window.sb && currentUser) {
         sb.from('users').update({
@@ -24285,7 +24378,7 @@ function _signupParentSearch(input) {
             if (!res) return;
             if (!list.length) { res.innerHTML = '<div style="color:#888;font-size:14px;padding:8px 2px;">No accounts found</div>'; return; }
             res.innerHTML = list.map(function(u) {
-                var av = u.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff';
+                var av = u.avatar_url || tfAvatarFor(u.full_name || 'U', '007AFF');
                 return '<div onclick="_signupParentPick(\'' + u.id + '\',\'' + escapeHtml(u.username) + '\',\'' + escapeHtml((u.full_name || '').replace(/'/g, '')) + '\')" style="display:flex;align-items:center;gap:12px;padding:11px 6px;cursor:pointer;border-bottom:0.5px solid var(--border-color,#f0f0f0);">' +
                     '<img src="' + escapeHtml(av) + '" style="width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
                     '<div style="flex:1;min-width:0;"><b style="font-size:15px;color:var(--text-primary,#000);">' + escapeHtml(u.full_name || u.username) + (u.verified ? ' <i class="fa-solid fa-circle-check ' + (u.badge_tier || 'verify-blue') + '" style="font-size:11px;"></i>' : '') + '</b><div style="color:#888;font-size:13px;">@' + escapeHtml(u.username) + '</div></div>' +
@@ -24846,7 +24939,7 @@ function renderSavedAccounts() {
     var lbl = document.getElementById('add-account-label');
     if (lbl) lbl.textContent = list.length ? 'Add another account' : 'Add an account';
     wrap.innerHTML = list.map(function(a) {
-        var av = a.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(a.name || 'U') + '&background=007AFF&color=fff';
+        var av = a.avatar_url || tfAvatarFor(a.name || 'U', '007AFF');
         return '<div class="saved-account-row" onclick="switchToSavedAccount(\'' + a.id + '\')">' +
             '<div class="saved-account-avwrap">' +
                 '<img class="saved-account-avatar" src="' + escapeHtml(av) + '">' +
@@ -27666,7 +27759,7 @@ function tfOpenImageViewer(postId, startIdx) {
     var likedColor = post._liked ? 'color:#FF3B30;' : '';
     var bookmarkClass = post._bookmarked ? 'fa-solid' : 'fa-regular';
     var bookmarkColor = post._bookmarked ? 'color:#007AFF;' : '';
-    var avatarUrl = user.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user.full_name || 'U') + '&background=007AFF&color=fff';
+    var avatarUrl = user.avatar_url || tfAvatarFor(user.full_name || 'U', '007AFF');
 
     var ov = document.createElement('div');
     ov.id = 'tfImageViewer';
@@ -27956,7 +28049,7 @@ function renderRealPostCard(post) {
     card.style.animation = 'popIn 0.4s ease';
 
     var timeAgo = typeof getTimeAgo === 'function' ? getTimeAgo(post.created_at) : 'now';
-    var avatarUrl = user.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user.full_name || 'U') + '&background=007AFF&color=fff';
+    var avatarUrl = user.avatar_url || tfAvatarFor(user.full_name || 'U', '007AFF');
     var displayName = user.full_name || user.username || 'User';
     var handle = '@' + (user.username || 'user');
     var badgeClass = user.badge_tier || 'verify-blue';
@@ -28635,7 +28728,7 @@ function revealCommentImage(el) {
 
 function _buildCommentNode(c, depth) {
         var u = c.users || {};
-        var avatar = u.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff';
+        var avatar = u.avatar_url || tfAvatarFor(u.full_name || 'U', '007AFF');
         var _st = window._cmt;
         var userLiked = _st ? _st.liked.has(c.id) : false;
         var likeCount = (_st && _st.likes[c.id]) || 0;
@@ -29120,7 +29213,7 @@ async function loadFeedStories() {
     // "Your story" button
     var myAvatar = (currentUser && currentUser.avatar_url)
         ? currentUser.avatar_url
-        : 'https://ui-avatars.com/api/?name=' + encodeURIComponent((currentUser && currentUser.username) || 'U') + '&background=007AFF&color=fff&size=100';
+        : tfAvatarFor((currentUser && currentUser.username) || 'U', '007AFF');
 
     // Check if current user has an active story (within 24h)
     var myStoryClick = 'openStoryPicker()';
@@ -29209,7 +29302,7 @@ async function loadFeedStories() {
             var stories = entry.stories;
             var total = stories.length;
             var name = u.full_name || u.username || 'User';
-            var avatar = u.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(name.charAt(0)) + '&background=007AFF&color=fff&size=100';
+            var avatar = u.avatar_url || tfAvatarFor(name.charAt(0), '007AFF');
             var size = 68, cx = 34, cy = 34, outerR = 32, innerR = 28;
             var gapDeg = total > 1 ? 5 : 0;
             var svgPaths = '';
@@ -29229,7 +29322,7 @@ async function loadFeedStories() {
             bar.innerHTML += '<div class="story-item" onclick="openStoryViewer(\'' + escapeHtml(u.id) + '\')">' +
                 '<div style="position:relative;width:68px;height:68px;flex-shrink:0;">' + svgRing +
                 '<img src="' + escapeHtml(avatar) + '" class="story-pic" style="position:absolute;top:5px;left:5px;width:58px;height:58px;border-radius:50%;object-fit:cover;" ' +
-                'onerror="this.src=\'https://ui-avatars.com/api/?name='+encodeURIComponent(name.charAt(0))+'&background=007AFF&color=fff&size=100\'">' +
+                'onerror="this.onerror=null;this.src=\'' + tfAvatarFor(name.charAt(0), '007AFF') + '\'">' +
                 '</div><small style="font-size:11px;">' + escapeHtml(name.split(' ')[0]) + '</small></div>';
         });
     } catch(e) { console.warn('[FeedStories]', e); }
@@ -29369,7 +29462,7 @@ function openPostMenu(postId, postUserId) {
                 <!-- User profile card -->
                 ${!isOwn ? `
                 <div onclick="lgOpenUserSubMenu()" style="background:rgba(255,255,255,0.72);backdrop-filter:blur(60px) saturate(200%);-webkit-backdrop-filter:blur(60px) saturate(200%);border:0.5px solid rgba(255,255,255,0.8);border-radius:22px;box-shadow:0 12px 40px rgba(0,0,0,0.15),0 1.5px 0 rgba(255,255,255,0.9) inset;overflow:hidden;margin-bottom:10px;display:flex;align-items:center;gap:12px;padding:16px 20px;cursor:pointer;" onmouseover="this.style.background='rgba(0,0,0,0.06)'" onmouseout="this.style.background='rgba(255,255,255,0.72)'">
-                    <img src="https://ui-avatars.com/api/?name=User&background=888&color=fff&size=80" id="lgMenuUserAvatar" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;">
+                    <img src="${tfAvatarFor("User", "888")}" id="lgMenuUserAvatar" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;">
                     <div style="flex:1;">
                         <b style="font-size:14px;color:var(--text-primary,#000);display:block;">View account options</b>
                         <small style="color:#888;font-size:12px;">Follow, mute or block</small>
@@ -29509,7 +29602,7 @@ async function lgOpenUserSubMenu() {
         }
     } catch (e) {}
     if (!avatarUrl) {
-        avatarUrl = 'https://ui-avatars.com/api/?name=' + encodeURIComponent(handle) + '&background=007AFF&color=fff&size=80';
+        avatarUrl = tfAvatarFor(handle, '007AFF');
     }
 
     // Follow and mute state come from the database, not from a device-local list
@@ -29818,10 +29911,10 @@ function _paUserRow(u, sub) {
     u = u || {};
     var uname = u.username || 'user';
     var name = u.full_name || uname;
-    var avatar = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=007AFF&color=fff&size=80');
+    var avatar = u.avatar_url || (tfAvatarFor(name, '007AFF'));
     var badge = u.verified ? ' <i class="fa-solid fa-circle-check verify-blue" style="font-size:12px;"></i>' : '';
     return '<div onclick="openProfile(\'' + (u.id || '') + '\')" style="display:flex;align-items:center;gap:12px;padding:11px 18px;cursor:pointer;" onmouseover="this.style.background=\'rgba(0,0,0,0.03)\'" onmouseout="this.style.background=\'\'">' +
-        '<img src="' + escapeHtml(avatar) + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=888&color=fff&size=80\'">' +
+        '<img src="' + escapeHtml(avatar) + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.onerror=null;this.src=\'' + tfAvatarFor('U', '888') + '\'">' +
         '<div style="flex:1;min-width:0;">' +
             '<b style="font-size:15px;color:var(--text-primary,#000);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(name) + badge + '</b>' +
             '<small style="font-size:13px;color:#888;">' + escapeHtml(sub || ('@' + uname)) + '</small>' +
@@ -30083,7 +30176,7 @@ async function viewUserProfile(userId) {
     var isOwnView = currentUser && currentUser.id === userId;
     var isLockedOut = isPrivate && !isFollowing && !isOwnView;
 
-    var avatarUrl = profile.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(profile.full_name || profile.username || 'U') + '&background=007AFF&color=fff&size=200';
+    var avatarUrl = profile.avatar_url || tfAvatarFor(profile.full_name || profile.username || 'U', '007AFF');
     var coverUrl = profile.cover_url || '';
     var badgeClass = profile.badge_tier || 'verify-blue';
 
@@ -30973,7 +31066,7 @@ renderRealPostCard = function(post) {
         if (post.quoted_post && card) {
             const qp = post.quoted_post;
             const qUser = qp.users || {};
-            const qAvatar = qUser.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(qUser.full_name||'U')}&background=888&color=fff`;
+            const qAvatar = qUser.avatar_url || tfAvatarFor(qUser.full_name||'U', '888');
             const quoteBlock = document.createElement('div');
             quoteBlock.style.cssText = 'border:0.5px solid var(--border-color,rgba(128,128,128,0.3));border-radius:16px;overflow:hidden;margin:6px 16px 10px;cursor:pointer;transition:background 0.15s;background:var(--bg-secondary,rgba(0,0,0,0.04));';
             quoteBlock.onmouseover = function(){ this.style.background = 'var(--bg-secondary,#f7f7f7)'; };
@@ -30988,7 +31081,7 @@ renderRealPostCard = function(post) {
                 <div style="padding:12px 14px 10px;">
                     <!-- Quoted user row -->
                     <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;flex-wrap:wrap;">
-                        <img src="${qAvatar}" onerror="this.src='https://ui-avatars.com/api/?name=U&background=888&color=fff'" style="width:18px;height:18px;border-radius:50%;object-fit:cover;flex-shrink:0;">
+                        <img src="${qAvatar}" onerror="this.src=tfAvatarFor('U', '888')" style="width:18px;height:18px;border-radius:50%;object-fit:cover;flex-shrink:0;">
                         <span style="font-weight:700;font-size:13.5px;color:var(--text-primary,#000);line-height:1;">${escapeHtml(qUser.full_name||'Unknown')}</span>
                         ${qUser.verified ? '<i class="fa-solid fa-circle-check" style="font-size:10px;color:#007AFF;flex-shrink:0;"></i>' : ''}
                         <span style="color:var(--text-tertiary,#888);font-size:13px;line-height:1;">@${escapeHtml(qUser.username||'user')}</span>
@@ -31532,7 +31625,7 @@ async function loadGroupMembers(groupId) {
 
     feedEl.innerHTML = (members || []).map(m => {
         const u = m.users || {};
-        const avatar = u.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.full_name || 'U')}&background=007AFF&color=fff`;
+        const avatar = u.avatar_url || tfAvatarFor(u.full_name || 'U', '007AFF');
         const badgeClass = u.badge_tier || 'verify-blue';
         return `<div onclick="viewUserProfile('${u.id}')" style="display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border-color,#f0f0f0);cursor:pointer;" onmouseover="this.style.background='var(--hover-bg,#f9f9f9)'" onmouseout="this.style.background=''">
             <img src="${escapeHtml(avatar)}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;">
@@ -32446,7 +32539,7 @@ function filterNotifs(type, el) {
 
 function renderNotifCard(notif) {
     const actor = notif.actor || {};
-    const avatar = actor.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(actor.full_name || 'U')}&background=007AFF&color=fff&size=80`;
+    const avatar = actor.avatar_url || tfAvatarFor(actor.full_name || 'U', '007AFF');
     const badgeClass = actor.badge_tier || 'verify-blue';
     const timeAgo = getTimeAgo ? getTimeAgo(notif.created_at) : 'now';
 
@@ -33310,11 +33403,11 @@ function openContactProfile() {
                 var _csp = _presenceFrom(u.last_seen);
                 var el = document.getElementById('cp-status'); if (el) el.textContent = _csp.label || 'Tap to view profile';
             }).catch(function() {
-                if (_cpAvEl) _cpAvEl.src = 'https://ui-avatars.com/api/?name=' + encodeURIComponent(name||'U') + '&background=007AFF&color=fff&size=200';
+                if (_cpAvEl) _cpAvEl.src = tfAvatarFor(name||'U', '007AFF');
                 var el = document.getElementById('cp-status'); if (el) el.textContent = 'Active now';
             });
     } else {
-        if (_cpAvEl) _cpAvEl.src = 'https://ui-avatars.com/api/?name=' + encodeURIComponent(name||'U') + '&background=007AFF&color=fff&size=200';
+        if (_cpAvEl) _cpAvEl.src = tfAvatarFor(name||'U', '007AFF');
         var el = document.getElementById('cp-status'); if (el) el.textContent = 'Active now';
     }
 
@@ -33747,7 +33840,7 @@ async function openChannelBroadcast(channelId) {
     if (!isOwner && owner) {
         var _fu = []; try { _fu = JSON.parse(localStorage.getItem('tf-followed-users') || '[]'); } catch (e) {}
         var _isFo = _fu.indexOf(owner.id) > -1;
-        var _oav = owner.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(owner.full_name || owner.username || 'U') + '&background=007AFF&color=fff';
+        var _oav = owner.avatar_url || tfAvatarFor(owner.full_name || owner.username || 'U', '007AFF');
         creatorCardHTML =
             '<div style="padding:0 16px 14px;flex-shrink:0;">' +
                 '<div style="display:flex;align-items:center;gap:11px;background:var(--bg-secondary,#f5f5f7);border-radius:16px;padding:11px 13px;">' +
@@ -33956,7 +34049,7 @@ function renderChPost(post, channelId, isOwner) {
     if (!post) return '';
     var u = post.users || {};
     var name = u.full_name || u.username || 'Channel';
-    var avatar = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=007AFF&color=fff&size=80');
+    var avatar = u.avatar_url || (tfAvatarFor(name, '007AFF'));
     var time = post.created_at ? new Date(post.created_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '';
     var text = post.content || '';
     var mediaHtml = '';
@@ -34074,7 +34167,7 @@ async function _chLoadReplies(postId) {
     if (!rows.length) { list.innerHTML = '<div style="text-align:center;padding:40px;color:#888;font-size:14px;">No replies yet. Be the first!</div>'; return; }
     list.innerHTML = rows.map(function(c) {
         var u = c.users || {};
-        var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || u.username || 'U') + '&background=007AFF&color=fff&size=60');
+        var av = u.avatar_url || (tfAvatarFor(u.full_name || u.username || 'U', '007AFF'));
         var t = c.created_at ? new Date(c.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }) : '';
         return '<div style="display:flex;gap:10px;padding:12px 16px;border-bottom:0.5px solid var(--border-color,#f2f2f7);">' +
             '<img src="' + escapeHtml(av) + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0;" onclick="openMentionUser(event,\'' + escapeHtml(u.username || '') + '\')">' +
@@ -36394,7 +36487,7 @@ function openQuoteRetweet(postId) {
         modal.id = 'quoteRetweetModal';
     modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:99999;background:rgba(0,0,0,0.5);display:flex;align-items:stretch;justify-content:center;';
 
-    var userAvatar = currentUser?.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent((currentUser?.full_name||currentUser?.username||'U')) + '&background=007AFF&color=fff&size=60');
+    var userAvatar = currentUser?.avatar_url || (tfAvatarFor((currentUser?.full_name||currentUser?.username||'U'), '007AFF'));
 
     modal.innerHTML = `
         <!-- Full-screen sheet -->
@@ -36411,7 +36504,7 @@ function openQuoteRetweet(postId) {
 
                 <!-- Composer row -->
                 <div style="display:flex;gap:12px;padding:14px 16px 10px;">
-                    <img src="${escapeHtml(userAvatar)}" onerror="this.src='https://ui-avatars.com/api/?name=U&background=007AFF&color=fff'" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;margin-top:2px;">
+                    <img src="${escapeHtml(userAvatar)}" onerror="this.src=tfAvatarFor('U', '007AFF')" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;margin-top:2px;">
                     <textarea id="quoteEditor" placeholder="Add a comment" maxlength="500" oninput="
                         this.style.height='auto';
                         this.style.height=this.scrollHeight+'px';
@@ -37253,7 +37346,7 @@ async function renderBlockSearch(query) {
         data.map(function(u) {
             var blocked = (typeof cpBlockedUsers !== 'undefined' && cpBlockedUsers.indexOf(u.id) > -1);
             return '<div style="display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border-color,#f0f0f0);">' +
-                '<img src="' + escapeHtml(u.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=eee&size=80') + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
+                '<img src="' + escapeHtml(u.avatar_url || tfAvatarFor(u.full_name || 'U', 'eee')) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
                 '<div style="flex:1;"><b style="font-size:15px;">' + escapeHtml(u.full_name || '') + '</b><br><small style="color:#888;">@' + escapeHtml(u.username || '') + '</small></div>' +
                 '<button onclick="blockUserById(\'' + u.id + '\',\'' + escapeHtml(u.full_name || u.username) + '\',this)" ' +
                 'style="padding:8px 16px;border-radius:20px;border:1px solid ' + (blocked ? '#eee' : '#FF3B30') + ';background:transparent;color:' + (blocked ? '#888' : '#FF3B30') + ';font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;">' +
@@ -38571,7 +38664,7 @@ async function openMsgReactionDetail(msgId) {
         var u = x.users || {};
         var mine = x.user_id === meId;
         var name = mine ? 'You' : (u.full_name || u.username || 'User');
-        var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=007AFF&color=fff');
+        var av = u.avatar_url || (tfAvatarFor(name, '007AFF'));
         var rowStyle = 'display:flex;align-items:center;gap:12px;padding:10px 14px;' + (mine ? 'cursor:pointer;' : '');
         return '<div ' + (mine ? 'onclick="removeMyMsgReaction(\'' + msgId + '\')" ' : '') + 'style="' + rowStyle + '">' +
             '<img src="' + escapeHtml(av) + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;flex-shrink:0;">' +
@@ -39998,7 +40091,7 @@ async function _loadDropYoursTemplates(tc, sc) {
     templates.forEach(function(t){
         window._dropYoursTemplates[t.id] = t;
         var cr = t.creator || {};
-        var av = cr.avatar_url || ('https://ui-avatars.com/api/?name='+encodeURIComponent(cr.full_name||cr.username||'U')+'&background=007AFF&color=fff&size=60');
+        var av = cr.avatar_url || (tfAvatarFor(cr.full_name||cr.username||'U', '007AFF'));
         var cover = t.cover_url;
         var count = t.participant_count || 0;
         grid +=
@@ -40046,7 +40139,7 @@ function _injectTemplatePill() {
     var page = document.getElementById('lgCameraPage');
     if (!ctx || !page) return;
     document.getElementById('lgTemplatePill')?.remove();
-    var av = ctx.avatar || ('https://ui-avatars.com/api/?name=U&background=007AFF&color=fff&size=40');
+    var av = ctx.avatar || (tfAvatarFor('U', '007AFF'));
     var pill = document.createElement('div');
     pill.id = 'lgTemplatePill';
     pill.style.cssText = 'position:absolute;left:50%;bottom:172px;transform:translateX(-50%);z-index:12;display:flex;align-items:center;background:#fff;border-radius:30px;padding:5px 6px;box-shadow:0 6px 20px rgba(0,0,0,0.28);max-width:82%;';
@@ -46603,12 +46696,19 @@ if (videoBtn) videoBtn.style.display = isSelf ? 'none' : '';
             <input id="withdraw-amount" type="number" placeholder="Amount (min R50)" style="width:100%;padding:16px;border-radius:14px;border:1px solid var(--border-color,#eee);background:var(--input-bg,#f5f5f5);font-size:16px;color:var(--text-primary,#000);margin-bottom:12px;outline:none;box-sizing:border-box;">
             <button onclick="confirmWithdraw()" style="width:100%;padding:16px;border-radius:14px;background:#007AFF;color:white;border:none;font-size:16px;font-weight:700;cursor:pointer;">Continue</button>`;
     } else if (type === 'addmoney') {
+        // The custom amount was an input with nothing to press and no handler
+        // reading it, so any figure typed there went nowhere.
         content.innerHTML = `
             <b style="font-size:18px;display:block;margin-bottom:16px;">Add Money</b>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
                 ${[50,100,200,500].map(a=>`<button onclick="confirmAddMoney(${a})" style="padding:16px;border-radius:14px;border:1px solid var(--border-color,#eee);background:var(--bg-primary,#fff);font-size:16px;font-weight:700;color:#007AFF;cursor:pointer;">R ${a}</button>`).join('')}
             </div>
-            <input type="number" placeholder="Custom amount" style="width:100%;padding:16px;border-radius:14px;border:1px solid var(--border-color,#eee);background:var(--input-bg,#f5f5f5);font-size:16px;color:var(--text-primary,#000);outline:none;box-sizing:border-box;">`;
+            <div style="display:flex;gap:10px;">
+                <input id="topup-custom" type="number" min="10" step="1" placeholder="Custom amount"
+                    onkeydown="if(event.key==='Enter')confirmAddMoneyCustom()"
+                    style="flex:1;min-width:0;padding:16px;border-radius:14px;border:1px solid var(--border-color,#eee);background:var(--input-bg,#f5f5f5);font-size:16px;color:var(--text-primary,#000);outline:none;box-sizing:border-box;">
+                <button onclick="confirmAddMoneyCustom()" style="flex-shrink:0;padding:16px 22px;border-radius:14px;background:#007AFF;color:#fff;border:none;font-size:16px;font-weight:700;cursor:pointer;">Add</button>
+            </div>`;
     } else if (type === 'buycoins') {
         var a = amount || 100;
         var prices = {100:'R 9.99', 500:'R 39.99', 2000:'R 149.99'};
@@ -46623,15 +46723,16 @@ if (videoBtn) videoBtn.style.display = isSelf ? 'none' : '';
             <p style="font-size:11px;color:#aaa;margin-bottom:16px;text-align:center;">Coins are non-refundable. Purchases are processed securely by your app store.</p>
             <button onclick="confirmBuyCoins(${a})" style="width:100%;padding:16px;border-radius:14px;background:#007AFF;color:white;border:none;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><i class="fa-brands ${/iphone|ipad|ipod/i.test(navigator.userAgent)?'fa-apple':'fa-google-play'}"></i> Buy with App Store</button>`;
     } else if (type === 'addcard') {
+        // No card fields. They collected a full card number and CVV, discarded
+        // them, and claimed the card had been added securely. Card details only
+        // ever belong in the payment provider's own form.
         content.innerHTML = `
-            <b style="font-size:18px;display:block;margin-bottom:16px;">Add Payment Method</b>
-            <input type="text" placeholder="Card number" maxlength="19" style="width:100%;padding:16px;border-radius:14px;border:1px solid var(--border-color,#eee);background:var(--input-bg,#f5f5f5);font-size:16px;color:var(--text-primary,#000);margin-bottom:10px;outline:none;box-sizing:border-box;">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
-                <input type="text" placeholder="MM/YY" maxlength="5" style="padding:16px;border-radius:14px;border:1px solid var(--border-color,#eee);background:var(--input-bg,#f5f5f5);font-size:16px;color:var(--text-primary,#000);outline:none;">
-                <input type="text" placeholder="CVV" maxlength="4" style="padding:16px;border-radius:14px;border:1px solid var(--border-color,#eee);background:var(--input-bg,#f5f5f5);font-size:16px;color:var(--text-primary,#000);outline:none;">
-            </div>
-            <p style="font-size:11px;color:#aaa;margin-bottom:16px;text-align:center;"><i class="fa-solid fa-lock" style="color:#34C759;"></i> Card details are encrypted. We never store full card numbers.</p>
-            <button onclick="confirmAddCard()" style="width:100%;padding:16px;border-radius:14px;background:#007AFF;color:white;border:none;font-size:16px;font-weight:700;cursor:pointer;">Add Card</button>`;
+            <b style="font-size:18px;display:block;margin-bottom:12px;">Payment methods</b>
+            <p style="font-size:14px;color:#888;line-height:1.5;margin-bottom:18px;">
+                Cards are not set up on TrustFirst yet. When they are, the card form comes
+                from the payment provider so your details never pass through this app.
+            </p>
+            <button onclick="closeWalletSheet()" style="width:100%;padding:16px;border-radius:14px;background:var(--bg-secondary,#f0f0f0);color:var(--text-primary,#000);border:none;font-size:16px;font-weight:700;cursor:pointer;">Close</button>`;
     }
 
     if (dim) dim.style.display = 'block';
@@ -46709,50 +46810,109 @@ function onNativeIAPSuccess(receipt) {
         .catch(function() { showToast('Could not verify purchase yet'); });
 }
 
+// Is there a real payment provider behind this, or not?
+//
+// PAYSTACK_PUBLIC_KEY is still the placeholder, the Paystack script is not
+// loaded, and there is no server endpoint to verify a payment or credit a
+// wallet. Nothing about topping up is connected to money.
+function _tfPaymentsReady() {
+    return typeof PaystackPop !== 'undefined' &&
+        !!PAYSTACK_PUBLIC_KEY && PAYSTACK_PUBLIC_KEY.indexOf('REPLACE') < 0;
+}
+
+function _tfPaymentsUnavailable() {
+    showToast('Payments are not connected yet, so no money can be added.');
+}
+
+function confirmAddMoneyCustom() {
+    var inp = document.getElementById('topup-custom');
+    var amount = parseFloat(inp ? inp.value : '');
+    if (!isFinite(amount) || amount < 10) { showToast('Enter an amount of R10 or more'); return; }
+    confirmAddMoney(Math.round(amount * 100) / 100);
+}
+
 function confirmAddMoney(amount) {
-    var userEmail = (window.currentUser && window.currentUser.email) || 'user@trustfirst.app';
+    var userEmail = (window.currentUser && window.currentUser.email) || '';
     closeWalletSheet();
 
-    if (typeof PaystackPop === 'undefined') {
-        var balEl = document.getElementById('wallet-balance');
-        if (balEl) balEl.textContent = ((parseFloat(balEl.textContent)||0) + amount).toFixed(2);
-        showToast('R' + amount + ' added (test mode)');
-        return;
-    }
+    // It used to add the amount to the number on screen and say "added (test
+    // mode)". No payment was taken, nothing was written down, and refreshing
+    // put the balance back. A wallet that says it holds money it does not hold
+    // is worse than one that plainly does not work yet.
+    if (!_tfPaymentsReady()) { _tfPaymentsUnavailable(); return; }
 
     var handler = PaystackPop.setup({
         key: PAYSTACK_PUBLIC_KEY,
         email: userEmail,
-        amount: amount * 100, // rands to cents
+        amount: Math.round(amount * 100), // rands to cents
         currency: 'ZAR',
         ref: 'TF_TOPUP_' + Date.now(),
         callback: function(response) {
-            var balEl = document.getElementById('wallet-balance');
-            if (balEl) balEl.textContent = ((parseFloat(balEl.textContent)||0) + amount).toFixed(2);
-            showToast('R' + amount + ' added to wallet! ✓');
+            // The browser saying it went through is not proof. The server has
+            // to check with Paystack and credit the wallet; until that endpoint
+            // exists the balance is not touched here.
+            showToast('Payment received. Your balance updates once it clears.');
             triggerHaptic(40);
-            logWalletTransaction('topup', amount, 'completed');
+            _tfVerifyTopup(response && response.reference, amount);
         },
         onClose: function() { showToast('Payment cancelled'); }
     });
     handler.openIframe();
 }
 
-function logWalletTransaction(type, amount, status) {
+// Hand the reference to the server, which is the only side that may credit a
+// wallet. Without this endpoint a top-up cannot be trusted, because anything
+// the browser claims can be made up.
+async function _tfVerifyTopup(reference, amount) {
+    if (!reference || !window.sb || !currentUser) return;
     try {
-        var txns = JSON.parse(localStorage.getItem('tf-wallet-txns') || '[]');
-        txns.unshift({ type: type, amount: amount, status: status, date: new Date().toISOString(), ref: 'TF_' + Date.now() });
-        if (txns.length > 100) txns = txns.slice(0, 100);
-        localStorage.setItem('tf-wallet-txns', JSON.stringify(txns));
-    } catch(e) {}
+        var tok = await _tfAccessToken();
+        var r = await fetch('/api/wallet/verify/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+            body: JSON.stringify({ reference: reference })
+        });
+        if (!r.ok) { showToast('Payment taken. It will show once we can confirm it.'); return; }
+        refreshWalletBalance();
+    } catch (e) {
+        console.warn('[Wallet] verify', e && e.message);
+    }
 }
 
-function openWalletHistory() {
+async function openWalletHistory() {
     var existing = document.getElementById('wallet-history-sheet');
     if (existing) existing.remove();
 
+    // Read the real ledger.
+    //
+    // This read a localStorage list that only one function ever wrote to, and
+    // that function only ran inside a Paystack callback that never fires,
+    // so the history was empty no matter what anybody did. The rows live in
+    // wallet_transactions and coin_transactions, which nothing was reading.
     var txns = [];
-    try { txns = JSON.parse(localStorage.getItem('tf-wallet-txns') || '[]'); } catch (e) {}
+    if (window.sb && currentUser) {
+        try {
+            var w = await sb.from('wallet_transactions')
+                .select('type, amount, currency, status, created_at')
+                .eq('user_id', currentUser.id)
+                .order('created_at', { ascending: false }).limit(60);
+            if (w.error) console.warn('[Wallet]', w.error.message);
+            (w.data || []).forEach(function (t) {
+                txns.push({ type: t.type, amount: (t.currency || 'R') + ' ' + t.amount,
+                            status: t.status, date: t.created_at });
+            });
+            var c = await sb.from('coin_transactions')
+                .select('type, amount, reason, created_at')
+                .eq('user_id', currentUser.id)
+                .order('created_at', { ascending: false }).limit(60);
+            if (c.error) console.warn('[Wallet]', c.error.message);
+            (c.data || []).forEach(function (t) {
+                txns.push({ type: 'coins ' + t.type, amount: t.amount + ' coins',
+                            status: t.reason || '', date: t.created_at });
+            });
+            txns.sort(function (a, b) { return new Date(b.date) - new Date(a.date); });
+        } catch (e) { console.warn('[Wallet] history', e && e.message); }
+    }
 
     function iconFor(t) {
         t = String(t || '');
@@ -46807,24 +46967,25 @@ function confirmWithdraw() {
     var inp = document.getElementById('withdraw-amount');
     var amount = parseFloat(inp ? inp.value : 0);
     if (!amount || amount < 50) { showToast('Minimum withdrawal is R50'); return; }
-    var balEl = document.getElementById('wallet-balance');
-    var current = parseFloat(balEl ? balEl.textContent : 0) || 0;
-    if (amount > current) { showToast('Insufficient balance'); return; }
-    if (balEl) balEl.textContent = (current - amount).toFixed(2);
+    // This took the amount off the number on screen and said the withdrawal was
+    // submitted. Nothing was recorded and no money was ever going to arrive.
     closeWalletSheet();
-    showToast('Withdrawal of R' + amount.toFixed(2) + ' submitted ✓');
+    if (!_tfPaymentsReady()) {
+        showToast('Payouts are not connected yet, so nothing can be withdrawn.');
+        return;
+    }
+    showToast('Withdrawals are reviewed before they are paid out.');
     triggerHaptic(30);
 }
 
 function confirmAddCard() {
     closeWalletSheet();
-    var list = document.getElementById('wallet-cards-list');
-    if (list) list.innerHTML = `<div style="display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg-primary,#fff);border-radius:12px;border:1px solid var(--border-color,#eee);">
-        <i class="fa-brands fa-cc-visa" style="font-size:24px;color:#1A1F71;"></i>
-        <span style="font-size:15px;font-weight:600;color:var(--text-primary,#000);">•••• •••• •••• 1234</span>
-        <span style="margin-left:auto;font-size:12px;color:#888;">12/27</span>
-    </div>`;
-    showToast('Card added securely ✓');
+    // The form took a real card number, expiry and CVV, threw all three away,
+    // and displayed a made-up Visa ending 1234 with "Card added securely".
+    // Nobody should be typing card details into a field that discards them, so
+    // the form is gone until a payment provider is handling it, which is the
+    // only place card details are allowed to go.
+    showToast('Cards are not set up yet. Nothing was saved.');
 }
 
 // ============================================================
@@ -47205,7 +47366,7 @@ async function loadDiscoverPeople() {
     var followingIds = new Set((following || []).map(function(f) { return f.following_id; }));
     if (list) list.innerHTML = data.map(function(u) {
         var isFollowing = followingIds.has(u.id);
-        var avatar = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff&size=80');
+        var avatar = u.avatar_url || (tfAvatarFor(u.full_name || 'U', '007AFF'));
         return '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;">' +
             '<img src="' + escapeHtml(avatar) + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;">' +
             '<div style="flex:1;"><b style="font-size:14px;">' + escapeHtml(u.full_name || '') + '</b>' +
@@ -47280,7 +47441,7 @@ async function openFollowersScreen(userId, initialTab) {
             var followsYou = followsMeIds.has(user.id);
             return {
                 id: user.id, name: name, handle: user.username || '', bio: user.bio || '', verified: !!user.verified,
-                avatar: user.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=007AFF&color=fff&size=80'),
+                avatar: user.avatar_url || (tfAvatarFor(name, '007AFF')),
                 followsYou: followsYou,
                 // Same wording as the profile page and the feed rail, so the
                 // platform says one thing about one relationship.
@@ -47324,7 +47485,7 @@ function renderFsList(filter) {
         // ever clickable here, so tapping a person did nothing at all.
         var open = 'onclick="viewUserProfile(\'' + escapeHtml(String(u.id)) + '\')" style="cursor:pointer;"';
         return '<div class="fs-user-row" style="animation-delay:'+delay+';">' +
-            '<img class="fs-avatar" ' + open + ' src="'+u.avatar+'" onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=888&color=fff&size=80\'">' +
+            '<img class="fs-avatar" ' + open + ' src="'+u.avatar+'" onerror="this.onerror=null;this.src=\'' + tfAvatarFor('U', '888') + '\'">' +
             '<div class="fs-user-info" ' + open + '>' +
                 '<div class="fs-name">'+u.name+(u.verified ? ' <i class="fa-solid fa-circle-check" style="color:#007AFF;font-size:13px;"></i>' : '')+'</div>' +
                 '<div class="fs-handle"><span>@'+u.handle+'</span>'+(u.followsYou ? '<span class="fs-follows-badge">Follows you</span>' : '')+'</div>' +
@@ -47535,12 +47696,12 @@ function _dsBuildPeopleRows(container, people) {
     container.innerHTML = people.map(function(u, i) {
         var name = escapeHtml(u.display_name || u.username || 'User');
         var handle = escapeHtml(u.username || 'user');
-        var avatar = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=random&color=fff&size=80');
+        var avatar = u.avatar_url || (tfAvatarFor(name, 'random'));
         var bio = u.bio ? '<div style="font-size:13px;color:var(--text-secondary,#888);margin-top:2px;line-height:1.4;">' + escapeHtml(u.bio.substring(0,80)) + '</div>' : '';
         // Avatar and name open the profile; only Follow used to do anything.
         var open = 'onclick="viewUserProfile(\'' + escapeHtml(String(u.id)) + '\')"';
         return '<div class="ds-user-row" style="animation-delay:' + (i*0.06) + 's">' +
-            '<img ' + open + ' src="' + avatar + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;flex-shrink:0;cursor:pointer;" onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=random&color=fff&size=80\'">' +
+            '<img ' + open + ' src="' + avatar + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;flex-shrink:0;cursor:pointer;" onerror="this.onerror=null;this.src=\'' + tfAvatarFor('U', 'random') + '\'">' +
             '<div ' + open + ' style="flex:1;min-width:0;cursor:pointer;">' +
                 '<div style="font-size:15px;font-weight:700;color:var(--text-primary,#000);">@' + handle + '</div>' +
                 '<div style="font-size:13px;color:var(--text-secondary,#888);">' + name + '</div>' +
@@ -47592,12 +47753,12 @@ function _dsRenderSuggested() {
             list.innerHTML = people.map(function(u, i) {
                 var name = escapeHtml(u.full_name || u.username || 'User');
                 var handle = escapeHtml(u.username || 'user');
-                var avatar = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(name) + '&background=random&color=fff&size=80');
+                var avatar = u.avatar_url || (tfAvatarFor(name, 'random'));
                 var bio = u.bio ? '<div style="font-size:13px;color:var(--text-secondary,#888);margin-top:3px;line-height:1.4;">' + escapeHtml(u.bio.substring(0,80)) + '</div>' : '';
                 // Avatar and name open the profile; only Follow used to do anything.
                 var open = 'onclick="viewUserProfile(\'' + escapeHtml(String(u.id)) + '\')"';
                 return '<div class="ds-user-row" style="animation-delay:' + (i*0.05) + 's">' +
-                    '<img ' + open + ' src="' + avatar + '" style="width:48px;height:48px;border-radius:50%;object-fit:cover;flex-shrink:0;cursor:pointer;" onerror="this.src=\'https://ui-avatars.com/api/?name=U&background=random&color=fff&size=80\'">' +
+                    '<img ' + open + ' src="' + avatar + '" style="width:48px;height:48px;border-radius:50%;object-fit:cover;flex-shrink:0;cursor:pointer;" onerror="this.onerror=null;this.src=\'' + tfAvatarFor('U', 'random') + '\'">' +
                     '<div ' + open + ' style="flex:1;min-width:0;cursor:pointer;">' +
                         '<div style="font-size:15px;font-weight:700;color:var(--text-primary,#000);">@' + handle + '</div>' +
                         '<div style="font-size:13px;color:var(--text-secondary,#888);">' + name + '</div>' +
@@ -50105,7 +50266,7 @@ function _renderCloseFriendsList(filter) {
     if (people.length === 0) return '<p style="text-align:center;color:#8E8E8E;font-size:14px;padding:20px 0;">No close friends yet.</p>';
     return people.map(function(p) {
         return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:0.5px solid var(--border-color,#f0f0f0);">' +
-            '<img src="' + (p.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(p.username||'?') + '&size=80') + '" style="width:42px;height:42px;border-radius:50%;object-fit:cover;">' +
+            '<img src="' + (p.avatar_url || tfAvatarFor(p.username||'?', '888')) + '" style="width:42px;height:42px;border-radius:50%;object-fit:cover;">' +
             '<span style="flex:1;font-size:15px;font-weight:500;color:var(--text-primary,#000);">' + (p.username||'Unknown') + '</span>' +
             '<button onclick="removeCF(\'' + p.id + '\')" style="background:none;border:1px solid #FF3B30;color:#FF3B30;border-radius:20px;padding:5px 14px;font-size:13px;font-weight:600;cursor:pointer;">Remove</button>' +
         '</div>';
@@ -51239,7 +51400,7 @@ async function savePronoun(val, modal) {
             var profiles = await sb.from('users').select('id,full_name,username,avatar_url').in('id', memberIds);
             membersEl.innerHTML = '<p style="font-size:12px;font-weight:800;color:#888;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">' + memberIds.length + ' ' + (memberIds.length === 1 ? 'person' : 'people') + '</p><div class="settings-card" style="margin-bottom:20px;">' +
                 (profiles.data || []).map(function(u) {
-                    var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff&size=80');
+                    var av = u.avatar_url || (tfAvatarFor(u.full_name || 'U', '007AFF'));
                     return '<div class="tc-member-row" data-uid="' + u.id + '" data-selected="true"><img src="' + escapeHtml(av) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;"><div style="flex:1;"><b style="font-size:15px;">' + escapeHtml(u.full_name || '') + '</b><br><small style="color:#888;">@' + escapeHtml(u.username || '') + '</small></div><div class="tc-radio checked" onclick="tcToggleMember(this)"><i class="fa-solid fa-check" style="color:white;font-size:11px;"></i></div></div>';
                 }).join('') + '</div>';
         }
@@ -51250,7 +51411,7 @@ async function savePronoun(val, modal) {
         var sug = await sb.from('users').select('id,full_name,username,avatar_url').in('id', followIds).limit(5);
         if (suggestedEl && sug.data && sug.data.length) {
             suggestedEl.innerHTML = sug.data.map(function(u) {
-                var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff&size=80');
+                var av = u.avatar_url || (tfAvatarFor(u.full_name || 'U', '007AFF'));
                 return '<div class="tc-member-row" data-uid="' + u.id + '" data-selected="false"><img src="' + escapeHtml(av) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;"><div style="flex:1;"><b style="font-size:15px;">' + escapeHtml(u.full_name || '') + '</b><br><small style="color:#888;">@' + escapeHtml(u.username || '') + '</small></div><div class="tc-radio" onclick="tcToggleMember(this)"></div></div>';
             }).join('');
         }
@@ -51269,7 +51430,7 @@ async function savePronoun(val, modal) {
         if (error || !data || !data.length) { el.innerHTML = '<p style="text-align:center;color:#aaa;padding:24px 0;font-size:14px;">You haven\'t blocked anyone.</p>'; return; }
         el.innerHTML = '<div class="settings-card">' + data.map(function(b) {
             var u = b.users || {};
-            var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=FF3B30&color=fff&size=80');
+            var av = u.avatar_url || (tfAvatarFor(u.full_name || 'U', 'FF3B30'));
             return '<div class="blocked-row" data-uid="' + u.id + '"><img src="' + escapeHtml(av) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;"><div style="flex:1;"><b style="font-size:15px;">@' + escapeHtml(u.username || '') + '</b><p style="font-size:11px;color:#888;margin:2px 0 0;">Includes other accounts they may have or create.</p></div><button onclick="realUnblock(this)" style="padding:8px 16px;border-radius:20px;border:1px solid #FF3B30;background:transparent;color:#FF3B30;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">Unblock</button></div>';
         }).join('') + '</div>';
     }
@@ -51282,7 +51443,7 @@ async function savePronoun(val, modal) {
         if (error || !data || !data.length) { el.innerHTML = '<p style="text-align:center;color:#aaa;padding:16px 0;font-size:14px;">No restricted accounts.</p>'; return; }
         el.innerHTML = data.map(function(r) {
             var u = r.profiles || {};
-            var av = u.avatar_url || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(u.full_name || 'U') + '&background=007AFF&color=fff&size=80');
+            var av = u.avatar_url || (tfAvatarFor(u.full_name || 'U', '007AFF'));
             return '<div class="restricted-row" data-uid="' + u.id + '"><img src="' + escapeHtml(av) + '" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;"><div style="flex:1;"><b style="font-size:15px;">' + escapeHtml(u.full_name || '') + '</b><br><small style="color:#888;">@' + escapeHtml(u.username || '') + '</small></div><button onclick="realUnrestrict(this)" style="padding:8px 16px;border-radius:20px;border:1px solid #007AFF;background:transparent;color:#007AFF;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">Unrestrict</button></div>';
         }).join('');
     }
@@ -51301,7 +51462,7 @@ async function savePronoun(val, modal) {
     function syncCommentBarAvatar() {
         var img = document.getElementById('comment-bar-avatar');
         if (!img || !currentUser) return;
-        var fallback = 'https://ui-avatars.com/api/?name=' + encodeURIComponent(currentUser.name || currentUser.full_name || currentUser.username || 'U') + '&background=007AFF&color=fff&size=80';
+        var fallback = tfAvatarFor(currentUser.name || currentUser.full_name || currentUser.username || 'U', '007AFF');
         img.src = currentUser.avatar_url || fallback;
         img.onerror = function() { this.onerror = null; this.src = fallback; };
     }
@@ -51939,7 +52100,7 @@ function openReelLikesModal(postId, likes, views) {
             }
 
             list.innerHTML = r.data.map(function(row){
-                var p = row.users || {}; var av = p.avatar_url || ('https://ui-avatars.com/api/?name='+encodeURIComponent(p.username||'U')+'&background=007AFF&color=fff&size=60');
+                var p = row.users || {}; var av = p.avatar_url || (tfAvatarFor(p.username||'U', '007AFF'));
                 var uid = row.user_id || '';
                 var isMe = !!(currentUser && currentUser.id && uid === currentUser.id);
                 var isFollowing = !!following[uid];
