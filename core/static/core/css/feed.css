@@ -4336,3 +4336,149 @@ textarea:focus-visible,
 /* The story buffering spinner. A stalled video and a broken one look the same
    without it: the bar stops, the picture holds, and nothing says which. */
 @keyframes tfSpin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+
+/* ==========================================================================
+   THE EDITOR, GIVEN THE SAME MANNERS AS THE REST OF THE APP
+
+   The editor is not worse code than the rest of TrustFirst. It is the one
+   screen that opted out of the app's motion. Counted: 29 controls in its
+   markup, 0 with a transition, 0 with a pressed state, 0 with touch feedback,
+   while feed.css carries 90 transition rules and 34 pressed states for
+   everything else. Every panel appears and disappears by flipping display,
+   which is instant by definition.
+
+   That gap is the whole of "the buttons work but in a cheap way". A button
+   that does not acknowledge the finger reads as a picture of a button.
+
+   All of this is scoped inside .editor-overlay and set through properties the
+   editor's inline styles never touch (transform, transition, animation), so
+   nothing here can fight the existing markup and nothing outside the editor
+   changes. No HTML was rewritten to get it.
+   ========================================================================== */
+
+/* One curve for the whole screen. Fast out, settled in: it reads as the
+   control responding rather than the interface performing. */
+.editor-overlay {
+    --ed-ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+    --ed-quick: 0.16s;
+}
+
+/* Every control: acknowledges the finger, and lets go smoothly. */
+.editor-overlay button,
+.editor-overlay [onclick],
+.editor-overlay .ed-tool {
+    transition: transform var(--ed-quick) var(--ed-ease),
+                background-color var(--ed-quick) ease,
+                border-color var(--ed-quick) ease,
+                opacity var(--ed-quick) ease;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.editor-overlay button:active,
+.editor-overlay [onclick]:active,
+.editor-overlay .ed-tool:active {
+    transform: scale(0.93);
+    opacity: 0.85;
+}
+
+/* Drag handles and the surfaces you draw on are excluded: a trim handle that
+   shrinks under the finger fights the drag it is meant to be doing, and the
+   whole timeline counts as a click target. */
+.editor-overlay .ed-trim:active,
+.editor-overlay #edVideoTrack:active,
+.editor-overlay #edAudioTrack:active,
+.editor-overlay #edTextTrack:active,
+.editor-overlay #edRuler:active,
+.editor-overlay #edStage:active,
+.editor-overlay #edPreviewArea:active,
+.editor-overlay #edTextLayer:active,
+.editor-overlay #edTextLayer *:active {
+    transform: none;
+    opacity: 1;
+}
+
+/* A trim handle should still say it has been grabbed. Wider, not smaller. */
+.editor-overlay .ed-trim {
+    transition: transform var(--ed-quick) var(--ed-ease), filter var(--ed-quick) ease;
+}
+.editor-overlay .ed-trim:active {
+    transform: scaleX(1.35);
+    filter: brightness(1.25);
+}
+
+/* A selected clip settles into place instead of snapping. */
+.editor-overlay .ed-clip {
+    transition: transform var(--ed-quick) var(--ed-ease),
+                box-shadow var(--ed-quick) ease,
+                outline-color var(--ed-quick) ease;
+}
+.editor-overlay .ed-clip.selected {
+    transform: translateY(-2px);
+}
+
+/* Things the editor shows by flipping display cannot transition, because there
+   is no before state to move from. An animation on the rule runs each time the
+   element comes back, which gets the same result without touching the JS that
+   shows them. */
+@keyframes edRise {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes edFade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.editor-overlay #edClipActions { animation: edRise 0.18s var(--ed-ease); }
+.editor-overlay #edPanel       { animation: edRise 0.22s var(--ed-ease); }
+.editor-overlay #edExportBar   { animation: edFade 0.2s ease; }
+.editor-overlay #edExitModal   { animation: edFade 0.16s ease; }
+
+/* Not here: #edExportFill already carries its own inline transition, and an
+   inline style beats a stylesheet whatever the specificity, so a rule for it
+   would never apply. Same reason #edNextBtn does not dim on press: its opacity
+   is set inline because that is how the editor marks it enabled or disabled.
+   It still gives under the finger, which is the part that was missing. */
+
+/* The play button is pressed more than anything else here, so it gets the one
+   piece of character on the screen: a small give, and a ring that answers. */
+.editor-overlay #edPlayBtn {
+    transition: transform 0.18s var(--ed-ease), box-shadow 0.18s ease,
+                background-color 0.18s ease;
+}
+.editor-overlay #edPlayBtn:active {
+    transform: scale(0.88);
+    box-shadow: 0 0 0 8px rgba(255, 255, 255, 0.10);
+}
+
+/* Keyboard users get the same affordance as thumbs. */
+.editor-overlay button:focus-visible,
+.editor-overlay [onclick]:focus-visible {
+    outline: 2px solid #007AFF;
+    outline-offset: 2px;
+}
+
+/* Motion is a preference, and this screen has a lot of it. */
+@media (prefers-reduced-motion: reduce) {
+    .editor-overlay button,
+    .editor-overlay [onclick],
+    .editor-overlay .ed-tool,
+    .editor-overlay .ed-trim,
+    .editor-overlay .ed-clip,
+    .editor-overlay #edPlayBtn {
+        transition: none;
+    }
+    .editor-overlay #edClipActions,
+    .editor-overlay #edPanel,
+    .editor-overlay #edExportBar,
+    .editor-overlay #edExitModal {
+        animation: none;
+    }
+    .editor-overlay button:active,
+    .editor-overlay [onclick]:active,
+    .editor-overlay .ed-tool:active,
+    .editor-overlay #edPlayBtn:active {
+        transform: none;
+        opacity: 0.75;
+    }
+}
