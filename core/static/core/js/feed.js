@@ -6474,7 +6474,7 @@ function loadProfileReels(container) {
         // in `posts`, and the two lists are merged newest first.
         Promise.all([
             sb.from('trustclips')
-                .select('id,video_url,thumbnail_url,view_count,caption,sound_name,volume,voice_effect,segments,like_count,comment_count,created_at')
+                .select('id,video_url,thumbnail_url,view_count,caption,sound_name,sound_id,sound_source_clip_id,volume,voice_effect,segments,like_count,comment_count,created_at')
                 .eq('user_id', currentUser.id)
                 .eq('is_hidden', false)
                 .order('created_at', { ascending: false })
@@ -6491,6 +6491,7 @@ function loadProfileReels(container) {
                 return { id: c.id, videoUrl: c.video_url, media_url: c.video_url,
                          thumbnail_url: c.thumbnail_url, view_count: c.view_count,
                          caption: c.caption, sound_name: c.sound_name,
+                         sound_id: c.sound_id || null, sound_source_clip_id: c.sound_source_clip_id || null,
                          volume: c.volume, voice_effect: c.voice_effect,
                          segments: c.segments, like_count: c.like_count,
                          comment_count: c.comment_count,
@@ -6511,7 +6512,7 @@ function loadProfileReels(container) {
                 if (_profileTabGen !== myGen) return;   // tab switched, discard
                 _tcClearSkeleton();
                 if (r.data && r.data.length > 0) {
-                    window._profileClips = r.data.map(function(c){ return { id: c.id, videoUrl: c.videoUrl, media_url: c.media_url, thumbnail_url: c.thumbnail_url, view_count: c.view_count, caption: c.caption, like_count: c.like_count || 0, comment_count: c.comment_count || 0, sound_name: c.sound_name || null, volume: c.volume, segments: c.segments || null, voice_effect: c.voice_effect || null, user_id: (currentUser && currentUser.id) || '', _clip: !!c._clip, username: '@' + (currentUser && currentUser.username || 'me') }; });
+                    window._profileClips = r.data.map(function(c){ return { id: c.id, videoUrl: c.videoUrl, media_url: c.media_url, thumbnail_url: c.thumbnail_url, view_count: c.view_count, caption: c.caption, like_count: c.like_count || 0, comment_count: c.comment_count || 0, sound_name: c.sound_name || null, sound_id: c.sound_id || null, sound_source_clip_id: c.sound_source_clip_id || null, volume: c.volume, segments: c.segments || null, voice_effect: c.voice_effect || null, user_id: (currentUser && currentUser.id) || '', _clip: !!c._clip, username: '@' + (currentUser && currentUser.username || 'me') }; });
                     r.data.forEach(function(clip, clipIdx) {
                         var thumb = clip.thumbnail_url || '';
         var videoUrl = clip.media_url || '';
@@ -14923,10 +14924,19 @@ function tfReelPageHTML(post, avatarHtml, username, verified, likes) {
                 // from the sound hub credited nobody and opening the pill
                 // searched for the wrong thing.
                 (function () {
-                    var sound = post.sound_name || 'Original Sound';
-                    return '<div class="sound-ticker" onclick="openSoundHub(\'' + escapeHtml(sound).replace(/'/g, '&#39;') + '\',\'' + escapeHtml(src) + '\')">' +
+                    // An original sound is that clip's own. Grouping on the
+                    // words "Original Sound" put unrelated clips together as
+                    // though they shared a track, so the pill carries the
+                    // sound's identity and not just its label.
+                    var isOriginal = !post.sound_id && (!post.sound_name ||
+                        /^original (audio|sound)$/i.test(post.sound_name));
+                    var srcId = post.sound_source_clip_id || (isOriginal ? post.id : '');
+                    var label = isOriginal
+                        ? ('Original audio · @' + (username || 'user'))
+                        : (post.sound_name || 'Original audio');
+                    return '<div class="sound-ticker" onclick="openSoundHub(\'' + escapeHtml(label).replace(/'/g, '&#39;') + '\',\'' + escapeHtml(src) + '\',\'' + escapeHtml(String(srcId || '')) + '\')">' +
                         '<i class="fa-solid fa-music"></i>' +
-                        '<span style="max-width:150px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; display:inline-block;">' + escapeHtml(sound) + '</span>' +
+                        '<span style="max-width:150px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; display:inline-block;">' + escapeHtml(label) + '</span>' +
                     '</div>';
                 })() +
             '</div>' +
@@ -14972,7 +14982,7 @@ async function initReels() {
         // relationship to follow and refuses the whole query rather than just
         // the join. The authors are looked up in one extra request below.
         var clipResp = await window.sb.from('trustclips')
-            .select('id, video_url, thumbnail_url, user_id, caption, sound_name, volume, voice_effect, sources, segments, stickers, location, captions, like_count, comment_count, view_count, created_at')
+            .select('id, video_url, thumbnail_url, user_id, caption, sound_name, sound_id, sound_source_clip_id, volume, voice_effect, sources, segments, stickers, location, captions, like_count, comment_count, view_count, created_at')
             .neq('is_hidden', true)
             .not('video_url', 'is', null)
             .order('created_at', { ascending: false })
@@ -15007,6 +15017,7 @@ async function initReels() {
                 id: c.id, media_url: c.video_url, video_url: c.video_url,
                 thumbnail_url: c.thumbnail_url, user_id: c.user_id,
                 text_content: c.caption, sound_name: c.sound_name,
+                sound_id: c.sound_id || null, sound_source_clip_id: c.sound_source_clip_id || null,
                 volume: c.volume, voice_effect: c.voice_effect,
                 sources: c.sources, segments: c.segments,
                 stickers: c.stickers, location: c.location, captions: c.captions,
@@ -19907,6 +19918,8 @@ function openContextualVideo(videoUrl, context, startIndex, clipArray) {
             segments: c.segments || null,        // the editor's cuts, honoured at playback
             voice_effect: c.voice_effect || null, // and its voice effect, likewise
             sound_name: c.sound_name || null,
+            sound_id: c.sound_id || null,
+            sound_source_clip_id: c.sound_source_clip_id || null,
             _clip: !!c._clip                     // which table a view belongs in
         };
         var profile = c.users || {};
@@ -19948,7 +19961,7 @@ async function openClipById(clipId) {
     if (!clipId || !window.sb) return;
     try {
         var r = await sb.from('trustclips')
-            .select('id, video_url, thumbnail_url, user_id, caption, sound_name, volume, voice_effect, segments, like_count, comment_count, view_count')
+            .select('id, video_url, thumbnail_url, user_id, caption, sound_name, sound_id, sound_source_clip_id, volume, voice_effect, segments, like_count, comment_count, view_count')
             .eq('id', clipId).maybeSingle();
         if (r.error || !r.data) { showToast('That clip is not available'); return; }
         var c = r.data, who = null;
@@ -19964,6 +19977,7 @@ async function openClipById(clipId) {
             id: c.id, media_url: c.video_url, user_id: c.user_id, users: who,
             username: '@' + ((who && who.username) || 'user'),
             caption: c.caption || '', sound_name: c.sound_name || null,
+            sound_id: c.sound_id || null, sound_source_clip_id: c.sound_source_clip_id || null,
             like_count: c.like_count || 0, comment_count: c.comment_count || 0,
             view_count: c.view_count || 0, volume: c.volume,
             segments: c.segments || null, voice_effect: c.voice_effect || null,
@@ -20026,6 +20040,8 @@ function openProfileClipViewer(startIdx) {
             username: c.username || ('@' + (me.username || 'you')),
             caption: c.caption || '',
             sound_name: c.sound_name || null,
+            sound_id: c.sound_id || null,
+            sound_source_clip_id: c.sound_source_clip_id || null,
             like_count: c.like_count || 0,
             comment_count: c.comment_count || 0,
             view_count: c.view_count || 0,
@@ -22579,8 +22595,13 @@ function startLiveNow() {
 function openSoundHubFromCamera() { if(typeof closeLgCam==='function')closeLgCam(); openSoundHub('Add Audio'); }
 
 function closeSoundHub() { stopSoundPreview&&stopSoundPreview(); var p=document.getElementById('soundHubPage'); if(p)p.remove(); var _rc=document.getElementById('reelsContainer'); if(!_rc) { showNavBar&&showNavBar(); } }
-async function openSoundHub(soundName, fallbackVideoUrl) {
-    soundName = soundName || 'Original Audio';
+async function openSoundHub(soundName, fallbackVideoUrl, sourceClipId) {
+    soundName = soundName || 'Original audio';
+    // Two clips that each recorded their own audio are not the same sound,
+    // however alike their labels look. Where a clip's own sound has an
+    // identity, group on that; the name is only the identity for a real
+    // track, where everyone using it typed nothing and shares the title.
+    sourceClipId = sourceClipId || null;
     var navBar = document.querySelector('.nav-container');
     if (navBar) navBar.style.display = 'none';
     // The clip you came from carried on playing behind this page, so its sound
@@ -22619,18 +22640,23 @@ async function openSoundHub(soundName, fallbackVideoUrl) {
     if (window.sb) {
         try {
             // Count clips using this exact sound
-            var countRes = await sb.from('trustclips').select('id', { count: 'exact', head: true }).eq('sound_name', soundName);
+            var countQ = sb.from('trustclips').select('id', { count: 'exact', head: true });
+            countQ = sourceClipId ? countQ.eq('sound_source_clip_id', sourceClipId)
+                                  : countQ.eq('sound_name', soundName).is('sound_source_clip_id', null);
+            var countRes = await countQ;
             clipCount = countRes.count || 0;
         } catch(e) {}
 
         try {
             // Get up to 6 real clips using this sound (for grid + preview audio)
-            var clipsRes = await sb.from('trustclips')
+            var clipsQ = sb.from('trustclips')
                 .select('id,video_url,thumbnail_url,user_id,view_count,sound_cover_url,sound_artist')
-                .eq('sound_name', soundName)
                 .neq('is_hidden', true)
                 .order('view_count', { ascending: false })
                 .limit(6);
+            clipsQ = sourceClipId ? clipsQ.eq('sound_source_clip_id', sourceClipId)
+                                  : clipsQ.eq('sound_name', soundName).is('sound_source_clip_id', null);
+            var clipsRes = await clipsQ;
             clips = (clipsRes.data) || [];
             if (clips.length > 0) {
                 firstVideoUrl = clips[0].video_url || null;
@@ -22652,6 +22678,7 @@ async function openSoundHub(soundName, fallbackVideoUrl) {
                 .select('sound_name, user_id')
                 .neq('sound_name', soundName)
                 .not('sound_name', 'is', null)
+                .is('sound_source_clip_id', null)
                 .limit(20);
             if (simRes.data && simRes.data.length) {
                 var seen = {};
@@ -22669,7 +22696,7 @@ async function openSoundHub(soundName, fallbackVideoUrl) {
                         var uRes = await sb.from('users').select('id,username').in('id', uids);
                         var uMap = {};
                         (uRes.data||[]).forEach(function(u){ uMap[u.id] = u.username; });
-                        similarSounds.forEach(function(s){ s.artist = s.userId && uMap[s.userId] ? '@'+uMap[s.userId] : 'Original Audio'; });
+                        similarSounds.forEach(function(s){ s.artist = s.userId && uMap[s.userId] ? '@'+uMap[s.userId] : 'Original audio'; });
                     } catch(e) {}
                 }
             }
@@ -22678,6 +22705,9 @@ async function openSoundHub(soundName, fallbackVideoUrl) {
 
     window._soundHubCurrentTrackVideoUrl = firstVideoUrl || null;
     window._soundHubFallbackAudioUrl = fallbackVideoUrl || null;
+    // Held for "Use this audio", so a clip made from someone's own recording
+    // is filed under that recording and not under the words on the label.
+    window._soundHubSourceClipId = sourceClipId || (clips.length ? clips[0].id : null);
 
     var countLabel = clipCount > 0 ? clipCount.toLocaleString() + ' clip' + (clipCount !== 1 ? 's' : '') : 'No clips yet';
 
@@ -22909,14 +22939,18 @@ async function useAudioAndOpenCamera(trackName) {
     // "Don't let others use as template" was written down and never once read,
     // so switching it on changed nothing at all: anybody could still lift the
     // sound. This is the check that makes it mean something.
-    if (trackName && window.sb) {
+    var srcClip = window._soundHubSourceClipId || null;
+    if ((trackName || srcClip) && window.sb) {
         try {
-            var r = await sb.from('trustclips')
+            var tq = sb.from('trustclips')
                 .select('allow_template')
-                .eq('sound_name', trackName)
                 .neq('is_hidden', true)
                 .order('created_at', { ascending: true })
-                .limit(1).maybeSingle();
+                .limit(1);
+            // Ask the clip the sound actually came from. Asking by name found
+            // whichever stranger posted first under the same label.
+            tq = srcClip ? tq.eq('sound_source_clip_id', srcClip) : tq.eq('sound_name', trackName);
+            var r = await tq.maybeSingle();
             if (r.data && r.data.allow_template === false) {
                 showToast('The person who made this sound has turned off reuse');
                 triggerHaptic(10);
@@ -22928,6 +22962,7 @@ async function useAudioAndOpenCamera(trackName) {
     // can be posted with this sound attached.
     window._lgSoundUrl = window._soundHubCurrentTrackVideoUrl || window._soundHubFallbackAudioUrl || null;
     window._lgSoundName = trackName || null;
+    window._lgSoundSourceClip = srcClip;
     closeSoundHub();
     openLiquidGlassCamera(trackName);
 }
@@ -28331,6 +28366,8 @@ function tfOpenPostVideo(postId, idx) {
             username: post.users ? ('@' + (post.users.username || 'user')) : '@user',
             caption: post.text_content || '',
             sound_name: post.sound_name || null,
+            sound_id: post.sound_id || null,
+            sound_source_clip_id: post.sound_source_clip_id || null,
             like_count: post.like_count || 0,
             comment_count: post.comment_count || 0,
             view_count: post.view_count || 0,
@@ -30757,7 +30794,7 @@ async function switchUserProfileTab(tab, el, userId) {
             // they had never posted a clip.
             if (tab === 'reels') {
                 var tc = await sb.from('trustclips')
-                    .select('id, video_url, thumbnail_url, user_id, caption, sound_name, volume, voice_effect, segments, like_count, comment_count, view_count, created_at')
+                    .select('id, video_url, thumbnail_url, user_id, caption, sound_name, sound_id, sound_source_clip_id, volume, voice_effect, segments, like_count, comment_count, view_count, created_at')
                     .eq('user_id', userId).neq('is_hidden', true)
                     .not('video_url', 'is', null)
                     .order('created_at', { ascending: false }).limit(20);
@@ -30765,7 +30802,8 @@ async function switchUserProfileTab(tab, el, userId) {
                 rows = (tc.data || []).map(function (c) {
                     return { id: c.id, media_url: c.video_url, thumbnail_url: c.thumbnail_url,
                              user_id: c.user_id, text_content: c.caption, caption: c.caption,
-                             sound_name: c.sound_name, volume: c.volume,
+                             sound_name: c.sound_name, sound_id: c.sound_id || null,
+                             sound_source_clip_id: c.sound_source_clip_id || null, volume: c.volume,
                              voice_effect: c.voice_effect, segments: c.segments,
                              like_count: c.like_count, comment_count: c.comment_count,
                              view_count: c.view_count, created_at: c.created_at, _clip: true };
@@ -30798,6 +30836,10 @@ async function switchUserProfileTab(tab, el, userId) {
                          user_id: c.user_id, users: c.users || null,
                          caption: c.caption || c.text_content || '',
                          sound_name: c.sound_name || null,
+                         sound_id: c.sound_id || null,
+                         sound_source_clip_id: c.sound_source_clip_id || null,
+            sound_id: c.sound_id || null,
+            sound_source_clip_id: c.sound_source_clip_id || null,
                          like_count: c.like_count || 0, comment_count: c.comment_count || 0,
                          volume: c.volume, segments: c.segments || null,
                          voice_effect: c.voice_effect || null, _clip: !!c._clip,
@@ -46367,7 +46409,22 @@ async function submitTrustClip() {
                     return Math.max(0, Math.min(v, 200));
                 })(),
                 audience: window._tcAudience || 'everyone',
-                sound_name: window._tcAudioName || 'Original Audio',
+                // The sound the person actually picked. Three different
+                // places wrote it down and the insert read none of them, so
+                // every clip was posted as "Original Audio" whatever was
+                // playing, which is why unrelated clips shared a sound hub.
+                sound_name: window._tcAudioName || window._tcSoundName ||
+                            window._lgSoundName || 'Original audio',
+                // Its identity. A sound lifted from another clip keeps that
+                // clip's id so both sit in one hub; a clip that recorded its
+                // own audio is its own sound; a real track has a name the
+                // world shares, so it needs no id.
+                sound_source_clip_id: (function () {
+                    if (window._lgSoundSourceClip) return window._lgSoundSourceClip;
+                    var named = window._tcAudioName || window._tcSoundName || window._lgSoundName;
+                    if (named && !/^original (audio|sound)$/i.test(named)) return null;
+                    return clipId;
+                })(),
                 // Links the clip to the sound it used, so it shows up in that
                 // sound's hub alongside the clip the sound came from.
                 sound_id: window._tcSoundId || null,
@@ -46472,6 +46529,8 @@ is_demo: window._tcIsDemoClip || false,
             // and this one's soundtrack.
             window._tcLocation = null;
             window._tcSoundName = null;
+            window._lgSoundName = null;
+            window._lgSoundSourceClip = null;
             window._tcSoundArtist = null;
             window._tcSoundCover = null;
             var _locLbl = document.getElementById('tcLocationLabel');
