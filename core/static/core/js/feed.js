@@ -2569,8 +2569,7 @@ function tfNotifyMentions(text, extra) {
         (res.data || []).forEach(function (u) {
             if (seen[u.id]) return;
             seen[u.id] = true;
-            _tfNotify(u.id, Object.assign({ type: 'mention',
-                message: _tfActorName() + ' mentioned you' }, extra || {}));
+            _tfNotify(u.id, Object.assign({ type: 'mention' }, extra || {}));
         });
     }).catch(function () {});
 }
@@ -14105,7 +14104,7 @@ function renderMentions(text) {
         return pre + '<span class="tf-mention" data-u="' + uname + '" onclick="openMentionUser(event,\'' + uname + '\')" style="color:#007AFF;font-weight:600;cursor:pointer;">@' + uname + '</span>';
     });
     esc = esc.replace(/(^|[\s(>])#([A-Za-z0-9_]{2,50})/g, function(_m, pre, tag) {
-        return pre + '<span class="tf-hashtag" onclick="openHashtag(event,\'' + tag + '\')" style="color:#007AFF;font-weight:600;cursor:pointer;">#' + tag + '</span>';
+        return pre + '<span class="tf-hashtag" onclick="openHashtag(event,\'' + tag + '\')">#' + tag + '</span>';
     });
     return esc;
 }
@@ -14914,7 +14913,11 @@ function tfReelPageHTML(post, avatarHtml, username, verified, likes) {
                     ((currentUser && post.user_id === currentUser.id) ? ''
                         : '<button class="follow-btn' + (tfIsFollowing(post.user_id) ? ' following' : '') + '" onclick="event.stopPropagation();realToggleFollow(this,\'' + escapeHtml(String(post.user_id || '')) + '\')">' + (tfIsFollowing(post.user_id) ? 'Following' : 'Follow') + '</button>') +
                 '</div>' +
-                '<p style="margin:0 0 10px; font-size:14px; line-height:1.35; max-width:88%;">' + escapeHtml(post.text_content || '') + '</p>' +
+                // Hashtags and mentions are links here, not plain words. A clip
+                // caption was being escaped straight into the page, so a
+                // hashtag on a clip was ordinary text you could not tap, which
+                // is why hashtags looked broken on this screen.
+                '<p style="margin:0 0 10px; font-size:14px; line-height:1.35; max-width:88%;">' + renderMentions(post.text_content || '') + '</p>' +
                 // The sound the clip was posted with, where it has one. This
                 // always said "Original Sound", so a clip made with a track
                 // from the sound hub credited nobody and opening the pill
@@ -14969,7 +14972,7 @@ async function initReels() {
         // relationship to follow and refuses the whole query rather than just
         // the join. The authors are looked up in one extra request below.
         var clipResp = await window.sb.from('trustclips')
-            .select('id, video_url, thumbnail_url, user_id, caption, sound_name, volume, voice_effect, sources, segments, stickers, location, like_count, comment_count, view_count, created_at')
+            .select('id, video_url, thumbnail_url, user_id, caption, sound_name, volume, voice_effect, sources, segments, stickers, location, captions, like_count, comment_count, view_count, created_at')
             .neq('is_hidden', true)
             .not('video_url', 'is', null)
             .order('created_at', { ascending: false })
@@ -15006,7 +15009,7 @@ async function initReels() {
                 text_content: c.caption, sound_name: c.sound_name,
                 volume: c.volume, voice_effect: c.voice_effect,
                 sources: c.sources, segments: c.segments,
-                stickers: c.stickers, location: c.location,
+                stickers: c.stickers, location: c.location, captions: c.captions,
                 like_count: c.like_count, comment_count: c.comment_count,
                 view_count: c.view_count, created_at: c.created_at,
                 users: null, _clip: true
@@ -28609,7 +28612,7 @@ function formatPostText(text) {
     var safe = escapeHtml(text);
     // Linkify URLs first (before hashtag/mention so they don't double-process)
     safe = safe.replace(/(https?:\/\/[^\s&lt;&quot;]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#007AFF;text-decoration:underline;word-break:break-all;">$1</a>');
-    safe = safe.replace(/(^|[\s(>])#([A-Za-z0-9_]{2,50})/g, '$1<span class="tf-hashtag" onclick="openHashtag(event,\'$2\')" style="color:#007AFF;font-weight:600;cursor:pointer;">#$2</span>');
+    safe = safe.replace(/(^|[\s(>])#([A-Za-z0-9_]{2,50})/g, '$1<span class="tf-hashtag" onclick="openHashtag(event,\'$2\')">#$2</span>');
     // Mentions render blue optimistically; the sweep below strips styling/clicks
     // for accounts that don't exist or are banned/suspended (→ plain text).
     safe = safe.replace(/(^|[\s(>])@([A-Za-z0-9_.]{2,30})/g, '$1<span class="tf-mention" data-u="$2" onclick="openMentionUser(event,\'$2\')" style="color:#007AFF;font-weight:600;cursor:pointer;">@$2</span>');
@@ -46325,6 +46328,11 @@ is_demo: window._tcIsDemoClip || false,
                 // shown in the composer row, and dropped at post time. That is
                 // why nothing appeared on the clip.
                 location: window._tcLocation || null,
+                // The transcript the editor made. Generated by ElevenLabs,
+                // shown live while editing, and until now never saved, so
+                // captions vanished the moment the clip was posted.
+                captions: (window.edState && edState.captions && edState.captions.length)
+                    ? edState.captions : null,
                 stickers: window._pendingClipStickers || [],
                 // The edit itself: which ranges of which file play, in order. Only
                 // written when the timeline is actually more than the whole clip,
@@ -46390,6 +46398,11 @@ is_demo: window._tcIsDemoClip || false,
         if (clipSaved === false) {
             showToast('Clip not saved. It is still on this device, try posting again.');
         } else {
+            // Anybody tagged in the caption hears about it. This was wired
+            // for posts and comments and never for clips, so being tagged in a
+            // clip notified nobody. clip_id, not post_id: a clip id in post_id
+            // is a foreign key violation.
+            try { tfNotifyMentions(text, { clip_id: clipId }); } catch (e) {}
             // Cleared, or the next clip silently inherits this one's place.
             window._tcLocation = null;
             var _locLbl = document.getElementById('tcLocationLabel');

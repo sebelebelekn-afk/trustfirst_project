@@ -4482,3 +4482,43 @@ textarea:focus-visible,
         opacity: 0.75;
     }
 }
+
+/* ==========================================================================
+   HASHTAGS
+
+   A posted hashtag is not the caption and should not read as the caption, but
+   it is not a headline either: it is a label you can follow. So it sits one
+   step back from the text around it rather than shouting in link blue, which
+   is what it used to do.
+
+   Colour comes from here rather than an inline style, because the right grey
+   on a white post is the wrong grey on a black clip.
+   ========================================================================== */
+.tf-hashtag {
+    color: #6B7686;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.tf-hashtag:active { opacity: 0.6; }
+
+/* On a clip the caption is white over video, so the tag steps back to a
+   translucent white instead of a grey that would disappear into the picture. */
+.reel-ui .tf-hashtag,
+.reel-captions .tf-hashtag {
+    color: rgba(255, 255, 255, 0.62);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .tf-hashtag { color: #8B95A5; }
+}
+:root[data-theme="dark"] .tf-hashtag { color: #8B95A5; }
+
+/* While you are still typing, a tag you have just picked from the list reads
+   as chosen: blue and solid, the way a link does before it settles into the
+   posted caption. */
+.tf-hashtag-live {
+    color: #007AFF;
+    font-weight: 700;
+}
