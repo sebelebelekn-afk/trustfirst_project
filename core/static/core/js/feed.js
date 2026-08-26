@@ -22626,7 +22626,7 @@ async function openSoundHub(soundName, fallbackVideoUrl) {
         try {
             // Get up to 6 real clips using this sound (for grid + preview audio)
             var clipsRes = await sb.from('trustclips')
-                .select('id,video_url,thumbnail_url,user_id,view_count')
+                .select('id,video_url,thumbnail_url,user_id,view_count,sound_cover_url,sound_artist')
                 .eq('sound_name', soundName)
                 .neq('is_hidden', true)
                 .order('view_count', { ascending: false })
@@ -22638,8 +22638,9 @@ async function openSoundHub(soundName, fallbackVideoUrl) {
                 // Get uploader name
                 if (clips[0].user_id) {
                     try {
-                        var profRes = await sb.from('users').select('username').eq('id', clips[0].user_id).maybeSingle();
+                        var profRes = await sb.from('users').select('username,avatar_url').eq('id', clips[0].user_id).maybeSingle();
                         if (profRes.data && profRes.data.username) uploaderName = '@' + profRes.data.username;
+                        if (profRes.data && profRes.data.avatar_url) window._soundHubUploaderAvatar = profRes.data.avatar_url;
                     } catch(e) {}
                 }
             }
@@ -22728,12 +22729,28 @@ async function openSoundHub(soundName, fallbackVideoUrl) {
     body.innerHTML =
         /* Track card */
         '<div style="background:linear-gradient(135deg,rgba(0,122,255,0.08),rgba(88,86,214,0.08));border:1px solid rgba(0,122,255,0.12);border-radius:22px;padding:22px;display:flex;align-items:center;gap:16px;margin-bottom:20px;">' +
-            '<div id="soundDisc" style="width:68px;height:68px;border-radius:50%;background:linear-gradient(135deg,#1a1a2e,#16213e);border:3px solid rgba(0,122,255,0.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
-                '<div style="width:22px;height:22px;border-radius:50%;background:var(--bg-primary,#fff);"></div>' +
-            '</div>' +
+            // The disc shows what the sound actually is.
+            //
+            // It was a flat gradient with a hole in it for every sound on the
+            // app. A track picked in the editor arrives with its cover from
+            // iTunes, so that goes on the record. An original sound belongs to
+            // whoever recorded it, so it gets their picture. The hole in the
+            // middle stays either way, because it is a record.
+            (function () {
+                var art = (clips[0] && clips[0].sound_cover_url) || null;
+                var face = window._soundHubUploaderAvatar || null;
+                var img = art || face;
+                return '<div id="soundDisc" style="position:relative;width:68px;height:68px;border-radius:50%;overflow:hidden;' +
+                    (img ? 'background:#111;' : 'background:linear-gradient(135deg,#1a1a2e,#16213e);') +
+                    'border:3px solid rgba(0,122,255,0.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+                    (img ? '<img src="' + escapeHtml(img) + '" alt="" style="width:100%;height:100%;object-fit:cover;" onerror="this.remove()">' : '') +
+                    '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:var(--bg-primary,#fff);box-shadow:0 0 0 2px rgba(0,0,0,0.25);"></div>' +
+                '</div>';
+            })() +
             '<div style="flex:1;min-width:0;">' +
                 '<h3 style="font-size:15px;font-weight:700;color:var(--text-primary,#000);margin:0 0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(soundName) + '</h3>' +
-                '<p style="font-size:13px;color:#888;margin:0 0 12px;">' + escapeHtml(uploaderName) + ' · ' + countLabel + '</p>' +
+                '<p style="font-size:13px;color:#888;margin:0 0 12px;">' +
+                    escapeHtml((clips[0] && clips[0].sound_artist) || uploaderName) + ' · ' + countLabel + '</p>' +
                 '<div style="display:flex;gap:8px;align-items:center;">' +
                     '<button id="soundPlayBtn" onclick="toggleSoundPreview(this)" ' + (!(firstVideoUrl || fallbackVideoUrl) ? 'disabled style="opacity:0.4;cursor:not-allowed;' : 'style="') + 'width:48px;height:48px;border-radius:50%;background:rgba(0,122,255,0.12);border:1.5px solid rgba(0,122,255,0.25);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:20px;color:#007AFF;transition:all 0.25s;">' +
                         '<i class="fa-solid fa-play" style="margin-left:3px;"></i>' +
@@ -43217,6 +43234,12 @@ function edAddMusicTrackReal(title, artist, previewUrl, artUrl) {
         spApplyMusic({ name: title, artist: artist, previewUrl: previewUrl, artUrl: artUrl });
         return;
     }
+    // Remember which track this is, so the clip can carry its name, its artist
+    // and its cover. iTunes hands all three back with every search result and
+    // the app was keeping only the audio.
+    window._tcSoundName = title;
+    window._tcSoundArtist = artist || null;
+    window._tcSoundCover = artUrl || null;
     edState.audioTracks.push({id:'music_'+Date.now(), label:title+', '+artist, url:previewUrl, artUrl:artUrl, startMs:0, durationMs:180000});
     edState.isDirty = true; edRenderTimeline(); edSaveHistory(); editorSaveDraft(false);
     var m = document.getElementById('edMusicModal');
@@ -46348,6 +46371,8 @@ async function submitTrustClip() {
                 // Links the clip to the sound it used, so it shows up in that
                 // sound's hub alongside the clip the sound came from.
                 sound_id: window._tcSoundId || null,
+                sound_artist: window._tcSoundArtist || null,
+                sound_cover_url: window._tcSoundCover || null,
                 is_hidden: false,
 is_demo: window._tcIsDemoClip || false,
                 demo_expiry: window._tcIsDemoClip ? new Date(Date.now() + 7*24*60*60*1000).toISOString() : null,
@@ -46443,8 +46468,12 @@ is_demo: window._tcIsDemoClip || false,
             // clip notified nobody. clip_id, not post_id: a clip id in post_id
             // is a foreign key violation.
             try { tfNotifyMentions(text, { clip_id: clipId }); } catch (e) {}
-            // Cleared, or the next clip silently inherits this one's place.
+            // Cleared, or the next clip silently inherits this one's place
+            // and this one's soundtrack.
             window._tcLocation = null;
+            window._tcSoundName = null;
+            window._tcSoundArtist = null;
+            window._tcSoundCover = null;
             var _locLbl = document.getElementById('tcLocationLabel');
             if (_locLbl) _locLbl.innerHTML = '<i class="fa-solid fa-chevron-right" style="color:#ccc;font-size:12px;"></i>';
             showToast('Clip posted ✓');
@@ -56133,17 +56162,24 @@ function _tfAttachClipCaptions(video, captions) {
     if (!Array.isArray(lines) || !lines.length) return;
 
     video._tfCapWired = true;
+    // Held on the element rather than closed over, so switching to a
+    // translation swaps the lines without rewiring anything.
+    video._tfCapLines = lines;
+    video._tfCapOriginal = lines;
     // timeupdate fires about four times a second, which is enough for a
     // subtitle and far cheaper than a frame loop for something that changes
     // once a sentence.
-    video.addEventListener('timeupdate', function () { _tfClipCaptionAt(video, lines); });
-    video.addEventListener('seeked', function () { _tfClipCaptionAt(video, lines); });
+    video.addEventListener('timeupdate', function () { _tfClipCaptionAt(video, video._tfCapLines || []); });
+    video.addEventListener('seeked', function () { _tfClipCaptionAt(video, video._tfCapLines || []); });
 }
 
 // Draw a clip's stickers and text over the video, once it has a real size.
 function _tfShowClipExtras(video, post) {
     if (!video || !post) return;
     _tfAttachClipCaptions(video, post.captions);
+    if (video._tfCapLines && video._tfCapLines.length) {
+        _tfAddTranslateButton(video, post.id, video._tfCapLines);
+    }
 
     var stickers = post.stickers;
     try {
@@ -56191,4 +56227,118 @@ function tfOpenClipLocation(name) {
         return;
     }
     showToast(name);
+}
+
+// ==========================================================================
+// CAPTIONS IN THE READER'S LANGUAGE
+//
+// Translated on request, not in advance. Pre-translating every clip into every
+// language would be work nobody asked for on text nobody may read; a tap costs
+// one request for the handful of lines a clip actually has.
+//
+// The result is kept, so the same clip in the same language is never fetched
+// twice in a session, and the toggle flips back to the original instantly.
+//
+// This is subtitles, not dubbing. The voice is untouched. Dubbing is billed by
+// the minute and is a different feature wearing the same word.
+// ==========================================================================
+
+var _tfCaptionTranslations = {};   // clipId|lang -> lines
+
+// The language this person reads, as a two-letter code.
+function _tfViewerLang() {
+    var l = '';
+    try { l = localStorage.getItem('tf_caption_lang') || ''; } catch (e) {}
+    if (!l) l = (navigator.language || navigator.userLanguage || 'en');
+    return String(l).slice(0, 2).toLowerCase();
+}
+
+// Are these captions already in the reader's language? Cheap guess, and only
+// used to decide whether offering a translation makes sense.
+function _tfCaptionsLookTranslated(lines, lang) {
+    return lang === 'en' && lines.every(function (l) {
+        return !/[^\x00-\x7F]/.test(l.text || '');   // plain ASCII reads as English
+    });
+}
+
+async function tfTranslateClipCaptions(btn, clipId) {
+    var video = btn.closest ? btn.closest('.reel-page') : null;
+    video = video ? video.querySelector('video') : null;
+    if (!video || !video._tfCapLines) return;
+
+    var lang = _tfViewerLang();
+    var key = clipId + '|' + lang;
+
+    // Already showing a translation: put the original back.
+    if (video._tfCapTranslated) {
+        video._tfCapLines = video._tfCapOriginal;
+        video._tfCapTranslated = false;
+        btn.textContent = 'See translation';
+        var host0 = btn.closest('.reel-page').querySelector('.reel-captions');
+        if (host0) host0._tfLast = null;      // force a redraw on the next tick
+        return;
+    }
+
+    if (_tfCaptionTranslations[key]) {
+        video._tfCapOriginal = video._tfCapOriginal || video._tfCapLines;
+        video._tfCapLines = _tfCaptionTranslations[key];
+        video._tfCapTranslated = true;
+        btn.textContent = 'See original';
+        return;
+    }
+
+    var original = video._tfCapLines;
+    btn.textContent = 'Translating…';
+    try {
+        var r = await fetch('/api/translate-text/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                q: original.map(function (l) { return l.text || ''; }),
+                target: lang
+            })
+        });
+        if (!r.ok) throw new Error('http ' + r.status);
+        var out = await r.json();
+        var translated = (out.t || []).map(function (t, i) {
+            return { start: original[i].start, end: original[i].end, text: t || original[i].text };
+        });
+        if (translated.length !== original.length) throw new Error('length mismatch');
+
+        _tfCaptionTranslations[key] = translated;
+        video._tfCapOriginal = original;
+        video._tfCapLines = translated;
+        video._tfCapTranslated = true;
+        btn.textContent = 'See original';
+        var host = btn.closest('.reel-page').querySelector('.reel-captions');
+        if (host) host._tfLast = null;
+    } catch (e) {
+        console.warn('[Captions] translate', e && e.message);
+        btn.textContent = 'See translation';
+        showToast('Could not translate those captions');
+    }
+}
+
+// The "See translation" control, added under a clip that has captions in
+// another language. Nothing is shown when there is nothing to translate.
+function _tfAddTranslateButton(video, clipId, lines) {
+    var page = video.closest ? video.closest('.reel-page') : null;
+    if (!page || page.querySelector('.reel-translate')) return;
+    var lang = _tfViewerLang();
+    if (_tfCaptionsLookTranslated(lines, lang)) return;
+
+    var ui = page.querySelector('.reel-ui > div');
+    if (!ui) return;
+    var btn = document.createElement('button');
+    btn.className = 'reel-translate';
+    btn.type = 'button';
+    btn.textContent = 'See translation';
+    btn.style.cssText = 'margin:0 0 8px;padding:5px 10px;border-radius:8px;border:none;' +
+        'background:rgba(255,255,255,0.16);color:#fff;font-size:12px;font-weight:700;' +
+        'cursor:pointer;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);';
+    btn.onclick = function (e) {
+        e.stopPropagation();
+        tfTranslateClipCaptions(btn, clipId);
+    };
+    ui.insertBefore(btn, ui.firstChild);
 }

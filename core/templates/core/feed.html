@@ -724,9 +724,9 @@ function authenticateUser() {
     <div style="padding:6px 20px 4px;margin-top:8px;"><p style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.06em;">Remix &amp; Reuse</p></div>
     <div class="settings-row" style="justify-content:space-between;"><span><i class="fa-solid fa-ban" style="margin-right:10px;color:#007AFF;"></i>Don't let others use as template</span><div class="toggle" id="moNoTemplate" onclick="this.classList.toggle('active');"></div></div>
     <div style="padding:6px 20px 4px;margin-top:8px;"><p style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.06em;">Accessibility</p></div>
-    <div class="settings-row" style="justify-content:space-between;"><span><i class="fa-solid fa-language" style="margin-right:10px;color:#007AFF;"></i>Translate trust clip</span><div class="toggle" id="moTranslate" onclick="openVoiceTranslationModal(this)"></div></div>
+    <div class="settings-row" style="justify-content:space-between;"><span><i class="fa-solid fa-language" style="margin-right:10px;color:#007AFF;"></i>Offer translated captions</span><div class="toggle" id="moTranslate" onclick="openVoiceTranslationModal(this)"></div></div>
     <div class="settings-row" style="justify-content:space-between;"><span><i class="fa-solid fa-closed-captioning" style="margin-right:10px;color:#007AFF;"></i>Enable closed captions</span><div class="toggle" id="moCaptions" onclick="this.classList.toggle('active');"></div></div>
-    <div class="settings-row" style="justify-content:space-between;"><span><i class="fa-solid fa-earth-americas" style="margin-right:10px;color:#007AFF;"></i>Translate closed captions</span><div class="toggle" id="moTranslateCaptions" onclick="this.classList.toggle('active');"></div></div>
+    <div class="settings-row" style="justify-content:space-between;"><span><i class="fa-solid fa-earth-americas" style="margin-right:10px;color:#007AFF;"></i>Translate captions automatically</span><div class="toggle" id="moTranslateCaptions" onclick="this.classList.toggle('active');"></div></div>
     <div style="padding:6px 20px 4px;margin-top:8px;"><p style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.06em;">Interaction</p></div>
     <div class="settings-row" style="justify-content:space-between;"><span><i class="fa-regular fa-heart" style="margin-right:10px;color:#007AFF;"></i>Hide like count</span><div class="toggle" id="moHideLikes" onclick="this.classList.toggle('active');"></div></div>
     <div class="settings-row" style="justify-content:space-between;"><span><i class="fa-solid fa-share-nodes" style="margin-right:10px;color:#007AFF;"></i>Hide share count</span><div class="toggle" id="moHideShares" onclick="this.classList.toggle('active');"></div></div>
@@ -4264,7 +4264,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=275"></script>
+<script src="{% static 'core/js/feed.js' %}?v=276"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
