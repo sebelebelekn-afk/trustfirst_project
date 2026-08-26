@@ -708,7 +708,10 @@ function authenticateUser() {
 
 <!-- ========== MORE OPTIONS SUB-SCREEN ========== -->
 <div id="more-options-overlay" class="white-overlay" style="z-index:8900;display:none;flex-direction:column;">
-  <div class="header-container" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:0.5px solid rgba(128,128,128,0.12);">
+  <!-- The status bar sat on top of the back button and the title. The top
+       padding clears whatever the phone reserves, with a floor for browsers
+       that report nothing. -->
+  <div class="header-container" style="display:flex;align-items:center;justify-content:space-between;padding:max(52px,calc(env(safe-area-inset-top,0px) + 16px)) 20px 16px;border-bottom:0.5px solid rgba(128,128,128,0.12);">
     <div class="liquid-glass-btn" onclick="closePage('more-options-overlay')"><i class="fa-solid fa-chevron-left"></i></div>
     <b style="font-size:17px;">More options</b>
     <div style="width:36px;"></div>
@@ -4261,7 +4264,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=271"></script>
+<script src="{% static 'core/js/feed.js' %}?v=272"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

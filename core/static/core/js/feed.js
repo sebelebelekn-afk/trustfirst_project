@@ -14658,6 +14658,9 @@ function reelTogglePlay(video) {
     var ind = page ? page.querySelector('.reel-play-indicator') : null;
     var icon = ind ? ind.querySelector('i') : null;
     if (video.paused) {
+        // Pausing by hand is remembered, so the recovery that restarts a clip
+        // once it has buffered does not undo a deliberate pause.
+        video._tfUserPaused = false;
         video.muted = window._reelsMuted;
         video.play().catch(function(){});
         if (ind && icon) {
@@ -14667,6 +14670,7 @@ function reelTogglePlay(video) {
             ind._hideT = setTimeout(function(){ ind.style.opacity = '0'; }, 500);
         }
     } else {
+        video._tfUserPaused = true;
         video.pause();
         if (ind && icon) {
             clearTimeout(ind._hideT);
@@ -14729,9 +14733,14 @@ function reelHeartTap(el, postId) {
 function toggleReelMute(btn) {
     var wasMuted = (window._reelsMuted !== false);
     window._reelsMuted = !window._reelsMuted;
+    // Sound goes to the clip you are watching, and to no other.
+    //
+    // This unmuted every video on the page at once. Anything else that happened
+    // to be playing got its audio turned on too, which is why turning the sound
+    // up could produce a completely different clip's soundtrack.
     var scroller = document.getElementById('reel-scroller');
     (scroller ? scroller.querySelectorAll('video.reel-video') : []).forEach(function(v) {
-        v.muted = window._reelsMuted;
+        v.muted = v._tfActive ? window._reelsMuted : true;
     });
     document.querySelectorAll('.reel-mute-btn i').forEach(function(i) {
         i.className = window._reelsMuted ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high';
@@ -15096,52 +15105,75 @@ setTimeout(function() {
     // Attach the slide-to-scrub progress bar to every reel
     videos.forEach(function(v) { wireReelScrub(v); });
 
-    // Preload first video aggressively
-    if (videos[0]) { videos[0].preload = 'auto'; videos[0].play().catch(function(){}); }
+    // Only the first few clips download to begin with.
+    //
+    // Every clip on the page used to be set to preload="auto" at once, so
+    // twenty videos competed for the same connection and, on a weak one, none
+    // of them finished. The clip you were actually looking at was starved by
+    // nineteen you were not. Three ahead is enough to scroll into without a
+    // wait, and the scroll handler moves the window along.
+    videos.forEach(function (v, i) { v.preload = i < 3 ? 'auto' : 'none'; });
+    if (videos[0]) _tfReelActivate(videos[0]);
 
     if (window.IntersectionObserver) {
-        var io = new IntersectionObserver(function(entries) {
-            entries.forEach(function(entry) {
-                var vid = entry.target;
-                // In the viewport is not the same as on screen: if an overlay
-                // is covering the clip, leave it paused.
-                if (entry.isIntersecting && !_tfIsCovered(vid)) {
-                    vid.currentTime = 0;
-                    vid.muted = window._reelsMuted;
-                    var p = vid.play();
-                    if (p) p.catch(function(){});
-                    // Clear any leftover pause icon from a previous reel
-                    var _pg = vid.closest('.reel-page');
-                    var _ind = _pg ? _pg.querySelector('.reel-play-indicator') : null;
-                    if (_ind) _ind.style.opacity = '0';
-                } else {
-                    vid.pause();
-                    // Scrolled away: reset so the next view starts fresh.
-                    // Merely covered: leave the position alone, because the
-                    // overlay closing puts you back where you were watching.
-                    if (!entry.isIntersecting) vid.currentTime = 0;
-                }
+        // One clip is in charge at a time, and it is whichever is most on
+        // screen. The old rule was "anything at least 75% visible plays", which
+        // has two failure modes: mid-scroll neither clip reaches 75% so nothing
+        // plays until you tap, and for a moment both can qualify, which is two
+        // videos playing at once. That is what a picture with somebody else's
+        // sound actually is.
+        var io = new IntersectionObserver(function (entries) {
+            entries.forEach(function (e) { e.target._tfRatio = e.intersectionRatio; });
+
+            var best = null, bestRatio = 0;
+            videos.forEach(function (v) {
+                var r = v._tfRatio || 0;
+                if (r > bestRatio) { bestRatio = r; best = v; }
             });
-        }, { threshold: 0.75, rootMargin: '0px' });
-        videos.forEach(function(v) {
-            v.preload = 'auto';
-            io.observe(v);
-        });
+
+            videos.forEach(function (v) {
+                if (v !== best) _tfReelDeactivate(v, (v._tfRatio || 0) === 0);
+            });
+            if (best && bestRatio >= 0.55 && !_tfIsCovered(best)) _tfReelActivate(best);
+        }, { threshold: [0, 0.25, 0.55, 0.8, 1] });
+
+        videos.forEach(function (v) { io.observe(v); });
+        scroller._tfIoReels = io;
     }
 
     // Scroll-snap smoother on mobile
     scroller.style.scrollSnapType = 'y mandatory';
     scroller.style.webkitOverflowScrolling = 'touch';
 
-    // Preload next video when current plays
-    scroller.addEventListener('scroll', function() {
-        var vids = scroller.querySelectorAll('video.reel-video');
-        var scrollPct = scroller.scrollTop / scroller.scrollHeight;
-        var idx = Math.floor(scrollPct * vids.length);
-        if (vids[idx+1]) { vids[idx+1].preload = 'auto'; vids[idx+1].load(); }
-        if (vids[idx+2]) { vids[idx+2].preload = 'auto'; vids[idx+2].load(); }
-        if (vids[idx+3]) { vids[idx+3].preload = 'auto'; vids[idx+3].load(); }
-        if (vids[idx+4]) { vids[idx+4].preload = 'auto'; vids[idx+4].load(); }
+    // Get the next few clips ready, without destroying the work already done.
+    //
+    // This called .load() on the next four videos on every scroll event, and a
+    // scroll event fires dozens of times a second. .load() resets a media
+    // element and throws away everything it has buffered, so the harder you
+    // scrolled the less was ready to play, which is the opposite of what it was
+    // trying to do. It is also why a clip so often needed a tap on pause and
+    // play to get going: the buffer it was waiting on had just been discarded.
+    //
+    // Setting preload once is all a browser needs. It is idempotent, so the
+    // same clip is never told twice, and nothing already downloaded is lost.
+    scroller.addEventListener('scroll', function () {
+        if (scroller._preloadPending) return;
+        scroller._preloadPending = true;
+        requestAnimationFrame(function () {
+            scroller._preloadPending = false;
+            var vids = scroller.querySelectorAll('video.reel-video');
+            if (!vids.length || !scroller.clientHeight) return;
+            var idx = Math.round(scroller.scrollTop / scroller.clientHeight);
+            for (var i = idx; i <= idx + 5; i++) {
+                var v = vids[i];
+                if (v && v.preload !== 'auto') v.preload = 'auto';
+            }
+            // Clips far behind release their buffer so a long session does not
+            // grow until the tab is killed.
+            for (var j = 0; j < vids.length; j++) {
+                if (j < idx - 3 && vids[j].preload !== 'none') vids[j].preload = 'none';
+            }
+        });
     }, { passive: true });
 
     // "No more clips" belongs to trying to go past the last one, not to
@@ -22506,6 +22538,10 @@ async function openSoundHub(soundName, fallbackVideoUrl) {
     soundName = soundName || 'Original Audio';
     var navBar = document.querySelector('.nav-container');
     if (navBar) navBar.style.display = 'none';
+    // The clip you came from carried on playing behind this page, so its sound
+    // ran under the track you opened this to hear. It never went through
+    // openPage, which is where everything else gets silenced.
+    _tfSilenceUnder('soundHubPage', null);
     var existing = document.getElementById('soundHubPage');
     if (existing) existing.remove();
 
@@ -22646,7 +22682,9 @@ async function openSoundHub(soundName, fallbackVideoUrl) {
             '</div>' +
         '</div>' +
 
-        '<button onclick="useAudioAndOpenCamera(\'' + escapeHtml(soundName) + '\')" style="width:100%;padding:16px;border-radius:18px;border:none;background:linear-gradient(135deg,#007AFF,#5856D6);color:white;font-size:16px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:24px;box-shadow:0 4px 20px rgba(0,122,255,0.35);">' +
+        // Flat, and no glow. The gradient and the halo were the two things on
+        // this page not doing any work.
+        '<button onclick="useAudioAndOpenCamera(\'' + escapeHtml(soundName) + '\')" style="width:100%;padding:16px;border-radius:18px;border:none;background:#007AFF;color:white;font-size:16px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:24px;">' +
             '<i class="fa-solid fa-music"></i> Use This Audio' +
         '</button>' +
 
@@ -22661,6 +22699,8 @@ function closeSoundHub() {
     stopSoundPreview();
     var p = document.getElementById('soundHubPage');
     if (p) p.remove();
+    // Start the clip again, exactly the one that was silenced on the way in.
+    _tfRestoreUnder('soundHubPage');
     var reelOverlay = document.getElementById('reel-overlay');
     var reelsContainer = document.getElementById('reelsContainer');
     if (!(reelOverlay && reelOverlay.style.display !== 'none') && !reelsContainer) {
@@ -41340,7 +41380,13 @@ function _edBuildFilmstrip(clip) {
     // Enough frames that each tile is about 56px wide at base zoom, so the strip
     // is not eight thumbnails stretched across the whole bar. Captured at 96x128
     // rather than 48x64, so a tile is downscaled instead of blown up and blurry.
-    var TILE_PX = 56, GRAB_W = 96, GRAB_H = 128;
+    // The strip cell is landscape, roughly 56 by 40, and these frames were
+    // being grabbed portrait at 96 by 128 and then stretched into it by
+    // drawImage. That is why the timeline looked squashed and soft: the wrong
+    // shape, then scaled up horizontally on a retina screen from a source too
+    // small to begin with. Captured at the cell's own shape, at three times the
+    // size so it is still sharp on a phone.
+    var TILE_PX = 56, GRAB_W = 168, GRAB_H = 120;
     var widthAtBaseZoom = (clip.durationMs / 1000) * ED_CLIP_PX_PER_SEC;
     var COUNT = Math.max(6, Math.min(24, Math.round(widthAtBaseZoom / TILE_PX)));
 
@@ -41379,8 +41425,15 @@ function _edBuildFilmstrip(clip) {
             try {
                 var cv = document.createElement('canvas');
                 cv.width = GRAB_W; cv.height = GRAB_H;
-                cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
-                frames.push(cv.toDataURL('image/jpeg', 0.72));
+                var ctx = cv.getContext('2d');
+                // Cover, not stretch. Take the middle of the frame at the
+                // cell's aspect ratio so a portrait clip is cropped rather
+                // than squashed into a landscape box.
+                var sw = v.videoWidth || GRAB_W, sh = v.videoHeight || GRAB_H;
+                var scale = Math.max(GRAB_W / sw, GRAB_H / sh);
+                var dw = sw * scale, dh = sh * scale;
+                ctx.drawImage(v, (GRAB_W - dw) / 2, (GRAB_H - dh) / 2, dw, dh);
+                frames.push(cv.toDataURL('image/jpeg', 0.82));
             } catch (e) { frames.push(null); }
             idx++; grab();
         };
@@ -55795,4 +55848,120 @@ function openStoryAttach() {
     window._tfStoryAttachTo = owner;
     try { inp.value = ''; } catch (e) {}
     inp.click();
+}
+
+// ==========================================================================
+// ONE CLIP PLAYS AT A TIME, AND IT SAYS WHEN IT IS WAITING
+//
+// Three faults lived here, and together they are the whole "scroll, tap pause,
+// tap play, hear the wrong sound" experience:
+//
+//   Nothing showed while a clip buffered. A stalled video and a paused one
+//   look identical, so a clip that was still loading read as one the app had
+//   decided to stop, and the only way to find out was to tap it.
+//
+//   Nothing guaranteed a single video had the sound. Two clips overlapping
+//   mid-scroll could both be playing, which is exactly what seeing one picture
+//   and hearing another is.
+//
+//   A refused play() was swallowed. Browsers refuse autoplay routinely and the
+//   clip then sat there, needing a tap nobody should have to give.
+// ==========================================================================
+
+// The spinner a clip shows while it is waiting for data. Stories already had
+// one; clips never did.
+function _tfReelBusy(video, on) {
+    var page = video.closest ? video.closest('.reel-page') : null;
+    if (!page) return;
+    var el = page.querySelector('.reel-buffering');
+    if (on && !el) {
+        el = document.createElement('div');
+        el.className = 'reel-buffering';
+        el.setAttribute('role', 'status');
+        el.setAttribute('aria-label', 'Loading');
+        el.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);' +
+            'z-index:26;width:42px;height:42px;border-radius:50%;pointer-events:none;' +
+            'border:3px solid rgba(255,255,255,0.25);border-top-color:#fff;' +
+            'animation:tfSpin 0.8s linear infinite;';
+        page.appendChild(el);
+    } else if (!on && el) {
+        el.remove();
+    }
+}
+
+// Wire the buffering and recovery listeners once per video.
+function _tfReelWire(video) {
+    if (video._tfWired) return;
+    video._tfWired = true;
+
+    video.addEventListener('waiting', function () { if (video._tfActive) _tfReelBusy(video, true); });
+    video.addEventListener('stalled', function () { if (video._tfActive) _tfReelBusy(video, true); });
+    video.addEventListener('playing', function () { _tfReelBusy(video, false); });
+    video.addEventListener('canplay', function () { _tfReelBusy(video, false); });
+
+    // A clip that has enough to play and is still the one on screen should be
+    // playing. Without this a refused autoplay stayed refused for good.
+    video.addEventListener('canplay', function () {
+        if (video._tfActive && video.paused && !video._tfUserPaused) {
+            video.play().catch(function () {});
+        }
+    });
+
+    video.addEventListener('error', function () {
+        _tfReelBusy(video, false);
+        console.warn('[Clip] could not play', video.currentSrc || video.src);
+    });
+}
+
+// Make this the clip that is playing, and the only one.
+function _tfReelActivate(video) {
+    if (!video) return;
+    _tfReelWire(video);
+    if (video._tfActive && !video.paused) return;   // already the one, leave it be
+
+    video._tfActive = true;
+    video.preload = 'auto';
+    video.muted = (window._reelsMuted !== false);
+
+    var page = video.closest ? video.closest('.reel-page') : null;
+    var ind = page ? page.querySelector('.reel-play-indicator') : null;
+    if (ind) ind.style.opacity = '0';
+
+    // Only show the spinner if it does not start promptly. A clip that is ready
+    // should never flash one.
+    if (video.readyState < 3) {
+        clearTimeout(video._tfBusyTimer);
+        video._tfBusyTimer = setTimeout(function () {
+            if (video._tfActive && video.readyState < 3) _tfReelBusy(video, true);
+        }, 180);
+    }
+
+    var p = video.play();
+    if (p && p.catch) {
+        p.catch(function () {
+            // Refused. Almost always because it asked for sound without a
+            // gesture, so fall back to silent playback rather than a still
+            // frame, and let the speaker button turn it up.
+            video.muted = true;
+            video.play().catch(function () {});
+        });
+    }
+}
+
+// Stand this clip down. Muted as well as paused, because a paused video that is
+// still unmuted is what makes the next one sound wrong.
+function _tfReelDeactivate(video, rewind) {
+    if (!video) return;
+    video._tfActive = false;
+    video._tfUserPaused = false;
+    clearTimeout(video._tfBusyTimer);
+    _tfReelBusy(video, false);
+    try {
+        if (!video.paused) video.pause();
+        video.muted = true;
+        // Asked for by the caller, so it happens whether or not this clip was
+        // the one playing. Skipping it for a clip that had never started left
+        // it part-watched, so scrolling back showed it halfway through.
+        if (rewind && video.currentTime !== 0) video.currentTime = 0;
+    } catch (e) {}
 }
