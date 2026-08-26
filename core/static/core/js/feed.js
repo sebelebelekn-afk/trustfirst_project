@@ -14882,8 +14882,27 @@ function tfReelPageHTML(post, avatarHtml, username, verified, likes) {
             ' autoplay muted loop playsinline preload="auto" style="width:100%;height:100%;object-fit:cover;opacity:1;" onclick="reelTogglePlay(this)"></video>' +
         '<div class="reel-play-indicator" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:82px;height:82px;border-radius:50%;background:rgba(0,0,0,0.42);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;pointer-events:none;z-index:25;"><i class="fa-solid fa-play" style="color:#fff;font-size:32px;margin-left:4px;"></i></div>' +
         '<button class="reel-mute-btn" onclick="toggleReelMute(this)" style="position:absolute;top:max(54px,env(safe-area-inset-top,54px));right:14px;width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,0.5);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:30;"><i class="fa-solid fa-volume-xmark" style="color:#fff;font-size:15px;"></i></button>' +
+        // Spoken captions sit above the name block and below the middle of the
+        // picture, which is where a subtitle belongs: clear of the face, clear
+        // of the buttons. Filled in on the fly from the clip's caption track as
+        // it plays, and empty until somebody speaks.
+        '<div class="reel-captions" aria-live="polite" style="position:absolute;left:14px;right:80px;bottom:132px;z-index:22;pointer-events:none;display:flex;justify-content:flex-start;"></div>' +
         '<div class="reel-ui">' +
             '<div style="flex:1;min-width:0;padding-right:8px;">' +
+                // Where this was filmed, above the name, as its own tappable
+                // pill. The location was being chosen in the composer and
+                // thrown away at post time, so nothing ever reached the clip.
+                (post.location
+                    ? '<div onclick="event.stopPropagation();tfOpenClipLocation(\'' + escapeHtml(String(post.location)).replace(/'/g, '&#39;') + '\')" ' +
+                      'style="display:inline-flex;align-items:center;gap:8px;background:rgba(0,0,0,0.45);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:10px;padding:6px 10px 6px 6px;margin-bottom:10px;max-width:100%;cursor:pointer;pointer-events:auto;">' +
+                        '<span style="width:22px;height:22px;border-radius:7px;background:#25D07A;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+                            '<i class="fa-solid fa-location-dot" style="color:#0b0b0b;font-size:11px;"></i></span>' +
+                        '<span style="min-width:0;">' +
+                            '<span style="display:block;color:#fff;font-size:13px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(String(post.location)) + '</span>' +
+                            '<span style="display:block;color:rgba(255,255,255,0.72);font-size:11px;">Explore now</span>' +
+                        '</span>' +
+                      '</div>'
+                    : '') +
                 '<div style="display:flex; align-items:center; gap:9px; margin-bottom:9px;">' +
                     avatarHtml +
                     '<b style="font-weight:800;font-size:15px;cursor:pointer;" onclick="openProfile(\'' + escapeHtml(String(post.user_id || '')) + '\')">@' + escapeHtml(username) + '</b>' +
@@ -14950,7 +14969,7 @@ async function initReels() {
         // relationship to follow and refuses the whole query rather than just
         // the join. The authors are looked up in one extra request below.
         var clipResp = await window.sb.from('trustclips')
-            .select('id, video_url, thumbnail_url, user_id, caption, sound_name, volume, voice_effect, sources, segments, like_count, comment_count, view_count, created_at')
+            .select('id, video_url, thumbnail_url, user_id, caption, sound_name, volume, voice_effect, sources, segments, stickers, location, like_count, comment_count, view_count, created_at')
             .neq('is_hidden', true)
             .not('video_url', 'is', null)
             .order('created_at', { ascending: false })
@@ -14987,6 +15006,7 @@ async function initReels() {
                 text_content: c.caption, sound_name: c.sound_name,
                 volume: c.volume, voice_effect: c.voice_effect,
                 sources: c.sources, segments: c.segments,
+                stickers: c.stickers, location: c.location,
                 like_count: c.like_count, comment_count: c.comment_count,
                 view_count: c.view_count, created_at: c.created_at,
                 users: null, _clip: true
@@ -14995,6 +15015,9 @@ async function initReels() {
             .sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); })
             .slice(0, 20);
         window._reelIdsOnScreen = reels.map(function (p) { return String(p.id); });
+        // The rows themselves, for the block that draws stickers and captions:
+        // it runs in a later setTimeout where this list is out of scope.
+        window._reelPosts = reels;
         if (reels.length === 0) {
             c.innerHTML = '<div style="color:rgba(255,255,255,0.4);text-align:center;padding:40px;font-size:14px;">No reels yet. Be the first to post!</div>';
             return;
@@ -15104,6 +15127,25 @@ setTimeout(function() {
 
     // Attach the slide-to-scrub progress bar to every reel
     videos.forEach(function(v) { wireReelScrub(v); });
+
+    // Draw what the editor put on each clip. _tfRenderClipOverlays was written
+    // for exactly this and was never called from anywhere, so every sticker and
+    // every line of text posted with a clip has been invisible.
+    //
+    // The rows are read from window._reelPosts rather than a local: this block
+    // runs in its own setTimeout, so the list initReels fetched is long out of
+    // scope by the time it fires.
+    (function () {
+        var posts = window._reelPosts || [];
+        if (!posts.length) return;
+        var byId = {};
+        posts.forEach(function (p) { byId[String(p.id)] = p; });
+        videos.forEach(function (v) {
+            var page = v.closest ? v.closest('.reel-page') : null;
+            var id = page ? page.getAttribute('data-post-id') : null;
+            if (id && byId[id]) _tfShowClipExtras(v, byId[id]);
+        });
+    })();
 
     // Only the first few clips download to begin with.
     //
@@ -46278,6 +46320,11 @@ is_demo: window._tcIsDemoClip || false,
                 no_downloads: document.getElementById('moAllowDownloads') && !document.getElementById('moAllowDownloads').classList.contains('active'),
                 allow_template: !(document.getElementById('moNoTemplate') && document.getElementById('moNoTemplate').classList.contains('active')),
                 scheduled_at: window._tcScheduledAt || null,
+                // The place picker writes the chosen name to window._tcLocation
+                // and nothing ever read it back, so a location was selected,
+                // shown in the composer row, and dropped at post time. That is
+                // why nothing appeared on the clip.
+                location: window._tcLocation || null,
                 stickers: window._pendingClipStickers || [],
                 // The edit itself: which ranges of which file play, in order. Only
                 // written when the timeline is actually more than the whole clip,
@@ -46343,6 +46390,10 @@ is_demo: window._tcIsDemoClip || false,
         if (clipSaved === false) {
             showToast('Clip not saved. It is still on this device, try posting again.');
         } else {
+            // Cleared, or the next clip silently inherits this one's place.
+            window._tcLocation = null;
+            var _locLbl = document.getElementById('tcLocationLabel');
+            if (_locLbl) _locLbl.innerHTML = '<i class="fa-solid fa-chevron-right" style="color:#ccc;font-size:12px;"></i>';
             showToast('Clip posted ✓');
             loadFeedStories();
         }
@@ -55964,4 +56015,113 @@ function _tfReelDeactivate(video, rewind) {
         // it part-watched, so scrolling back showed it halfway through.
         if (rewind && video.currentTime !== 0) video.currentTime = 0;
     } catch (e) {}
+}
+
+// ==========================================================================
+// WHAT THE EDITOR MADE, FINALLY SHOWN ON THE CLIP
+//
+// Three things were being produced and then dropped on the floor:
+//
+//   The location was picked in the composer, written to window._tcLocation,
+//   and never read when the clip was posted.
+//   The captions were transcribed by ElevenLabs, shown live while editing,
+//   and never saved with the clip.
+//   The stickers and text WERE saved, and _tfRenderClipOverlays, the function
+//   written to draw them, was never called from anywhere.
+//
+// So a clip you had captioned, decorated and placed posted as a bare video.
+// ==========================================================================
+
+// The caption line for this moment, in the box under the picture.
+function _tfClipCaptionAt(video, lines) {
+    var page = video.closest ? video.closest('.reel-page') : null;
+    if (!page) return;
+    var host = page.querySelector('.reel-captions');
+    if (!host) return;
+
+    var t = video.currentTime || 0;
+    var line = null;
+    for (var i = 0; i < lines.length; i++) {
+        if (t >= lines[i].start && t <= lines[i].end) { line = lines[i]; break; }
+    }
+    var text = (line && line.text) ? String(line.text).trim() : '';
+    if (text === host._tfLast) return;          // nothing changed, do not touch the DOM
+    host._tfLast = text;
+
+    if (!text) { host.innerHTML = ''; return; }
+    host.innerHTML = '<span style="display:inline-block;background:rgba(0,0,0,0.55);' +
+        'backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);' +
+        'color:#fff;font-size:15px;font-weight:600;line-height:1.35;' +
+        'padding:7px 11px;border-radius:8px;text-align:left;' +
+        'text-shadow:0 1px 3px rgba(0,0,0,0.5);">' + escapeHtml(text) + '</span>';
+}
+
+// Attach a clip's captions to its video, once.
+function _tfAttachClipCaptions(video, captions) {
+    if (!video || video._tfCapWired) return;
+    var lines = [];
+    try {
+        lines = (typeof captions === 'string' ? JSON.parse(captions) : captions) || [];
+    } catch (e) { lines = []; }
+    if (!Array.isArray(lines) || !lines.length) return;
+
+    video._tfCapWired = true;
+    // timeupdate fires about four times a second, which is enough for a
+    // subtitle and far cheaper than a frame loop for something that changes
+    // once a sentence.
+    video.addEventListener('timeupdate', function () { _tfClipCaptionAt(video, lines); });
+    video.addEventListener('seeked', function () { _tfClipCaptionAt(video, lines); });
+}
+
+// Draw a clip's stickers and text over the video, once it has a real size.
+function _tfShowClipExtras(video, post) {
+    if (!video || !post) return;
+    _tfAttachClipCaptions(video, post.captions);
+
+    var stickers = post.stickers;
+    try {
+        if (typeof stickers === 'string') stickers = JSON.parse(stickers);
+    } catch (e) { stickers = null; }
+    if (!stickers || !stickers.length) return;
+    if (video._tfOverlaysDone) return;
+
+    var page = video.closest ? video.closest('.reel-page') : null;
+    if (!page) return;
+
+    // The overlays are positioned against the picture, not the page, so this
+    // waits for the video to report its real size. Without that they land
+    // against a zero box and pile up in the corner.
+    function place() {
+        var w = page.clientWidth, h = page.clientHeight;
+        if (!w || !h) return false;
+        video._tfOverlaysDone = true;
+        try {
+            _tfRenderClipOverlays(page, { left: 0, top: 0, width: w, height: h },
+                                  stickers, post.id);
+        } catch (e) { console.warn('[Clip] overlays', e && e.message); }
+        return true;
+    }
+    if (!place()) {
+        video.addEventListener('loadedmetadata', place, { once: true });
+    }
+}
+
+// Tapping the place on a clip searches for it, which is the only thing it can
+// usefully do until there is a place page.
+function tfOpenClipLocation(name) {
+    if (!name) return;
+    if (typeof openSearchWith === 'function') { openSearchWith(name); return; }
+    var input = document.getElementById('s-input');
+    if (input && typeof navGoTo === 'function') {
+        navGoTo('search');
+        setTimeout(function () {
+            var el = document.getElementById('s-input');
+            if (el) {
+                el.value = name;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        }, 220);
+        return;
+    }
+    showToast(name);
 }
