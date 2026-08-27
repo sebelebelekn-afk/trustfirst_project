@@ -15,7 +15,7 @@ function openAdminDashboard() {
             '<b>Admin Dashboard</b>' +
         '</div>' +
         '<div style="display:flex;border-bottom:0.5px solid var(--border-color,#eee);flex-shrink:0;overflow-x:auto;">' +
-            ['applications', 'reports', 'feedback', 'kids', 'eddie'].map(function(t, i) {
+            ['applications', 'reports', 'feedback', 'kids', 'eddie', 'payments'].map(function(t, i) {
                 return '<button id="adminTab_' + t + '" onclick="adminSwitchTab(\'' + t + '\')" style="flex:1;min-width:90px;padding:13px 8px;background:none;border:none;border-bottom:2px solid ' + (i === 0 ? '#007AFF' : 'transparent') + ';color:' + (i === 0 ? 'var(--text-primary,#000)' : '#888') + ';font-size:13px;font-weight:700;cursor:pointer;text-transform:capitalize;">' + t + '</button>';
             }).join('') +
         '</div>' +
@@ -27,7 +27,7 @@ function openAdminDashboard() {
 }
 
 window.adminSwitchTab = function(tab) {
-    ['applications', 'reports', 'feedback', 'kids', 'eddie'].forEach(function(t) {
+    ['applications', 'reports', 'feedback', 'kids', 'eddie', 'payments'].forEach(function(t) {
         var b = document.getElementById('adminTab_' + t);
         if (b) { b.style.borderBottomColor = (t === tab) ? '#007AFF' : 'transparent'; b.style.color = (t === tab) ? 'var(--text-primary,#000)' : '#888'; }
     });
@@ -39,6 +39,7 @@ window.adminSwitchTab = function(tab) {
     if (tab === 'reports') return adminLoadReports(body);
     if (tab === 'feedback') return adminLoadFeedback(body);
     if (tab === 'eddie') return adminLoadEddie(body);
+    if (tab === 'payments') return adminLoadPayments(body);
 };
 
 // ============================================================
@@ -518,5 +519,109 @@ window.adminEddiePost = async function () {
         showToast('Could not reach the server');
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Post'; }
+    }
+};
+
+
+// ============================================================
+// PAYMENTS
+//
+// Registering the webhook is the one setup step that cannot be done from the
+// Yoco dashboard or from Render: it is an authenticated call that has to come
+// from this server with the secret key, and Yoco returns the signing secret
+// only once in reply. So it happens here, on a screen only an admin reaches,
+// rather than from a browser console on a phone.
+// ============================================================
+async function adminLoadPayments(body) {
+    if (!currentUser || !currentUser.is_admin) { body.innerHTML = _adminEmpty('Admins only'); return; }
+
+    var cfg = {};
+    try { cfg = await (await fetch('/api/config/')).json(); } catch (e) {}
+
+    var on = !!cfg.yoco_enabled;
+    var mode = cfg.yoco_mode || 'test';
+    var present = cfg.yoco_keys_present || {};
+    var pill = function (ok, label) {
+        return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;">' +
+            '<i class="fa-solid ' + (ok ? 'fa-circle-check' : 'fa-circle-xmark') +
+            '" style="color:' + (ok ? '#34C759' : '#FF3B30') + ';"></i>' +
+            '<span style="color:var(--text-primary,#000);">' + label + '</span></div>';
+    };
+
+    body.innerHTML =
+        _adminCard(
+            '<div style="font-size:15px;font-weight:800;color:var(--text-primary,#000);margin-bottom:2px;">Card payments</div>' +
+            '<p style="font-size:12px;color:#888;margin:0 0 12px;">' +
+                (on ? ('Switched on, in <b>' + escapeHtml(mode) + '</b> mode.')
+                    : 'Not switched on. Deposits are refused until the keys and the webhook are in place.') +
+            '</p>' +
+            (cfg.yoco_misconfigured
+                ? '<div style="background:rgba(255,59,48,0.1);border:1px solid rgba(255,59,48,0.3);border-radius:11px;padding:11px;font-size:12px;color:#FF3B30;margin-bottom:10px;line-height:1.5;">' +
+                    escapeHtml(cfg.yoco_misconfigured) + '</div>'
+                : '') +
+            pill(!!present.test_secret, 'Test secret key') +
+            pill(!!present.test_public, 'Test public key') +
+            pill(!!present.live_secret, 'Live secret key') +
+            pill(!!present.live_public, 'Live public key') +
+            pill(!!present.webhook, 'Webhook signing secret, ' + escapeHtml(mode) + ' mode')
+        ) +
+        _adminCard(
+            '<div style="font-size:14px;font-weight:700;color:var(--text-primary,#000);margin-bottom:6px;">Tell Yoco where to send events</div>' +
+            '<p style="font-size:12px;color:#888;margin:0 0 12px;line-height:1.5;">' +
+                'Run this once for each mode. Yoco shows the signing secret only once, ' +
+                'so copy it straight into Render. Nothing on this server keeps a copy.' +
+            '</p>' +
+            '<button id="admHookBtn" onclick="adminRegisterYocoWebhook()" style="width:100%;padding:12px;border-radius:12px;border:none;background:#007AFF;color:#fff;font-size:14px;font-weight:800;cursor:pointer;">Register webhook</button>' +
+            '<div id="admHookOut" style="display:none;margin-top:12px;"></div>'
+        );
+}
+
+window.adminRegisterYocoWebhook = async function () {
+    var btn = document.getElementById('admHookBtn');
+    var out = document.getElementById('admHookOut');
+    if (btn) { btn.disabled = true; btn.textContent = 'Asking Yoco...'; }
+    try {
+        var tok = await _tfAccessToken();
+        var r = await fetch('/api/wallet/register-yoco-webhook/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok }
+        });
+        var d = await r.json().catch(function () { return {}; });
+        if (!r.ok) {
+            showToast(d.error || 'Yoco refused that');
+            if (out && d.detail) {
+                out.style.display = 'block';
+                out.innerHTML = '<div style="font-size:12px;color:#FF3B30;line-height:1.5;">' + escapeHtml(d.detail) + '</div>';
+            }
+            return;
+        }
+        if (out) {
+            out.style.display = 'block';
+            out.innerHTML =
+                '<div style="background:rgba(52,199,89,0.1);border:1px solid rgba(52,199,89,0.3);border-radius:11px;padding:12px;">' +
+                    '<div style="font-size:12px;font-weight:700;color:#34C759;margin-bottom:8px;">Registered for ' + escapeHtml(d.mode || '') + '</div>' +
+                    '<div style="font-size:11px;color:#888;margin-bottom:4px;">Save this in Render as</div>' +
+                    '<div style="font-size:13px;font-weight:800;color:var(--text-primary,#000);margin-bottom:10px;">' + escapeHtml(d.variable || '') + '</div>' +
+                    '<div style="font-size:12px;font-family:monospace;word-break:break-all;background:var(--input-bg,#f0f0f0);border-radius:8px;padding:10px;color:var(--text-primary,#000);">' + escapeHtml(d.secret || '') + '</div>' +
+                    '<button onclick="adminCopyHookSecret(this)" data-secret="' + escapeHtml(d.secret || '') + '" style="width:100%;margin-top:10px;padding:10px;border-radius:10px;border:none;background:#34C759;color:#fff;font-size:13px;font-weight:800;cursor:pointer;">Copy secret</button>' +
+                    '<p style="font-size:11px;color:#888;margin:10px 0 0;line-height:1.5;">Yoco will not show this again. If you lose it, register the webhook once more to get a new one.</p>' +
+                '</div>';
+        }
+        showToast('Webhook registered');
+    } catch (e) {
+        showToast('Could not reach the server');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Register webhook'; }
+    }
+};
+
+window.adminCopyHookSecret = function (el) {
+    var v = el && el.getAttribute('data-secret');
+    if (!v) return;
+    try {
+        navigator.clipboard.writeText(v);
+        showToast('Copied. Paste it into Render now.');
+    } catch (e) {
+        showToast('Select the text above and copy it');
     }
 };
