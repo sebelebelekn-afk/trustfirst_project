@@ -234,6 +234,18 @@ def get_config(request):
         # browser monitoring off, which is what happens locally.
         "sentry_dsn": getattr(settings, "SENTRY_DSN_PUBLIC", ""),
         "sentry_environment": getattr(settings, "SENTRY_ENVIRONMENT", "production"),
+        # Yoco. The public key is meant to be seen; the secret one is not here
+        # and never will be. yoco_mode is what tells the wallet whether to say
+        # "test payment" on screen, so nobody mistakes a test card for a real
+        # deposit, and yoco_enabled is how the app knows whether to offer a
+        # deposit at all rather than opening a form that cannot work.
+        "yoco_enabled": bool(getattr(settings, "YOCO_ENABLED", False)),
+        "yoco_mode": getattr(settings, "YOCO_MODE", "test"),
+        "yoco_public_key": getattr(settings, "YOCO_PUBLIC_KEY", ""),
+        # Set only when the keys and the mode contradict each other. Naming the
+        # problem out loud beats a deposit button that silently does nothing,
+        # which is how R2 stayed off for days.
+        "yoco_misconfigured": getattr(settings, "YOCO_MISCONFIGURED", ""),
     })
 
 

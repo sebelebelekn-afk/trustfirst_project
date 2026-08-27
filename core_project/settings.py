@@ -183,6 +183,71 @@ STRIPE_PUBLISHABLE_KEY  = os.environ.get('STRIPE_PUBLISHABLE_KEY', '')
 STRIPE_SECRET_KEY       = os.environ.get('STRIPE_SECRET_KEY', '')
 STRIPE_WEBHOOK_SECRET   = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
 
+# ------------------------------------------------------------------
+# YOCO, the card payments that put real money in the wallet
+#
+# Both sets of keys live here at once, test and live, and YOCO_MODE decides
+# which one is used. Holding both means going live is one environment variable
+# on Render, with no code change and no redeploy of anything else, and it means
+# test keys stay available afterwards for checking a change without charging
+# anybody.
+#
+# The secret key never leaves this server. Only the public key is served to the
+# browser through /api/config/, which is what it is for.
+#
+# Two spellings are accepted for each, the same lesson R2 taught: saving
+# YOCO_LIVE_SECRET_KEY while this file reads YOCO_SECRET_KEY_LIVE is not an
+# error, it is an empty string and a payment feature that quietly does nothing.
+# ------------------------------------------------------------------
+YOCO_MODE = (os.environ.get('YOCO_MODE', '') or 'test').strip().lower()
+if YOCO_MODE not in ('test', 'live'):
+    YOCO_MODE = 'test'
+
+YOCO_TEST_SECRET_KEY  = _env_any('YOCO_TEST_SECRET_KEY', 'YOCO_SECRET_KEY_TEST')
+YOCO_TEST_PUBLIC_KEY  = _env_any('YOCO_TEST_PUBLIC_KEY', 'YOCO_PUBLIC_KEY_TEST')
+YOCO_LIVE_SECRET_KEY  = _env_any('YOCO_LIVE_SECRET_KEY', 'YOCO_SECRET_KEY_LIVE')
+YOCO_LIVE_PUBLIC_KEY  = _env_any('YOCO_LIVE_PUBLIC_KEY', 'YOCO_PUBLIC_KEY_LIVE')
+
+# A webhook is the only thing allowed to credit a wallet, so its signing secret
+# is per mode too. Yoco hands it back once, when the subscription is created.
+YOCO_TEST_WEBHOOK_SECRET = _env_any('YOCO_TEST_WEBHOOK_SECRET', 'YOCO_WEBHOOK_SECRET_TEST')
+YOCO_LIVE_WEBHOOK_SECRET = _env_any('YOCO_LIVE_WEBHOOK_SECRET', 'YOCO_WEBHOOK_SECRET_LIVE')
+
+# Plain names, for anyone who sets only the pair they are using right now.
+# The mode-specific name wins where both are set.
+_yoco_plain_secret  = _env_any('YOCO_SECRET_KEY')
+_yoco_plain_public  = _env_any('YOCO_PUBLIC_KEY')
+_yoco_plain_webhook = _env_any('YOCO_WEBHOOK_SECRET')
+
+if YOCO_MODE == 'live':
+    YOCO_SECRET_KEY     = YOCO_LIVE_SECRET_KEY or _yoco_plain_secret
+    YOCO_PUBLIC_KEY     = YOCO_LIVE_PUBLIC_KEY or _yoco_plain_public
+    YOCO_WEBHOOK_SECRET = YOCO_LIVE_WEBHOOK_SECRET or _yoco_plain_webhook
+else:
+    YOCO_SECRET_KEY     = YOCO_TEST_SECRET_KEY or _yoco_plain_secret
+    YOCO_PUBLIC_KEY     = YOCO_TEST_PUBLIC_KEY or _yoco_plain_public
+    YOCO_WEBHOOK_SECRET = YOCO_TEST_WEBHOOK_SECRET or _yoco_plain_webhook
+
+# The key carries its own mode in its prefix, so a key that disagrees with
+# YOCO_MODE is a misconfiguration with real consequences in one direction:
+# mode 'test' holding an sk_live_ key charges people actual money during a
+# test. Rather than trust the label, the prefix decides, and a contradiction
+# switches payments off instead of guessing.
+YOCO_MISCONFIGURED = ''
+if YOCO_SECRET_KEY:
+    _expected = 'sk_live_' if YOCO_MODE == 'live' else 'sk_test_'
+    if not YOCO_SECRET_KEY.startswith(_expected):
+        YOCO_MISCONFIGURED = (
+            'YOCO_MODE is "%s" but the secret key is not a %s key. '
+            'Payments are off until they agree.' % (YOCO_MODE, _expected)
+        )
+        YOCO_SECRET_KEY = ''
+        YOCO_PUBLIC_KEY = ''
+
+YOCO_ENABLED = bool(YOCO_SECRET_KEY)
+# Where a checkout is created. Same host for both modes, the key picks the mode.
+YOCO_API_BASE = os.environ.get('YOCO_API_BASE', 'https://payments.yoco.com')
+
 GIPHY_API_KEY                = os.environ.get('GIPHY_API_KEY', '')
 RESEND_API_KEY               = os.environ.get('RESEND_API_KEY', '')
 GOOGLE_CLOUD_VISION_API_KEY  = os.environ.get('GOOGLE_CLOUD_VISION_API_KEY', '')
