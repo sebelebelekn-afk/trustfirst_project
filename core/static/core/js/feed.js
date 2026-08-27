@@ -47423,6 +47423,14 @@ function _tfPaymentsReady() {
     return !!(window._tfConfig && window._tfConfig.yoco_enabled);
 }
 
+// Paying out needs a bank transfer, a review step and somewhere to record it.
+// None of that exists, so this is false and stays false until it does. It is a
+// separate function from _tfPaymentsReady on purpose: connecting card deposits
+// must never quietly imply that withdrawals work.
+function _tfPayoutsReady() {
+    return false;
+}
+
 function _tfPaymentsUnavailable() {
     showToast('Payments are not connected yet, so no money can be added.');
 }
@@ -47631,7 +47639,12 @@ function confirmWithdraw() {
     // This took the amount off the number on screen and said the withdrawal was
     // submitted. Nothing was recorded and no money was ever going to arrive.
     closeWalletSheet();
-    if (!_tfPaymentsReady()) {
+    // Taking money in and paying money out are separate problems, and only the
+    // first one is built. Asking _tfPaymentsReady() here would have made this
+    // start saying "reviewed before they are paid out" the moment card
+    // deposits were switched on, while still recording nothing and paying
+    // nobody, which is the exact dishonesty the deposit rewrite removed.
+    if (!_tfPayoutsReady()) {
         showToast('Payouts are not connected yet, so nothing can be withdrawn.');
         return;
     }
