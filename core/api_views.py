@@ -1759,3 +1759,61 @@ def wallet_deposit_status(request):
         'amount': rows[0].get('amount'),
         'currency': rows[0].get('currency'),
     })
+
+
+@ratelimit(key='ip', rate='5/h', method='POST', block=True)
+@csrf_exempt
+@require_http_methods(["POST"])
+def wallet_register_yoco_webhook(request):
+    """Tell Yoco where to send payment events, and hand back the signing secret.
+
+    Yoco returns that secret exactly once, when the subscription is created,
+    and there is no way to read it back afterwards. So it is shown to the
+    admin who asked for it, to be pasted into Render, and it is deliberately
+    not written to the log or stored anywhere by this server.
+
+    Admin only, because the person who can point Yoco's events at a URL is the
+    person who decides what gets believed about money.
+    """
+    if not getattr(settings, 'YOCO_ENABLED', False):
+        return JsonResponse({'error': 'Set the Yoco keys first'}, status=503)
+
+    try:
+        _require_admin(request)
+    except ValueError:
+        return JsonResponse({'error': 'Admins only'}, status=403)
+
+    hook_url = request.build_absolute_uri('/api/wallet/yoco-webhook/')
+    if not hook_url.startswith('https://'):
+        return JsonResponse({'error': 'Yoco will only deliver to https'}, status=400)
+
+    try:
+        resp = httpx.post(
+            settings.YOCO_API_BASE + '/api/webhooks',
+            headers={
+                'Authorization': 'Bearer ' + settings.YOCO_SECRET_KEY,
+                'Content-Type': 'application/json',
+            },
+            json={'name': 'trustfirst-wallet-' + settings.YOCO_MODE, 'url': hook_url},
+            timeout=20,
+        )
+    except Exception as exc:
+        print('[Yoco] webhook registration unreachable: %s' % exc)
+        return JsonResponse({'error': 'Could not reach the payment provider'}, status=503)
+
+    if resp.status_code not in (200, 201):
+        print('[Yoco] webhook registration refused %s: %s' % (resp.status_code, resp.text[:300]))
+        return JsonResponse({'error': 'Yoco refused that', 'detail': resp.text[:300]}, status=502)
+
+    data = resp.json()
+    secret = data.get('secret') or ''
+    return JsonResponse({
+        'ok': True,
+        'mode': settings.YOCO_MODE,
+        'url': hook_url,
+        'secret': secret,
+        'variable': ('YOCO_LIVE_WEBHOOK_SECRET' if settings.YOCO_MODE == 'live'
+                     else 'YOCO_TEST_WEBHOOK_SECRET'),
+        'note': 'Yoco shows this secret once. Save it in Render under the variable '
+                'named above, then reload. It is not stored on this server.',
+    })
