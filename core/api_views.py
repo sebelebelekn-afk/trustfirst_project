@@ -1481,3 +1481,281 @@ def username_login(request):
         'refresh_token': data['refresh_token'],
         'expires_in': data.get('expires_in'),
     })
+
+
+# ---------------------------------------------------------------------------
+# YOCO, putting real money in a wallet
+#
+# The rule the whole design turns on: the browser is never believed. It asks
+# for a checkout and it gets sent to Yoco's own card page, and that is the
+# extent of its involvement. The balance moves only when Yoco tells this
+# server, over a signed webhook, that a payment succeeded.
+#
+# That is not caution for its own sake. Anything the client can claim, anyone
+# can claim by hand, so a wallet credited on the client's word is a wallet
+# anybody can fill for nothing.
+#
+# Card details never touch TrustFirst. They are typed on Yoco's own page, which
+# is why the card form that used to sit in the wallet had to go: it collected
+# real card numbers into nothing at all.
+# ---------------------------------------------------------------------------
+
+# What a person may add at once. The floor keeps the provider's fee from
+# swallowing the deposit, and the ceiling is there because an unbounded amount
+# on a new payment integration is how a typo becomes a support case.
+YOCO_MIN_DEPOSIT = 10.00
+YOCO_MAX_DEPOSIT = 5000.00
+
+
+def _yoco_rpc(fn, payload):
+    """Call one of the wallet functions with the service key.
+
+    These are the only credentials permitted to move a balance, and they never
+    leave this process.
+    """
+    return httpx.post(
+        settings.SUPABASE_URL + "/rest/v1/rpc/" + fn,
+        headers={
+            "apikey": settings.SUPABASE_SERVICE_KEY,
+            "Authorization": "Bearer " + settings.SUPABASE_SERVICE_KEY,
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=15,
+    )
+
+
+@ratelimit(key='ip', rate='10/m', method='POST', block=True)
+@csrf_exempt
+@require_http_methods(["POST"])
+def wallet_create_checkout(request):
+    """Open a Yoco checkout for a top-up and hand back the URL to send them to."""
+    if not getattr(settings, 'YOCO_ENABLED', False):
+        return JsonResponse({'error': 'Payments are not switched on yet'}, status=503)
+
+    try:
+        claims = _verify_supabase_jwt(request)
+    except ValueError:
+        return JsonResponse({'error': 'Not signed in'}, status=401)
+
+    user_id = claims.get('sub')
+    if not _is_valid_uuid(user_id):
+        return JsonResponse({'error': 'Not signed in'}, status=401)
+
+    try:
+        body = json.loads(request.body or '{}')
+        amount = float(body.get('amount') or 0)
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'That amount is not a number'}, status=400)
+
+    # Rounded to cents before it is checked, so a fraction of a cent cannot
+    # slip past the floor and land in the ledger.
+    amount = round(amount, 2)
+    if amount < YOCO_MIN_DEPOSIT:
+        return JsonResponse({'error': 'The smallest top-up is R%.0f' % YOCO_MIN_DEPOSIT}, status=400)
+    if amount > YOCO_MAX_DEPOSIT:
+        return JsonResponse({'error': 'The largest top-up is R%.0f' % YOCO_MAX_DEPOSIT}, status=400)
+
+    origin = request.build_absolute_uri('/').rstrip('/')
+    cents = int(round(amount * 100))
+
+    try:
+        resp = httpx.post(
+            settings.YOCO_API_BASE + "/api/checkouts",
+            headers={
+                'Authorization': 'Bearer ' + settings.YOCO_SECRET_KEY,
+                'Content-Type': 'application/json',
+                # Yoco replays a repeated key rather than charging twice, so a
+                # double tap on a slow connection cannot open two checkouts.
+                'Idempotency-Key': 'tf-topup-%s-%d-%s' % (user_id, cents, uuid.uuid4().hex[:12]),
+            },
+            json={
+                'amount': cents,
+                'currency': 'ZAR',
+                'successUrl': origin + '/?topup=done',
+                'cancelUrl': origin + '/?topup=cancelled',
+                'failureUrl': origin + '/?topup=failed',
+                # Carried back on the webhook. Useful for tracing, but never
+                # trusted on its own: the deposit is found by its reference.
+                'metadata': {'trustfirst_user_id': str(user_id), 'purpose': 'wallet_topup'},
+            },
+            timeout=20,
+        )
+    except Exception as exc:
+        print('[Yoco] checkout unreachable: %s' % exc)
+        return JsonResponse({'error': 'Could not reach the payment provider'}, status=503)
+
+    if resp.status_code not in (200, 201):
+        # The body carries the reason, and it is worth having in the log the
+        # first time a live key meets an unverified domain.
+        print('[Yoco] checkout refused %s: %s' % (resp.status_code, resp.text[:400]))
+        return JsonResponse({'error': 'The payment provider refused that'}, status=502)
+
+    data = resp.json()
+    checkout_id = data.get('id')
+    redirect_url = data.get('redirectUrl')
+    if not checkout_id or not redirect_url:
+        print('[Yoco] checkout missing fields: %s' % resp.text[:400])
+        return JsonResponse({'error': 'The payment provider sent something unexpected'}, status=502)
+
+    # Written down before they pay, so the webhook has our own record of what
+    # was expected rather than believing whatever arrives.
+    opened = _yoco_rpc('tf_wallet_open_deposit', {
+        'p_user': str(user_id),
+        'p_amount': amount,
+        'p_reference': checkout_id,
+        'p_currency': 'ZAR',
+        'p_metadata': {'provider': 'yoco', 'mode': settings.YOCO_MODE},
+    })
+    if opened.status_code >= 300:
+        print('[Yoco] could not open deposit %s: %s' % (opened.status_code, opened.text[:300]))
+        return JsonResponse({'error': 'Could not start that top-up'}, status=500)
+
+    return JsonResponse({
+        'redirect_url': redirect_url,
+        'checkout_id': checkout_id,
+        'amount': amount,
+        'mode': settings.YOCO_MODE,
+    })
+
+
+def _yoco_signature_ok(request):
+    """Is this really Yoco, and is it recent?
+
+    Standard Webhooks: sign "{id}.{timestamp}.{body}" with the secret, which is
+    base64 once its whsec_ prefix is removed, and compare in constant time. A
+    stale timestamp is refused so a captured delivery cannot be replayed later.
+    """
+    import base64
+    import hashlib
+    import hmac
+    import time
+
+    secret = getattr(settings, 'YOCO_WEBHOOK_SECRET', '')
+    if not secret:
+        return False, 'no webhook secret configured'
+
+    wh_id = request.headers.get('webhook-id', '')
+    wh_ts = request.headers.get('webhook-timestamp', '')
+    wh_sig = request.headers.get('webhook-signature', '')
+    if not (wh_id and wh_ts and wh_sig):
+        return False, 'missing webhook headers'
+
+    try:
+        if abs(time.time() - int(wh_ts)) > 180:
+            return False, 'timestamp outside the three minute window'
+    except (TypeError, ValueError):
+        return False, 'unreadable timestamp'
+
+    try:
+        secret_bytes = base64.b64decode(secret.split('_', 1)[1] if '_' in secret else secret)
+    except Exception:
+        return False, 'webhook secret is not valid base64'
+
+    signed = (wh_id + '.' + wh_ts + '.').encode() + request.body
+    expected = base64.b64encode(
+        hmac.new(secret_bytes, signed, hashlib.sha256).digest()
+    ).decode()
+
+    # The header may carry several versioned signatures, space separated.
+    for part in wh_sig.split(' '):
+        _, _, candidate = part.partition(',')
+        if candidate and hmac.compare_digest(candidate, expected):
+            return True, ''
+    return False, 'signature did not match'
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def wallet_yoco_webhook(request):
+    """The only thing in this codebase permitted to add money to a wallet."""
+    ok, why = _yoco_signature_ok(request)
+    if not ok:
+        # Deliberately terse to the caller. The reason goes to the log, not to
+        # whoever is knocking.
+        print('[Yoco] webhook rejected: %s' % why)
+        return JsonResponse({'error': 'rejected'}, status=400)
+
+    try:
+        event = json.loads(request.body or '{}')
+    except ValueError:
+        return JsonResponse({'error': 'bad json'}, status=400)
+
+    kind = (event.get('type') or '').lower()
+    payload = event.get('payload') or {}
+
+    # Only a succeeded payment moves a balance. Everything else is
+    # acknowledged, so Yoco stops retrying, and otherwise ignored.
+    if 'succeeded' not in kind:
+        return JsonResponse({'received': True, 'ignored': kind})
+
+    # The checkout id is what the deposit was filed under.
+    reference = (
+        (payload.get('metadata') or {}).get('checkoutId')
+        or payload.get('checkoutId')
+        or payload.get('id')
+    )
+    amount_cents = payload.get('amount')
+    if not reference or amount_cents is None:
+        print('[Yoco] webhook missing reference or amount: %s' % request.body[:300])
+        return JsonResponse({'received': True, 'ignored': 'incomplete'})
+
+    settled = _yoco_rpc('tf_wallet_settle_deposit', {
+        'p_reference': str(reference),
+        'p_amount': round(float(amount_cents) / 100.0, 2),
+    })
+    if settled.status_code >= 300:
+        # A 5xx tells Yoco to try again, which is what we want when our own
+        # database was briefly unreachable.
+        print('[Yoco] settle failed %s: %s' % (settled.status_code, settled.text[:300]))
+        return JsonResponse({'error': 'could not settle'}, status=500)
+
+    outcome = settled.json()
+    if outcome == 'amount_mismatch':
+        print('[Yoco] amount mismatch on %s, left for review' % reference)
+    return JsonResponse({'received': True, 'outcome': outcome})
+
+
+@ratelimit(key='ip', rate='30/m', method='GET', block=True)
+@require_http_methods(["GET"])
+def wallet_deposit_status(request):
+    """Has this top-up landed yet?
+
+    Someone comes back from Yoco before the webhook has necessarily arrived,
+    so the app asks rather than assuming. Read only, and scoped to the
+    caller's own deposits.
+    """
+    try:
+        claims = _verify_supabase_jwt(request)
+    except ValueError:
+        return JsonResponse({'error': 'Not signed in'}, status=401)
+
+    reference = request.GET.get('reference', '')
+    if not reference:
+        return JsonResponse({'error': 'Which top-up?'}, status=400)
+
+    try:
+        r = httpx.get(
+            settings.SUPABASE_URL + "/rest/v1/wallet_transactions",
+            headers={
+                'apikey': settings.SUPABASE_SERVICE_KEY,
+                'Authorization': "Bearer " + settings.SUPABASE_SERVICE_KEY,
+            },
+            params={
+                'select': 'status,amount,currency',
+                'reference': 'eq.' + reference,
+                'user_id': 'eq.' + str(claims.get('sub')),
+            },
+            timeout=10,
+        )
+        rows = r.json() if r.status_code < 300 else []
+    except Exception:
+        rows = []
+
+    if not rows:
+        return JsonResponse({'status': 'unknown'})
+    return JsonResponse({
+        'status': rows[0].get('status'),
+        'amount': rows[0].get('amount'),
+        'currency': rows[0].get('currency'),
+    })

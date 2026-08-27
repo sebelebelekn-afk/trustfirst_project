@@ -52,6 +52,13 @@ urlpatterns = [
     path('api/live/token/', api_views.livekit_token, name='api_live_token'),
     path('api/eddie/post/', api_views.eddie_post, name='api_eddie_post'),
     path('api/auth/username-login/', api_views.username_login, name='api_username_login'),
+
+    # Wallet top-ups. The checkout is opened here, the money is added only by
+    # the webhook, and the status endpoint is how the app finds out whether a
+    # payment landed after the person is sent back from Yoco.
+    path('api/wallet/create-checkout/', api_views.wallet_create_checkout, name='api_wallet_checkout'),
+    path('api/wallet/yoco-webhook/', api_views.wallet_yoco_webhook, name='api_wallet_yoco_webhook'),
+    path('api/wallet/deposit-status/', api_views.wallet_deposit_status, name='api_wallet_deposit_status'),
     path('sw.js', views.service_worker, name='sw'),
     path('manifest.json', views.manifest, name='manifest'),
 path('api/giphy/search/', api_views.giphy_search, name='api_giphy'),

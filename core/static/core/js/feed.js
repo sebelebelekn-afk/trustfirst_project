@@ -15735,8 +15735,16 @@ var sb = null; // alias for window._sb, assigned in initSupabase()
         GIPHY_KEY_FROM_SERVER = cfg.giphy_api_key || '';
         TF_R2_ENABLED = !!cfg.r2_enabled;
         TF_R2_PUBLIC_BASE = cfg.r2_public_base || '';
+        // Kept whole, because the wallet needs to know whether payments are
+        // connected and which mode they are in. Nothing secret is in here:
+        // the server only ever sends the public key.
+        window._tfConfig = cfg;
+        if (cfg.yoco_misconfigured) console.warn('[Yoco]', cfg.yoco_misconfigured);
         initSupabase();
         if (cfg.sentry_dsn) tfInitSentry(cfg.sentry_dsn, cfg.sentry_environment);
+        // Someone may have just come back from paying. The webhook is what
+        // credits the wallet; this only finds out whether it has yet.
+        try { _tfCheckPendingTopup(); } catch (e) {}
     } catch(e) {
         console.error('[Config] Failed to load config from server:', e);
         showToast('Could not connect to server. Please refresh.');
@@ -47322,8 +47330,9 @@ if (videoBtn) videoBtn.style.display = isSelf ? 'none' : '';
         content.innerHTML = `
             <b style="font-size:18px;display:block;margin-bottom:12px;">Payment methods</b>
             <p style="font-size:14px;color:#888;line-height:1.5;margin-bottom:18px;">
-                Cards are not set up on TrustFirst yet. When they are, the card form comes
-                from the payment provider so your details never pass through this app.
+                There are no saved cards on TrustFirst. When you add money you are taken
+                to the payment provider's own page and type your card there, so your
+                details never pass through this app and are never stored by it.
             </p>
             <button onclick="closeWalletSheet()" style="width:100%;padding:16px;border-radius:14px;background:var(--bg-secondary,#f0f0f0);color:var(--text-primary,#000);border:none;font-size:16px;font-weight:700;cursor:pointer;">Close</button>`;
     }
@@ -47339,7 +47348,9 @@ function closeWalletSheet() {
     if (sheet) sheet.style.display = 'none';
 }
 
-var PAYSTACK_PUBLIC_KEY = 'pk_test_REPLACE_WITH_YOUR_KEY'; // get from paystack.com/dashboard
+// Card payments go through Yoco. There is no key in this file on purpose:
+// the secret one lives on the server and the public one is fetched from
+// /api/config/, so nothing here can be edited into charging a card.
 
 function confirmBuyCoins(amount) {
     closeWalletSheet();
@@ -47403,14 +47414,13 @@ function onNativeIAPSuccess(receipt) {
         .catch(function() { showToast('Could not verify purchase yet'); });
 }
 
-// Is there a real payment provider behind this, or not?
+// Are payments actually connected?
 //
-// PAYSTACK_PUBLIC_KEY is still the placeholder, the Paystack script is not
-// loaded, and there is no server endpoint to verify a payment or credit a
-// wallet. Nothing about topping up is connected to money.
+// This used to test a Paystack placeholder key that was never replaced, so it
+// was permanently false and the honest message below was all anyone ever saw.
+// Now it asks the server, which knows whether a usable key is configured.
 function _tfPaymentsReady() {
-    return typeof PaystackPop !== 'undefined' &&
-        !!PAYSTACK_PUBLIC_KEY && PAYSTACK_PUBLIC_KEY.indexOf('REPLACE') < 0;
+    return !!(window._tfConfig && window._tfConfig.yoco_enabled);
 }
 
 function _tfPaymentsUnavailable() {
@@ -47424,8 +47434,10 @@ function confirmAddMoneyCustom() {
     confirmAddMoney(Math.round(amount * 100) / 100);
 }
 
-function confirmAddMoney(amount) {
-    var userEmail = (window.currentUser && window.currentUser.email) || '';
+// Ask the server to open a checkout, then hand the person to Yoco's own card
+// page. Nothing here touches a card number and nothing here credits anything:
+// the balance moves when Yoco tells the server the payment succeeded.
+async function confirmAddMoney(amount) {
     closeWalletSheet();
 
     // It used to add the amount to the number on screen and say "added (test
@@ -47434,42 +47446,98 @@ function confirmAddMoney(amount) {
     // is worse than one that plainly does not work yet.
     if (!_tfPaymentsReady()) { _tfPaymentsUnavailable(); return; }
 
-    var handler = PaystackPop.setup({
-        key: PAYSTACK_PUBLIC_KEY,
-        email: userEmail,
-        amount: Math.round(amount * 100), // rands to cents
-        currency: 'ZAR',
-        ref: 'TF_TOPUP_' + Date.now(),
-        callback: function(response) {
-            // The browser saying it went through is not proof. The server has
-            // to check with Paystack and credit the wallet; until that endpoint
-            // exists the balance is not touched here.
-            showToast('Payment received. Your balance updates once it clears.');
-            triggerHaptic(40);
-            _tfVerifyTopup(response && response.reference, amount);
-        },
-        onClose: function() { showToast('Payment cancelled'); }
-    });
-    handler.openIframe();
-}
-
-// Hand the reference to the server, which is the only side that may credit a
-// wallet. Without this endpoint a top-up cannot be trusted, because anything
-// the browser claims can be made up.
-async function _tfVerifyTopup(reference, amount) {
-    if (!reference || !window.sb || !currentUser) return;
+    showToast('Opening secure payment…');
     try {
         var tok = await _tfAccessToken();
-        var r = await fetch('/api/wallet/verify/', {
+        var r = await fetch('/api/wallet/create-checkout/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
-            body: JSON.stringify({ reference: reference })
+            body: JSON.stringify({ amount: amount })
         });
-        if (!r.ok) { showToast('Payment taken. It will show once we can confirm it.'); return; }
-        refreshWalletBalance();
+        var out = await r.json().catch(function () { return {}; });
+        if (!r.ok || !out.redirect_url) {
+            showToast(out.error || 'Could not start that top-up');
+            return;
+        }
+        // Remembered so the app can check what happened when they come back,
+        // which may be before the webhook has arrived.
+        try {
+            localStorage.setItem('tf_pending_topup', JSON.stringify({
+                reference: out.checkout_id, amount: out.amount, at: Date.now()
+            }));
+        } catch (e) {}
+        if (out.mode === 'test') showToast('Test mode, no real money moves');
+        window.location.href = out.redirect_url;
     } catch (e) {
-        console.warn('[Wallet] verify', e && e.message);
+        console.warn('[Wallet] checkout', e && e.message);
+        showToast('Could not reach the payment provider');
     }
+}
+
+// Called on boot when Yoco has sent someone back. The webhook is what credits
+// the wallet, so this only reports; it never adds anything itself.
+async function _tfCheckPendingTopup() {
+    var raw = null;
+    try { raw = localStorage.getItem('tf_pending_topup'); } catch (e) {}
+    if (!raw) return;
+    var pending;
+    try { pending = JSON.parse(raw); } catch (e) { pending = null; }
+    if (!pending || !pending.reference) { try { localStorage.removeItem('tf_pending_topup'); } catch (e) {} return; }
+
+    // A top-up nobody finished should not nag forever.
+    if (Date.now() - (pending.at || 0) > 6 * 60 * 60 * 1000) {
+        try { localStorage.removeItem('tf_pending_topup'); } catch (e) {}
+        return;
+    }
+
+    var params = new URLSearchParams(window.location.search);
+    var flag = params.get('topup');
+    if (flag === 'cancelled' || flag === 'failed') {
+        try { localStorage.removeItem('tf_pending_topup'); } catch (e) {}
+        showToast(flag === 'cancelled' ? 'Top-up cancelled' : 'That payment did not go through');
+        _tfClearTopupParam();
+        return;
+    }
+
+    // Yoco can take a moment to deliver the webhook, so give it a few tries
+    // rather than declaring failure the instant we get back.
+    for (var i = 0; i < 5; i++) {
+        try {
+            var tok = await _tfAccessToken();
+            var r = await fetch('/api/wallet/deposit-status/?reference=' + encodeURIComponent(pending.reference), {
+                headers: { 'Authorization': 'Bearer ' + tok }
+            });
+            var out = await r.json().catch(function () { return {}; });
+            if (out.status === 'completed') {
+                try { localStorage.removeItem('tf_pending_topup'); } catch (e) {}
+                showToast('R' + Number(out.amount || pending.amount).toFixed(2) + ' added to your wallet');
+                triggerHaptic(40);
+                if (typeof refreshWalletBalance === 'function') refreshWalletBalance();
+                _tfClearTopupParam();
+                return;
+            }
+            if (out.status === 'failed') {
+                try { localStorage.removeItem('tf_pending_topup'); } catch (e) {}
+                showToast('That payment could not be completed');
+                _tfClearTopupParam();
+                return;
+            }
+        } catch (e) { /* try again */ }
+        await new Promise(function (res) { setTimeout(res, 2000); });
+    }
+    if (flag === 'done') showToast('Payment received. Your balance updates once it clears.');
+    _tfClearTopupParam();
+}
+
+// Take the ?topup= flag off the address bar so a refresh does not replay it.
+function _tfClearTopupParam() {
+    try {
+        var u = new URL(window.location.href);
+        if (u.searchParams.has('topup')) {
+            u.searchParams.delete('topup');
+            window.history.replaceState({}, '', u.pathname + (u.search || '') + (u.hash || ''));
+        }
+    } catch (e) {}
 }
 
 async function openWalletHistory() {
