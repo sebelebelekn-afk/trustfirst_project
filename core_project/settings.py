@@ -245,6 +245,22 @@ if YOCO_SECRET_KEY:
         YOCO_PUBLIC_KEY = ''
 
 YOCO_ENABLED = bool(YOCO_SECRET_KEY)
+
+# Which pairs are actually on the server, regardless of the mode in use.
+#
+# Without this there is no way to confirm a key was saved correctly except by
+# switching payments on, which is the one thing you do not want to do just to
+# find out whether you typed the variable name right. Booleans only: this is
+# served to the browser, and it says whether a key exists, never what it is.
+YOCO_KEYS_PRESENT = {
+    'test_secret': bool(YOCO_TEST_SECRET_KEY),
+    'test_public': bool(YOCO_TEST_PUBLIC_KEY),
+    'live_secret': bool(YOCO_LIVE_SECRET_KEY),
+    'live_public': bool(YOCO_LIVE_PUBLIC_KEY),
+    'plain_secret': bool(_yoco_plain_secret),
+    'plain_public': bool(_yoco_plain_public),
+    'webhook': bool(YOCO_WEBHOOK_SECRET),
+}
 # Where a checkout is created. Same host for both modes, the key picks the mode.
 YOCO_API_BASE = os.environ.get('YOCO_API_BASE', 'https://payments.yoco.com')
 

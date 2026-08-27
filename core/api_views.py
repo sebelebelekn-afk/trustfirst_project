@@ -246,6 +246,9 @@ def get_config(request):
         # problem out loud beats a deposit button that silently does nothing,
         # which is how R2 stayed off for days.
         "yoco_misconfigured": getattr(settings, "YOCO_MISCONFIGURED", ""),
+        # Which keys are on the server at all, as booleans. Confirms a key was
+        # saved under the right name without switching payments on to find out.
+        "yoco_keys_present": getattr(settings, "YOCO_KEYS_PRESENT", {}),
     })
 
 
