@@ -1817,3 +1817,72 @@ def wallet_register_yoco_webhook(request):
         'note': 'Yoco shows this secret once. Save it in Render under the variable '
                 'named above, then reload. It is not stored on this server.',
     })
+
+
+# ---------------------------------------------------------------------------
+# BUYING COINS
+#
+# Coins come out of the wallet, not out of a card. The card is involved once,
+# when money goes into the wallet; after that buying coins is a move between
+# two balances the same person already owns, so it is instant and there is no
+# payment page in the way.
+#
+# The price list lives here and nowhere else. The browser sends which bundle
+# was tapped, never what it costs, because a client that names its own price
+# will eventually be asked to.
+# ---------------------------------------------------------------------------
+COIN_BUNDLES = {
+    100:  9.99,
+    500:  39.99,
+    2000: 149.99,
+}
+
+
+@ratelimit(key='ip', rate='20/m', method='POST', block=True)
+@csrf_exempt
+@require_http_methods(["POST"])
+def wallet_buy_coins(request):
+    try:
+        claims = _verify_supabase_jwt(request)
+    except ValueError:
+        return JsonResponse({'error': 'Not signed in'}, status=401)
+
+    user_id = claims.get('sub')
+    if not _is_valid_uuid(user_id):
+        return JsonResponse({'error': 'Not signed in'}, status=401)
+
+    try:
+        body = json.loads(request.body or '{}')
+        coins = int(body.get('coins') or 0)
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'Which bundle?'}, status=400)
+
+    price = COIN_BUNDLES.get(coins)
+    if price is None:
+        return JsonResponse({'error': 'That is not a coin bundle'}, status=400)
+
+    r = _yoco_rpc('tf_buy_coins', {
+        'p_user': str(user_id),
+        'p_coins': coins,
+        'p_rands': price,
+    })
+    if r.status_code >= 300:
+        print('[Coins] purchase failed %s: %s' % (r.status_code, r.text[:300]))
+        return JsonResponse({'error': 'Could not complete that'}, status=500)
+
+    out = r.json() or {}
+    if not out.get('ok'):
+        # Not an error, just not enough money. The app offers a top-up.
+        return JsonResponse({
+            'ok': False,
+            'reason': out.get('reason'),
+            'balance': out.get('balance', 0),
+            'needed': price,
+        }, status=200)
+
+    return JsonResponse({
+        'ok': True,
+        'coins': out.get('coins'),
+        'balance': out.get('balance'),
+        'spent': out.get('spent'),
+    })

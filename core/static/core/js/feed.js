@@ -47313,6 +47313,10 @@ if (videoBtn) videoBtn.style.display = isSelf ? 'none' : '';
     } else if (type === 'buycoins') {
         var a = amount || 100;
         var prices = {100:'R 9.99', 500:'R 39.99', 2000:'R 149.99'};
+        // Paid for out of the wallet, so the sheet says what is in it. Being
+        // told the price and the balance in the same place is the difference
+        // between one tap and a failed purchase.
+        var _wb = (window._tfWalletBalance != null) ? window._tfWalletBalance : null;
         content.innerHTML = `
             <b style="font-size:18px;display:block;margin-bottom:6px;">Buy ${a} Coins</b>
             <p style="font-size:14px;color:#888;margin-bottom:20px;">${prices[a] || 'R ?'} · Instant delivery</p>
@@ -47321,8 +47325,10 @@ if (videoBtn) videoBtn.style.display = isSelf ? 'none' : '';
                 <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-size:14px;"><span>Price</span><b>${prices[a]||'—'}</b></div>
                 <div style="border-top:1px solid var(--border-color,#eee);padding-top:8px;display:flex;justify-content:space-between;font-size:15px;font-weight:700;"><span>Total</span><b style="color:#007AFF;">${prices[a]||'—'}</b></div>
             </div>
-            <p style="font-size:11px;color:#aaa;margin-bottom:16px;text-align:center;">Coins are non-refundable. Purchases are processed securely by your app store.</p>
-            <button onclick="confirmBuyCoins(${a})" style="width:100%;padding:16px;border-radius:14px;background:#007AFF;color:white;border:none;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><i class="fa-brands ${/iphone|ipad|ipod/i.test(navigator.userAgent)?'fa-apple':'fa-google-play'}"></i> Buy with App Store</button>`;
+            <div style="display:flex;justify-content:space-between;font-size:13px;color:#888;margin-bottom:16px;"><span>Wallet balance</span><b id="bc-balance" style="color:var(--text-primary,#000);">${_wb == null ? '\u2026' : 'R ' + Number(_wb).toFixed(2)}</b></div>
+            <p style="font-size:11px;color:#aaa;margin-bottom:16px;text-align:center;">Paid from your wallet. Coins are non-refundable.</p>
+            <button id="bc-buy" onclick="confirmBuyCoins(${a})" style="width:100%;padding:16px;border-radius:14px;background:#007AFF;color:white;border:none;font-size:16px;font-weight:700;cursor:pointer;">Buy ${a} coins</button>`;
+        _tfFillCoinSheetBalance();
     } else if (type === 'addcard') {
         // No card fields. They collected a full card number and CVV, discarded
         // them, and claimed the card had been added securely. Card details only
@@ -47352,35 +47358,71 @@ function closeWalletSheet() {
 // the secret one lives on the server and the public one is fetched from
 // /api/config/, so nothing here can be edited into charging a card.
 
-function confirmBuyCoins(amount) {
-    closeWalletSheet();
-    var prices = {100:'R 9.99', 500:'R 39.99', 2000:'R 149.99'};
-    var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-    var isAndroid = /android/i.test(navigator.userAgent);
-    var productId = 'com.trustfirst.coins_' + amount;
+// Buying coins takes them out of the wallet. No card, no redirect, no app
+// store: the money is already yours and already here, so this is one tap and
+// the coins are there.
+//
+// It used to hand off to Apple or Google billing, neither of which exists, so
+// on the web it said "available in the mobile app" and in the app it said
+// nothing happened at all.
+async function confirmBuyCoins(amount) {
+    var prices = { 100: 9.99, 500: 39.99, 2000: 149.99 };
+    var price = prices[amount];
+    if (!price) return;
 
-    if (isIOS) {
-        // Trigger Apple In-App Purchase via native bridge
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.iapPurchase) {
-            window.webkit.messageHandlers.iapPurchase.postMessage({ productId: productId, coins: amount });
-        } else {
-            showToast('Open in the TrustFirst iOS app to buy coins.');
+    var btn = document.getElementById('bc-buy');
+    if (btn) { btn.disabled = true; btn.textContent = 'Buying\u2026'; }
+
+    try {
+        var tok = await _tfAccessToken();
+        var r = await fetch('/api/wallet/buy-coins/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+            body: JSON.stringify({ coins: amount })
+        });
+        var d = await r.json().catch(function () { return {}; });
+
+        if (!r.ok) { showToast(d.error || 'Could not buy those coins'); return; }
+
+        // Not enough in the wallet is not a failure, it is a missing step.
+        if (!d.ok) {
+            closeWalletSheet();
+            window._tfWalletBalance = d.balance;
+            var short = Math.max(0, (d.needed || price) - (d.balance || 0));
+            showToast('R' + short.toFixed(2) + ' short. Add money to your wallet first.');
+            triggerHaptic(10);
+            setTimeout(function () { openWalletSheet('addmoney'); }, 700);
+            return;
         }
-        return;
-    }
 
-    if (isAndroid) {
-        // Trigger Google Play Billing via native bridge
-        if (window.TrustFirstAndroid && typeof window.TrustFirstAndroid.launchBillingFlow === 'function') {
-            window.TrustFirstAndroid.launchBillingFlow(productId, amount);
-        } else {
-            showToast('Open in the TrustFirst Android app to buy coins.');
-        }
-        return;
+        window._tfWalletBalance = d.balance;
+        if (currentUser) currentUser.coins = d.coins;
+        closeWalletSheet();
+        showToast(amount + ' coins added');
+        triggerHaptic(40);
+        var el = document.getElementById('wallet-coins');
+        if (el) el.textContent = d.coins;
+        if (typeof refreshWalletBalance === 'function') refreshWalletBalance();
+    } catch (e) {
+        console.warn('[Coins] buy', e && e.message);
+        showToast('Could not reach the server');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Buy ' + amount + ' coins'; }
     }
+}
 
-    // Web fallback — no direct card purchase for coins
-    showToast('Coin purchases are available in the TrustFirst mobile app.');
+// The sheet is built before the balance is known, so it fills in after.
+async function _tfFillCoinSheetBalance() {
+    var el = document.getElementById('bc-balance');
+    if (!el || !window.sb || !currentUser) return;
+    try {
+        var r = await sb.from('wallets').select('balance').eq('user_id', currentUser.id).maybeSingle();
+        var bal = (r.data && Number(r.data.balance)) || 0;
+        window._tfWalletBalance = bal;
+        el.textContent = 'R ' + bal.toFixed(2);
+    } catch (e) {
+        el.textContent = 'R 0.00';
+    }
 }
 
 // The real balance lives in users.coins and is written server-side only, so we
