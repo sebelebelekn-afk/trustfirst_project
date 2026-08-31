@@ -1,0 +1,91 @@
+# Build the image and put it live on Cloud Run.
+#
+# Google runs this, not GitHub, which is deliberate: a Cloud Build trigger reads
+# the repository directly, so there is no service account key sitting in a
+# GitHub secret waiting to leak. Nothing here is a credential.
+#
+# ONE-TIME SETUP, in the Google Cloud console:
+#
+#   1. Create a project, and enable billing on it. Cloud Run's free tier is
+#      real and permanent, but Google still wants a card on the account. Set a
+#      budget alert while you are there.
+#
+#   2. Enable these APIs: Cloud Run, Cloud Build, Artifact Registry.
+#
+#   3. Artifact Registry, Create Repository:
+#        name: trustfirst      format: Docker      region: europe-west1
+#
+#   4. Cloud Build, Triggers, Connect Repository, pick this GitHub repo, then
+#      Create Trigger:
+#        event: push to branch      branch: ^main$
+#        configuration: Cloud Build configuration file      location: cloudbuild.yaml
+#
+#   5. Give the build permission to deploy. In IAM, find the Cloud Build service
+#      account and add: Cloud Run Admin, and Service Account User.
+#
+#   6. Set the environment variables on the Cloud Run service itself, in the
+#      console, not here. They are secrets and they do not belong in a file that
+#      lives in the repository.
+#
+# After that, pushing to main builds and deploys itself, the same way the
+# landing site already does.
+
+substitutions:
+  _REGION: europe-west1          # closest of the cheap regions to South Africa
+  _SERVICE: trustfirst
+  _REPO: trustfirst
+
+steps:
+  # Built with the commit's short SHA as the tag, so every deploy is traceable
+  # back to exactly one commit, and rolling back is picking an older tag rather
+  # than reverting code under pressure.
+  - name: gcr.io/cloud-builders/docker
+    id: build
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    id: push
+    args: [push, --all-tags, '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}']
+
+  # Deployed without --set-env-vars on purpose. Those are configured once on the
+  # service and left alone; naming them here would mean every deploy silently
+  # overwrote whatever was set in the console, including the payment keys.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: deploy
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      # The app is a public website. Without this only signed-in Google
+      # accounts could reach it, which would look like a total outage.
+      - --allow-unauthenticated
+      # 1GB, twice what the old free instance had. Video work and image
+      # handling were running into the old ceiling.
+      - --memory=1Gi
+      - --cpu=1
+      # Scales to zero, so an idle app costs nothing. The ceiling is a
+      # deliberate guard: a traffic spike or a runaway loop cannot quietly
+      # spend money that this project does not have.
+      - --min-instances=0
+      - --max-instances=4
+      # Each instance handles many requests at once, which is what keeps a
+      # Django app comfortably inside the free tier.
+      - --concurrency=80
+      - --timeout=300
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY

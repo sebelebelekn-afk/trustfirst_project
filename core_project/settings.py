@@ -23,7 +23,28 @@ _allowed = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 _render_host = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
 if _render_host:
     _allowed.append(_render_host)
+
+# Cloud Run invents the service URL, so it cannot be written down in advance and
+# the first deploy would answer every request with DisallowedHost, which reads
+# like the app is broken rather than unconfigured. K_SERVICE is set by Cloud Run
+# and by nothing else, so this only ever loosens things where Google is already
+# the one routing the request. The leading dot means "any subdomain of".
+if os.environ.get('K_SERVICE'):
+    _allowed.append('.run.app')
+
 ALLOWED_HOSTS = [h.strip() for h in _allowed if h.strip()]
+
+# Django checks the Origin of a form post against this, and a custom domain has
+# to be named here or every POST from it is rejected as a CSRF failure. The API
+# routes are exempt and carry a bearer token instead, so the symptom would be
+# narrow and confusing: most of the app fine, the admin login refusing to work.
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()
+]
+if os.environ.get('K_SERVICE'):
+    CSRF_TRUSTED_ORIGINS.append('https://*.run.app')
+if _render_host:
+    CSRF_TRUSTED_ORIGINS.append('https://' + _render_host)
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

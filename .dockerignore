@@ -1,0 +1,44 @@
+# Kept out of the image. Everything here is either large, secret, or rebuilt
+# during the build anyway, and each one makes the upload to the builder slower.
+
+.git
+.github
+.gitignore
+
+# Secrets. These must never end up in an image that gets pushed to a registry.
+.env
+.env.*
+*.pem
+*.key
+service-account*.json
+
+# Rebuilt by collectstatic inside the image.
+staticfiles/
+
+# Local Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# The Android wrapper and the promo video. Neither is served by Django, and
+# together they are most of the repository's weight.
+android/
+ios/
+promo/
+node_modules/
+
+# The marketing site. Cloudflare serves that, not this container.
+landing/
+www/
+
+# Local databases and editor noise
+*.sqlite3
+db.sqlite3
+.idea/
+.vscode/
+.DS_Store
