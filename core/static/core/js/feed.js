@@ -12956,7 +12956,16 @@ async function sendViewerGift(emoji, name, cost) {
             : await sb.rpc('spend_coins', { p_amount: cost, p_reason: 'gift:' + (name || emoji) });
         if (r.error) {
             var m = (r.error.message || '');
-            showToast(/insufficient/i.test(m) ? 'Not enough coins' : 'Could not send gift');
+            // A gift has to be a whole multiple of five coins, because a fifth
+            // of anything else is not a whole coin and the rounding used to
+            // come out of TrustFirst's share. Worth saying plainly: if a gift
+            // is ever priced wrongly, this is the message that explains it
+            // rather than a flat "could not send".
+            showToast(
+                /insufficient/i.test(m) ? 'Not enough coins' :
+                /multiple of 5/i.test(m) ? 'Gifts come in fives. That one is priced wrong.' :
+                'Could not send gift'
+            );
             return;
         }
         var bal = r.data;
