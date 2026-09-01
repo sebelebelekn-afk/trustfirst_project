@@ -22,5 +22,23 @@
 	// runtime or cost anything per invocation.
 	"assets": {
 		"directory": "./landing"
-	}
+	},
+
+	// The domain, bound here rather than clicked into the dashboard.
+	//
+	// Written down it deploys itself, survives someone rebuilding the worker,
+	// and can be read by anyone wondering where the site actually lives. A
+	// custom domain set by hand in a dashboard is invisible until it breaks.
+	//
+	// "custom_domain" and not a plain route: Cloudflare then creates the DNS
+	// record and issues the certificate itself, so there is no separate record
+	// to add and nothing to keep in step.
+	//
+	// The app is deliberately not here. It lives on app.gettrustfirst.co.za,
+	// which is Django, so this domain can stay pointed at the marketing site
+	// while the app moves between hosts behind its own name.
+	"routes": [
+		{ "pattern": "gettrustfirst.co.za", "custom_domain": true },
+		{ "pattern": "www.gettrustfirst.co.za", "custom_domain": true }
+	]
 }
