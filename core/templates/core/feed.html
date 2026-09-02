@@ -2793,6 +2793,13 @@ function authenticateUser() {
                 <b style="font-size:16px;color:var(--text-primary,#000);"><i class="fa-solid fa-coins" style="color:#FFB800;margin-right:6px;"></i>Coins</b>
                 <span style="font-size:13px;color:#888;">Balance: <b style="color:#007AFF;" id="wallet-coins">0</b></span>
             </div>
+            <!-- Coins earned from gifts are not money until they are turned into
+                 it. Without a way to do that, a creator's earnings sit as coins
+                 forever and the Withdraw button is useless to the people who
+                 actually have something to withdraw. -->
+            <button onclick="tfCashOutCoins()" style="width:100%;padding:11px;border-radius:12px;background:none;color:#007AFF;border:1px solid var(--border-color,#eee);font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">
+                <i class="fa-solid fa-arrow-right-arrow-left" style="margin-right:6px;"></i>Cash out coins to your wallet
+            </button>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
                 <div onclick="openWalletSheet('buycoins',100)" style="background:var(--bg-primary,#fff);border-radius:12px;padding:12px 8px;text-align:center;cursor:pointer;border:1px solid var(--border-color,#eee);transition:all 0.2s;" onmousedown="this.style.transform='scale(0.96)'" onmouseup="this.style.transform=''">
                     <div style="font-size:22px;"><i class="fa-solid fa-coins" style="color:#FFB800;"></i></div>
@@ -4264,11 +4271,11 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=281"></script>
+<script src="{% static 'core/js/feed.js' %}?v=282"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
-<script src="{% static 'core/js/admin.js' %}?v=79"></script>
+<script src="{% static 'core/js/admin.js' %}?v=80"></script>
 <!-- Native shell bridge. No-ops in the browser, so the PWA is unaffected.
      Must load after feed.js because it wraps the media pickers defined there. -->
 <script src="{% static 'core/js/native.js' %}?v=6"></script>

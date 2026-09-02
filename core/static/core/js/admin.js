@@ -565,6 +565,7 @@ async function adminLoadPayments(body) {
             pill(!!present.live_public, 'Live public key') +
             pill(!!present.webhook, 'Webhook signing secret, ' + escapeHtml(mode) + ' mode')
         ) +
+        '<div id="admWithdrawals"></div>' +
         _adminCard(
             '<div style="font-size:14px;font-weight:700;color:var(--text-primary,#000);margin-bottom:6px;">Tell Yoco where to send events</div>' +
             '<p style="font-size:12px;color:#888;margin:0 0 12px;line-height:1.5;">' +
@@ -574,6 +575,8 @@ async function adminLoadPayments(body) {
             '<button id="admHookBtn" onclick="adminRegisterYocoWebhook()" style="width:100%;padding:12px;border-radius:12px;border:none;background:#007AFF;color:#fff;font-size:14px;font-weight:800;cursor:pointer;">Register webhook</button>' +
             '<div id="admHookOut" style="display:none;margin-top:12px;"></div>'
         );
+
+    adminLoadWithdrawals();
 }
 
 window.adminRegisterYocoWebhook = async function () {
@@ -623,5 +626,96 @@ window.adminCopyHookSecret = function (el) {
         showToast('Copied. Paste it into Render now.');
     } catch (e) {
         showToast('Select the text above and copy it');
+    }
+};
+
+
+// ============================================================
+// WITHDRAWALS
+//
+// Yoco pays this merchant, not this merchant's creators, so there is no API
+// that sends money to somebody's bank account for us. Somebody has to make the
+// transfer. This is the list of who is owed what, with the details needed to
+// pay them, and the two buttons that record what was done.
+//
+// The money has already left the creator's wallet by the time a row appears
+// here, so "reject" is not a no-op: it puts it back.
+// ============================================================
+async function adminLoadWithdrawals(status) {
+    var host = document.getElementById('admWithdrawals');
+    if (!host) return;
+    status = status || 'pending';
+    window._admWdStatus = status;
+    host.innerHTML = _adminCard('<div style="text-align:center;color:#aaa;padding:14px;"><i class="fa-solid fa-spinner fa-spin"></i></div>');
+
+    var rows = [];
+    try {
+        var tok = await _tfAccessToken();
+        var r = await fetch('/api/admin/withdrawals/?status=' + encodeURIComponent(status), {
+            headers: { 'Authorization': 'Bearer ' + tok }
+        });
+        var d = await r.json().catch(function () { return {}; });
+        rows = d.withdrawals || [];
+    } catch (e) { /* shown as empty below */ }
+
+    var tabs = ['pending', 'paid', 'rejected'].map(function (t) {
+        var on = (t === status);
+        return '<button onclick="adminLoadWithdrawals(\'' + t + '\')" style="flex:1;padding:8px;border-radius:9px;border:none;cursor:pointer;font-size:12px;font-weight:700;text-transform:capitalize;' +
+            (on ? 'background:#007AFF;color:#fff;' : 'background:var(--bg-secondary,#f0f0f0);color:#888;') + '">' + t + '</button>';
+    }).join('');
+
+    var owed = rows.reduce(function (a, w) { return a + Number(w.amount || 0); }, 0);
+
+    var list = rows.length ? rows.map(function (w) {
+        var when = w.created_at ? new Date(w.created_at).toLocaleDateString() : '';
+        return '<div style="border-top:1px solid var(--border-color,#eee);padding:12px 0;">' +
+            '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;">' +
+                '<b style="font-size:15px;color:var(--text-primary,#000);">R' + Number(w.amount).toFixed(2) + '</b>' +
+                '<span style="font-size:12px;color:#888;">@' + escapeHtml(w.username || 'user') + ' \u00b7 ' + escapeHtml(when) + '</span>' +
+            '</div>' +
+            '<div style="font-size:12px;color:#888;margin-top:6px;line-height:1.6;">' +
+                escapeHtml(w.account_holder || '') + '<br>' +
+                escapeHtml(w.bank_name || '') + ' \u00b7 ' + escapeHtml(w.account_number || '') +
+                (w.branch_code ? ' \u00b7 branch ' + escapeHtml(w.branch_code) : '') +
+            '</div>' +
+            (status === 'pending'
+                ? '<div style="display:flex;gap:8px;margin-top:10px;">' +
+                    '<button onclick="adminDecideWithdrawal(\'' + w.id + '\',\'paid\')" style="flex:1;padding:9px;border-radius:10px;border:none;background:#34C759;color:#fff;font-size:12px;font-weight:800;cursor:pointer;">Mark paid</button>' +
+                    '<button onclick="adminDecideWithdrawal(\'' + w.id + '\',\'rejected\')" style="flex:1;padding:9px;border-radius:10px;border:1px solid rgba(255,59,48,0.4);background:none;color:#FF3B30;font-size:12px;font-weight:800;cursor:pointer;">Reject and refund</button>' +
+                  '</div>'
+                : (w.note ? '<div style="font-size:11px;color:#aaa;margin-top:6px;">' + escapeHtml(w.note) + '</div>' : '')) +
+        '</div>';
+    }).join('') : '<div style="text-align:center;color:#aaa;padding:18px 0;font-size:13px;">Nothing ' + escapeHtml(status) + '</div>';
+
+    host.innerHTML = _adminCard(
+        '<div style="font-size:15px;font-weight:800;color:var(--text-primary,#000);margin-bottom:2px;">Withdrawals</div>' +
+        '<p style="font-size:12px;color:#888;margin:0 0 12px;line-height:1.5;">' +
+            'The money has already left their wallet. Make the transfer, then mark it paid. ' +
+            'Rejecting puts it back.' +
+        '</p>' +
+        (status === 'pending' && owed > 0
+            ? '<div style="background:rgba(255,149,0,0.1);border:1px solid rgba(255,149,0,0.3);border-radius:11px;padding:10px;font-size:13px;color:#FF9500;font-weight:700;margin-bottom:12px;">R' + owed.toFixed(2) + ' waiting to be paid</div>'
+            : '') +
+        '<div style="display:flex;gap:6px;margin-bottom:6px;">' + tabs + '</div>' +
+        list
+    );
+}
+
+window.adminDecideWithdrawal = async function (id, status) {
+    if (status === 'rejected' && !confirm('Reject this and put the money back in their wallet?')) return;
+    if (status === 'paid' && !confirm('Only mark this paid once the transfer has actually gone through. Done?')) return;
+    try {
+        var tok = await _tfAccessToken();
+        var r = await fetch('/api/admin/withdrawals/decide/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+            body: JSON.stringify({ id: id, status: status })
+        });
+        var d = await r.json().catch(function () { return {}; });
+        if (!r.ok || d.ok === false) { showToast(d.error || 'Could not update that'); return; }
+        showToast(status === 'paid' ? 'Marked paid' : 'Rejected and refunded');
+        adminLoadWithdrawals(window._admWdStatus || 'pending');
+    } catch (e) {
+        showToast('Could not reach the server');
     }
 };

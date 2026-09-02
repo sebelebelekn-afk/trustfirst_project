@@ -47298,13 +47298,28 @@ if (videoBtn) videoBtn.style.display = isSelf ? 'none' : '';
     if (!sheet || !content) return;
 
     if (type === 'withdraw') {
+        // The bank details are asked for here because there is no way to pay
+        // somebody without them. They are sent once, with the request, and are
+        // never kept on the profile.
         content.innerHTML = `
-            <b style="font-size:18px;display:block;margin-bottom:16px;">Withdraw Funds</b>
-            <div style="background:rgba(255,149,0,0.1);border:1px solid rgba(255,149,0,0.3);border-radius:12px;padding:12px;margin-bottom:16px;font-size:13px;color:#FF9500;">
-                ⚠️ Minimum withdrawal: R50. Bank transfers take 1 to 3 business days.
+            <b style="font-size:18px;display:block;margin-bottom:6px;">Withdraw funds</b>
+            <p style="font-size:13px;color:#888;margin:0 0 14px;line-height:1.5;">
+                Minimum R50. Paid by bank transfer, usually within 1 to 3 business days.
+                The amount leaves your balance as soon as you request it.
+            </p>
+            <div style="display:flex;justify-content:space-between;font-size:13px;color:#888;margin-bottom:12px;">
+                <span>Available</span><b id="wd-balance" style="color:var(--text-primary,#000);">\u2026</b>
             </div>
-            <input id="withdraw-amount" type="number" placeholder="Amount (min R50)" style="width:100%;padding:16px;border-radius:14px;border:1px solid var(--border-color,#eee);background:var(--input-bg,#f5f5f5);font-size:16px;color:var(--text-primary,#000);margin-bottom:12px;outline:none;box-sizing:border-box;">
-            <button onclick="confirmWithdraw()" style="width:100%;padding:16px;border-radius:14px;background:#007AFF;color:white;border:none;font-size:16px;font-weight:700;cursor:pointer;">Continue</button>`;
+            <input id="withdraw-amount" type="number" min="50" step="1" placeholder="Amount (min R50)" style="width:100%;padding:14px;border-radius:12px;border:1px solid var(--border-color,#eee);background:var(--input-bg,#f5f5f5);font-size:15px;color:var(--text-primary,#000);margin-bottom:10px;outline:none;box-sizing:border-box;">
+            <input id="wd-holder" type="text" autocomplete="name" placeholder="Account holder name" style="width:100%;padding:14px;border-radius:12px;border:1px solid var(--border-color,#eee);background:var(--input-bg,#f5f5f5);font-size:15px;color:var(--text-primary,#000);margin-bottom:10px;outline:none;box-sizing:border-box;">
+            <input id="wd-bank" type="text" placeholder="Bank (FNB, Capitec, Absa\u2026)" style="width:100%;padding:14px;border-radius:12px;border:1px solid var(--border-color,#eee);background:var(--input-bg,#f5f5f5);font-size:15px;color:var(--text-primary,#000);margin-bottom:10px;outline:none;box-sizing:border-box;">
+            <input id="wd-account" type="text" inputmode="numeric" placeholder="Account number" style="width:100%;padding:14px;border-radius:12px;border:1px solid var(--border-color,#eee);background:var(--input-bg,#f5f5f5);font-size:15px;color:var(--text-primary,#000);margin-bottom:10px;outline:none;box-sizing:border-box;">
+            <input id="wd-branch" type="text" inputmode="numeric" placeholder="Branch code (optional)" style="width:100%;padding:14px;border-radius:12px;border:1px solid var(--border-color,#eee);background:var(--input-bg,#f5f5f5);font-size:15px;color:var(--text-primary,#000);margin-bottom:10px;outline:none;box-sizing:border-box;">
+            <button id="wd-submit" onclick="confirmWithdraw()" style="width:100%;padding:16px;border-radius:14px;background:#007AFF;color:white;border:none;font-size:16px;font-weight:700;cursor:pointer;margin-top:4px;">Request withdrawal</button>
+            <p style="font-size:11px;color:#aaa;margin:12px 0 0;text-align:center;line-height:1.5;">
+                Your bank details are used for this payment only.
+            </p>`;
+        _tfFillWithdrawBalance();
     } else if (type === 'addmoney') {
         // The custom amount was an input with nothing to press and no handler
         // reading it, so any figure typed there went nowhere.
@@ -47472,14 +47487,6 @@ function onNativeIAPSuccess(receipt) {
 // Now it asks the server, which knows whether a usable key is configured.
 function _tfPaymentsReady() {
     return !!(window._tfConfig && window._tfConfig.yoco_enabled);
-}
-
-// Paying out needs a bank transfer, a review step and somewhere to record it.
-// None of that exists, so this is false and stays false until it does. It is a
-// separate function from _tfPaymentsReady on purpose: connecting card deposits
-// must never quietly imply that withdrawals work.
-function _tfPayoutsReady() {
-    return false;
 }
 
 function _tfPaymentsUnavailable() {
@@ -47683,25 +47690,94 @@ async function openWalletHistory() {
     if (typeof triggerHaptic === 'function') triggerHaptic(10);
 }
 
-function confirmWithdraw() {
-    var inp = document.getElementById('withdraw-amount');
-    var amount = parseFloat(inp ? inp.value : 0);
-    if (!amount || amount < 50) { showToast('Minimum withdrawal is R50'); return; }
-    // This took the amount off the number on screen and said the withdrawal was
-    // submitted. Nothing was recorded and no money was ever going to arrive.
-    closeWalletSheet();
-    // Taking money in and paying money out are separate problems, and only the
-    // first one is built. Asking _tfPaymentsReady() here would have made this
-    // start saying "reviewed before they are paid out" the moment card
-    // deposits were switched on, while still recording nothing and paying
-    // nobody, which is the exact dishonesty the deposit rewrite removed.
-    if (!_tfPayoutsReady()) {
-        showToast('Payouts are not connected yet, so nothing can be withdrawn.');
-        return;
+// Ask to be paid out.
+//
+// This used to take the figure off the number on screen and say the withdrawal
+// was submitted. Nothing was recorded and no money was ever going to arrive.
+//
+// Now the balance really moves, the request is recorded with the details needed
+// to pay it, and it is settled by transfer. Nothing here claims anybody has
+// been paid until somebody actually has.
+async function confirmWithdraw() {
+    var amount = parseFloat((document.getElementById('withdraw-amount') || {}).value || 0);
+    var holder = ((document.getElementById('wd-holder') || {}).value || '').trim();
+    var bank = ((document.getElementById('wd-bank') || {}).value || '').trim();
+    var account = ((document.getElementById('wd-account') || {}).value || '').trim();
+    var branch = ((document.getElementById('wd-branch') || {}).value || '').trim();
+
+    if (!isFinite(amount) || amount < 50) { showToast('Minimum withdrawal is R50'); return; }
+    if (!holder || !bank || !account) { showToast('Fill in your account holder, bank and account number'); return; }
+
+    var btn = document.getElementById('wd-submit');
+    if (btn) { btn.disabled = true; btn.textContent = 'Submitting\u2026'; }
+    try {
+        var tok = await _tfAccessToken();
+        var r = await fetch('/api/wallet/withdraw/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+            body: JSON.stringify({
+                amount: amount, account_holder: holder, bank_name: bank,
+                account_number: account, branch_code: branch
+            })
+        });
+        var d = await r.json().catch(function () { return {}; });
+        if (!r.ok || d.ok === false) { showToast(d.error || 'Could not submit that'); return; }
+
+        window._tfWalletBalance = d.balance;
+        closeWalletSheet();
+        showToast('Withdrawal requested. You will be paid within 1 to 3 business days.');
+        triggerHaptic(40);
+    } catch (e) {
+        console.warn('[Wallet] withdraw', e && e.message);
+        showToast('Could not reach the server');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Request withdrawal'; }
     }
-    showToast('Withdrawals are reviewed before they are paid out.');
-    triggerHaptic(30);
 }
+
+// The sheet is built before the balance is known, so it fills in after.
+async function _tfFillWithdrawBalance() {
+    var el = document.getElementById('wd-balance');
+    if (!el || !window.sb || !currentUser) return;
+    try {
+        var r = await sb.from('wallets').select('balance').eq('user_id', currentUser.id).maybeSingle();
+        var bal = (r.data && Number(r.data.balance)) || 0;
+        window._tfWalletBalance = bal;
+        el.textContent = 'R ' + bal.toFixed(2);
+    } catch (e) { el.textContent = 'R 0.00'; }
+}
+
+// Coins earned from gifts are not money until they are turned into it. Without
+// this a creator's earnings sit as coins forever and the withdraw button is
+// useless to exactly the people who need it. The rate is what coins were sold
+// at, so the only cut is the 20% already taken when the gift was sent.
+async function tfCashOutCoins() {
+    var coins = (currentUser && currentUser.coins) || 0;
+    if (coins < 100) { showToast('You need at least 100 coins to cash out'); return; }
+    if (!confirm('Turn ' + coins + ' coins into R' + (coins * 0.0999).toFixed(2) + ' in your wallet?')) return;
+
+    try {
+        var tok = await _tfAccessToken();
+        var r = await fetch('/api/wallet/cash-out-coins/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+            body: JSON.stringify({ coins: coins })
+        });
+        var d = await r.json().catch(function () { return {}; });
+        if (!r.ok || d.ok === false) { showToast(d.error || 'Could not cash those out'); return; }
+
+        if (currentUser) currentUser.coins = d.coins;
+        window._tfWalletBalance = d.balance;
+        var el = document.getElementById('wallet-coins');
+        if (el) el.textContent = d.coins;
+        showToast('R' + Number(d.rands).toFixed(2) + ' added to your wallet');
+        triggerHaptic(40);
+        if (typeof refreshWalletBalance === 'function') refreshWalletBalance();
+    } catch (e) {
+        showToast('Could not reach the server');
+    }
+}
+
 
 function confirmAddCard() {
     closeWalletSheet();

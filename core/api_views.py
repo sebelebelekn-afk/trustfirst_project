@@ -1886,3 +1886,215 @@ def wallet_buy_coins(request):
         'balance': out.get('balance'),
         'spent': out.get('spent'),
     })
+
+
+# ---------------------------------------------------------------------------
+# GETTING MONEY OUT
+#
+# Yoco pays this merchant, not this merchant's creators. There is no API that
+# sends money to somebody else's bank account for us, so an automatic payout is
+# not something that can be built here honestly.
+#
+# What can be built, and is: the balance really leaves the wallet, the request
+# is recorded with the bank details needed to pay it, and an admin settles it by
+# transfer and marks it. Rejecting gives the money back. Nothing claims to have
+# paid anybody until somebody actually has.
+#
+# Bank details are the most sensitive thing this app stores. They are written
+# once, on the request, read only by their owner and by the server, and never
+# logged.
+# ---------------------------------------------------------------------------
+
+WITHDRAW_MIN = 50.00
+COIN_CASHOUT_MIN = 100      # coins, about R10
+
+
+@ratelimit(key='ip', rate='10/m', method='POST', block=True)
+@csrf_exempt
+@require_http_methods(["POST"])
+def wallet_cash_out_coins(request):
+    """Turn earned coins into wallet money that can be withdrawn."""
+    try:
+        claims = _verify_supabase_jwt(request)
+    except ValueError:
+        return JsonResponse({'error': 'Not signed in'}, status=401)
+
+    user_id = claims.get('sub')
+    if not _is_valid_uuid(user_id):
+        return JsonResponse({'error': 'Not signed in'}, status=401)
+
+    try:
+        coins = int((json.loads(request.body or '{}')).get('coins') or 0)
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'That is not a number of coins'}, status=400)
+
+    if coins < COIN_CASHOUT_MIN:
+        return JsonResponse({'error': 'Cash out at least %d coins' % COIN_CASHOUT_MIN}, status=400)
+
+    r = _yoco_rpc('tf_cash_out_coins', {'p_user': str(user_id), 'p_coins': coins})
+    if r.status_code >= 300:
+        print('[Wallet] cash out failed %s: %s' % (r.status_code, r.text[:300]))
+        return JsonResponse({'error': 'Could not cash those out'}, status=500)
+
+    out = r.json() or {}
+    if not out.get('ok'):
+        reason = out.get('reason')
+        return JsonResponse({
+            'ok': False,
+            'error': ('You do not have that many coins' if reason == 'insufficient_coins'
+                      else 'Cash out at least %d coins' % COIN_CASHOUT_MIN),
+        }, status=200)
+    return JsonResponse(out)
+
+
+@ratelimit(key='ip', rate='5/m', method='POST', block=True)
+@csrf_exempt
+@require_http_methods(["POST"])
+def wallet_request_withdrawal(request):
+    """Ask to be paid out. The money leaves the wallet now, not on approval."""
+    try:
+        claims = _verify_supabase_jwt(request)
+    except ValueError:
+        return JsonResponse({'error': 'Not signed in'}, status=401)
+
+    user_id = claims.get('sub')
+    if not _is_valid_uuid(user_id):
+        return JsonResponse({'error': 'Not signed in'}, status=401)
+
+    try:
+        body = json.loads(request.body or '{}')
+        amount = round(float(body.get('amount') or 0), 2)
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'That amount is not a number'}, status=400)
+
+    holder = str(body.get('account_holder') or '').strip()
+    bank = str(body.get('bank_name') or '').strip()
+    account = str(body.get('account_number') or '').strip()
+    branch = str(body.get('branch_code') or '').strip()
+
+    if amount < WITHDRAW_MIN:
+        return JsonResponse({'error': 'The smallest withdrawal is R%.0f' % WITHDRAW_MIN}, status=400)
+    if not (holder and bank and account):
+        return JsonResponse({'error': 'Account holder, bank and account number are all needed'}, status=400)
+    # A South African account number is digits, and between six and eleven of
+    # them. Catching a typo here is much cheaper than a failed transfer later.
+    if not re.fullmatch(r'\d{6,11}', account):
+        return JsonResponse({'error': 'That account number does not look right'}, status=400)
+    if branch and not re.fullmatch(r'\d{6}', branch):
+        return JsonResponse({'error': 'A branch code is six digits'}, status=400)
+
+    r = _yoco_rpc('tf_request_withdrawal', {
+        'p_user': str(user_id),
+        'p_amount': amount,
+        'p_holder': holder,
+        'p_bank': bank,
+        'p_account': account,
+        'p_branch': branch or None,
+    })
+    if r.status_code >= 300:
+        # Deliberately does not echo the body: it contains bank details.
+        print('[Wallet] withdrawal request failed %s' % r.status_code)
+        return JsonResponse({'error': 'Could not submit that'}, status=500)
+
+    out = r.json() or {}
+    if not out.get('ok'):
+        reason = out.get('reason')
+        return JsonResponse({
+            'ok': False,
+            'error': {
+                'minimum': 'The smallest withdrawal is R%.0f' % WITHDRAW_MIN,
+                'missing_bank_details': 'Account holder, bank and account number are all needed',
+                'insufficient': 'That is more than your balance',
+            }.get(reason, 'Could not submit that'),
+            'balance': out.get('balance'),
+        }, status=200)
+
+    return JsonResponse({'ok': True, 'id': out.get('id'), 'balance': out.get('balance')})
+
+
+@ratelimit(key='ip', rate='30/m', method='GET', block=True)
+@require_http_methods(["GET"])
+def admin_list_withdrawals(request):
+    """Everything waiting to be paid, for the person who pays it."""
+    try:
+        _require_admin(request)
+    except ValueError:
+        return JsonResponse({'error': 'Admins only'}, status=403)
+
+    status = request.GET.get('status', 'pending')
+    if status not in ('pending', 'paid', 'rejected'):
+        status = 'pending'
+    try:
+        r = httpx.get(
+            settings.SUPABASE_URL + '/rest/v1/withdrawals',
+            headers=_service_headers(),
+            params={
+                'select': 'id,user_id,amount,currency,status,account_holder,bank_name,'
+                          'account_number,branch_code,created_at,decided_at,note',
+                'status': 'eq.' + status,
+                'order': 'created_at.asc',
+                'limit': '100',
+            },
+            timeout=15,
+        )
+        rows = r.json() if r.status_code < 300 else []
+    except Exception:
+        rows = []
+
+    # Names, so the person paying knows who they are paying.
+    ids = list({row.get('user_id') for row in rows if row.get('user_id')})
+    names = {}
+    if ids:
+        try:
+            u = httpx.get(
+                settings.SUPABASE_URL + '/rest/v1/users',
+                headers=_service_headers(),
+                params={'select': 'id,username,full_name', 'id': 'in.(%s)' % ','.join(ids)},
+                timeout=15,
+            )
+            for row in (u.json() if u.status_code < 300 else []):
+                names[row['id']] = row.get('username') or row.get('full_name') or ''
+        except Exception:
+            pass
+    for row in rows:
+        row['username'] = names.get(row.get('user_id'), '')
+
+    return JsonResponse({'withdrawals': rows})
+
+
+@ratelimit(key='ip', rate='20/m', method='POST', block=True)
+@csrf_exempt
+@require_http_methods(["POST"])
+def admin_decide_withdrawal(request):
+    """Mark one paid once the transfer is done, or reject it and refund."""
+    try:
+        admin_id = _require_admin(request)
+    except ValueError:
+        return JsonResponse({'error': 'Admins only'}, status=403)
+
+    try:
+        body = json.loads(request.body or '{}')
+    except ValueError:
+        return JsonResponse({'error': 'bad json'}, status=400)
+
+    wid = body.get('id')
+    status = body.get('status')
+    if not _is_valid_uuid(wid):
+        return JsonResponse({'error': 'Which withdrawal?'}, status=400)
+    if status not in ('paid', 'rejected'):
+        return JsonResponse({'error': 'Paid or rejected'}, status=400)
+
+    r = _yoco_rpc('tf_decide_withdrawal', {
+        'p_id': str(wid),
+        'p_status': status,
+        'p_admin': str(admin_id),
+        'p_note': (body.get('note') or None),
+    })
+    if r.status_code >= 300:
+        print('[Wallet] decide withdrawal failed %s' % r.status_code)
+        return JsonResponse({'error': 'Could not update that'}, status=500)
+
+    out = r.json() or {}
+    if not out.get('ok'):
+        return JsonResponse({'ok': False, 'error': out.get('reason')}, status=200)
+    return JsonResponse({'ok': True, 'status': out.get('status')})

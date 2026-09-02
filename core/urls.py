@@ -61,6 +61,12 @@ urlpatterns = [
     path('api/wallet/deposit-status/', api_views.wallet_deposit_status, name='api_wallet_deposit_status'),
     # Coins are bought out of the wallet, so no payment page is involved.
     path('api/wallet/buy-coins/', api_views.wallet_buy_coins, name='api_wallet_buy_coins'),
+    # Getting money out. Yoco cannot pay a third party, so a request is
+    # recorded and settled by transfer; the balance moves when it is asked for.
+    path('api/wallet/cash-out-coins/', api_views.wallet_cash_out_coins, name='api_wallet_cashout'),
+    path('api/wallet/withdraw/', api_views.wallet_request_withdrawal, name='api_wallet_withdraw'),
+    path('api/admin/withdrawals/', api_views.admin_list_withdrawals, name='api_admin_withdrawals'),
+    path('api/admin/withdrawals/decide/', api_views.admin_decide_withdrawal, name='api_admin_withdraw_decide'),
     # Run once per mode, by an admin, to tell Yoco where to deliver events.
     path('api/wallet/register-yoco-webhook/', api_views.wallet_register_yoco_webhook, name='api_wallet_register_hook'),
     path('sw.js', views.service_worker, name='sw'),
