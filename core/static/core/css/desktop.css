@@ -24,11 +24,20 @@
    -------------------------------------------------------------------------- */
 @media (min-width: 1000px) {
 
+    /* The layout in two numbers. Everything else is derived, so a change here
+       moves the sidebar, the rail, the arrows and the sheets together and they
+       cannot drift apart. */
+    :root {
+        --tf-col-half: 300px;   /* half the feed column */
+        --tf-nav-w: 72px;       /* sidebar: icons only until there is room */
+        --tf-gap: 28px;
+    }
+
     /* The phone bezel goes. On a laptop it read as a mockup of an app rather
        than an app. The column widens to something readable and keeps the
        hairline edges so it still reads as a column, the way X does it. */
     .app {
-        max-width: 600px !important;
+        max-width: calc(var(--tf-col-half) * 2) !important;
         max-height: none !important;
         height: 100dvh !important;
         border-radius: 0 !important;
@@ -55,10 +64,30 @@
     }
 
     #tfSideNav {
-        right: calc(50% + 300px + 28px);
-        width: 260px;
+        right: calc(50% + var(--tf-col-half) + var(--tf-gap));
+        width: var(--tf-nav-w);
         padding: 14px 8px 18px;
         justify-content: flex-start;
+    }
+
+    /* Icons only, until the window is wide enough for words.
+       At 1024px a 260px sidebar with labels ran 76px off the left of the
+       screen. X solves this the same way: the labels are the first thing to
+       go, not the sidebar. */
+    #tfSideNav .tf-nav-item span,
+    #tfSideNav .tf-nav-brand,
+    #tfSideNav .tf-nav-me > div,
+    #tfSideNav .tf-nav-create span { display: none; }
+
+    #tfSideNav .tf-nav-item { justify-content: center; gap: 0; padding: 13px 0; }
+    #tfSideNav .tf-nav-item i { width: auto; }
+    #tfSideNav .tf-nav-dot { left: auto; right: 14px; top: 8px; }
+    #tfSideNav .tf-nav-me { justify-content: center; padding: 10px 0; }
+    .tf-nav-create { font-size: 0; padding: 15px 0; }
+    .tf-nav-create::before {
+        content: "\002b";           /* a plus, since "Create" will not fit */
+        font-size: 20px;
+        font-weight: 700;
     }
 
     /* The third column needs 1300px to exist. Below that it would squeeze the
@@ -188,12 +217,33 @@
 }
 
 /* --------------------------------------------------------------------------
+   1280px and up: the sidebar earns its words
+
+   260 + 28 + 300 is 588 either side of centre, so labels need a 1176px window.
+   1280 gives them a little room rather than exactly enough.
+   -------------------------------------------------------------------------- */
+@media (min-width: 1280px) {
+    :root { --tf-nav-w: 260px; }
+
+    #tfSideNav .tf-nav-item span,
+    #tfSideNav .tf-nav-brand,
+    #tfSideNav .tf-nav-me > div { display: block; }
+
+    #tfSideNav .tf-nav-item { justify-content: flex-start; gap: 18px; padding: 11px 14px; }
+    #tfSideNav .tf-nav-item i { width: 26px; }
+    #tfSideNav .tf-nav-dot { left: 30px; right: auto; }
+    #tfSideNav .tf-nav-me { justify-content: flex-start; padding: 10px 12px; }
+    .tf-nav-create { font-size: 16px; padding: 15px; }
+    .tf-nav-create::before { content: none; }
+}
+
+/* --------------------------------------------------------------------------
    1300px and up: the third column
    -------------------------------------------------------------------------- */
 @media (min-width: 1300px) {
     #tfRightRail {
         display: flex;
-        left: calc(50% + 300px + 28px);
+        left: calc(50% + var(--tf-col-half) + var(--tf-gap));
         /* 300, not 330. The layout is not symmetric about the centre: the
            right half needs 28 + 300 + this width to fit in half the window,
            and 330 needed a 1316px window while claiming to work at 1300. */
@@ -411,8 +461,8 @@
     #channels-overlay, #drafts-overlay, #scheduled-overlay, #groups-overlay,
     #group-page-overlay, #notif-overlay, #contact-profile-overlay,
     #share-sheet {
-        max-width: 600px !important;
-        left: calc(50% - 300px) !important;
+        max-width: calc(var(--tf-col-half) * 2) !important;
+        left: calc(50% - var(--tf-col-half)) !important;
         right: auto !important;
     }
 
@@ -422,7 +472,7 @@
        well moved it a second time, and it opened 300px to the left of the
        column. Left on the centre line, its own transform does the centring. */
     #repost-sheet {
-        max-width: 600px !important;
+        max-width: calc(var(--tf-col-half) * 2) !important;
         left: 50% !important;
         right: auto !important;
     }
@@ -441,7 +491,7 @@
     #tfReelNav.on {
         display: flex;
         position: fixed;
-        left: calc(50% + 300px + 20px);
+        left: calc(50% + var(--tf-col-half) + 20px);
         top: 50%;
         transform: translateY(-50%);
         flex-direction: column;
@@ -497,3 +547,118 @@
 }
 .tf-acct-item:hover { background: var(--bg-secondary, #f2f2f2); }
 .tf-acct-item.tf-danger { color: #FF3B30; }
+
+/* --------------------------------------------------------------------------
+   Settings as two panes.
+
+   On a phone this is one long scroll of 131 rows, which is right for a thumb.
+   With a 600px column and a mouse it becomes a list of categories on the left
+   and the chosen one on the right, the way every desktop settings screen has
+   worked for thirty years.
+
+   The hiding is done here rather than in JS on purpose. The script only groups
+   the rows and marks one active; if the window is dragged narrow, these rules
+   stop applying and every group shows again, which is exactly the original
+   phone layout. Nothing has to be undone.
+   -------------------------------------------------------------------------- */
+@media (min-width: 1000px) {
+    .tf-set-split {
+        display: flex;
+        align-items: flex-start;
+        gap: 18px;
+    }
+
+    .tf-set-nav {
+        width: 210px;
+        flex-shrink: 0;
+        position: sticky;
+        top: 0;
+    }
+
+    .tf-set-cat {
+        padding: 11px 13px;
+        border-radius: 10px;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary, #000);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 2px;
+        border-left: 3px solid transparent;
+    }
+    .tf-set-cat:hover { background: var(--bg-secondary, rgba(0, 0, 0, 0.05)); }
+    .tf-set-cat.tf-on {
+        background: var(--bg-secondary, rgba(0, 0, 0, 0.05));
+        border-left-color: #007AFF;
+        font-weight: 800;
+    }
+    .tf-set-cat i { color: #c3c9d0; font-size: 12px; }
+
+    .tf-set-body { flex: 1; min-width: 0; }
+
+    /* One group at a time. Searching lifts this, because a match in a group
+       you are not looking at is still a match. */
+    .tf-set-split:not(.tf-set-searching) .tf-set-group:not(.tf-set-on) {
+        display: none;
+    }
+
+    /* The overlay scrolls as one page rather than the pane scrolling inside a
+       column that also scrolls, which traps the wheel. */
+    #settings-overlay { overflow-y: auto; }
+}
+
+/* --------------------------------------------------------------------------
+   Screens that want the whole width.
+
+   Settings is a list beside a pane, and squeezing both into 600px leaves the
+   pane too narrow to read. On these screens the third column steps aside and
+   the middle takes the space, which is what X does with its own settings.
+
+   The width is clamped rather than fixed so it can never grow into the
+   sidebar: whatever is left after the sidebar and the gaps, up to 430 either
+   side, and never less than the normal column.
+   -------------------------------------------------------------------------- */
+@media (min-width: 1000px) {
+    .tf-wide #tfRightRail { display: none !important; }
+
+    /* Stretched, not just widened.
+       Centring is what was wasting the room: the sidebar takes 260px on the
+       left only, so a centred column leaves the same 260 empty on the right
+       and can never reach the edge. In wide mode the column stops being
+       centred and simply runs from beside the sidebar to the far margin. */
+    .tf-wide #tfSideNav {
+        right: auto;
+        left: 20px;
+    }
+
+    .tf-wide .app {
+        position: fixed;
+        left: calc(var(--tf-nav-w) + 44px);
+        right: 24px;
+        width: auto !important;
+        max-width: none !important;
+        transform: none !important;
+    }
+
+    /* The overlays that open on top follow the same box. Left centred on the
+       viewport they would sit visibly off from the page behind them, which is
+       the whole reason the width rules exist in the first place.
+       repost-sheet is left out on purpose: it centres with a transform that
+       also carries its slide-up, and it cannot be open on a settings screen. */
+    .tf-wide #saved-overlay, .tf-wide #archive-overlay, .tf-wide #live-overlay,
+    .tf-wide #wallet-overlay, .tf-wide #channels-overlay, .tf-wide #drafts-overlay,
+    .tf-wide #scheduled-overlay, .tf-wide #groups-overlay,
+    .tf-wide #group-page-overlay, .tf-wide #notif-overlay,
+    .tf-wide #contact-profile-overlay, .tf-wide #share-sheet {
+        left: calc(var(--tf-nav-w) + 44px) !important;
+        right: 24px !important;
+        max-width: none !important;
+    }
+
+    /* With the room to do it, the category list stops being a cramped strip. */
+    .tf-wide .tf-set-nav { width: 260px; }
+    .tf-wide .tf-set-split { gap: 28px; }
+}

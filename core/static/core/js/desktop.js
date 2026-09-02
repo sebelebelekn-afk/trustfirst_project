@@ -52,8 +52,19 @@ var TF_DESK_ROUTES = {
     groups:    'loadGroups',
     saved:     'openSavedLibrary',
     analytics: 'openCreatorAnalytics',
-    settings:  'openSettings',
+    settings:  'tfDeskOpenSettings',
 };
+
+// Opens the real settings screen, then splits it. Wrapping rather than
+// patching openSettings keeps the phone's path untouched.
+function tfDeskOpenSettings() {
+    if (typeof openSettings === 'function') openSettings();
+    setTimeout(tfDeskSplitSettings, 60);
+    // Whether the account is an admin is decided after the screen is drawn,
+    // so the categories are checked again once that has had time to arrive.
+    setTimeout(tfDeskSettingsPrune, 900);
+    setTimeout(tfDeskSettingsPrune, 2500);
+}
 
 function tfDeskGo(key) {
     tfDeskSetActive(key);
@@ -398,6 +409,7 @@ if (typeof window !== 'undefined') {
         tfDeskInit();
         setInterval(tfDeskSyncBadges, 4000);
         setInterval(tfReelNavSync, 700);
+        setInterval(tfDeskWideSync, 500);
         // Signing in removes a class rather than reloading the page, so the
         // chrome has to be told. Watching the attribute costs nothing and
         // cannot drift the way a timer would.
@@ -490,4 +502,171 @@ function tfDeskLogOut() {
     if (menu) menu.classList.remove('on');
     if (typeof logOut === 'function') { logOut(); return; }
     console.warn('[desktop] no logOut function');
+}
+
+// ---------------------------------------------------------------- settings --
+
+// Settings is one long list of 131 rows, which is correct for a thumb and
+// wrong for a mouse. This groups what is already in the page rather than
+// building a second settings screen: the rows, their handlers and their order
+// are untouched, they are only put into boxes and one box is shown at a time.
+//
+// Nothing is destroyed, so if the window is dragged narrow the stylesheet
+// stops hiding groups and the original single list is back.
+var TF_SET_ICONS = {
+    'YOUR TRUSTFIRST EXPERIENCE': 'fa-compass',
+    'ACCOUNT': 'fa-user',
+    'FOR CREATORS': 'fa-chart-simple',
+    'WELLBEING': 'fa-heart',
+    'PREFERENCES': 'fa-sliders',
+    'EXPLORE': 'fa-magnifying-glass',
+    'STORAGE': 'fa-box-archive',
+    'SUPPORT': 'fa-circle-question',
+    'ADMIN TOOLS': 'fa-shield-halved',
+};
+
+function tfDeskSplitSettings() {
+    if (!tfIsDesktop()) return;
+    var overlay = document.getElementById('settings-overlay');
+    if (!overlay || overlay.querySelector('.tf-set-split')) return;   // once only
+
+    // The padded box holding the cards, found by what it contains rather than
+    // by a class it does not have.
+    var content = null;
+    var kids = overlay.children;
+    for (var i = 0; i < kids.length; i++) {
+        if (kids[i].querySelector && kids[i].querySelector('.settings-card')) {
+            content = kids[i];
+            break;
+        }
+    }
+    if (!content) return;
+
+    var nodes = Array.prototype.slice.call(content.children);
+    var groups = [];
+    var current = { title: 'Your account', nodes: [] };
+
+    nodes.forEach(function (n) {
+        if (n.classList && n.classList.contains('settings-section-title')) {
+            if (current.nodes.length) groups.push(current);
+            current = { title: (n.textContent || '').trim(), nodes: [], titleNode: n };
+        } else {
+            current.nodes.push(n);
+        }
+    });
+    if (current.nodes.length) groups.push(current);
+    if (groups.length < 2) return;
+
+    var split = document.createElement('div');
+    split.className = 'tf-set-split';
+    var nav = document.createElement('div');
+    nav.className = 'tf-set-nav';
+    var body = document.createElement('div');
+    body.className = 'tf-set-body';
+    split.appendChild(nav);
+    split.appendChild(body);
+
+    groups.forEach(function (g, idx) {
+        var box = document.createElement('div');
+        box.className = 'tf-set-group' + (idx === 0 ? ' tf-set-on' : '');
+        box.setAttribute('data-group', String(idx));
+        // The heading moves into the group: the left list already names it, and
+        // repeating it above the rows says the same thing twice.
+        g.nodes.forEach(function (n) { box.appendChild(n); });
+        body.appendChild(box);
+
+        // Sentence case, except the brand, which is not a word to be lowered.
+        var pretty = g.title.replace(/&amp;/g, '&');
+        pretty = pretty.charAt(0).toUpperCase() + pretty.slice(1).toLowerCase();
+        pretty = pretty.replace(/trustfirst/gi, 'TrustFirst');
+
+        var cat = document.createElement('div');
+        cat.className = 'tf-set-cat' + (idx === 0 ? ' tf-on' : '');
+        cat.setAttribute('data-group', String(idx));
+        cat.innerHTML = '<span><i class="fa-solid ' +
+            (TF_SET_ICONS[g.title] || 'fa-gear') +
+            '" style="width:18px;margin-right:9px;"></i>' + escapeHtml(pretty) +
+            '</span><i class="fa-solid fa-chevron-right"></i>';
+        cat.onclick = function () { tfDeskSettingsShow(idx); };
+        nav.appendChild(cat);
+
+        if (g.titleNode && g.titleNode.parentNode) {
+            g.titleNode.parentNode.removeChild(g.titleNode);
+        }
+    });
+
+    content.appendChild(split);
+    tfDeskSettingsPrune();
+
+    // Searching has to reach every group, not only the open one.
+    var box = document.getElementById('settingsSearchInput');
+    if (box) {
+        box.addEventListener('input', function () {
+            split.classList.toggle('tf-set-searching', !!this.value.trim());
+        });
+    }
+}
+
+function tfDeskSettingsShow(idx) {
+    var overlay = document.getElementById('settings-overlay');
+    if (!overlay) return;
+    overlay.querySelectorAll('.tf-set-group').forEach(function (g) {
+        g.classList.toggle('tf-set-on', g.getAttribute('data-group') === String(idx));
+    });
+    overlay.querySelectorAll('.tf-set-cat').forEach(function (c) {
+        c.classList.toggle('tf-on', c.getAttribute('data-group') === String(idx));
+    });
+    overlay.scrollTop = 0;
+}
+
+// Categories whose rows are all hidden do not get shown.
+//
+// Admin tools is the case that matters: its rows carry display:none until the
+// account is confirmed to be an admin, so without this everybody else sees an
+// Admin tools heading that opens onto nothing. Run again after the admin check
+// has had time to land, because that happens after settings is drawn.
+function tfDeskSettingsPrune() {
+    var overlay = document.getElementById('settings-overlay');
+    if (!overlay) return;
+    var firstVisible = -1;
+    overlay.querySelectorAll('.tf-set-group').forEach(function (g) {
+        var idx = g.getAttribute('data-group');
+        var rows = g.querySelectorAll('.settings-row');
+        var anyVisible = false;
+        for (var i = 0; i < rows.length; i++) {
+            if (getComputedStyle(rows[i]).display !== 'none') { anyVisible = true; break; }
+        }
+        var cat = overlay.querySelector('.tf-set-cat[data-group="' + idx + '"]');
+        if (cat) cat.style.display = anyVisible ? '' : 'none';
+        if (anyVisible && firstVisible < 0) firstVisible = parseInt(idx, 10);
+    });
+
+    // If the open category was the one just hidden, move to a real one.
+    var open = overlay.querySelector('.tf-set-group.tf-set-on');
+    if (open) {
+        var openCat = overlay.querySelector('.tf-set-cat[data-group="' +
+            open.getAttribute('data-group') + '"]');
+        if ((!openCat || openCat.style.display === 'none') && firstVisible >= 0) {
+            tfDeskSettingsShow(firstVisible);
+        }
+    }
+}
+
+// Screens that read better with the third column out of the way.
+//
+// Settings is a list beside a pane; in a 600px column the pane is too narrow
+// to be worth having. Watched rather than set by the opener, so closing the
+// screen any way at all puts the rail back.
+var TF_WIDE_SCREENS = ['settings-overlay'];
+
+function tfDeskWideSync() {
+    if (!tfIsDesktop()) {
+        document.documentElement.classList.remove('tf-wide');
+        return;
+    }
+    var wide = TF_WIDE_SCREENS.some(function (id) {
+        var el = document.getElementById(id);
+        return el && getComputedStyle(el).display !== 'none';
+    });
+    document.documentElement.classList.toggle('tf-wide', wide);
 }
