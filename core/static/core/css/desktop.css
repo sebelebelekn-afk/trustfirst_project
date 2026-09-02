@@ -1,0 +1,499 @@
+/* ==========================================================================
+   THE LAPTOP LAYOUT
+
+   Everything here is inside a min-width media query, so a phone never loads a
+   single rule of it. That is deliberate: the mobile app is finished and being
+   used, and a desktop layout is not worth one regression on the screen people
+   actually open.
+
+   The approach is flanking, not restructuring. The app column stays exactly
+   where it was, centred in the viewport, and gets two fixed panels either side
+   of it. That matters because roughly eighty overlays in this app are
+   position:fixed and centred on the viewport with translateX(-50%). Rebuild
+   the page as a grid and every one of them lands in the wrong place. Leave the
+   centre where it is and they all keep working untouched.
+
+   Breakpoints follow what the content needs rather than any device:
+     under 1000px   the phone frame, exactly as before
+     1000px and up  sidebar plus a wider feed
+     1300px and up  the third column as well
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1000px and up: two columns
+   -------------------------------------------------------------------------- */
+@media (min-width: 1000px) {
+
+    /* The phone bezel goes. On a laptop it read as a mockup of an app rather
+       than an app. The column widens to something readable and keeps the
+       hairline edges so it still reads as a column, the way X does it. */
+    .app {
+        max-width: 600px !important;
+        max-height: none !important;
+        height: 100dvh !important;
+        border-radius: 0 !important;
+        border: none !important;
+        border-left: 1px solid var(--border-color, #e6e8ea) !important;
+        border-right: 1px solid var(--border-color, #e6e8ea) !important;
+        box-shadow: none !important;
+    }
+
+    /* The pill is a thumb control. The sidebar replaces it. */
+    .nav-container { display: none !important; }
+
+    /* Both panels hang off the centre line rather than off the window edges,
+       so they stay glued to the feed column at every width instead of drifting
+       apart on a wide monitor. */
+    .tf-desk-panel {
+        display: flex;
+        position: fixed;
+        top: 0;
+        height: 100dvh;
+        flex-direction: column;
+        z-index: 5500;
+        box-sizing: border-box;
+    }
+
+    #tfSideNav {
+        right: calc(50% + 300px + 28px);
+        width: 260px;
+        padding: 14px 8px 18px;
+        justify-content: flex-start;
+    }
+
+    /* The third column needs 1300px to exist. Below that it would squeeze the
+       feed, and a cramped feed is worse than no sidebar of suggestions. */
+    #tfRightRail { display: none; }
+
+    /* --- sidebar --- */
+    .tf-nav-brand {
+        font-size: 26px;
+        font-weight: 900;
+        color: var(--text-primary, #000);
+        padding: 10px 14px 18px;
+        letter-spacing: -0.5px;
+    }
+
+    .tf-nav-item {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding: 11px 14px;
+        margin-bottom: 4px;
+        border-radius: 999px;
+        cursor: pointer;
+        color: var(--text-primary, #000);
+        font-size: 19px;
+        font-weight: 500;
+        transition: background 0.15s ease;
+        position: relative;
+        user-select: none;
+    }
+    .tf-nav-item:hover { background: var(--bg-secondary, rgba(0, 0, 0, 0.06)); }
+    .tf-nav-item i { font-size: 21px; width: 26px; text-align: center; }
+    .tf-nav-item.tf-active { font-weight: 800; }
+
+    /* Unread counts, in the same place a phone puts them. */
+    .tf-nav-dot {
+        position: absolute;
+        left: 30px;
+        top: 8px;
+        min-width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #FF3B30;
+        display: none;
+    }
+    .tf-nav-dot.on { display: block; }
+
+    .tf-nav-create {
+        width: calc(100% - 16px);
+        margin: 0 8px 8px;
+        padding: 15px;
+        border: none;
+        border-radius: 999px;
+        background: #007AFF;
+        color: #fff;
+        font-size: 16px;
+        font-weight: 800;
+        cursor: pointer;
+        transition: filter 0.15s ease;
+    }
+    .tf-nav-create:hover { filter: brightness(1.08); }
+
+    /* The list takes the free height and scrolls inside itself; the foot is
+       pinned. Without this, adding rows pushed Create off a 768px screen. */
+    .tf-nav-list {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        scrollbar-width: none;
+    }
+    .tf-nav-list::-webkit-scrollbar { display: none; }
+    .tf-nav-foot { flex-shrink: 0; padding-top: 8px; }
+
+    .tf-nav-me {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        padding: 10px 12px;
+        border-radius: 999px;
+        cursor: pointer;
+    }
+    .tf-nav-me:hover { background: var(--bg-secondary, rgba(0, 0, 0, 0.06)); }
+    .tf-nav-me img {
+        width: 38px; height: 38px; border-radius: 50%;
+        object-fit: cover; flex-shrink: 0; background: #ddd;
+    }
+    .tf-nav-me-name {
+        font-size: 14px; font-weight: 700; color: var(--text-primary, #000);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .tf-nav-me-handle { font-size: 13px; color: #888; }
+
+    /* --- search, in the header as asked --- */
+    .tf-desk-search {
+        display: flex !important;
+        align-items: center;
+        gap: 9px;
+        flex: 1;
+        margin: 0 16px;
+        padding: 9px 15px;
+        border-radius: 999px;
+        background: var(--input-bg, #f0f2f5);
+        border: 1px solid transparent;
+        transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .tf-desk-search:focus-within {
+        border-color: #007AFF;
+        background: var(--bg-primary, #fff);
+    }
+    .tf-desk-search i { color: #8b95a5; font-size: 14px; }
+    .tf-desk-search input {
+        flex: 1;
+        min-width: 0;
+        border: none;
+        outline: none;
+        background: none;
+        font-size: 15px;
+        color: var(--text-primary, #000);
+        font-family: inherit;
+    }
+
+    /* --- things that do not belong on a laptop ---
+       The clip editor is built for a thumb on a touchscreen, and a voice call
+       has no reason to exist next to a video call on a machine with a webcam.
+       Hidden rather than half-ported, which is the whole point. */
+    .tf-no-desktop { display: none !important; }
+}
+
+/* --------------------------------------------------------------------------
+   1300px and up: the third column
+   -------------------------------------------------------------------------- */
+@media (min-width: 1300px) {
+    #tfRightRail {
+        display: flex;
+        left: calc(50% + 300px + 28px);
+        /* 300, not 330. The layout is not symmetric about the centre: the
+           right half needs 28 + 300 + this width to fit in half the window,
+           and 330 needed a 1316px window while claiming to work at 1300. */
+        width: 300px;
+        padding: 16px 4px;
+        overflow-y: auto;
+        scrollbar-width: none;
+    }
+    #tfRightRail::-webkit-scrollbar { display: none; }
+
+    .tf-rail-card {
+        background: var(--card-bg, #f7f9f9);
+        border: 1px solid var(--border-color, #eff3f4);
+        border-radius: 16px;
+        padding: 14px 16px;
+        margin-bottom: 16px;
+    }
+    .tf-rail-title {
+        font-size: 18px;
+        font-weight: 800;
+        color: var(--text-primary, #000);
+        margin: 0 0 10px;
+    }
+    .tf-rail-row {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        padding: 9px 0;
+        cursor: pointer;
+        border-radius: 10px;
+    }
+    .tf-rail-row:hover { background: var(--bg-secondary, rgba(0, 0, 0, 0.04)); }
+    .tf-rail-row img {
+        width: 38px; height: 38px; border-radius: 50%;
+        object-fit: cover; flex-shrink: 0; background: #ddd;
+    }
+    .tf-rail-name {
+        font-size: 14px; font-weight: 700; color: var(--text-primary, #000);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .tf-rail-sub { font-size: 13px; color: #8b95a5; }
+    .tf-rail-empty { font-size: 13px; color: #aaa; padding: 6px 0; }
+
+    .tf-live-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: #FF3B30; flex-shrink: 0;
+        animation: tfLivePulse 1.6s ease-in-out infinite;
+    }
+    @keyframes tfLivePulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.35; }
+    }
+}
+
+/* --------------------------------------------------------------------------
+   The create window.
+   A centred dialog, not a bottom sheet: a sheet is a thumb pattern and reads
+   as wrong under a cursor.
+   -------------------------------------------------------------------------- */
+#tfCreateModal {
+    position: fixed;
+    inset: 0;
+    z-index: 20000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+}
+#tfCreateModal.on { display: flex; }
+.tf-create-box {
+    width: 400px;
+    max-width: calc(100vw - 40px);
+    background: var(--bg-primary, #fff);
+    border-radius: 20px;
+    padding: 22px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.3);
+}
+.tf-create-box h3 {
+    margin: 0 0 4px;
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text-primary, #000);
+}
+.tf-create-box .tf-create-sub {
+    margin: 0 0 16px;
+    font-size: 13px;
+    color: #888;
+    line-height: 1.5;
+}
+.tf-create-opt {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px;
+    border-radius: 14px;
+    cursor: pointer;
+    color: var(--text-primary, #000);
+    font-size: 15px;
+    font-weight: 600;
+    border: 1px solid var(--border-color, #eee);
+    margin-bottom: 9px;
+    transition: background 0.15s ease;
+}
+.tf-create-opt:hover { background: var(--bg-secondary, #f5f5f5); }
+.tf-create-opt i { font-size: 17px; color: #007AFF; width: 22px; text-align: center; }
+.tf-create-note {
+    margin: 6px 0 0;
+    font-size: 12px;
+    color: #999;
+    line-height: 1.55;
+    text-align: center;
+}
+
+/* --------------------------------------------------------------------------
+   Eddie, and chats, docked bottom right.
+
+   Pinned to the window rather than to a column, so they stay put whether the
+   third column is showing or not, and they never collide with it.
+   -------------------------------------------------------------------------- */
+#tfDock { display: none; }
+
+@media (min-width: 1000px) {
+    #tfDock {
+        display: flex;
+        position: fixed;
+        right: 24px;
+        bottom: 22px;
+        flex-direction: column;
+        gap: 12px;
+        z-index: 5600;
+    }
+    .tf-dock-btn {
+        width: 52px;
+        height: 52px;
+        border-radius: 50%;
+        border: 1px solid var(--border-color, #e6e8ea);
+        background: var(--bg-primary, #fff);
+        color: var(--text-primary, #000);
+        font-size: 19px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.14);
+        transition: transform 0.15s ease, background 0.15s ease;
+        position: relative;
+    }
+    .tf-dock-btn:hover {
+        transform: translateY(-2px);
+        background: var(--bg-secondary, #f5f5f5);
+    }
+    .tf-dock-btn .tf-nav-dot {
+        left: auto;
+        right: 11px;
+        top: 11px;
+    }
+
+    /* Eddie's face fills the button rather than sitting inside it as a small
+       glyph, so it reads as the assistant's avatar the way it does everywhere
+       else in the app. */
+    .tf-dock-eddie { padding: 0; overflow: hidden; border-color: transparent; }
+    .tf-dock-eddie svg { width: 100%; height: 100%; display: block; }
+    .tf-dock-eddie:hover { background: none; }
+}
+
+/* --------------------------------------------------------------------------
+   Signed out.
+
+   A sidebar full of places you cannot go is not navigation, it is decoration,
+   so the whole laptop frame stays out of the way until there is an account
+   behind it. The splash then gets the window rather than a 430px strip of it.
+   -------------------------------------------------------------------------- */
+@media (min-width: 1000px) {
+    .tf-logged-out #tfSideNav,
+    .tf-logged-out #tfRightRail,
+    .tf-logged-out #tfDock { display: none !important; }
+
+    .tf-logged-out .app {
+        max-width: 100% !important;
+        border-left: none !important;
+        border-right: none !important;
+    }
+
+    /* The splash was pinned to a phone-sized box. On a laptop it reads as a
+       window, so it takes the window. */
+    .splash-screen {
+        left: 0 !important;
+        right: 0 !important;
+        transform: none !important;
+        max-width: none !important;
+        max-height: none !important;
+        width: 100% !important;
+    }
+
+    /* The form itself stays a comfortable reading width. A login field
+       stretched across a 1440px monitor is harder to use, not easier. */
+    .auth-step { max-width: 420px !important; margin: 0 auto; }
+    .auth-brand { font-size: 60px !important; }
+    .auth-sub { font-size: 17px !important; }
+}
+
+/* --------------------------------------------------------------------------
+   Overlays and bottom sheets follow the column.
+
+   feed.css pins these to 430px centred on the viewport from 431px up, which
+   was right when the app was a phone frame. On a laptop the column is 600px,
+   so without this every one of them would open narrower than the page behind
+   it and visibly off to one side. The centre line is shared, so matching the
+   width is all that is needed.
+   -------------------------------------------------------------------------- */
+@media (min-width: 1000px) {
+    #saved-overlay, #archive-overlay, #live-overlay, #wallet-overlay,
+    #channels-overlay, #drafts-overlay, #scheduled-overlay, #groups-overlay,
+    #group-page-overlay, #notif-overlay, #contact-profile-overlay,
+    #share-sheet {
+        max-width: 600px !important;
+        left: calc(50% - 300px) !important;
+        right: auto !important;
+    }
+
+    /* The repost sheet is the one in that list that centres itself with
+       translateX(-50%), and it needs that transform kept because the same
+       transform carries the slide-up. Subtracting half the width in `left` as
+       well moved it a second time, and it opened 300px to the left of the
+       column. Left on the centre line, its own transform does the centring. */
+    #repost-sheet {
+        max-width: 600px !important;
+        left: 50% !important;
+        right: auto !important;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Moving through clips without a thumb.
+
+   A trackpad can scroll the reel, but there is no gesture for "next" the way
+   a swipe is on a phone, so TikTok puts a pair of arrows beside the video.
+   These sit just outside the column and only exist while clips are open.
+   -------------------------------------------------------------------------- */
+#tfReelNav { display: none; }
+
+@media (min-width: 1000px) {
+    #tfReelNav.on {
+        display: flex;
+        position: fixed;
+        left: calc(50% + 300px + 20px);
+        top: 50%;
+        transform: translateY(-50%);
+        flex-direction: column;
+        gap: 14px;
+        z-index: 100001;
+    }
+    .tf-reel-arrow {
+        width: 46px;
+        height: 46px;
+        border-radius: 50%;
+        border: none;
+        background: rgba(255, 255, 255, 0.14);
+        color: #fff;
+        font-size: 17px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-backdrop-filter: blur(10px);
+        backdrop-filter: blur(10px);
+        transition: background 0.15s ease, transform 0.15s ease;
+    }
+    .tf-reel-arrow:hover {
+        background: rgba(255, 255, 255, 0.26);
+        transform: scale(1.06);
+    }
+    .tf-reel-arrow:active { transform: scale(0.94); }
+}
+
+/* --------------------------------------------------------------------------
+   The account menu, off the row at the foot of the sidebar.
+   -------------------------------------------------------------------------- */
+#tfAccountMenu {
+    display: none;
+    position: fixed;
+    z-index: 20001;
+    min-width: 220px;
+    background: var(--bg-primary, #fff);
+    border: 1px solid var(--border-color, #e6e8ea);
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+    padding: 6px;
+    overflow: hidden;
+}
+#tfAccountMenu.on { display: block; }
+.tf-acct-item {
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary, #000);
+    cursor: pointer;
+}
+.tf-acct-item:hover { background: var(--bg-secondary, #f2f2f2); }
+.tf-acct-item.tf-danger { color: #FF3B30; }

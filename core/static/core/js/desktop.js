@@ -1,0 +1,493 @@
+// ==========================================================================
+// THE LAPTOP LAYOUT
+//
+// Loaded after feed.js and deliberately additive: nothing in here changes a
+// function the mobile app uses. It reads the same nav functions the pill reads
+// (navHome, navGoTo) so there is one source of truth for what a tab does, and
+// every screen the sidebar reaches is the screen the phone already reaches.
+//
+// Everything is gated on TF_DESKTOP. On a phone this file defines a few
+// functions, does nothing with them, and exits.
+// ==========================================================================
+
+var TF_DESKTOP_MIN = 1000;
+
+function tfIsDesktop() {
+    return window.matchMedia('(min-width: ' + TF_DESKTOP_MIN + 'px)').matches;
+}
+
+// The signed-in user, from wherever it really lives.
+//
+// feed.js holds it in `let currentUser`, and a top-level let is not a property
+// of window, so window.currentUser is permanently undefined. Reading that was
+// silently wrong: it fails in exactly the case that matters, when somebody is
+// actually signed in. The bare binding is reachable from here because top-level
+// lets share one global lexical scope across classic scripts.
+function tfMe() {
+    try {
+        if (typeof currentUser !== 'undefined' && currentUser) return currentUser;
+    } catch (e) { /* not declared yet */ }
+    return (window && window.currentUser) || null;
+}
+
+// ---------------------------------------------------------------- sidebar --
+
+// Which tab is lit. The pill tracks this itself; the sidebar has to be told,
+// because the app was never built to have two navigations.
+function tfDeskSetActive(key) {
+    var items = document.querySelectorAll('#tfSideNav .tf-nav-item');
+    for (var i = 0; i < items.length; i++) {
+        items[i].classList.toggle('tf-active', items[i].getAttribute('data-tab') === key);
+    }
+}
+
+// Where each row goes. The four the pill already owns are handed straight to
+// it, so the phone and the laptop can never disagree about what a tab does.
+// The rest call the same functions the burger menu and settings rows call.
+// Every one was checked to exist before it was put here.
+var TF_DESK_ROUTES = {
+    explore:   'tfDeskExplore',
+    live:      'openLiveStreamFeed',
+    channels:  'openChannels',
+    groups:    'loadGroups',
+    saved:     'openSavedLibrary',
+    analytics: 'openCreatorAnalytics',
+    settings:  'openSettings',
+};
+
+function tfDeskGo(key) {
+    tfDeskSetActive(key);
+    try {
+        if (key === 'home') {
+            if (typeof navHome === 'function') navHome();
+            return;
+        }
+        var fn = TF_DESK_ROUTES[key];
+        if (fn) {
+            if (typeof window[fn] === 'function') {
+                window[fn]();
+            } else {
+                console.warn('[desktop] no handler for', key);
+            }
+            return;
+        }
+        if (typeof navGoTo === 'function') navGoTo(key);
+    } catch (e) {
+        console.warn('[desktop] nav', key, e && e.message);
+    }
+}
+
+// The badges the pill already maintains, mirrored onto the sidebar. Read from
+// the same elements rather than re-querying the database, so the two can never
+// disagree about how many unread things there are.
+function tfDeskSyncBadges() {
+    if (!tfIsDesktop()) return;
+    var pairs = [
+        ['notif-badge', 'tf-dot-notifications'],
+        ['msgs-badge', 'tf-dot-messages'],
+        ['msgs-badge', 'tf-dot-dockmsgs'],
+    ];
+    for (var i = 0; i < pairs.length; i++) {
+        var src = document.getElementById(pairs[i][0]);
+        var dot = document.getElementById(pairs[i][1]);
+        if (!dot) continue;
+        var has = !!(src && (src.textContent || '').trim() &&
+                     (src.textContent || '').trim() !== '0');
+        dot.classList.toggle('on', has);
+    }
+}
+
+// Who is signed in, at the foot of the sidebar.
+function tfDeskFillMe() {
+    var u = tfMe();
+    if (!tfIsDesktop() || !u) return;
+    var img = document.getElementById('tfNavMeAvatar');
+    var name = document.getElementById('tfNavMeName');
+    var handle = document.getElementById('tfNavMeHandle');
+    if (img) {
+        img.src = u.avatar_url || (typeof tfAvatarFor === 'function'
+            ? tfAvatarFor(u.username || 'you', '007AFF') : '');
+    }
+    // Your name, not the word "You". A sidebar that calls you "You" while
+    // sitting next to your own avatar is a placeholder nobody replaced.
+    if (name) name.textContent = u.full_name || u.display_name || u.username || '';
+    if (handle) handle.textContent = u.username ? '@' + u.username : '';
+}
+
+// ------------------------------------------------------------- right rail --
+
+// Real rows or an honest empty state. Nothing invented: an empty app should
+// look empty rather than busy with people who do not exist.
+async function tfDeskLoadRail() {
+    if (!document.getElementById('tfRightRail')) return;
+    if (!window.matchMedia('(min-width: 1300px)').matches) return;
+    if (!window.sb) return;
+
+    // --- who to follow ---
+    var who = document.getElementById('tfRailPeople');
+    if (who) {
+        try {
+            var q = sb.from('users')
+                .select('id,username,full_name,avatar_url,verified')
+                .neq('is_banned', true)
+                .limit(4);
+            var me = tfMe();
+            if (me && me.id) q = q.neq('id', me.id);
+            var r = await q;
+            var rows = (r.data || []);
+            who.innerHTML = rows.length ? rows.map(function (u) {
+                var av = u.avatar_url || (typeof tfAvatarFor === 'function'
+                    ? tfAvatarFor(u.username || 'user', '007AFF') : '');
+                return '<div class="tf-rail-row" onclick="tfDeskOpenProfile(\'' + u.id + '\')">' +
+                    '<img src="' + escapeHtml(av) + '" alt="">' +
+                    '<div style="flex:1;min-width:0;">' +
+                        '<div class="tf-rail-name">' + escapeHtml(u.full_name || u.username || 'User') + '</div>' +
+                        '<div class="tf-rail-sub">@' + escapeHtml(u.username || 'user') + '</div>' +
+                    '</div>' +
+                '</div>';
+            }).join('') : '<div class="tf-rail-empty">Nobody to suggest yet.</div>';
+        } catch (e) {
+            who.innerHTML = '<div class="tf-rail-empty">Could not load suggestions.</div>';
+        }
+    }
+
+    // --- trending tags ---
+    var tags = document.getElementById('tfRailTags');
+    if (tags) {
+        try {
+            var t = await sb.from('posts')
+                .select('text_content')
+                .not('text_content', 'is', null)
+                .order('created_at', { ascending: false })
+                .limit(120);
+            var counts = {};
+            (t.data || []).forEach(function (p) {
+                var found = (p.text_content || '').match(/#[\w]+/g) || [];
+                found.forEach(function (h) {
+                    var k = h.toLowerCase();
+                    counts[k] = (counts[k] || 0) + 1;
+                });
+            });
+            var top = Object.keys(counts)
+                .sort(function (a, b) { return counts[b] - counts[a]; })
+                .slice(0, 5);
+            tags.innerHTML = top.length ? top.map(function (h) {
+                return '<div class="tf-rail-row" onclick="tfDeskSearch(\'' + escapeHtml(h) + '\')">' +
+                    '<div style="flex:1;min-width:0;">' +
+                        '<div class="tf-rail-name">' + escapeHtml(h) + '</div>' +
+                        '<div class="tf-rail-sub">' + counts[h] + ' post' + (counts[h] === 1 ? '' : 's') + '</div>' +
+                    '</div>' +
+                '</div>';
+            }).join('') : '<div class="tf-rail-empty">No hashtags yet.</div>';
+        } catch (e) {
+            tags.innerHTML = '<div class="tf-rail-empty">Could not load trends.</div>';
+        }
+    }
+
+    // --- who is live ---
+    var live = document.getElementById('tfRailLive');
+    if (live) {
+        try {
+            var l = await sb.from('live_sessions')
+                .select('id,room,username,avatar_url,title,viewer_count')
+                .eq('is_live', true)
+                .order('viewer_count', { ascending: false })
+                .limit(3);
+            var ls = (l.data || []);
+            live.innerHTML = ls.length ? ls.map(function (s) {
+                var av = s.avatar_url || (typeof tfAvatarFor === 'function'
+                    ? tfAvatarFor(s.username || 'user', 'FF3B30') : '');
+                return '<div class="tf-rail-row" onclick="tfDeskGo(\'reels\')">' +
+                    '<img src="' + escapeHtml(av) + '" alt="">' +
+                    '<div style="flex:1;min-width:0;">' +
+                        '<div class="tf-rail-name">' + escapeHtml(s.username || 'Someone') + '</div>' +
+                        '<div class="tf-rail-sub">' + escapeHtml(s.title || 'Live now') + '</div>' +
+                    '</div>' +
+                    '<div class="tf-live-dot"></div>' +
+                '</div>';
+            }).join('') : '<div class="tf-rail-empty">Nobody is live right now.</div>';
+        } catch (e) {
+            live.innerHTML = '<div class="tf-rail-empty">Could not load.</div>';
+        }
+    }
+}
+
+function tfDeskOpenProfile(id) {
+    if (typeof openUserProfile === 'function') { openUserProfile(id); return; }
+    if (typeof openProfileById === 'function') { openProfileById(id); return; }
+    tfDeskGo('account');
+}
+
+// Search goes through handleNavSearch and nothing else.
+//
+// executeNavSearch, which the pill's Enter key calls, opens a page called
+// search-overlay that does not exist and then calls performSearch, which is
+// not defined anywhere. Routing the laptop through it would inherit a dead
+// path. handleNavSearch is the one that works: it fills #discovery-page with
+// real results, and because that page lives inside .app it lands in the middle
+// column on a laptop without anything else being moved.
+function tfDeskSearch(term) {
+    var box = document.getElementById('tfDeskSearchInput');
+    if (box) box.value = term;
+    tfDeskSearchInput(term);
+}
+
+// Typing suggests as you go, which is the same behaviour the phone has.
+function tfDeskSearchInput(value) {
+    try {
+        if (typeof handleNavSearch === 'function') handleNavSearch(value);
+    } catch (e) {
+        console.warn('[desktop] search', e && e.message);
+    }
+}
+
+// Enter just commits what is already on screen. There is no separate results
+// page to go to, because the results are already there.
+function tfDeskSearchGo() {
+    var box = document.getElementById('tfDeskSearchInput');
+    tfDeskSearchInput(box ? box.value : '');
+    if (box) box.blur();
+}
+
+// ------------------------------------------------------------------ explore --
+
+// Explore with nothing typed yet.
+//
+// #discovery-page hides itself below two characters, so opening it cold would
+// show a blank column. It gets a starting state instead: what people are
+// tagging and who they could follow, from the same queries the rail uses. The
+// moment anything is typed, handleNavSearch takes the page over and this is
+// replaced by real results.
+async function tfDeskExplore() {
+    var disc = document.getElementById('discovery-page');
+    if (!disc) return;
+
+    disc.style.cssText = 'display:flex;flex-direction:column;position:absolute;' +
+        'top:0;left:0;width:100%;height:100%;z-index:3500;' +
+        'background:var(--bg-primary,#fff);overflow:hidden;';
+    disc.innerHTML =
+        '<div style="display:flex;align-items:center;gap:10px;padding:18px 16px 12px;flex-shrink:0;">' +
+            '<b style="font-size:20px;color:var(--text-primary,#000);flex:1;">Explore</b>' +
+        '</div>' +
+        '<div class="tf-desk-search" style="display:flex;margin:0 16px 14px;flex:none;">' +
+            '<i class="fa-solid fa-magnifying-glass"></i>' +
+            '<input id="tfExploreInput" type="text" placeholder="Search TrustFirst"' +
+                   ' aria-label="Search TrustFirst" autocomplete="off"' +
+                   ' oninput="tfDeskSearchInput(this.value)"' +
+                   ' onkeydown="if(event.key===\'Enter\')tfDeskSearchInput(this.value)">' +
+        '</div>' +
+        '<div id="tfExploreBody" style="flex:1;overflow-y:auto;padding:0 16px 90px;">' +
+            '<div class="tf-rail-empty">Loading\u2026</div>' +
+        '</div>';
+
+    var input = document.getElementById('tfExploreInput');
+    if (input) setTimeout(function () { input.focus(); }, 60);
+
+    var body = document.getElementById('tfExploreBody');
+    if (!body || !window.sb) return;
+
+    var html = '';
+    try {
+        var t = await sb.from('posts')
+            .select('text_content')
+            .not('text_content', 'is', null)
+            .order('created_at', { ascending: false })
+            .limit(200);
+        var counts = {};
+        (t.data || []).forEach(function (post) {
+            ((post.text_content || '').match(/#[\w]+/g) || []).forEach(function (h) {
+                var k = h.toLowerCase();
+                counts[k] = (counts[k] || 0) + 1;
+            });
+        });
+        var top = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 10);
+        html += '<h3 style="font-size:17px;font-weight:800;margin:6px 0 8px;color:var(--text-primary,#000);">Trending</h3>';
+        html += top.length ? top.map(function (h) {
+            return '<div class="tf-rail-row" onclick="tfDeskSearch(\'' + escapeHtml(h) + '\')">' +
+                '<div style="flex:1;min-width:0;">' +
+                    '<div class="tf-rail-name">' + escapeHtml(h) + '</div>' +
+                    '<div class="tf-rail-sub">' + counts[h] + ' post' + (counts[h] === 1 ? '' : 's') + '</div>' +
+                '</div></div>';
+        }).join('') : '<div class="tf-rail-empty">No hashtags yet. Post one and it shows up here.</div>';
+    } catch (e) {
+        html += '<div class="tf-rail-empty">Could not load trends.</div>';
+    }
+
+    try {
+        var q = sb.from('users')
+            .select('id,username,full_name,avatar_url,verified')
+            .neq('is_banned', true)
+            .limit(8);
+        var me = tfMe();
+        if (me && me.id) q = q.neq('id', me.id);
+        var r = await q;
+        var people = (r.data || []);
+        html += '<h3 style="font-size:17px;font-weight:800;margin:20px 0 8px;color:var(--text-primary,#000);">People</h3>';
+        html += people.length ? people.map(function (u) {
+            var av = u.avatar_url || (typeof tfAvatarFor === 'function'
+                ? tfAvatarFor(u.username || 'user', '007AFF') : '');
+            return '<div class="tf-rail-row" onclick="tfDeskOpenProfile(\'' + u.id + '\')">' +
+                '<img src="' + escapeHtml(av) + '" alt="">' +
+                '<div style="flex:1;min-width:0;">' +
+                    '<div class="tf-rail-name">' + escapeHtml(u.full_name || u.username || 'User') + '</div>' +
+                    '<div class="tf-rail-sub">@' + escapeHtml(u.username || 'user') + '</div>' +
+                '</div></div>';
+        }).join('') : '<div class="tf-rail-empty">Nobody here yet.</div>';
+    } catch (e) {
+        html += '<div class="tf-rail-empty">Could not load people.</div>';
+    }
+
+    var stillThere = document.getElementById('tfExploreBody');
+    if (stillThere) stillThere.innerHTML = html;
+}
+
+// ----------------------------------------------------------------- create --
+
+function tfDeskCreateOpen() {
+    var m = document.getElementById('tfCreateModal');
+    if (m) m.classList.add('on');
+}
+
+function tfDeskCreateClose() {
+    var m = document.getElementById('tfCreateModal');
+    if (m) m.classList.remove('on');
+}
+
+function tfDeskCreate(what) {
+    tfDeskCreateClose();
+    try {
+        if (what === 'post') {
+            if (typeof openPage === 'function') openPage('composer-overlay');
+            if (typeof hideNavBar === 'function') hideNavBar();
+        } else if (what === 'live') {
+            if (typeof openLiveStreamFeed === 'function') openLiveStreamFeed();
+        } else if (what === 'eddie') {
+            if (typeof openEddieChat === 'function') openEddieChat();
+        }
+    } catch (e) {
+        console.warn('[desktop] create', what, e && e.message);
+    }
+}
+
+// ------------------------------------------------------------------- boot --
+
+// The app carries its own signed-out marker on #app. Mirrored onto the root so
+// the stylesheet can hide the laptop chrome, because CSS cannot reach a
+// sibling's class from here.
+function tfDeskSyncAuth() {
+    var app = document.getElementById('app');
+    var out = !app || app.classList.contains('not-authenticated');
+    document.documentElement.classList.toggle('tf-logged-out', out);
+    if (!out) tfDeskFillMe();
+}
+
+function tfDeskInit() {
+    if (!tfIsDesktop()) return;
+    document.documentElement.classList.add('tf-is-desktop');
+    tfDeskSyncAuth();
+    tfDeskFillMe();
+    tfDeskSyncBadges();
+    tfDeskLoadRail();
+}
+
+// The pill updates its badges whenever counts change, and there is no event to
+// listen for, so the sidebar checks the same elements on a slow timer. Cheap:
+// it reads two nodes already in the page and touches nothing else.
+if (typeof window !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', function () {
+        tfDeskInit();
+        setInterval(tfDeskSyncBadges, 4000);
+        setInterval(tfReelNavSync, 700);
+        // Signing in removes a class rather than reloading the page, so the
+        // chrome has to be told. Watching the attribute costs nothing and
+        // cannot drift the way a timer would.
+        var appEl = document.getElementById('app');
+        if (appEl && window.MutationObserver) {
+            new MutationObserver(tfDeskSyncAuth).observe(appEl, {
+                attributes: true, attributeFilter: ['class']
+            });
+        }
+        // currentUser arrives after the session is restored, which is later
+        // than DOMContentLoaded, so the avatar is filled again once it exists.
+        var tries = 0;
+        var waitForUser = setInterval(function () {
+            if (tfMe() || ++tries > 40) {
+                clearInterval(waitForUser);
+                tfDeskFillMe();
+                tfDeskLoadRail();
+            }
+        }, 500);
+    });
+
+    // A window dragged across the breakpoint should settle into the right
+    // layout rather than needing a reload.
+    window.addEventListener('resize', function () {
+        clearTimeout(window._tfDeskResize);
+        window._tfDeskResize = setTimeout(tfDeskInit, 250);
+    });
+}
+
+// ------------------------------------------------------------------- clips --
+
+// Whichever element is actually doing the scrolling. The clip player builds
+// its container at runtime and the markup has changed before, so this asks
+// rather than assuming one id will always be there.
+function tfReelScroller() {
+    var overlay = document.getElementById('reel-overlay');
+    if (!overlay) return null;
+    var candidates = [
+        document.getElementById('reelsContainer'),
+        overlay.querySelector('.reel-viewport'),
+        overlay,
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+        var el = candidates[i];
+        if (el && el.scrollHeight > el.clientHeight + 10) return el;
+    }
+    return null;
+}
+
+// One clip per press. Snapping does the aligning, this only has to move by
+// roughly a screen and let the snap points finish the job.
+function tfReelStep(direction) {
+    var sc = tfReelScroller();
+    if (!sc) return;
+    sc.scrollBy({ top: direction * sc.clientHeight, behavior: 'smooth' });
+}
+
+// The arrows exist only while clips are on screen. Watching the overlay is
+// more reliable than hooking every function that might open or close it.
+function tfReelNavSync() {
+    var nav = document.getElementById('tfReelNav');
+    if (!nav) return;
+    var overlay = document.getElementById('reel-overlay');
+    var open = !!overlay && getComputedStyle(overlay).display !== 'none';
+    nav.classList.toggle('on', open && tfIsDesktop());
+}
+
+// ----------------------------------------------------------------- account --
+
+function tfDeskAccountMenu(anchorEl) {
+    var menu = document.getElementById('tfAccountMenu');
+    if (!menu) return;
+    if (menu.classList.contains('on')) { menu.classList.remove('on'); return; }
+    var r = anchorEl.getBoundingClientRect();
+    menu.style.left = Math.round(r.left - 40) + 'px';
+    menu.style.top = Math.round(r.top - 60) + 'px';
+    menu.classList.add('on');
+    setTimeout(function () {
+        document.addEventListener('click', function close(e) {
+            if (!menu.contains(e.target)) {
+                menu.classList.remove('on');
+                document.removeEventListener('click', close);
+            }
+        });
+    }, 0);
+}
+
+function tfDeskLogOut() {
+    var menu = document.getElementById('tfAccountMenu');
+    if (menu) menu.classList.remove('on');
+    if (typeof logOut === 'function') { logOut(); return; }
+    console.warn('[desktop] no logOut function');
+}

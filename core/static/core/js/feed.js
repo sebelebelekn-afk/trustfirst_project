@@ -7031,6 +7031,10 @@ function tfAvatarFor(name, bg, size) {
         colour = palette[Math.abs(h) % palette.length];
     }
     var key = initials + '|' + colour;
+    // Filled in on first use rather than at the top of the file. This function
+    // is called by top-level code that runs before the declaration below is
+    // reached, so relying on that assignment threw on every single page load.
+    if (!_tfAvatarCache) _tfAvatarCache = {};
     if (_tfAvatarCache[key]) return _tfAvatarCache[key];
 
     var px = size || 80;

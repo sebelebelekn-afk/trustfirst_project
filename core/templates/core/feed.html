@@ -1,8 +1,8 @@
-{% load static %}
+﻿{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <!-- CSP is set server-side via Django CSP middleware — no meta tag needed -->
+    <!-- CSP is set server-side via Django CSP middleware â€” no meta tag needed -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <link rel="manifest" href="/manifest.json">
@@ -28,8 +28,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=109">
+    <!-- The laptop layout. Every rule inside is behind a min-width query,
+         so a phone downloads it and applies none of it. -->
+    <link rel="stylesheet" href="{% static 'core/css/desktop.css' %}?v=5">
     <script nonce="{{ request.csp_nonce }}">
-/* Safety stub — mirrors the real implementation in feed.js.
+/* Safety stub â€” mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
 function nextAuthStep(s){
   document.querySelectorAll('.auth-step').forEach(function(x){x.classList.remove('active');});
@@ -83,7 +86,7 @@ function authenticateUser() {
 })();
 </script>
 <script nonce="{{ request.csp_nonce }}">
-/* CHAT HEADER AVATAR — show/hide real image vs initials fallback */
+/* CHAT HEADER AVATAR â€” show/hide real image vs initials fallback */
 (function () {
   var img      = document.getElementById('chat-header-avatar');
   var fallback = document.getElementById('chat-header-avatar-fallback');
@@ -237,7 +240,7 @@ function authenticateUser() {
         <button class="auth-btn" onclick="proceedFromRegistrationDetails()">Next: Account Type</button>
     </div>
 
-    <!-- ===== NEW SIGN-UP FLOW: email → code → password → name → username → profile ===== -->
+    <!-- ===== NEW SIGN-UP FLOW: email â†’ code â†’ password â†’ name â†’ username â†’ profile ===== -->
     <div class="auth-step" id="step-signup-email">
         <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-register')"><i class="fa-solid fa-arrow-left"></i></div></div>
         <h2 class="auth-x-title">Enter your email</h2>
@@ -319,7 +322,7 @@ function authenticateUser() {
             <input type="file" id="signup-avatar-file" accept="image/*" style="display:none;" onchange="_signupAvatarChosen(this)">
         </div>
         <p style="font-size:12px;color:#8e8e93;font-weight:700;letter-spacing:0.04em;margin-bottom:9px;">BIO (OPTIONAL)</p>
-        <textarea id="signup-bio-in" placeholder="Tell people a bit about you…" maxlength="160" style="width:100%;min-height:82px;border:1px solid var(--border-color,#e5e5ea);border-radius:14px;padding:12px;font-size:15px;font-family:inherit;background:var(--bg-secondary,#f7f7f9);color:var(--text-primary,#000);outline:none;resize:none;box-sizing:border-box;"></textarea>
+        <textarea id="signup-bio-in" placeholder="Tell people a bit about youâ€¦" maxlength="160" style="width:100%;min-height:82px;border:1px solid var(--border-color,#e5e5ea);border-radius:14px;padding:12px;font-size:15px;font-family:inherit;background:var(--bg-secondary,#f7f7f9);color:var(--text-primary,#000);outline:none;resize:none;box-sizing:border-box;"></textarea>
         <div class="auth-x-spacer"></div>
         <button class="auth-x-continue" id="signup-profile-continue" onclick="_signupFinish(false)">Complete sign up</button>
     </div>
@@ -409,7 +412,7 @@ function authenticateUser() {
         </div>
 
         <button class="auth-btn" onclick="completeRegistration(true)" id="verify-btn" style="opacity:0.5; pointer-events:none;">Complete Verification</button>
-        <p style="text-align:center; margin-top:15px; font-size:13px; color:#888; cursor:pointer;" onclick="skipVerification()">I'll verify later →</p>
+        <p style="text-align:center; margin-top:15px; font-size:13px; color:#888; cursor:pointer;" onclick="skipVerification()">I'll verify later â†’</p>
     </div>
 
     <div class="loading-spinner" id="auth-loader">
@@ -435,6 +438,135 @@ function authenticateUser() {
     </div>
 </div>
 
+
+<!-- ==========================================================================
+     LAPTOP CHROME
+     Hidden at every width below 1000px by desktop.css, so this markup exists
+     on a phone and is never shown. It sits outside .app on purpose, because
+     .app clips its overflow.
+     ========================================================================== -->
+<nav id="tfSideNav" class="tf-desk-panel" aria-label="Main">
+    <div class="tf-nav-brand" translate="no">TrustFirst</div>
+
+    <!-- Scrolls on its own so a short laptop screen never pushes Create and
+         the account row off the bottom, which is where the two things people
+         reach for most happen to live. -->
+    <div class="tf-nav-list">
+    <div class="tf-nav-item tf-active" data-tab="home" role="button" tabindex="0"
+         onclick="tfDeskGo('home')"><i class="fa-solid fa-house"></i><span>Home</span></div>
+    <div class="tf-nav-item" data-tab="explore" role="button" tabindex="0"
+         onclick="tfDeskGo('explore')"><i class="fa-solid fa-magnifying-glass"></i><span>Explore</span></div>
+    <div class="tf-nav-item" data-tab="reels" role="button" tabindex="0"
+         onclick="tfDeskGo('reels')"><i class="fa-solid fa-clapperboard"></i><span>TrustClips</span></div>
+    <div class="tf-nav-item" data-tab="notifications" role="button" tabindex="0"
+         onclick="tfDeskGo('notifications')"><i class="fa-solid fa-bell"></i><span>Notifications</span>
+         <span class="tf-nav-dot" id="tf-dot-notifications"></span></div>
+    <div class="tf-nav-item" data-tab="messages" role="button" tabindex="0"
+         onclick="tfDeskGo('messages')"><i class="fa-solid fa-paper-plane"></i><span>Messages</span>
+         <span class="tf-nav-dot" id="tf-dot-messages"></span></div>
+    <div class="tf-nav-item" data-tab="live" role="button" tabindex="0"
+         onclick="tfDeskGo('live')"><i class="fa-solid fa-tower-broadcast"></i><span>Live</span></div>
+    <div class="tf-nav-item" data-tab="channels" role="button" tabindex="0"
+         onclick="tfDeskGo('channels')"><i class="fa-solid fa-satellite-dish"></i><span>Channels</span></div>
+    <div class="tf-nav-item" data-tab="groups" role="button" tabindex="0"
+         onclick="tfDeskGo('groups')"><i class="fa-solid fa-users"></i><span>Groups</span></div>
+    <div class="tf-nav-item" data-tab="saved" role="button" tabindex="0"
+         onclick="tfDeskGo('saved')"><i class="fa-solid fa-bookmark"></i><span>Saved</span></div>
+    <div class="tf-nav-item" data-tab="analytics" role="button" tabindex="0"
+         onclick="tfDeskGo('analytics')"><i class="fa-solid fa-chart-simple"></i><span>Creator analytics</span></div>
+    <div class="tf-nav-item" data-tab="settings" role="button" tabindex="0"
+         onclick="tfDeskGo('settings')"><i class="fa-solid fa-gear"></i><span>Settings</span></div>
+    <div class="tf-nav-item" data-tab="account" role="button" tabindex="0"
+         onclick="tfDeskGo('account')"><i class="fa-solid fa-user"></i><span>Profile</span></div>
+    </div>
+
+    <!-- Pinned. Create sits directly above the account row, as asked. -->
+    <div class="tf-nav-foot">
+        <button class="tf-nav-create" onclick="tfDeskCreateOpen()">Create</button>
+        <div class="tf-nav-me" onclick="tfDeskGo('account')">
+            <img id="tfNavMeAvatar" alt="">
+            <div style="min-width:0;flex:1;">
+                <div class="tf-nav-me-name" id="tfNavMeName">…</div>
+                <div class="tf-nav-me-handle" id="tfNavMeHandle"></div>
+            </div>
+            <i class="fa-solid fa-ellipsis" title="Account options" aria-label="Account options"
+               style="color:#8b95a5;padding:6px;flex-shrink:0;"
+               onclick="event.stopPropagation();tfDeskAccountMenu(this)"></i>
+        </div>
+    </div>
+</nav>
+
+<aside id="tfRightRail" class="tf-desk-panel" aria-label="Discover">
+    <div class="tf-rail-card">
+        <h2 class="tf-rail-title">Who to follow</h2>
+        <div id="tfRailPeople"><div class="tf-rail-empty">Loadingâ€¦</div></div>
+    </div>
+    <div class="tf-rail-card">
+        <h2 class="tf-rail-title">Trending</h2>
+        <div id="tfRailTags"><div class="tf-rail-empty">Loadingâ€¦</div></div>
+    </div>
+    <div class="tf-rail-card">
+        <h2 class="tf-rail-title">Live now</h2>
+        <div id="tfRailLive"><div class="tf-rail-empty">Loadingâ€¦</div></div>
+    </div>
+</aside>
+
+<!-- Up and down through clips, for a machine with no thumb. Shown only while
+     the clip player is open, and only on a laptop. -->
+<div id="tfReelNav">
+    <button class="tf-reel-arrow" onclick="tfReelStep(-1)" title="Previous clip" aria-label="Previous clip">
+        <i class="fa-solid fa-chevron-up"></i>
+    </button>
+    <button class="tf-reel-arrow" onclick="tfReelStep(1)" title="Next clip" aria-label="Next clip">
+        <i class="fa-solid fa-chevron-down"></i>
+    </button>
+</div>
+
+<!-- The account row's menu. Only what TrustFirst actually supports: there is
+     no second account to switch to, so it does not offer one. -->
+<div id="tfAccountMenu">
+    <div class="tf-acct-item tf-danger" onclick="tfDeskLogOut()">Log out</div>
+</div>
+
+<!-- Eddie and chats, docked bottom right the way a desktop app keeps its
+     assistant and its conversations within reach without spending a column
+     on either. Hidden below 1000px, so the phone never sees them. -->
+<div id="tfDock">
+    <button class="tf-dock-btn tf-dock-eddie" onclick="tfDeskCreate('eddie')"
+            title="Ask Eddie" aria-label="Ask Eddie">
+        <svg viewBox="0 0 512 512" aria-hidden="true">
+            <circle cx="256" cy="256" r="256" fill="#0a0a0a"/>
+            <rect x="150" y="150" width="62" height="128" rx="31" fill="#fff"/>
+            <rect x="300" y="150" width="62" height="128" rx="31" fill="#fff"/>
+            <path d="M170 330 Q256 400 342 330" stroke="#fff" stroke-width="26"
+                  stroke-linecap="round" fill="none"/>
+        </svg>
+    </button>
+    <button class="tf-dock-btn" onclick="tfDeskGo('messages')"
+            title="Messages" aria-label="Messages">
+        <i class="fa-solid fa-paper-plane"></i>
+        <span class="tf-nav-dot" id="tf-dot-dockmsgs"></span>
+    </button>
+</div>
+
+<!-- Create, as a centred window. A bottom sheet is a thumb pattern and reads
+     as wrong under a cursor. Only the three things that genuinely work with a
+     mouse and keyboard are here; recording and editing stay on the phone. -->
+<div id="tfCreateModal" onclick="if(event.target===this)tfDeskCreateClose()">
+    <div class="tf-create-box">
+        <h3>Create</h3>
+        <p class="tf-create-sub">What would you like to make?</p>
+        <div class="tf-create-opt" onclick="tfDeskCreate('post')">
+            <i class="fa-solid fa-pen-nib"></i> Write a post</div>
+        <div class="tf-create-opt" onclick="tfDeskCreate('live')">
+            <i class="fa-solid fa-tower-broadcast"></i> Go live</div>
+        <div class="tf-create-opt" onclick="tfDeskCreate('eddie')">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Ask Eddie</div>
+        <p class="tf-create-note">Recording and editing clips happens in the
+            TrustFirst app, where the camera and the editor live.</p>
+    </div>
+</div>
+
 <div class="app not-authenticated" id="app">
 
     <input type="file" id="file-input" accept="image/*,video/*" multiple onchange="handleChatMediaPick(this)" aria-hidden="true" style="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;">
@@ -445,8 +577,21 @@ function authenticateUser() {
     <!-- Add this overlay to your HTML (before the closing </div> of .app) -->
 
     <div class="header-container">
-        <h1 class="brand-logo" translate="no">TrustFirst</h1>
-        <div class="plus-wrapper">
+        <!-- Hidden on a laptop: the wordmark is already at the top of the sidebar,
+             and printing it twice on one screen is just noise. The phone keeps it,
+             because the phone has no sidebar to carry it. -->
+        <h1 class="brand-logo tf-no-desktop" translate="no">TrustFirst</h1>
+        <!-- Laptop search. display:none until the desktop stylesheet turns it
+             on, and it drives the same search the pill drives so the two can
+             never fall out of step. -->
+        <div class="tf-desk-search" style="display:none;">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input id="tfDeskSearchInput" type="text" placeholder="Search TrustFirst"
+                   aria-label="Search TrustFirst" autocomplete="off"
+                   oninput="tfDeskSearchInput(this.value)"
+                   onkeydown="if(event.key==='Enter')tfDeskSearchGo()">
+        </div>
+        <div class="plus-wrapper tf-no-desktop">
             <div class="liquid-glass-btn" onclick="togglePlusMenu()">
                 <i class="fa-solid fa-plus" id="plus-icon-anim"></i>
             </div>
@@ -526,7 +671,7 @@ function authenticateUser() {
     </div>
     <!-- Export progress bar (hidden by default) -->
     <div id="edExportBar" style="position:absolute;inset:0;background:rgba(0,0,0,0.75);display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;">
-      <p style="color:white;font-size:16px;font-weight:700;">Exporting…</p>
+      <p style="color:white;font-size:16px;font-weight:700;">Exportingâ€¦</p>
       <div style="width:60%;background:rgba(255,255,255,0.15);border-radius:10px;height:6px;overflow:hidden;">
         <div id="edExportFill" style="height:100%;background:#007AFF;width:0%;border-radius:10px;transition:width 0.3s;"></div>
       </div>
@@ -776,9 +921,9 @@ function authenticateUser() {
 
     <!-- VIBE CHECK CARD -->
     <div class="vibe-card">
-      <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#7c3aed;margin-bottom:8px;">✦ Vibe Check</p>
+      <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#7c3aed;margin-bottom:8px;">âœ¦ Vibe Check</p>
       <h3 style="font-size:18px;font-weight:800;color:#3b1f6e;margin-bottom:4px;">What's your vibe today?</h3>
-      <p style="font-size:13px;color:#6d4aab;margin-bottom:4px;">I'll focus on…</p>
+      <p style="font-size:13px;color:#6d4aab;margin-bottom:4px;">I'll focus onâ€¦</p>
       <div class="vibe-dropzone" id="vibe-dropzone">
         <span id="vibe-drop-placeholder"><i class="fa-regular fa-circle-dot" style="margin-right:6px;"></i>Drop a word here</span>
       </div>
@@ -817,7 +962,7 @@ function authenticateUser() {
     <div class="breathe-card" id="breathe-card">
       <div class="breathe-bg-blob" style="width:120px;height:120px;background:rgba(255,255,255,0.15);top:-30px;right:-20px;animation:blobShift 6s ease-in-out infinite;"></div>
       <div class="breathe-bg-blob" style="width:80px;height:80px;background:rgba(100,200,255,0.2);bottom:-10px;left:10px;animation:blobShift 8s ease-in-out infinite reverse;"></div>
-      <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:rgba(255,255,255,0.6);margin-bottom:6px;">✦ Focus</p>
+      <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:rgba(255,255,255,0.6);margin-bottom:6px;">âœ¦ Focus</p>
       <h3 style="font-size:20px;font-weight:800;color:white;margin-bottom:4px;">Breathe evenly</h3>
       <p style="font-size:13px;color:rgba(255,255,255,0.7);margin-bottom:12px;">Box breathing, 4 counts each. A 2-minute reset.</p>
       <div style="display:flex;gap:8px;margin-bottom:16px;">
@@ -841,7 +986,7 @@ function authenticateUser() {
     <!-- SOOTHING SOUNDS CARD -->
     <div class="sounds-card" id="sounds-card">
       <canvas id="sounds-ripple-canvas" style="position:absolute;inset:0;width:100%;height:100%;opacity:0.12;pointer-events:none;"></canvas>
-      <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:rgba(255,255,255,0.5);margin-bottom:6px;position:relative;">✦ Ambient</p>
+      <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:rgba(255,255,255,0.5);margin-bottom:6px;position:relative;">âœ¦ Ambient</p>
       <h3 style="font-size:20px;font-weight:800;color:white;margin-bottom:4px;position:relative;">Soothing sounds</h3>
       <p style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:16px;position:relative;">White noise to help you focus or drift off.</p>
       <div style="display:flex;gap:8px;margin-bottom:16px;position:relative;" id="sounds-track-pills">
@@ -878,7 +1023,7 @@ function authenticateUser() {
   </div>
   <div class="fs-search">
     <i class="fa-solid fa-magnifying-glass" style="color:#aaa;font-size:14px;flex-shrink:0;"></i>
-    <input type="text" id="fs-search-input" placeholder="Search users…" oninput="filterFsList(this.value)">
+    <input type="text" id="fs-search-input" placeholder="Search usersâ€¦" oninput="filterFsList(this.value)">
   </div>
   <div class="fs-list" id="fs-list-content"></div>
 </div>
@@ -961,7 +1106,7 @@ function authenticateUser() {
            role="button" tabindex="0" aria-label="Home"
            onclick="navHome()"></i>
 
-        <!-- Burger (Others toggle) — auto-expands when droplet hovers -->
+        <!-- Burger (Others toggle) â€” auto-expands when droplet hovers -->
         <i class="fa-solid fa-bars nav-icon burger-icon" id="nav-burger"
            role="button" tabindex="0" aria-label="More" aria-expanded="false"
            onclick="navToggleOthers()"
@@ -1214,7 +1359,7 @@ function authenticateUser() {
       <span id="vm-status-text" style="color:rgba(255,255,255,0.4);font-size:12px;"></span>
     </div>
     <!-- Caption input -->
-    <input id="vm-caption-input" type="text" placeholder="Add a caption… (optional)" style="width:100%;padding:14px 16px;border-radius:14px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.07);color:#fff;font-size:14px;outline:none;box-sizing:border-box;margin-bottom:16px;-webkit-user-select:text;user-select:text;" onfocus="this.style.borderColor='#007AFF'" onblur="this.style.borderColor='rgba(255,255,255,0.12)'">
+    <input id="vm-caption-input" type="text" placeholder="Add a captionâ€¦ (optional)" style="width:100%;padding:14px 16px;border-radius:14px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.07);color:#fff;font-size:14px;outline:none;box-sizing:border-box;margin-bottom:16px;-webkit-user-select:text;user-select:text;" onfocus="this.style.borderColor='#007AFF'" onblur="this.style.borderColor='rgba(255,255,255,0.12)'">
     <div style="display:flex;gap:10px;align-items:center;">
       <button onclick="closeCallVoiceMsg()" style="flex:1;padding:15px;border-radius:14px;background:rgba(255,255,255,0.08);border:0.5px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);font-size:15px;font-weight:600;cursor:pointer;">Cancel</button>
       <button id="vm-record-btn" onmousedown="startVmRecording()" ontouchstart="startVmRecording()" onmouseup="stopVmRecording()" ontouchend="stopVmRecording()" style="flex:2;padding:15px;border-radius:14px;background:#007AFF;border:none;color:#fff;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all 0.15s;"><i class="fa-solid fa-microphone"></i> Hold to Record</button>
@@ -1252,7 +1397,7 @@ function authenticateUser() {
         <i class="fa-solid fa-phone" style="color:#34C759;font-size:14px;flex-shrink:0;"></i>
         <div style="min-width:0;display:flex;align-items:center;gap:6px;">
           <span id="call-mini-name" style="color:#34C759;font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
-          <span style="color:#34C759;font-size:16px;font-weight:700;flex-shrink:0;">·</span>
+          <span style="color:#34C759;font-size:16px;font-weight:700;flex-shrink:0;">Â·</span>
           <span id="call-mini-status" style="color:#34C759;font-size:16px;font-weight:700;flex-shrink:0;">Ringing</span>
         </div>
       </div>
@@ -1304,7 +1449,7 @@ function authenticateUser() {
               oninput="filterChatList(this.value)"
               style="border:none; background:transparent; outline:none; flex:1; min-width:0; font-weight:600; user-select:text; -webkit-user-select:text; width:0;">
     </div>
-</div><!-- ✅ FIXED: #msg-overlay closes HERE -->
+</div><!-- âœ… FIXED: #msg-overlay closes HERE -->
 
 <div id="chat-interface" class="white-overlay" style="z-index:5002;display:none;">
 <div class="header-container" style="display:flex;align-items:center;gap:10px;padding:env(safe-area-inset-top,0px) 12px 0;min-height:60px;flex-shrink:0;border-bottom:0.5px solid var(--border-color,rgba(0,0,0,0.08));background:var(--bg-primary,#fff);position:sticky;top:0;z-index:10;">
@@ -1335,8 +1480,8 @@ function authenticateUser() {
         <div id="chat-body" style="padding:20px;"></div>
 
         <div class="emoji-picker" id="emoji-picker">
-    <div onclick="insertEmoji('😀')">😀</div><div onclick="insertEmoji('😂')">😂</div><div onclick="insertEmoji('😍')">😍</div><div onclick="insertEmoji('🔥')">🔥</div><div onclick="insertEmoji('🙏')">🙏</div>
-    <div onclick="insertEmoji('💀')">💀</div><div onclick="insertEmoji('😭')">😭</div><div onclick="insertEmoji('👀')">👀</div><div onclick="insertEmoji('🙌')">🙌</div><div onclick="insertEmoji('💯')">💯</div><div onclick="insertEmoji('❤️')">❤️</div><div onclick="insertEmoji('🎉')">🎉</div>
+    <div onclick="insertEmoji('ðŸ˜€')">ðŸ˜€</div><div onclick="insertEmoji('ðŸ˜‚')">ðŸ˜‚</div><div onclick="insertEmoji('ðŸ˜')">ðŸ˜</div><div onclick="insertEmoji('ðŸ”¥')">ðŸ”¥</div><div onclick="insertEmoji('ðŸ™')">ðŸ™</div>
+    <div onclick="insertEmoji('ðŸ’€')">ðŸ’€</div><div onclick="insertEmoji('ðŸ˜­')">ðŸ˜­</div><div onclick="insertEmoji('ðŸ‘€')">ðŸ‘€</div><div onclick="insertEmoji('ðŸ™Œ')">ðŸ™Œ</div><div onclick="insertEmoji('ðŸ’¯')">ðŸ’¯</div><div onclick="insertEmoji('â¤ï¸')">â¤ï¸</div><div onclick="insertEmoji('ðŸŽ‰')">ðŸŽ‰</div>
 </div>
            <div class="attach-menu" id="attach-menu">
     <div class="attach-item" onclick="openMedia()"><i class="fa-regular fa-image"></i> Photo</div>
@@ -1465,7 +1610,7 @@ function authenticateUser() {
   </div>
   <div style="display:flex;align-items:center;gap:10px;background:var(--card-bg,#fff);border-radius:25px;padding:10px 16px;border:0.5px solid var(--border-color,#e0e0e0);box-shadow:0 2px 8px rgba(0,0,0,0.06);width:100%;box-sizing:border-box;">
     <i class="fa-solid fa-magnifying-glass" style="color:#aaa;font-size:14px;flex-shrink:0;"></i>
-    <input type="text" placeholder="Search settings…" id="settingsSearchInput" oninput="filterSettings(this.value)"
+    <input type="text" placeholder="Search settingsâ€¦" id="settingsSearchInput" oninput="filterSettings(this.value)"
       style="flex:1;border:none;background:transparent;outline:none;font-size:15px;color:var(--text-primary,#000);caret-color:#007AFF;-webkit-user-select:text;user-select:text;">
   </div>
 </div>
@@ -1977,7 +2122,7 @@ function authenticateUser() {
       </div>
     </div>
 
-    <!-- App & Media — moved to settings, kept here as stub -->
+    <!-- App & Media â€” moved to settings, kept here as stub -->
     <div class="settings-section-title">APP AND MEDIA</div>
     <div class="settings-card">
       <div class="settings-row" onclick="openDevicePermissions()">
@@ -2404,7 +2549,7 @@ function authenticateUser() {
   </ul>
 
   <div style="margin-top:30px; padding:20px; background:var(--bg-secondary,#f5f5f5); border-radius:16px; text-align:center;">
-    <p style="font-size:12px; color:var(--text-tertiary,#999);">© 2026 TrustFirst. All rights reserved.</p>
+    <p style="font-size:12px; color:var(--text-tertiary,#999);">Â© 2026 TrustFirst. All rights reserved.</p>
   </div>
 </div>
 </div>
@@ -2489,13 +2634,13 @@ function authenticateUser() {
     {% endcomment %}
     <div class="story-content" id="story-content" onclick="storyTapNav(event)"></div>
 
-    <!-- Reply bar — other people's stories -->
+    <!-- Reply bar â€” other people's stories -->
     <div id="story-reply-bar-viewer" class="story-reply-bar" style="gap:10px;display:none;">
         <input type="text" placeholder="Send a message..." onclick="openStoryInteractionOverlay()" readonly>
         <i class="fa-solid fa-paper-plane" style="color:white;font-size:22px;cursor:pointer;" onclick="openStoryInteractionOverlay()"></i>
     </div>
 
-    <!-- Owner bar — your own stories -->
+    <!-- Owner bar â€” your own stories -->
     <div id="story-owner-bar" style="display:none;position:absolute;bottom:0;left:0;right:0;padding:16px 24px 38px;align-items:center;justify-content:space-between;z-index:200;">
         <div id="storyViewsBtn" onclick="openStoryViewers()" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:rgba(0,0,0,0.35);border-radius:50px;padding:8px 16px;border:0.5px solid rgba(255,255,255,0.15);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);">
             <i class="fa-regular fa-eye" style="color:white;font-size:16px;"></i>
@@ -2511,7 +2656,7 @@ function authenticateUser() {
     </div>
 </div>
 
-    <!-- ── SAVED LIBRARY ── -->
+    <!-- â”€â”€ SAVED LIBRARY â”€â”€ -->
 <div id="saved-overlay" class="white-overlay" style="z-index:6400;display:none;flex-direction:column;background:var(--bg-primary,#fff);">
     <div style="position:sticky;top:0;z-index:10;background:var(--bg-primary,#fff);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);padding:54px 20px 12px;border-bottom:1px solid var(--border-color,#f0f0f0);flex-shrink:0;">
         <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -2541,7 +2686,7 @@ function authenticateUser() {
     </div>
 </div>
 
-    <!-- ── ARCHIVE / PRIVATE VAULT ── -->
+    <!-- â”€â”€ ARCHIVE / PRIVATE VAULT â”€â”€ -->
 <div id="archive-overlay" class="white-overlay" style="z-index:6400;display:none;flex-direction:column;background:var(--bg-primary,#fff);">
     <div style="position:sticky;top:0;z-index:10;background:var(--bg-primary,#fff);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);padding:54px 20px 14px;border-bottom:1px solid var(--border-color,#f0f0f0);flex-shrink:0;position:relative;">
         <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -2563,7 +2708,7 @@ function authenticateUser() {
         <div id="archive-empty" style="display:none;text-align:center;padding:70px 20px;color:#888;">
             <i class="fa-solid fa-box-archive" style="font-size:44px;color:#ccc;display:block;margin-bottom:16px;"></i>
             <h3 style="color:var(--text-primary,#000);margin-bottom:8px;font-size:18px;">Private Vault is empty</h3>
-            <p style="font-size:14px;line-height:1.5;">Enable archiving in Settings → Privacy to auto-save your stories and lives.</p>
+            <p style="font-size:14px;line-height:1.5;">Enable archiving in Settings â†’ Privacy to auto-save your stories and lives.</p>
         </div>
     </div>
 </div>
@@ -2748,19 +2893,19 @@ function authenticateUser() {
     <div id="viewer-gift-sheet" style="display:none;position:absolute;bottom:0;left:0;right:0;z-index:20;background:rgba(18,18,18,0.97);backdrop-filter:blur(30px);border-radius:26px 26px 0 0;padding:24px 20px max(40px,env(safe-area-inset-bottom,40px));">
         <div style="width:40px;height:4px;background:rgba(255,255,255,0.2);border-radius:4px;margin:0 auto 20px;"></div>
         <b style="color:white;font-size:17px;display:block;margin-bottom:4px;">Send a Gift</b>
-        <p style="color:rgba(255,255,255,0.4);font-size:13px;margin-bottom:20px;">Your coins balance: <span id="gift-coins-display" style="color:#007AFF;font-weight:700;">0</span> 🪙</p>
+        <p style="color:rgba(255,255,255,0.4);font-size:13px;margin-bottom:20px;">Your coins balance: <span id="gift-coins-display" style="color:#007AFF;font-weight:700;">0</span> ðŸª™</p>
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;">
-            <div onclick="sendViewerGift('🌹','Rose',5)" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,255,255,0.1);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
-                <div style="font-size:28px;">🌹</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Rose</div><div style="color:#007AFF;font-size:11px;">5 🪙</div>
+            <div onclick="sendViewerGift('ðŸŒ¹','Rose',5)" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,255,255,0.1);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
+                <div style="font-size:28px;">ðŸŒ¹</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Rose</div><div style="color:#007AFF;font-size:11px;">5 ðŸª™</div>
             </div>
-            <div onclick="sendViewerGift('💎','Diamond',50)" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,255,255,0.1);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
-                <div style="font-size:28px;">💎</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Diamond</div><div style="color:#007AFF;font-size:11px;">50 🪙</div>
+            <div onclick="sendViewerGift('ðŸ’Ž','Diamond',50)" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,255,255,0.1);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
+                <div style="font-size:28px;">ðŸ’Ž</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Diamond</div><div style="color:#007AFF;font-size:11px;">50 ðŸª™</div>
             </div>
-            <div onclick="sendViewerGift('🚀','Rocket',100)" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,255,255,0.1);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
-                <div style="font-size:28px;">🚀</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Rocket</div><div style="color:#007AFF;font-size:11px;">100 🪙</div>
+            <div onclick="sendViewerGift('ðŸš€','Rocket',100)" style="background:rgba(255,255,255,0.07);border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,255,255,0.1);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
+                <div style="font-size:28px;">ðŸš€</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Rocket</div><div style="color:#007AFF;font-size:11px;">100 ðŸª™</div>
             </div>
-            <div onclick="sendViewerGift('👑','Crown',500)" style="background:linear-gradient(135deg,rgba(255,215,0,0.15),rgba(255,165,0,0.1));border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,215,0,0.3);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
-                <div style="font-size:28px;">👑</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Crown</div><div style="color:#FFD700;font-size:11px;">500 🪙</div>
+            <div onclick="sendViewerGift('ðŸ‘‘','Crown',500)" style="background:linear-gradient(135deg,rgba(255,215,0,0.15),rgba(255,165,0,0.1));border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;border:0.5px solid rgba(255,215,0,0.3);" onmousedown="this.style.transform='scale(0.93)'" onmouseup="this.style.transform=''">
+                <div style="font-size:28px;">ðŸ‘‘</div><div style="color:white;font-size:11px;font-weight:700;margin-top:4px;">Crown</div><div style="color:#FFD700;font-size:11px;">500 ðŸª™</div>
             </div>
         </div>
         <button onclick="document.getElementById('viewer-gift-sheet').style.display='none'" style="width:100%;padding:14px;border-radius:16px;background:rgba(255,255,255,0.08);color:white;border:0.5px solid rgba(255,255,255,0.1);font-size:15px;font-weight:600;cursor:pointer;">Cancel</button>
@@ -2997,7 +3142,7 @@ function authenticateUser() {
     <!-- Post to group button -->
     <div style="padding:12px 20px; border-bottom:1px solid var(--border-color,#f0f0f0);">
         <button onclick="postToGroup(currentGroupId)" style="width:100%; padding:12px; border-radius:14px; border:1.5px solid #007AFF; background:transparent; color:#007AFF; font-size:14px; font-weight:700; cursor:pointer;">
-            ✏️ Write something in this group...
+            âœï¸ Write something in this group...
         </button>
     </div>
 
@@ -3035,7 +3180,7 @@ function authenticateUser() {
         <span style="font-weight:700;font-size:17px;color:var(--text-primary,#000);">Contact Info</span>
     </div>
 
-    <!-- Hero pill — avatar + name + status -->
+    <!-- Hero pill â€” avatar + name + status -->
     <div style="margin:14px;padding:28px 20px 20px;background:var(--cp-card-bg,rgba(255,255,255,0.62));backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid var(--cp-card-border,rgba(0,0,0,0.05));border-radius:28px;box-shadow:var(--cp-card-shadow,0 8px 28px rgba(0,0,0,0.08));text-align:center;">
         <div style="position:relative;display:inline-block;margin-bottom:14px;">
             <div id="cp-avatar-ring" onclick="openCPStoryOrProfile()" style="width:88px;height:88px;border-radius:50%;padding:3px;background:linear-gradient(135deg,#007AFF,#00C2FF);margin:0 auto;box-shadow:0 6px 24px rgba(0,122,255,0.3);cursor:pointer;display:none;">
@@ -3244,7 +3389,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── TIME MANAGEMENT ── -->
+<!-- â”€â”€ TIME MANAGEMENT â”€â”€ -->
 <div id="timeManagementOverlay" class="settings-sub-overlay" style="overflow-y:auto;-webkit-overflow-scrolling:touch;">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3256,7 +3401,7 @@ function authenticateUser() {
     <!-- Daily average hero -->
     <div style="background:var(--card-bg,#fff);border-radius:22px;padding:24px;margin-bottom:20px;border:1px solid var(--border-color,#eee);text-align:center;">
       <p style="font-size:13px;color:#888;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Daily Average</p>
-      <div id="tmDailyAvgLabel" style="font-size:52px;font-weight:900;color:var(--text-primary,#000);letter-spacing:-2px;">—</div>
+      <div id="tmDailyAvgLabel" style="font-size:52px;font-weight:900;color:var(--text-primary,#000);letter-spacing:-2px;">â€”</div>
       <p style="font-size:13px;color:#888;margin-top:8px;" id="tmWeeklyTotalLabel">Loading your usage...</p>
     </div>
 
@@ -3303,7 +3448,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── SLEEP MODE ── -->
+<!-- â”€â”€ SLEEP MODE â”€â”€ -->
 <div id="sleepModeOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3334,7 +3479,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── TRUST CIRCLE ── -->
+<!-- â”€â”€ TRUST CIRCLE â”€â”€ -->
 <div id="trustCircleOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3354,7 +3499,7 @@ function authenticateUser() {
       <input type="text" placeholder="Search people" style="flex:1;border:none;background:transparent;outline:none;font-size:15px;color:var(--text-primary,#000);">
     </div>
     <!-- Members -->
-    <div id="trustCircleMembersList"><p style="text-align:center;color:#aaa;padding:24px 0;font-size:14px;">Loading your TrustCircle…</p></div>
+    <div id="trustCircleMembersList"><p style="text-align:center;color:#aaa;padding:24px 0;font-size:14px;">Loading your TrustCircleâ€¦</p></div>
     <!-- Suggested -->
     <p style="font-size:12px;font-weight:800;color:#888;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Suggested</p>
     <div id="trustCircleSuggestedList" class="settings-card"><p style="text-align:center;color:#aaa;padding:16px 0;font-size:14px;">No suggestions yet.</p></div>
@@ -3365,7 +3510,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── BLOCKED ACCOUNTS ── -->
+<!-- â”€â”€ BLOCKED ACCOUNTS â”€â”€ -->
 <div id="blockedAccountsOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -3377,12 +3522,12 @@ function authenticateUser() {
     </div>
   </div>
   <div class="sub-scroll">
-    <div id="blockedAccountsList"><p style="text-align:center;color:#aaa;padding:24px 0;font-size:14px;">Loading blocked accounts…</p></div>
+    <div id="blockedAccountsList"><p style="text-align:center;color:#aaa;padding:24px 0;font-size:14px;">Loading blocked accountsâ€¦</p></div>
     <p style="font-size:13px;color:#888;text-align:center;padding:20px;">People you block won't be able to find your profile or contact you.</p>
   </div>
 </div>
 
-<!-- ── BLOCK SEARCH ── -->
+<!-- â”€â”€ BLOCK SEARCH â”€â”€ -->
 <div id="blockSearchOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3398,7 +3543,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── MESSAGES & STORY REPLIES ── -->
+<!-- â”€â”€ MESSAGES & STORY REPLIES â”€â”€ -->
 <div id="msgStoryRepliesOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3457,7 +3602,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── COMMENTS SETTINGS ── -->
+<!-- â”€â”€ COMMENTS SETTINGS â”€â”€ -->
 <div id="commentsSettingsOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3470,7 +3615,7 @@ function authenticateUser() {
     <div class="settings-card">
       <div class="settings-row" onclick="showToast('Comment block list')">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-ban" style="color:#FF3B30;"></i>
-          <div><b style="font-size:15px;">Block Comments From</b><p style="font-size:12px;color:#888;margin:2px 0 0;">0 people blocked · New comments only visible to them</p></div>
+          <div><b style="font-size:15px;">Block Comments From</b><p style="font-size:12px;color:#888;margin:2px 0 0;">0 people blocked Â· New comments only visible to them</p></div>
         </div>
         <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
       </div>
@@ -3504,7 +3649,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── RESTRICTED USERS INTRO ── -->
+<!-- â”€â”€ RESTRICTED USERS INTRO â”€â”€ -->
 <div id="restrictedIntroOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3542,7 +3687,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── RESTRICTED ACCOUNTS LIST ── -->
+<!-- â”€â”€ RESTRICTED ACCOUNTS LIST â”€â”€ -->
 <div id="restrictedListOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3556,11 +3701,11 @@ function authenticateUser() {
       <i class="fa-solid fa-magnifying-glass" style="color:#aaa;"></i>
       <input type="text" placeholder="Search restricted accounts" style="flex:1;border:none;background:transparent;outline:none;font-size:15px;color:var(--text-primary,#000);">
     </div>
-    <div id="restrictedAccountsList" class="settings-card"><p style="text-align:center;color:#aaa;padding:16px 0;font-size:14px;">Loading restricted accounts…</p></div>
+    <div id="restrictedAccountsList" class="settings-card"><p style="text-align:center;color:#aaa;padding:16px 0;font-size:14px;">Loading restricted accountsâ€¦</p></div>
   </div>
 </div>
 
-<!-- ── INTERACTION CONTROL ── -->
+<!-- â”€â”€ INTERACTION CONTROL â”€â”€ -->
 <div id="interactionControlOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3603,7 +3748,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── FILTERED WORDS ── -->
+<!-- â”€â”€ FILTERED WORDS â”€â”€ -->
 <div id="filteredWordsOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3658,7 +3803,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── CUSTOM WORDS ── -->
+<!-- â”€â”€ CUSTOM WORDS â”€â”€ -->
 <div id="customWordsOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3668,7 +3813,7 @@ function authenticateUser() {
   </div>
   <div style="padding:16px 20px;flex-shrink:0;border-bottom:1px solid var(--border-color,#eee);">
     <div style="display:flex;gap:8px;">
-      <input type="text" id="customWordInput" placeholder="Add a word, phrase, or emoji…" style="flex:1;padding:13px 16px;border-radius:14px;border:1.5px solid var(--border-color,#eee);background:var(--card-bg,#fff);font-size:15px;color:var(--text-primary,#000);outline:none;-webkit-user-select:text;user-select:text;" onfocus="this.style.borderColor='#007AFF'" onblur="this.style.borderColor='var(--border-color,#eee)'">
+      <input type="text" id="customWordInput" placeholder="Add a word, phrase, or emojiâ€¦" style="flex:1;padding:13px 16px;border-radius:14px;border:1.5px solid var(--border-color,#eee);background:var(--card-bg,#fff);font-size:15px;color:var(--text-primary,#000);outline:none;-webkit-user-select:text;user-select:text;" onfocus="this.style.borderColor='#007AFF'" onblur="this.style.borderColor='var(--border-color,#eee)'">
       <button onclick="addCustomFilterWord()" style="padding:13px 18px;border-radius:14px;border:none;background:#007AFF;color:white;font-size:15px;font-weight:700;cursor:pointer;white-space:nowrap;">Add</button>
     </div>
     <p style="font-size:11px;color:#888;margin-top:8px;">Comments and messages containing these terms will be automatically hidden.</p>
@@ -3678,7 +3823,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── PREFERRED CONTENT ── -->
+<!-- â”€â”€ PREFERRED CONTENT â”€â”€ -->
 <div id="preferredContentOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3739,7 +3884,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── MUTED ACCOUNTS ── -->
+<!-- â”€â”€ MUTED ACCOUNTS â”€â”€ -->
 <div id="mutedAccountsOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3755,7 +3900,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── DEVICE PERMISSIONS ── -->
+<!-- â”€â”€ DEVICE PERMISSIONS â”€â”€ -->
 <div id="devicePermissionsOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3812,7 +3957,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── ARCHIVING & DOWNLOADING ── -->
+<!-- â”€â”€ ARCHIVING & DOWNLOADING â”€â”€ -->
 <div id="archivingOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3859,7 +4004,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── ACCESSIBILITY ── -->
+<!-- â”€â”€ ACCESSIBILITY â”€â”€ -->
 <div id="accessibilityOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3906,7 +4051,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── MEDIA QUALITY ── -->
+<!-- â”€â”€ MEDIA QUALITY â”€â”€ -->
 <div id="mediaQualityOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3938,7 +4083,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── LIKE & SHARE COUNTS ── -->
+<!-- â”€â”€ LIKE & SHARE COUNTS â”€â”€ -->
 <div id="likeShareCountsOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -3959,7 +4104,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── HELP CENTER ── -->
+<!-- â”€â”€ HELP CENTER â”€â”€ -->
 <div id="helpCenterOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -4011,7 +4156,7 @@ function authenticateUser() {
   </div>
 </div>
 
-    <!-- ── REPORT A PROBLEM ── -->
+    <!-- â”€â”€ REPORT A PROBLEM â”€â”€ -->
 <div id="reportProblemOverlay" class="settings-sub-overlay" style="display:none;">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -4088,7 +4233,7 @@ function authenticateUser() {
   </div>
 </div>
 
-<!-- ── SUPPORT REQUESTS (Reports & Violations) ── -->
+<!-- â”€â”€ SUPPORT REQUESTS (Reports & Violations) â”€â”€ -->
 <div id="reportViolationsOverlay" class="settings-sub-overlay" style="display:none;">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -4157,7 +4302,7 @@ function authenticateUser() {
 
   </div>
 </div>
-    <!-- ── WEBSITE PERMISSIONS ── -->
+    <!-- â”€â”€ WEBSITE PERMISSIONS â”€â”€ -->
 <div id="websitePermissionsOverlay" class="settings-sub-overlay" style="display:none;">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -4189,7 +4334,7 @@ function authenticateUser() {
     </div>
   </div>
 </div>
-<!-- ── ACCOUNT STATUS ── -->
+<!-- â”€â”€ ACCOUNT STATUS â”€â”€ -->
 <div id="accountStatusOverlay" class="settings-sub-overlay">
   <div style="position:sticky;top:0;z-index:10;background:rgba(242,242,247,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border-color,#e0e0e0);padding:14px 20px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:14px;">
@@ -4271,11 +4416,14 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=282"></script>
+<script src="{% static 'core/js/feed.js' %}?v=283"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
 <script src="{% static 'core/js/admin.js' %}?v=80"></script>
+    <!-- Loaded after feed.js because it calls navHome and navGoTo from it.
+         Everything inside is gated on the window being at least 1000px. -->
+    <script src="{% static 'core/js/desktop.js' %}?v=5"></script>
 <!-- Native shell bridge. No-ops in the browser, so the PWA is unaffected.
      Must load after feed.js because it wraps the media pickers defined there. -->
 <script src="{% static 'core/js/native.js' %}?v=6"></script>
