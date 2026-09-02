@@ -66,8 +66,44 @@ function tfDeskOpenSettings() {
     setTimeout(tfDeskSettingsPrune, 2500);
 }
 
+// Everything that can cover the column. Most share .white-overlay; the rest
+// are listed because they do not, or because they are built at runtime and are
+// not in the page until something opens them.
+var TF_DESK_LOOSE_OVERLAYS = [
+    'reel-overlay', 'live-overlay', 'user-profile-overlay',
+    'trustAnalyticsOverlay', 'liveSettingsPage', 'soundHubPage',
+    'adminDashOverlay',
+    // Built fresh each time it is opened rather than shown and hidden, so it
+    // is not a .white-overlay and nothing else was closing it. Live left its
+    // page sitting in the column after moving to another tab.
+    'liveStreamFeedPage',
+    // Explore's own page. It deliberately does not reuse #discovery-page,
+    // because the search results element hides and rebuilds itself as you
+    // type and would take Explore with it.
+    'tfExplorePage',
+];
+
+// Close whatever is open before opening the next thing.
+//
+// navHome does this for the home button and nothing did it for the rest, which
+// is why Live, Channels and Groups stacked on top of each other.
+function tfDeskCloseAll() {
+    document.querySelectorAll('.white-overlay').forEach(function (el) {
+        el.style.display = 'none';
+    });
+    document.querySelectorAll('.settings-sub-overlay').forEach(function (el) {
+        el.style.display = 'none';
+    });
+    TF_DESK_LOOSE_OVERLAYS.forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+    });
+}
+
 function tfDeskGo(key) {
     tfDeskSetActive(key);
+    // home goes through navHome, which closes things itself.
+    if (key !== 'home') tfDeskCloseAll();
     try {
         if (key === 'home') {
             if (typeof navHome === 'function') navHome();
@@ -125,6 +161,34 @@ function tfDeskFillMe() {
     if (handle) handle.textContent = u.username ? '@' + u.username : '';
 }
 
+// Ids that must not appear in a suggestion list: you, and everyone you have
+// already followed. Kept in one place so the rail and Explore cannot disagree.
+async function tfDeskExcludeIds() {
+    var me = tfMe();
+    var out = [];
+    if (!me || !me.id) return out;
+    out.push(me.id);
+    try {
+        var f = await sb.from('follows')
+            .select('following_id')
+            .eq('follower_id', me.id)
+            .limit(500);
+        (f.data || []).forEach(function (r) {
+            if (r.following_id) out.push(r.following_id);
+        });
+    } catch (e) { /* suggesting a few extra people beats suggesting none */ }
+    return out;
+}
+
+// Ask for more than is shown, because the exclusions are applied after the
+// query as well and a page of four could otherwise come back with two.
+function tfDeskFilterPeople(rows, exclude, limit) {
+    var blocked = {};
+    exclude.forEach(function (id) { blocked[id] = true; });
+    return (rows || []).filter(function (u) { return u && u.id && !blocked[u.id]; })
+                       .slice(0, limit);
+}
+
 // ------------------------------------------------------------- right rail --
 
 // Real rows or an honest empty state. Nothing invented: an empty app should
@@ -138,14 +202,17 @@ async function tfDeskLoadRail() {
     var who = document.getElementById('tfRailPeople');
     if (who) {
         try {
+            var exclude = await tfDeskExcludeIds();
             var q = sb.from('users')
                 .select('id,username,full_name,avatar_url,verified')
                 .neq('is_banned', true)
-                .limit(4);
-            var me = tfMe();
-            if (me && me.id) q = q.neq('id', me.id);
+                .limit(20);
+            if (exclude.length) q = q.not('id', 'in', '(' + exclude.join(',') + ')');
             var r = await q;
-            var rows = (r.data || []);
+            // Filtered again here: a suggestion list that shows you your own
+            // account is the one result it must never produce, so it does not
+            // depend on the query alone.
+            var rows = tfDeskFilterPeople(r.data, exclude, 4);
             who.innerHTML = rows.length ? rows.map(function (u) {
                 var av = u.avatar_url || (typeof tfAvatarFor === 'function'
                     ? tfAvatarFor(u.username || 'user', '007AFF') : '');
@@ -224,9 +291,11 @@ async function tfDeskLoadRail() {
 }
 
 function tfDeskOpenProfile(id) {
-    if (typeof openUserProfile === 'function') { openUserProfile(id); return; }
-    if (typeof openProfileById === 'function') { openProfileById(id); return; }
-    tfDeskGo('account');
+    tfDeskCloseAll();
+    // viewUserProfile is the one that exists. It already sends you to your own
+    // page when the id is yours, so there is nothing to special-case here.
+    if (typeof viewUserProfile === 'function') { viewUserProfile(id); return; }
+    console.warn('[desktop] cannot open profile, viewUserProfile missing');
 }
 
 // Search goes through handleNavSearch and nothing else.
@@ -250,6 +319,13 @@ function tfDeskSearchInput(value) {
     } catch (e) {
         console.warn('[desktop] search', e && e.message);
     }
+    // handleNavSearch hides the results page below two characters. If Explore
+    // is what is underneath, it should be visible again at that point rather
+    // than leaving an empty column.
+    var ex = document.getElementById('tfExplorePage');
+    if (ex && ex.style.display === 'none' && (!value || value.length < 2)) {
+        ex.style.display = 'flex';
+    }
 }
 
 // Enter just commits what is already on screen. There is no separate results
@@ -270,13 +346,22 @@ function tfDeskSearchGo() {
 // moment anything is typed, handleNavSearch takes the page over and this is
 // replaced by real results.
 async function tfDeskExplore() {
-    var disc = document.getElementById('discovery-page');
-    if (!disc) return;
+    var app = document.getElementById('app');
+    if (!app) return;
 
-    disc.style.cssText = 'display:flex;flex-direction:column;position:absolute;' +
-        'top:0;left:0;width:100%;height:100%;z-index:3500;' +
+    var page = document.getElementById('tfExplorePage');
+    if (!page) {
+        page = document.createElement('div');
+        page.id = 'tfExplorePage';
+        app.appendChild(page);
+    }
+    // Below #discovery-page, which is z-index 3500, so search results cover
+    // this rather than fighting it.
+    page.style.cssText = 'display:flex;flex-direction:column;position:absolute;' +
+        'top:0;left:0;width:100%;height:100%;z-index:3400;' +
         'background:var(--bg-primary,#fff);overflow:hidden;';
-    disc.innerHTML =
+
+    page.innerHTML =
         '<div style="display:flex;align-items:center;gap:10px;padding:18px 16px 12px;flex-shrink:0;">' +
             '<b style="font-size:20px;color:var(--text-primary,#000);flex:1;">Explore</b>' +
         '</div>' +
@@ -325,14 +410,14 @@ async function tfDeskExplore() {
     }
 
     try {
+        var exclude = await tfDeskExcludeIds();
         var q = sb.from('users')
             .select('id,username,full_name,avatar_url,verified')
             .neq('is_banned', true)
-            .limit(8);
-        var me = tfMe();
-        if (me && me.id) q = q.neq('id', me.id);
+            .limit(30);
+        if (exclude.length) q = q.not('id', 'in', '(' + exclude.join(',') + ')');
         var r = await q;
-        var people = (r.data || []);
+        var people = tfDeskFilterPeople(r.data, exclude, 8);
         html += '<h3 style="font-size:17px;font-weight:800;margin:20px 0 8px;color:var(--text-primary,#000);">People</h3>';
         html += people.length ? people.map(function (u) {
             var av = u.avatar_url || (typeof tfAvatarFor === 'function'
@@ -343,7 +428,7 @@ async function tfDeskExplore() {
                     '<div class="tf-rail-name">' + escapeHtml(u.full_name || u.username || 'User') + '</div>' +
                     '<div class="tf-rail-sub">@' + escapeHtml(u.username || 'user') + '</div>' +
                 '</div></div>';
-        }).join('') : '<div class="tf-rail-empty">Nobody here yet.</div>';
+        }).join('') : '<div class="tf-rail-empty">Nobody new to suggest.</div>';
     } catch (e) {
         html += '<div class="tf-rail-empty">Could not load people.</div>';
     }
@@ -388,8 +473,14 @@ function tfDeskCreate(what) {
 function tfDeskSyncAuth() {
     var app = document.getElementById('app');
     var out = !app || app.classList.contains('not-authenticated');
+    var wasOut = document.documentElement.classList.contains('tf-logged-out');
     document.documentElement.classList.toggle('tf-logged-out', out);
-    if (!out) tfDeskFillMe();
+    if (!out) {
+        tfDeskFillMe();
+        // Signing in is the moment the suggestions become answerable: before
+        // it there is no "you" to leave out and nobody known to be followed.
+        if (wasOut) tfDeskLoadRail();
+    }
 }
 
 function tfDeskInit() {

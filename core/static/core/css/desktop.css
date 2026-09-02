@@ -466,6 +466,23 @@
         right: auto !important;
     }
 
+    /* Pages built at runtime that pin themselves to the whole viewport.
+       Opening somebody's profile covered the entire screen, sidebar and all,
+       because it sets position:fixed with left and right at zero in an inline
+       style. Inline styles need !important to argue with, and the width has to
+       be set explicitly because `right` is what it used to stretch. */
+    #user-profile-overlay {
+        left: calc(50% - var(--tf-col-half)) !important;
+        right: auto !important;
+        width: calc(var(--tf-col-half) * 2) !important;
+        max-width: none !important;
+    }
+
+    /* Centres itself with a transform already, so it only needs the width. */
+    #soundHubPage {
+        max-width: calc(var(--tf-col-half) * 2) !important;
+    }
+
     /* The repost sheet is the one in that list that centres itself with
        translateX(-50%), and it needs that transform kept because the same
        transform carries the slide-up. Subtracting half the width in `left` as
