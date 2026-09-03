@@ -53,6 +53,13 @@ urlpatterns = [
     path('api/eddie/post/', api_views.eddie_post, name='api_eddie_post'),
     path('api/auth/username-login/', api_views.username_login, name='api_username_login'),
 
+    # Approving a sign-in from the phone. The laptop shows a number, the
+    # phone offers three, and only the matching one lets a session through.
+    path('api/auth/device-request/', api_views.device_login_request, name='api_device_request'),
+    path('api/auth/device-status/', api_views.device_login_status, name='api_device_status'),
+    path('api/auth/device-pending/', api_views.device_login_pending, name='api_device_pending'),
+    path('api/auth/device-decide/', api_views.device_login_decide, name='api_device_decide'),
+
     # Wallet top-ups. The checkout is opened here, the money is added only by
     # the webhook, and the status endpoint is how the app finds out whether a
     # payment landed after the person is sent back from Yoco.

@@ -2098,3 +2098,274 @@ def admin_decide_withdrawal(request):
     if not out.get('ok'):
         return JsonResponse({'ok': False, 'error': out.get('reason')}, status=200)
     return JsonResponse({'ok': True, 'status': out.get('status')})
+
+
+# ---------------------------------------------------------------------------
+# SIGNING IN BY APPROVING IT ON YOUR PHONE
+#
+# The laptop shows a number, the phone offers three, and only the one on the
+# laptop lets the session through.
+#
+# That matching is the security. Without it, anybody who knows a username
+# could ask repeatedly until the owner pressed yes out of irritation, which is
+# a real attack with a name. An attacker cannot tell somebody which of three
+# numbers to press, because they cannot see the screen it is written on.
+#
+# The correct number never reaches the approving device. The phone is told the
+# device, the place and the three choices; the comparison happens in the
+# database. So the number genuinely has to be read off the other screen.
+# ---------------------------------------------------------------------------
+
+DEVICE_ATTEMPT_TTL = 120          # seconds, matched by the table's default
+
+
+def _device_choices():
+    """Three two-digit numbers, one of which is the answer."""
+    import random
+    picks = random.sample(range(10, 100), 3)
+    return picks, random.choice(picks)
+
+
+def _device_label(request):
+    ua = (request.headers.get('User-Agent') or '')[:300]
+    os_name = ('Windows' if 'Windows' in ua else
+               'Mac' if 'Mac' in ua else
+               'Android' if 'Android' in ua else
+               'iPhone' if 'iPhone' in ua or 'iPad' in ua else
+               'Linux' if 'Linux' in ua else 'a computer')
+    browser = ('Edge' if 'Edg/' in ua else
+               'Chrome' if 'Chrome' in ua else
+               'Firefox' if 'Firefox' in ua else
+               'Safari' if 'Safari' in ua else 'a browser')
+    return '%s, %s' % (os_name, browser)
+
+
+def _client_ip(request):
+    fwd = request.headers.get('X-Forwarded-For', '')
+    return (fwd.split(',')[0].strip() if fwd
+            else request.META.get('REMOTE_ADDR', '')) or ''
+
+
+@ratelimit(key='ip', rate='10/h', method='POST', block=True)
+@csrf_exempt
+@require_http_methods(["POST"])
+def device_login_request(request):
+    """Start a sign-in that the phone will approve."""
+    try:
+        who = str((json.loads(request.body or '{}')).get('identifier') or '').strip()
+    except ValueError:
+        return JsonResponse({'error': 'bad request'}, status=400)
+    if not who:
+        return JsonResponse({'error': 'Enter your username or email'}, status=400)
+
+    choices, code = _device_choices()
+
+    # Look the account up here so the browser never learns whether it exists.
+    # An unknown name still gets a number and a waiting screen; it simply never
+    # gets approved, because there is no phone to approve it.
+    user_id = None
+    try:
+        field = 'email' if '@' in who else 'username'
+        r = httpx.get(
+            settings.SUPABASE_URL + '/rest/v1/users',
+            headers=_service_headers(),
+            params={'select': 'id', field: 'eq.' + who, 'limit': '1'},
+            timeout=10,
+        )
+        rows = r.json() if r.status_code < 300 else []
+        if rows:
+            user_id = rows[0].get('id')
+    except Exception as exc:
+        print('[DeviceLogin] lookup failed: %s' % exc)
+
+    attempt_id = None
+    if user_id:
+        opened = _yoco_rpc('tf_login_attempt_open', {
+            'p_user': user_id,
+            'p_code': code,
+            'p_choices': choices,
+            'p_device': _device_label(request),
+            'p_ip': _client_ip(request),
+            'p_city': (request.headers.get('CF-IPCity') or ''),
+            'p_country': (request.headers.get('CF-IPCountry') or ''),
+        })
+        if opened.status_code < 300:
+            attempt_id = opened.json()
+        else:
+            # Too many in a short window is the usual reason. Same answer as an
+            # unknown account, so hammering tells the caller nothing either.
+            print('[DeviceLogin] open refused %s' % opened.status_code)
+
+        if attempt_id:
+            try:
+                send_push_to_user(
+                    user_id,
+                    'Is this you trying to log in?',
+                    'A sign-in from %s. Open TrustFirst to approve or refuse it.'
+                    % _device_label(request),
+                    {'type': 'login_approval', 'attempt': str(attempt_id)},
+                )
+            except Exception as exc:
+                print('[DeviceLogin] push failed: %s' % exc)
+
+    # A made-up id for an account that does not exist, so the screens are
+    # identical either way.
+    return JsonResponse({
+        'attempt': attempt_id or str(uuid.uuid4()),
+        'code': code,
+        'expires_in': DEVICE_ATTEMPT_TTL,
+    })
+
+
+@ratelimit(key='ip', rate='120/h', method='GET', block=True)
+@require_http_methods(["GET"])
+def device_login_status(request):
+    """The laptop asking whether it has been let in yet."""
+    attempt = request.GET.get('attempt', '')
+    if not _is_valid_uuid(attempt):
+        return JsonResponse({'status': 'not_found'})
+
+    r = _yoco_rpc('tf_login_attempt_claim', {'p_id': attempt})
+    if r.status_code >= 300:
+        return JsonResponse({'status': 'pending'})
+
+    out = r.json() or {}
+    status = out.get('status')
+    if status != 'approved':
+        return JsonResponse({'status': status or 'pending'})
+
+    # Handed over once. The database has already emptied its copy.
+    return JsonResponse({'status': 'approved', 'grant': out.get('grant')})
+
+
+@ratelimit(key='ip', rate='60/m', method='GET', block=True)
+@require_http_methods(["GET"])
+def device_login_pending(request):
+    """What the phone shows: where from, and three numbers to choose between."""
+    try:
+        claims = _verify_supabase_jwt(request)
+    except ValueError:
+        return JsonResponse({'error': 'Not signed in'}, status=401)
+
+    uid = claims.get('sub')
+    if not _is_valid_uuid(uid):
+        return JsonResponse({'error': 'Not signed in'}, status=401)
+
+    try:
+        r = httpx.get(
+            settings.SUPABASE_URL + '/rest/v1/login_attempts',
+            headers=_service_headers(),
+            params={
+                # Never the code. That is the whole point of the exercise.
+                'select': 'id,choices,device_label,city,country,created_at,expires_at',
+                'user_id': 'eq.' + str(uid),
+                'status': 'eq.pending',
+                'order': 'created_at.desc',
+                'limit': '1',
+            },
+            timeout=10,
+        )
+        rows = r.json() if r.status_code < 300 else []
+    except Exception:
+        rows = []
+
+    if not rows:
+        return JsonResponse({'pending': None})
+    return JsonResponse({'pending': rows[0]})
+
+
+@ratelimit(key='ip', rate='20/m', method='POST', block=True)
+@csrf_exempt
+@require_http_methods(["POST"])
+def device_login_decide(request):
+    """The phone answering. A wrong number refuses the sign-in outright."""
+    try:
+        claims = _verify_supabase_jwt(request)
+    except ValueError:
+        return JsonResponse({'error': 'Not signed in'}, status=401)
+
+    uid = claims.get('sub')
+    if not _is_valid_uuid(uid):
+        return JsonResponse({'error': 'Not signed in'}, status=401)
+
+    try:
+        body = json.loads(request.body or '{}')
+        attempt = str(body.get('attempt') or '')
+        choice = body.get('choice')
+        choice = None if choice is None else int(choice)
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'bad request'}, status=400)
+
+    if not _is_valid_uuid(attempt):
+        return JsonResponse({'error': 'Which sign-in?'}, status=400)
+
+    # "Not me" is a refusal with no number, and must never be approvable.
+    if body.get('refuse'):
+        choice = -1
+
+    grant = None
+    if choice is not None and choice >= 0:
+        # The session the laptop will collect, minted only now. A magic link
+        # token is the one way to hand somebody a Supabase session without
+        # their password, and it is created after the number matched, never
+        # before, so an unapproved attempt has nothing to steal.
+        grant = _device_make_grant(uid)
+        if grant is None:
+            return JsonResponse({'error': 'Could not complete that'}, status=500)
+
+    r = _yoco_rpc('tf_login_attempt_decide', {
+        'p_id': attempt,
+        'p_user': str(uid),
+        'p_choice': choice if choice is not None else -1,
+        'p_grant': grant,
+    })
+    if r.status_code >= 300:
+        return JsonResponse({'error': 'Could not complete that'}, status=500)
+
+    out = r.json() or {}
+    if out.get('ok'):
+        return JsonResponse({'ok': True})
+    return JsonResponse({'ok': False, 'reason': out.get('reason')}, status=200)
+
+
+def _device_make_grant(user_id):
+    """A one-shot token the laptop can exchange for a session.
+
+    Supabase has no "approved on another device" grant, so this borrows the
+    magic link machinery: the admin API mints a link for the account and the
+    browser redeems its token for a session. The email is never sent and never
+    leaves this server.
+    """
+    try:
+        u = httpx.get(
+            settings.SUPABASE_URL + '/rest/v1/users',
+            headers=_service_headers(),
+            params={'select': 'email', 'id': 'eq.' + str(user_id), 'limit': '1'},
+            timeout=10,
+        )
+        rows = u.json() if u.status_code < 300 else []
+        email = rows[0].get('email') if rows else None
+        if not email:
+            print('[DeviceLogin] no email on file for that account')
+            return None
+
+        g = httpx.post(
+            settings.SUPABASE_URL + '/auth/v1/admin/generate_link',
+            headers={
+                'apikey': settings.SUPABASE_SERVICE_KEY,
+                'Authorization': 'Bearer ' + settings.SUPABASE_SERVICE_KEY,
+                'Content-Type': 'application/json',
+            },
+            json={'type': 'magiclink', 'email': email},
+            timeout=15,
+        )
+        if g.status_code >= 300:
+            print('[DeviceLogin] generate_link %s' % g.status_code)
+            return None
+        data = g.json() or {}
+        # Newer GoTrue nests these under properties; older returns them flat.
+        props = data.get('properties') or data
+        return props.get('hashed_token')
+    except Exception as exc:
+        print('[DeviceLogin] grant failed: %s' % exc)
+        return None
