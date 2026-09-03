@@ -33750,10 +33750,21 @@ function executeNavSearch() {
     var query = input ? input.value.trim() : '';
     if (!query) return;
 
-    // Navigate to discovery/search results
-    navCloseSearch();
-    if (typeof openPage === 'function') openPage('search-overlay');
-    if (typeof performSearch === 'function') performSearch(query);
+    // Pressing Enter did nothing at all.
+    //
+    // This opened a page called search-overlay, which does not exist in the
+    // markup, and then called performSearch, which is not defined anywhere. So
+    // the search box closed and no results were ever shown. Both calls were
+    // guarded by a typeof check, which is why it failed silently rather than
+    // throwing and being noticed.
+    //
+    // handleNavSearch is the one that works, and is already what typing calls,
+    // so Enter now finishes what the keystrokes started instead of undoing it.
+    if (typeof handleNavSearch === 'function') handleNavSearch(query);
+
+    // The pill collapses, but the results page stays up: closing the search
+    // box is not the same as abandoning the search.
+    if (typeof navSetState === 'function') navSetState('collapsed');
 }
 
 function resetNav() {

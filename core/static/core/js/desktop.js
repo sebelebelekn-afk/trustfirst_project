@@ -711,6 +711,26 @@ function tfDeskSettingsShow(idx) {
     overlay.scrollTop = 0;
 }
 
+// Would this row actually be on screen, ignoring whether its own group is the
+// open one?
+//
+// getComputedStyle on the row is not the answer and was the bug here: a row
+// inside a card with display:none still computes its own display as flex, so
+// the Admin tools category looked populated to everybody even though feed.js
+// correctly hides that whole card unless the account is an admin. offsetParent
+// would be right, except every closed group is display:none too, which would
+// make it report that only the open category has anything in it.
+//
+// So this walks the ancestors and stops at the group box.
+function tfDeskRowShows(row, groupBox) {
+    var el = row;
+    while (el && el !== groupBox) {
+        if (getComputedStyle(el).display === 'none') return false;
+        el = el.parentElement;
+    }
+    return true;
+}
+
 // Categories whose rows are all hidden do not get shown.
 //
 // Admin tools is the case that matters: its rows carry display:none until the
@@ -726,7 +746,7 @@ function tfDeskSettingsPrune() {
         var rows = g.querySelectorAll('.settings-row');
         var anyVisible = false;
         for (var i = 0; i < rows.length; i++) {
-            if (getComputedStyle(rows[i]).display !== 'none') { anyVisible = true; break; }
+            if (tfDeskRowShows(rows[i], g)) { anyVisible = true; break; }
         }
         var cat = overlay.querySelector('.tf-set-cat[data-group="' + idx + '"]');
         if (cat) cat.style.display = anyVisible ? '' : 'none';

@@ -4416,14 +4416,14 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=283"></script>
+<script src="{% static 'core/js/feed.js' %}?v=284"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
 <script src="{% static 'core/js/admin.js' %}?v=80"></script>
     <!-- Loaded after feed.js because it calls navHome and navGoTo from it.
          Everything inside is gated on the window being at least 1000px. -->
-    <script src="{% static 'core/js/desktop.js' %}?v=13"></script>
+    <script src="{% static 'core/js/desktop.js' %}?v=14"></script>
     <!-- Approving a sign-in from the phone. After feed.js, because it wraps
          showAuthError and calls _tfAccessToken from it. -->
     <script src="{% static 'core/js/device-login.js' %}?v=1"></script>
