@@ -81,6 +81,7 @@ var TF_DESK_LOOSE_OVERLAYS = [
     // because the search results element hides and rebuilds itself as you
     // type and would take Explore with it.
     'tfExplorePage',
+    'tfMsgEmpty',
 ];
 
 // Close whatever is open before opening the next thing.
@@ -748,7 +749,7 @@ function tfDeskSettingsPrune() {
 // Settings is a list beside a pane; in a 600px column the pane is too narrow
 // to be worth having. Watched rather than set by the opener, so closing the
 // screen any way at all puts the rail back.
-var TF_WIDE_SCREENS = ['settings-overlay'];
+var TF_WIDE_SCREENS = ['settings-overlay', 'msg-overlay'];
 
 function tfDeskWideSync() {
     if (!tfIsDesktop()) {
@@ -760,4 +761,28 @@ function tfDeskWideSync() {
         return el && getComputedStyle(el).display !== 'none';
     });
     document.documentElement.classList.toggle('tf-wide', wide);
+
+    // Messages gets a second class of its own, because the two panes are laid
+    // out inside the column and that is a different question from how wide the
+    // column is.
+    var msgs = document.getElementById('msg-overlay');
+    var msgsOpen = !!msgs && getComputedStyle(msgs).display !== 'none';
+    document.documentElement.classList.toggle('tf-msgs', msgsOpen);
+
+    if (msgsOpen) {
+        var chat = document.getElementById('chat-interface');
+        var chatOpen = !!chat && getComputedStyle(chat).display !== 'none';
+        var empty = document.getElementById('tfMsgEmpty');
+        if (!empty) {
+            empty = document.createElement('div');
+            empty.id = 'tfMsgEmpty';
+            empty.innerHTML =
+                '<i class="fa-regular fa-comments"></i>' +
+                '<b>Your messages</b>' +
+                '<span>Pick a conversation on the left, or start a new one.</span>';
+            var app = document.getElementById('app');
+            if (app) app.appendChild(empty);
+        }
+        empty.classList.toggle('on', !chatOpen);
+    }
 }

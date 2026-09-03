@@ -20,6 +20,23 @@
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
+   Off by default. This rule is the whole safety of the file.
+
+   Everything below turns things ON inside a min-width query. Nothing turned
+   them off outside one, and an element with no display rule is not hidden, it
+   is a plain block. So on a phone the sidebar and the rail rendered as two
+   boxes in the page flow next to the app, squashing it, while the claim in the
+   header above said a phone applies none of this.
+
+   It did apply. A media query only holds back the rules written inside it, not
+   the existence of the markup, and the hiding has to be stated.
+   -------------------------------------------------------------------------- */
+#tfSideNav,
+#tfRightRail,
+#tfMsgEmpty,
+#tfExplorePage { display: none; }
+
+/* --------------------------------------------------------------------------
    1000px and up: two columns
    -------------------------------------------------------------------------- */
 @media (min-width: 1000px) {
@@ -64,6 +81,11 @@
     }
 
     #tfSideNav {
+        /* An id, because the off-by-default rule above is an id too and a
+           media query adds no specificity. `.tf-desk-panel { display: flex }`
+           lost to it and the sidebar vanished from the laptop entirely. Equal
+           specificity, and this comes later in the file, so this one wins. */
+        display: flex;
         right: calc(50% + var(--tf-col-half) + var(--tf-gap));
         width: var(--tf-nav-w);
         padding: 14px 8px 18px;
@@ -466,6 +488,17 @@
         right: auto !important;
     }
 
+    /* The boot splash covers the window, not the column.
+       It is position:absolute, so it fills whatever box it was appended to,
+       which is the 600px column. On a phone that is the whole screen and the
+       distinction never came up; on a laptop it left the logo in a strip with
+       the sidebar and the rail sitting either side of a loading screen. */
+    #appSplashScreen {
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 100000 !important;
+    }
+
     /* Pages built at runtime that pin themselves to the whole viewport.
        Opening somebody's profile covered the entire screen, sidebar and all,
        because it sets position:fixed with left and right at zero in an inline
@@ -678,4 +711,56 @@
     /* With the room to do it, the category list stops being a cramped strip. */
     .tf-wide .tf-set-nav { width: 260px; }
     .tf-wide .tf-set-split { gap: 28px; }
+}
+
+/* --------------------------------------------------------------------------
+   Messages: the list and the conversation, side by side.
+
+   On a phone these are two screens, one covering the other. They are already
+   two absolutely positioned children of the same box, both pinned to the left
+   edge with the thread simply sitting two z-index steps higher, so making them
+   into panes is a matter of giving each one half of the width rather than all
+   of it. No markup moves and nothing about opening a chat changes.
+   -------------------------------------------------------------------------- */
+@media (min-width: 1000px) {
+    .tf-msgs #msg-overlay {
+        left: 0 !important;
+        right: auto !important;
+        width: 340px !important;
+        border-right: 1px solid var(--border-color, #e6e8ea);
+    }
+
+    .tf-msgs #chat-interface {
+        left: 340px !important;
+        right: 0 !important;
+        width: auto !important;
+    }
+
+    /* Standing in for the thread until one is chosen, so the right half is
+       not simply blank. Hidden the moment a conversation opens. */
+    #tfMsgEmpty {
+        display: none;
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 340px;
+        right: 0;
+        z-index: 5001;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        background: var(--bg-primary, #fff);
+        color: #8b95a5;
+        text-align: center;
+        padding: 0 32px;
+    }
+    .tf-msgs #tfMsgEmpty.on { display: flex; }
+    #tfMsgEmpty i { font-size: 40px; opacity: 0.35; }
+    #tfMsgEmpty b { font-size: 18px; color: var(--text-primary, #000); }
+    #tfMsgEmpty span { font-size: 14px; line-height: 1.5; }
+
+    /* The chat's own back arrow is a phone gesture: there is nothing to go
+       back to when the list is already beside you. */
+    .tf-msgs #chat-interface .chat-back { display: none !important; }
 }

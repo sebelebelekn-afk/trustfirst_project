@@ -30,7 +30,7 @@
 <link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=109">
     <!-- The laptop layout. Every rule inside is behind a min-width query,
          so a phone downloads it and applies none of it. -->
-    <link rel="stylesheet" href="{% static 'core/css/desktop.css' %}?v=9">
+    <link rel="stylesheet" href="{% static 'core/css/desktop.css' %}?v=13">
     <script nonce="{{ request.csp_nonce }}">
 /* Safety stub â€” mirrors the real implementation in feed.js.
    Ensures splash buttons work even if the external script is delayed or fails. */
@@ -4423,7 +4423,7 @@ function authenticateUser() {
 <script src="{% static 'core/js/admin.js' %}?v=80"></script>
     <!-- Loaded after feed.js because it calls navHome and navGoTo from it.
          Everything inside is gated on the window being at least 1000px. -->
-    <script src="{% static 'core/js/desktop.js' %}?v=12"></script>
+    <script src="{% static 'core/js/desktop.js' %}?v=13"></script>
 <!-- Native shell bridge. No-ops in the browser, so the PWA is unaffected.
      Must load after feed.js because it wraps the media pickers defined there. -->
 <script src="{% static 'core/js/native.js' %}?v=6"></script>
