@@ -47306,13 +47306,51 @@ var videoBtn = document.querySelector('#chat-interface .fa-video')?.closest('but
 if (callBtn) callBtn.style.display = isSelf ? 'none' : '';
 if (videoBtn) videoBtn.style.display = isSelf ? 'none' : '';
 
+    // The wallet balance, fetched once and kept, because two of the sheets
+    // below decide what to draw from it. Without this the first tap of a
+    // session always drew the form and refused afterwards.
+    async function _tfEnsureBalance() {
+        if (window._tfWalletBalance != null) return window._tfWalletBalance;
+        if (!window.sb || !currentUser) return null;
+        try {
+            var r = await sb.from('wallets').select('balance')
+                .eq('user_id', currentUser.id).maybeSingle();
+            window._tfWalletBalance = (r.data && Number(r.data.balance)) || 0;
+        } catch (e) {
+            window._tfWalletBalance = 0;
+        }
+        return window._tfWalletBalance;
+    }
+
     function openWalletSheet(type, amount) {
+        // Withdraw needs the balance to decide what to show. If it is not known
+        // yet, fetch it and open again rather than guessing.
+        if (type === 'withdraw' && window._tfWalletBalance == null) {
+            _tfEnsureBalance().then(function () { openWalletSheet(type, amount); });
+            return;
+        }
     var dim = document.getElementById('wallet-sheet-dim');
     var sheet = document.getElementById('wallet-sheet');
     var content = document.getElementById('wallet-sheet-content');
     if (!sheet || !content) return;
 
-    if (type === 'withdraw') {
+    if (type === 'withdraw' && (window._tfWalletBalance != null) && window._tfWalletBalance < 50) {
+        // Asking for bank details and then refusing on the balance wastes the
+        // one thing people are most reluctant to type.
+        content.innerHTML =
+            '<b style="font-size:18px;display:block;margin-bottom:10px;">Withdraw funds</b>' +
+            '<div style="display:flex;justify-content:space-between;font-size:14px;color:#888;margin-bottom:14px;">' +
+                '<span>Your balance</span>' +
+                '<b style="color:var(--text-primary,#000);">R ' + Number(window._tfWalletBalance).toFixed(2) + '</b>' +
+            '</div>' +
+            '<p style="font-size:14px;color:#888;line-height:1.55;margin:0 0 18px;">' +
+                'The smallest withdrawal is R50. Earnings from gifts arrive as coins, ' +
+                'so cash those out to your wallet first.' +
+            '</p>' +
+            '<button onclick="closeWalletSheet()" style="width:100%;padding:16px;border-radius:14px;' +
+                'background:var(--bg-secondary,#f0f0f0);color:var(--text-primary,#000);border:none;' +
+                'font-size:16px;font-weight:700;cursor:pointer;">Close</button>';
+    } else if (type === 'withdraw') {
         // The bank details are asked for here because there is no way to pay
         // somebody without them. They are sent once, with the request, and are
         // never kept on the profile.
@@ -47335,6 +47373,19 @@ if (videoBtn) videoBtn.style.display = isSelf ? 'none' : '';
                 Your bank details are used for this payment only.
             </p>`;
         _tfFillWithdrawBalance();
+    } else if (type === 'addmoney' && !_tfPaymentsReady()) {
+        // Nothing to tap. What is missing, and for an admin, exactly what is
+        // missing, rather than four buttons that all lead to the same toast.
+        content.innerHTML =
+            '<b style="font-size:18px;display:block;margin-bottom:10px;">Add money</b>' +
+            '<p style="font-size:14px;color:#888;line-height:1.55;margin:0 0 16px;">' +
+                'Card payments are not switched on yet, so there is no way to add ' +
+                'money to your wallet at the moment.' +
+            '</p>' +
+            _tfPaymentsSetupNote() +
+            '<button onclick="closeWalletSheet()" style="width:100%;padding:16px;border-radius:14px;' +
+                'background:var(--bg-secondary,#f0f0f0);color:var(--text-primary,#000);border:none;' +
+                'font-size:16px;font-weight:700;cursor:pointer;">Close</button>';
     } else if (type === 'addmoney') {
         // The custom amount was an input with nothing to press and no handler
         // reading it, so any figure typed there went nowhere.
@@ -47502,6 +47553,32 @@ function onNativeIAPSuccess(receipt) {
 // Now it asks the server, which knows whether a usable key is configured.
 function _tfPaymentsReady() {
     return !!(window._tfConfig && window._tfConfig.yoco_enabled);
+}
+
+// For the person who can actually fix it. Everybody else gets the plain
+// sentence above; there is no point telling a stranger which environment
+// variable is missing.
+function _tfPaymentsSetupNote() {
+    var me = (typeof currentUser !== 'undefined' && currentUser) || null;
+    if (!me || !me.is_admin) return '';
+    var cfg = window._tfConfig || {};
+    var have = cfg.yoco_keys_present || {};
+    var mode = cfg.yoco_mode || 'test';
+    var missing = [];
+    if (mode === 'test' && !have.test_secret) missing.push('YOCO_TEST_SECRET_KEY');
+    if (mode === 'test' && !have.test_public) missing.push('YOCO_TEST_PUBLIC_KEY');
+    if (mode === 'live' && !have.live_secret) missing.push('YOCO_LIVE_SECRET_KEY');
+    if (!have.webhook) missing.push('the webhook secret (Admin, Payments)');
+    if (cfg.yoco_misconfigured) {
+        return '<div style="background:rgba(255,59,48,0.1);border:1px solid rgba(255,59,48,0.3);' +
+            'border-radius:12px;padding:12px;font-size:12px;color:#FF3B30;line-height:1.5;margin-bottom:16px;">' +
+            escapeHtml(cfg.yoco_misconfigured) + '</div>';
+    }
+    if (!missing.length) return '';
+    return '<div style="background:rgba(255,149,0,0.1);border:1px solid rgba(255,149,0,0.3);' +
+        'border-radius:12px;padding:12px;font-size:12px;color:#FF9500;line-height:1.6;margin-bottom:16px;">' +
+        '<b>Admin:</b> running in <b>' + escapeHtml(mode) + '</b> mode and still missing ' +
+        escapeHtml(missing.join(', ')) + '.</div>';
 }
 
 function _tfPaymentsUnavailable() {
