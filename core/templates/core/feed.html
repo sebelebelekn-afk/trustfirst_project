@@ -4424,6 +4424,9 @@ function authenticateUser() {
     <!-- Loaded after feed.js because it calls navHome and navGoTo from it.
          Everything inside is gated on the window being at least 1000px. -->
     <script src="{% static 'core/js/desktop.js' %}?v=13"></script>
+    <!-- Approving a sign-in from the phone. After feed.js, because it wraps
+         showAuthError and calls _tfAccessToken from it. -->
+    <script src="{% static 'core/js/device-login.js' %}?v=1"></script>
 <!-- Native shell bridge. No-ops in the browser, so the PWA is unaffected.
      Must load after feed.js because it wraps the media pickers defined there. -->
 <script src="{% static 'core/js/native.js' %}?v=6"></script>
