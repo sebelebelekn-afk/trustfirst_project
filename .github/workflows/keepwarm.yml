@@ -14,11 +14,26 @@ name: Keep the app warm
 # the allowance runs out Render SUSPENDS EVERY FREE SERVICE until the 1st.
 # That is a total outage, far worse than the page this is meant to avoid.
 #
-# So there is a gap, and it is made as small as the budget allows:
+# WHY EACH RUN LOOPS INSTEAD OF FIRING ONCE. GitHub's scheduled runs are
+# best-effort and routinely start ten to thirty minutes late when the runners
+# are busy. Against a fifteen-minute idle timeout that is a race this loses:
+# a single ping per cron tick means the app spins down in every gap, which is
+# exactly what happened when this file pinged once and went home.
 #
-#   pings   03:00-00:59 UTC   22 hours a day
-#   asleep  roughly 01:05-03:00 UTC, after the 15-minute idle timeout
-#   usage   about 682 hours a month, leaving ~68 in hand
+# So cron only has to start a run roughly on the hour, and the run itself keeps
+# time from there — pinging every five minutes for seventy, which is longer
+# than the hour between runs. A run that starts twenty minutes late is still
+# covered by the one before it. concurrency below then hands over cleanly: the
+# new run cancels the old one rather than both pinging.
+#
+# This costs nothing because the repository is public, and GitHub bills no
+# minutes for Actions on public repositories. Do not carry this file into a
+# private repo without rereading that: continuous runs would eat the 2,000
+# free minutes a month in about a day and a half.
+#
+#   pings   04:00-01:09 UTC, every 5 minutes
+#   asleep  roughly 01:25-04:00 UTC  =  03:25-06:00 SAST
+#   usage   about 664 hours a month, leaving ~86 in hand
 #
 # THE GAP IS NOT DOWNTIME. The app answers every request during it. All the gap
 # decides is who pays for the wake-up — this ping, or the first visitor. And a
@@ -26,12 +41,13 @@ name: Keep the app warm
 # ping does, so at most one person waits, and only when the app was quiet
 # enough that almost nobody was there to wait.
 #
-# Two hours at 01:00-03:00 UTC is the least-bad slot for an audience that is
-# mostly South African but not only: 03:00-05:00 in Johannesburg, the middle of
-# the night in Europe, and pre-dawn across the Americas. It is the middle of
-# the working day in Asia, which is the cost of the choice. Shift the hours
-# below if the users turn out to sit somewhere else — the shape matters more
-# than the exact slot, and Render's dashboard shows where the hours actually go.
+# The gap sits at 01:25-04:00 UTC, the least-bad slot for an audience that is
+# mostly South African but not only: pre-dawn in Johannesburg, the middle of
+# the night in Europe, late evening into early morning across the Americas. It
+# is the working day in Asia, which is the cost of the choice rather than
+# something a schedule can solve. Shift the hours below if the users turn out
+# to sit somewhere else — the shape matters more than the exact slot, and
+# Render's dashboard shows where the hours actually go.
 #
 # ONE FREE SERVICE ONLY. The 750 hours belong to the workspace, not the
 # service. A second free web service running alongside this one halves the
@@ -49,9 +65,17 @@ name: Keep the app warm
 
 on:
   schedule:
-    # Every ten minutes, through every hour except 01:00 and 02:00 UTC.
+    # On the hour, every hour except 01:00-03:00 UTC. The run itself does the
+    # fine-grained pinging, so this only has to start one roughly on time.
     # Times are UTC; South Africa is UTC+2 year round, no daylight saving.
-    - cron: "*/10 0,3-23 * * *"
+    - cron: "0 0,4-23 * * *"
+  # Every deploy restarts the service, so warm it again straight away rather
+  # than leaving the next visitor to pay for it. This also means the loop
+  # starts working the moment this file lands, instead of waiting however long
+  # GitHub takes to register a new schedule — which is why nothing ran at all
+  # the first time round.
+  push:
+    branches: [main]
   # So it can be fired by hand to check it works, rather than waiting.
   workflow_dispatch:
 
@@ -67,28 +91,48 @@ concurrency:
 jobs:
   ping:
     runs-on: ubuntu-latest
+    # Longer than the gap between runs, so a late start is covered by the run
+    # before it. The hard cap is a little above that so a wedged loop cannot
+    # sit on a runner indefinitely.
+    timeout-minutes: 75
     steps:
-      - name: Knock on the door
+      - name: Hold the service open
         env:
           APP_URL: https://trustfirst-project-bt1h.onrender.com
+          MINUTES: "70"
+          EVERY: "300"          # seconds between pings; the idle timeout is 900
         run: |
-          # /healthz is the cheapest endpoint in the app: no database, no
-          # session, no template. See core/views.py. Falling back to / keeps
-          # this working if it is ever pinged before that deploy lands.
-          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 "$APP_URL/healthz") || code=000
-          if [ "$code" = "404" ]; then
-            echo "No /healthz yet, falling back to /"
-            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 "$APP_URL/") || code=000
-          fi
-          echo "$APP_URL -> $code"
+          deadline=$(( $(date +%s) + MINUTES * 60 ))
+          ok=0; fail=0
 
-          # --max-time is generous on purpose. If the service HAS gone cold this
-          # ping is the one paying for the wake-up, which is exactly its job;
-          # cutting it off early would mean never succeeding at it.
-          #
-          # Anything that answers means an instance is running, which is the
-          # goal. A red run here means the app was genuinely unreachable.
-          case "$code" in
-            2*|3*) exit 0 ;;
-            *) echo "::warning::No usable response from $APP_URL (got $code)"; exit 1 ;;
-          esac
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            # /healthz is the cheapest endpoint in the app: no database, no
+            # session, no template. See core/views.py. Falling back to / keeps
+            # this working if it is ever pinged before that deploy lands.
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 "$APP_URL/healthz") || code=000
+            if [ "$code" = "404" ]; then
+              code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 "$APP_URL/") || code=000
+            fi
+
+            # --max-time is generous on purpose. If the service HAS gone cold
+            # this ping is the one paying for the wake-up, which is exactly its
+            # job; cutting it off early would mean never succeeding at it.
+            case "$code" in
+              2*|3*) ok=$((ok+1)) ;;
+              *) fail=$((fail+1)); echo "$(date -u +%H:%M:%S) -> $code" ;;
+            esac
+
+            # Don't start another sleep we would only be cut off in the middle
+            # of; the next run takes over from here.
+            [ $(( $(date +%s) + EVERY )) -lt "$deadline" ] || break
+            sleep "$EVERY"
+          done
+
+          echo "$ok answered, $fail did not"
+
+          # One failed ping is a blip and the next one covers it. Never getting
+          # an answer at all means the app is genuinely down and worth a look.
+          if [ "$ok" -eq 0 ]; then
+            echo "::error::$APP_URL never answered in $MINUTES minutes"
+            exit 1
+          fi
