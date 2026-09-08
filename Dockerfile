@@ -5,6 +5,13 @@
 # here instead, which is the point: the same image runs on Cloud Run, on a
 # plain server, or on anything else, and moving host again later costs nothing.
 #
+# Moving was not a preference. Render's free tier stops the instance when it is
+# idle and serves its own branded "service waking up" page to whoever knocks
+# first, for the thirty to sixty seconds it takes to start. That page is Render's,
+# not this app's, and no amount of code here can suppress it. Cloud Run also
+# scales to zero, but a cold request simply waits a second or two for the
+# container: Google never puts a page of its own in front of the app.
+#
 # Python 3.12 rather than 3.13: Django 4.2 supports 3.12, and every wheel this
 # project needs (cryptography, pillow, psycopg2) is published for it. Chasing a
 # newer Python here buys nothing and risks a build that only fails in the cloud.
@@ -54,10 +61,19 @@ EXPOSE 8080
 #
 # --timeout 0 because Cloud Run does its own request timing out. Gunicorn
 # killing a worker first would turn a slow upload into a fatal error.
+#
+# --preload imports Django before the port is opened, which is what makes a cold
+# start invisible. Cloud Run grants boosted CPU until the container is listening
+# and then sends the first request the instant it is, so without this the import
+# happens on that request, at normal CPU, with somebody waiting for it. With it,
+# the expensive part happens in the boosted window and the first request is
+# served by an app that is already built. Safe at one worker: there is no fork
+# to share a database connection across.
 CMD exec gunicorn core_project.wsgi:application \
     --bind 0.0.0.0:$PORT \
     --workers 1 \
     --threads 8 \
     --timeout 0 \
+    --preload \
     --access-logfile - \
     --error-logfile -

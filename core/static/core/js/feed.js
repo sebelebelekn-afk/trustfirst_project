@@ -1085,8 +1085,8 @@ localStorage.setItem('tf_burst', JSON.stringify(burstAttempts));
         // the session, so the address never comes back here.
         //
         // If the server cannot be reached, this falls through to the old path
-        // rather than locking anybody out. Render's free tier sleeps, and a
-        // cold start must never be the reason somebody cannot get in.
+        // rather than locking anybody out. The app is on a host that scales to
+        // zero, and a cold start must never be the reason somebody cannot get in.
         if (!isValidEmail(identifier)) {
             const cleanUsername = identifier.replace('@', '').toLowerCase();
             const viaServer = await _tfUsernameLogin(cleanUsername, password);
@@ -15748,6 +15748,10 @@ var sb = null; // alias for window._sb, assigned in initSupabase()
         GIPHY_KEY_FROM_SERVER = cfg.giphy_api_key || '';
         TF_R2_ENABLED = !!cfg.r2_enabled;
         TF_R2_PUBLIC_BASE = cfg.r2_public_base || '';
+        // What this site calls itself, so every shared link and QR code points
+        // at the app's own domain rather than whichever host served this page.
+        // See tfSiteOrigin(). Empty locally, which leaves it on location.origin.
+        if (cfg.app_public_url) window.TF_CANONICAL_ORIGIN = cfg.app_public_url;
         // Kept whole, because the wallet needs to know whether payments are
         // connected and which mode they are in. Nothing secret is in here:
         // the server only ever sends the public key.
@@ -40327,9 +40331,14 @@ async function sendPhoneOTP() {
 // Links were hardcoded to https://trustfirst.app and to /u/<username>, a path that
 // is not a route at all: urls.py serves profile/<username>/. So a scanned QR code
 // went to a 404 on a domain that may not be the one the app is being served from,
-// while other copy-link buttons handed out the raw Render URL. Take the origin the
-// app is actually running on unless a canonical domain is configured, and use the
-// paths that exist.
+// while other copy-link buttons handed out the raw hosting-provider URL. Take the
+// origin the app is actually running on unless a canonical domain is configured,
+// and use the paths that exist.
+//
+// The canonical one is configured now: the server sends APP_PUBLIC_URL through
+// /api/config/ and the loader sets it below. That matters most during a move
+// between hosts, which is exactly when someone would otherwise copy a link to
+// an address that is about to stop being the app's.
 window.TF_CANONICAL_ORIGIN = window.TF_CANONICAL_ORIGIN || '';
 function tfSiteOrigin() {
     if (window.TF_CANONICAL_ORIGIN) return window.TF_CANONICAL_ORIGIN.replace(/\/+$/, '');
@@ -47634,10 +47643,62 @@ async function confirmAddMoney(amount) {
 
 // Called on boot when Yoco has sent someone back. The webhook is what credits
 // the wallet, so this only reports; it never adds anything itself.
+//
+// _tfTopupChecking guards it because it is no longer called only once. It runs
+// on boot and again whenever the app is brought back to the foreground, and the
+// two can overlap: the poll below runs for up to ten seconds, which is long
+// enough for somebody to switch away and back inside a single call. Two copies
+// racing would poll twice and could show the same "added to your wallet" toast
+// twice for one payment.
+var _tfTopupChecking = false;
+
 async function _tfCheckPendingTopup() {
+    if (_tfTopupChecking) return;
     var raw = null;
     try { raw = localStorage.getItem('tf_pending_topup'); } catch (e) {}
     if (!raw) return;
+    _tfTopupChecking = true;
+    try {
+        await _tfCheckPendingTopupInner(raw);
+    } finally {
+        _tfTopupChecking = false;
+    }
+}
+
+// Watch for the app coming back into view.
+//
+// The desktop path never needed this: paying means leaving the page and coming
+// back is a fresh load, so the check on boot catches it. On a phone it is not
+// reliable. The card page opens in the app's own web view where Capacitor is
+// configured to allow it, but a bank's 3-D Secure step can still hand the
+// person off to the system browser, and returning from there is a switch back
+// to an app that was never unloaded. No load, no boot, no check — and the
+// balance sat stale until the app was killed and reopened, which looked exactly
+// like a payment that had not worked.
+//
+// Both events, because they do not fire in the same situations: visibilitychange
+// covers switching between apps, and pageshow covers coming back to a page the
+// browser had frozen. Whichever arrives first does the work; the guard above
+// makes the second one free.
+(function _tfWatchForTopupReturn() {
+    function recheck() {
+        if (document.visibilityState !== 'visible') return;
+        // Not before the app has finished starting. pageshow also fires on the
+        // very first load, and running then would reach _tfAccessToken() before
+        // initSupabase() has made a client for it to ask. The poll would spend
+        // its five attempts recovering from that, and worse, it would be
+        // holding the guard while the boot check tried to run and was turned
+        // away. Config loaded means there is a client; the loader does its own
+        // check at that point, so nothing here is lost by waiting.
+        if (!window._tfConfig) return;
+        try { if (!localStorage.getItem('tf_pending_topup')) return; } catch (e) { return; }
+        try { _tfCheckPendingTopup(); } catch (e) {}
+    }
+    document.addEventListener('visibilitychange', recheck);
+    window.addEventListener('pageshow', recheck);
+})();
+
+async function _tfCheckPendingTopupInner(raw) {
     var pending;
     try { pending = JSON.parse(raw); } catch (e) { pending = null; }
     if (!pending || !pending.reference) { try { localStorage.removeItem('tf_pending_topup'); } catch (e) {} return; }

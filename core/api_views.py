@@ -229,6 +229,13 @@ def get_config(request):
         # from; the credentials never leave the server.
         "r2_enabled": _r2_ready(),
         "r2_public_base": getattr(settings, "R2_PUBLIC_BASE", "").rstrip("/"),
+        # The app's permanent address, so a link somebody shares survives the
+        # host it was copied from. Without it the client falls back to
+        # location.origin, which during a migration is whatever address that
+        # browser happened to reach — a *.run.app URL that will stop being the
+        # app's the moment the domain mapping is finished. Public by
+        # definition: it is the address of a public website.
+        "app_public_url": getattr(settings, "APP_PUBLIC_URL", ""),
         # A Sentry DSN is a public identifier by design: it says where to send
         # events, and carries no permission to read anything back. Empty turns
         # browser monitoring off, which is what happens locally.
@@ -1769,8 +1776,8 @@ def wallet_register_yoco_webhook(request):
 
     Yoco returns that secret exactly once, when the subscription is created,
     and there is no way to read it back afterwards. So it is shown to the
-    admin who asked for it, to be pasted into Render, and it is deliberately
-    not written to the log or stored anywhere by this server.
+    admin who asked for it, to be saved on the server by hand, and it is
+    deliberately not written to the log or stored anywhere by this server.
 
     Admin only, because the person who can point Yoco's events at a URL is the
     person who decides what gets believed about money.
@@ -1783,7 +1790,22 @@ def wallet_register_yoco_webhook(request):
     except ValueError:
         return JsonResponse({'error': 'Admins only'}, status=403)
 
-    hook_url = request.build_absolute_uri('/api/wallet/yoco-webhook/')
+    # The app's own address, not the one this admin happens to be browsing.
+    #
+    # This used to build the URL from the request, which quietly tied the
+    # webhook to whichever host was in the address bar at the time. Registering
+    # from the Cloud Run *.run.app address while the app is served at its own
+    # domain would still work on the day and then break the moment that address
+    # changed — and the symptom is the worst kind: checkouts open, people pay,
+    # and no wallet is ever credited because the only thing allowed to credit
+    # one is an event being delivered somewhere nobody is listening.
+    #
+    # APP_PUBLIC_URL is where the app answers permanently, so that is what Yoco
+    # is told. Falling back to the request keeps a local or first-deploy setup
+    # working before that variable is set.
+    base = (getattr(settings, 'APP_PUBLIC_URL', '') or '').rstrip('/')
+    hook_url = (base + '/api/wallet/yoco-webhook/') if base \
+        else request.build_absolute_uri('/api/wallet/yoco-webhook/')
     if not hook_url.startswith('https://'):
         return JsonResponse({'error': 'Yoco will only deliver to https'}, status=400)
 
@@ -1814,8 +1836,9 @@ def wallet_register_yoco_webhook(request):
         'secret': secret,
         'variable': ('YOCO_LIVE_WEBHOOK_SECRET' if settings.YOCO_MODE == 'live'
                      else 'YOCO_TEST_WEBHOOK_SECRET'),
-        'note': 'Yoco shows this secret once. Save it in Render under the variable '
-                'named above, then reload. It is not stored on this server.',
+        'note': 'Yoco shows this secret once. Save it on the Cloud Run service '
+                'under the variable named above, then redeploy or restart. It is '
+                'not stored on this server.',
     })
 
 

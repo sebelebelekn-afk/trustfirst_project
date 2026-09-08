@@ -10,6 +10,10 @@ from . import eddie_voice
 urlpatterns = [
     path('', views.feed, name='feed'),
 
+    # Cheap proof of life. Pinged on a schedule to hold one instance open, so
+    # the first real visitor of the hour does not wait for a cold start.
+    path('healthz', views.healthz, name='healthz'),
+
     # Real pages at real URLs, so they can be linked, shared and indexed. These
     # must come before the catch-all share routes at the bottom of this file,
     # or /privacy/ would be read as somebody's profile.

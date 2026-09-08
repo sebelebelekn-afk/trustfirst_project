@@ -4,8 +4,12 @@
   "webDir": "www",
   "server": {
     "androidScheme": "https",
-    "url": "https://trustfirst-project-bt1h.onrender.com",
-    "cleartext": false
+    "url": "https://app.gettrustfirst.co.za",
+    "cleartext": false,
+    "allowNavigation": [
+      "payments.yoco.com",
+      "*.yoco.com"
+    ]
   },
   "android": {
     "backgroundColor": "#000000",

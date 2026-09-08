@@ -76,3 +76,22 @@ def manifest(request):
     """Serve the PWA manifest from the site root."""
     path = settings.BASE_DIR / 'core' / 'static' / 'manifest.json'
     return FileResponse(open(path, 'rb'), content_type='application/manifest+json')
+
+
+def healthz(request):
+    """Alive, in as few cycles as possible.
+
+    Two jobs, and deliberately nothing else. Cloud Run wants a cheap way to see
+    that a container came up, and something has to be pinged on a schedule to
+    keep one instance alive so nobody pays for a cold start with their time.
+
+    No database, no session, no template. A ping that touched Postgres would
+    hold a connection open every few minutes for no reason, and a ping that
+    failed when the database blinked would look like the app was down when it
+    was not.
+    """
+    resp = JsonResponse({'ok': True})
+    # Never let a CDN or the browser answer this on the server's behalf. A
+    # cached ping keeps nothing warm, which is the one thing it is for.
+    resp['Cache-Control'] = 'no-store'
+    return resp

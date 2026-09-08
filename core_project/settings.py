@@ -20,6 +20,30 @@ if not SECRET_KEY:
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
 _allowed = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+
+# Where this app answers to the outside world, as one https URL.
+#
+# One value, read by everything that needs to name the app: the host is added to
+# ALLOWED_HOSTS, the origin to CSRF_TRUSTED_ORIGINS, and the Yoco webhook is
+# registered against it so a payment provider is not pointed at whichever host
+# an admin happened to be browsing. Moving the app again is this variable and
+# a DNS record, not a search through the codebase.
+#
+# Empty is fine and is what a local machine has: nothing below fires, and the
+# app runs on localhost exactly as before.
+APP_PUBLIC_URL = (os.environ.get('APP_PUBLIC_URL', '') or '').strip().rstrip('/')
+_public_host = ''
+if APP_PUBLIC_URL:
+    from urllib.parse import urlsplit
+    _public_host = urlsplit(APP_PUBLIC_URL).hostname or ''
+    if _public_host:
+        _allowed.append(_public_host)
+
+# The old host, kept only so a rollback to Render still boots.
+#
+# Render set this by itself, which is why it was read here at all. Nothing sets
+# it on Cloud Run, so this is dead weight on the new host and costs nothing;
+# delete it once the Render service is torn down.
 _render_host = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
 if _render_host:
     _allowed.append(_render_host)
@@ -43,6 +67,8 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 if os.environ.get('K_SERVICE'):
     CSRF_TRUSTED_ORIGINS.append('https://*.run.app')
+if _public_host:
+    CSRF_TRUSTED_ORIGINS.append('https://' + _public_host)
 if _render_host:
     CSRF_TRUSTED_ORIGINS.append('https://' + _render_host)
 
@@ -209,9 +235,9 @@ STRIPE_WEBHOOK_SECRET   = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
 #
 # Both sets of keys live here at once, test and live, and YOCO_MODE decides
 # which one is used. Holding both means going live is one environment variable
-# on Render, with no code change and no redeploy of anything else, and it means
-# test keys stay available afterwards for checking a change without charging
-# anybody.
+# on the server, with no code change and no redeploy of anything else, and it
+# means test keys stay available afterwards for checking a change without
+# charging anybody.
 #
 # The secret key never leaves this server. Only the public key is served to the
 # browser through /api/config/, which is what it is for.
@@ -415,11 +441,25 @@ SECURE_CONTENT_TYPE_NOSNIFF     = True
 X_FRAME_OPTIONS                 = 'DENY'
 SESSION_COOKIE_HTTPONLY         = True
 CSRF_COOKIE_HTTPONLY            = True
-# Behind Render/any reverse proxy, trust the forwarded-proto header so HTTPS
-# detection (secure cookies, SSL redirect, HSTS) works correctly.
+# Behind Cloud Run, or any reverse proxy, trust the forwarded-proto header so
+# HTTPS detection (secure cookies, SSL redirect, HSTS) works correctly. Cloud
+# Run terminates TLS at the edge and speaks plain HTTP to the container, so
+# without this Django would decide every request was insecure and drop the
+# session cookie on a site that is in fact https-only.
 SECURE_PROXY_SSL_HEADER         = ('HTTP_X_FORWARDED_PROTO', 'https')
-SECURE_SSL_REDIRECT             = os.environ.get('SECURE_SSL_REDIRECT', 'False') == 'True'
+# On by default wherever Google is doing the routing, because the app is only
+# ever reached over https there and an http answer is not something anybody
+# wants served. K_SERVICE is set by Cloud Run and by nothing else, so a local
+# machine is untouched and still runs on plain http. The variable still wins if
+# it is set explicitly, in either direction.
+_ssl_redirect_default = 'True' if os.environ.get('K_SERVICE') else 'False'
+SECURE_SSL_REDIRECT             = os.environ.get('SECURE_SSL_REDIRECT', _ssl_redirect_default) == 'True'
 SESSION_COOKIE_SECURE           = not DEBUG
+# The session cookie was already marked secure and this one was not, which is a
+# gap rather than a decision: the CSRF token is what proves an admin's POST came
+# from the admin, and it was travelling without the flag that stops a browser
+# ever sending it over plain http.
+CSRF_COOKIE_SECURE              = not DEBUG
 SESSION_COOKIE_SAMESITE         = 'Lax'
 CSRF_COOKIE_SAMESITE            = 'Lax'
 SECURE_HSTS_SECONDS             = 31536000

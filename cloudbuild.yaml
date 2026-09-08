@@ -27,8 +27,54 @@
 #      console, not here. They are secrets and they do not belong in a file that
 #      lives in the repository.
 #
+#      Everything the app already needed carries over from Render unchanged.
+#      Three are new or newly important:
+#
+#        APP_PUBLIC_URL        https://app.gettrustfirst.co.za
+#                              The one place the app's own address is written
+#                              down. It puts the host in ALLOWED_HOSTS, the
+#                              origin in CSRF_TRUSTED_ORIGINS, and it is what
+#                              the Yoco webhook is registered against.
+#        ALLOWED_HOSTS         only needed for a host that is neither the
+#                              APP_PUBLIC_URL one nor a *.run.app address.
+#
+#      SECURE_SSL_REDIRECT does not need setting. settings.py turns it on by
+#      itself when it sees K_SERVICE, which only Cloud Run sets. Set it to
+#      False there if you ever need the app to answer on http.
+#
+#      RENDER_EXTERNAL_HOSTNAME is not set here and does not need to be. Nothing
+#      on Cloud Run sets it, and settings.py only reads it so a rollback works.
+#
+#   7. Point the domain at the service. Cloud Run, Manage Custom Domains, Add
+#      Mapping: pick the service, enter app.gettrustfirst.co.za, and add the DNS
+#      records it prints at the registrar. Google issues the certificate. Until
+#      that resolves the service is still reachable at its own *.run.app
+#      address, which settings.py already allows.
+#
+#   8. Keep one instance alive, so nobody waits for a cold start.
+#
+#      min-instances stays at 0 below because a minimum instance is billed
+#      around the clock and would leave the free tier within days. Pinging
+#      /healthz instead costs nothing: Cloud Run only charges CPU while a
+#      request is being served, so an instance that is merely alive between
+#      pings is free, and 4,000-odd pings a month is nothing against the two
+#      million included.
+#
+#      Cloud Scheduler, Create Job (three jobs are free per month):
+#        frequency: */10 * * * *      target: HTTP
+#        URL: https://app.gettrustfirst.co.za/healthz      method: GET
+#
+#      .github/workflows/keepwarm.yml does the same thing from GitHub Actions
+#      if you would rather not set up Scheduler. Use one or the other, not both.
+#
 # After that, pushing to main builds and deploys itself, the same way the
 # landing site already does.
+#
+# WHY NOT THE OTHER FREE GOOGLE OPTION. App Engine's standard tier includes 28
+# instance-hours a day, enough to keep one instance up permanently with no cold
+# start at all — but the free instance class has 256MB of memory, and this app
+# handles images and video and was already pushing past that on Render's 512MB.
+# Cloud Run at 1GB with a warm instance gets the same result with room to work.
 
 substitutions:
   _REGION: europe-west1          # closest of the cheap regions to South Africa
@@ -82,6 +128,11 @@ steps:
       # Django app comfortably inside the free tier.
       - --concurrency=80
       - --timeout=300
+      # Extra CPU while the container is starting, billed at nothing extra and
+      # switched on per service. Combined with gunicorn --preload it is what
+      # turns a cold start into a pause nobody names, which is the whole reason
+      # this app is not on Render any more.
+      - --cpu-boost
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA
