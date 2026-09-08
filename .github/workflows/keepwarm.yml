@@ -14,30 +14,44 @@ name: Keep the app warm
 # the allowance runs out Render SUSPENDS EVERY FREE SERVICE until the 1st.
 # That is a total outage, far worse than the page this is meant to avoid.
 #
-# So the app is deliberately allowed to sleep in the small hours:
+# So there is a gap, and it is made as small as the budget allows:
 #
-#   pings   03:00-22:59 UTC   =  05:00-00:59 SAST   20 hours a day
-#   asleep  roughly 01:15-05:00 SAST, after the 15-minute idle timeout
-#   usage   about 620 hours a month, leaving ~130 in hand
+#   pings   03:00-00:59 UTC   22 hours a day
+#   asleep  roughly 01:05-03:00 UTC, after the 15-minute idle timeout
+#   usage   about 682 hours a month, leaving ~68 in hand
 #
-# The window is built around when South Africans actually use the app: awake
-# through the evening and past midnight, asleep only when almost nobody is
-# there. The 05:00 ping absorbs the cold start itself, so the first real
-# visitor of the morning already finds it running.
+# THE GAP IS NOT DOWNTIME. The app answers every request during it. All the gap
+# decides is who pays for the wake-up — this ping, or the first visitor. And a
+# real visitor keeps the instance up for the next 15 minutes just as well as a
+# ping does, so at most one person waits, and only when the app was quiet
+# enough that almost nobody was there to wait.
+#
+# Two hours at 01:00-03:00 UTC is the least-bad slot for an audience that is
+# mostly South African but not only: 03:00-05:00 in Johannesburg, the middle of
+# the night in Europe, and pre-dawn across the Americas. It is the middle of
+# the working day in Asia, which is the cost of the choice. Shift the hours
+# below if the users turn out to sit somewhere else — the shape matters more
+# than the exact slot, and Render's dashboard shows where the hours actually go.
 #
 # ONE FREE SERVICE ONLY. The 750 hours belong to the workspace, not the
 # service. A second free web service running alongside this one halves the
 # budget and both get suspended when it runs out.
 #
-# IF THE APP MOVES OFF RENDER, change APP_URL below and widen the window: on a
-# host that bills per request rather than per hour, there is no reason to let
-# it sleep at all.
+# IF THIS EVER RUNS OUT ANYWAY, that is information, not a bug: it means real
+# traffic is keeping the instance up around the clock on its own, which is 744
+# hours before this file pings anything. An app genuinely busy at every hour
+# has outgrown a 750-hour allowance and needs a host that charges by the
+# request instead — which is what cloudbuild.yaml is already written for.
+#
+# IF THE APP MOVES OFF RENDER, change APP_URL below and drop the gap entirely:
+# on a host that bills per request rather than per hour, an idle instance costs
+# nothing and there is no reason to let it sleep at all.
 
 on:
   schedule:
-    # Every ten minutes, but only through the hours above. Times are UTC;
-    # South Africa is UTC+2 year round, with no daylight saving to track.
-    - cron: "*/10 3-22 * * *"
+    # Every ten minutes, through every hour except 01:00 and 02:00 UTC.
+    # Times are UTC; South Africa is UTC+2 year round, no daylight saving.
+    - cron: "*/10 0,3-23 * * *"
   # So it can be fired by hand to check it works, rather than waiting.
   workflow_dispatch:
 
