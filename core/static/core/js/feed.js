@@ -47524,15 +47524,50 @@ async function _tfFillCoinSheetBalance() {
     }
 }
 
-// The real balance lives in users.coins and is written server-side only, so we
-// always read it back rather than trusting anything on the client.
+// The wallet screen shows two balances from two different tables, and until now
+// only one of them was ever filled in.
+//
+// "Available Balance", the large number at the top, is money in Rands and lives
+// in wallets.balance. That is what a card top-up credits and what Withdraw pays
+// out from. Nothing in this file ever wrote to it: the 0.00 in feed.html was
+// hard-coded markup, so the number sat at zero no matter what the wallet held.
+// Somebody could pay ten Rand, have it arrive correctly, be credited correctly,
+// and still be looking at R 0.00 — which is indistinguishable from the payment
+// having failed, and is the worst possible way for a payment feature to behave.
+//
+// Coins are the other balance, in users.coins, bought out of the wallet. That
+// one was always read, which is why the bug looked like "the balance never
+// updates" rather than "the screen is reading the wrong table".
+//
+// Both are written server-side only and read back here rather than tracked on
+// the client, so neither can drift from what the database actually holds. This
+// still returns the coin count, because openViewerGiftSheet uses it to decide
+// what a gift can cost.
 async function refreshWalletBalance() {
+    if (!window.sb || !currentUser) return 0;
+
+    // Money first: it is the number somebody who just paid is staring at.
+    try {
+        var w = await sb.from('wallets').select('balance')
+            .eq('user_id', currentUser.id).maybeSingle();
+        var money = (w.data && Number(w.data.balance)) || 0;
+        // The cached copy the Buy coins and Withdraw sheets read before they
+        // decide what to draw. Refreshed here rather than left alone, because
+        // it is only ever filled once per session otherwise — so those sheets
+        // would go on showing R 0.00 to somebody who had just topped up.
+        window._tfWalletBalance = money;
+        var moneyEl = document.getElementById('wallet-balance');
+        if (moneyEl) moneyEl.textContent = money.toFixed(2);
+    } catch (e) {
+        // Leave whatever is on screen. Overwriting a real balance with a zero
+        // because one read failed would recreate exactly the bug above.
+    }
+
     var el = document.getElementById('wallet-coins');
-    if (!el || !window.sb || !currentUser) return 0;
     try {
         var r = await sb.from('users').select('coins').eq('id', currentUser.id).maybeSingle();
         var bal = (r.data && r.data.coins) || 0;
-        el.textContent = bal;
+        if (el) el.textContent = bal;
         if (currentUser) currentUser.coins = bal;
         return bal;
     } catch (e) { return 0; }
