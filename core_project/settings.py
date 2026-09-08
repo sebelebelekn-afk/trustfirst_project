@@ -288,6 +288,28 @@ if YOCO_SECRET_KEY:
         )
         YOCO_SECRET_KEY = ''
         YOCO_PUBLIC_KEY = ''
+else:
+    # Keys on the server, for the mode nobody selected.
+    #
+    # The check above only speaks when a key was found, so the one case it
+    # could not describe was the case that actually happened: live keys saved
+    # correctly, YOCO_MODE never set, and the default of 'test' sending the app
+    # looking for test keys that were never created. Payments switched off, the
+    # wallet said "not connected yet", and nothing anywhere said why — while
+    # /api/config/ was reporting live_secret true the whole time.
+    #
+    # YOCO_MODE is not something to infer. Guessing 'live' because live keys
+    # exist would start charging real cards on the strength of an unset
+    # variable, which is precisely the mistake the prefix check above exists to
+    # prevent. So this says what is wrong and leaves the decision alone.
+    _other = 'live' if YOCO_MODE == 'test' else 'test'
+    _other_secret = YOCO_LIVE_SECRET_KEY if _other == 'live' else YOCO_TEST_SECRET_KEY
+    if _other_secret:
+        YOCO_MISCONFIGURED = (
+            'YOCO_MODE is "%s", but the only keys on this server are %s keys. '
+            'Set YOCO_MODE=%s to use them, or add %s keys.'
+            % (YOCO_MODE, _other, _other, YOCO_MODE)
+        )
 
 YOCO_ENABLED = bool(YOCO_SECRET_KEY)
 
