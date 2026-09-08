@@ -16,8 +16,8 @@ name: Build Android app
 #
 #   https://github.com/<owner>/<repo>/releases/download/android-latest/trustfirst.apk
 #
-# That address never changes, so it goes into ANDROID_APK_URL on the server once
-# and every build after this replaces the file behind it. Pushing an update is
+# That address never changes, so it goes into ANDROID_APK_URL on the Cloud Run
+# service once, and every build after this replaces the file behind it. Pushing an update is
 # then just running this workflow again — nothing to upload, nothing to re-point.
 #
 # TO GET SIGNED BUILDS, once, on your own machine:
@@ -35,8 +35,9 @@ on:
   workflow_dispatch:
     inputs:
       app_url:
-        description: "Live TrustFirst URL the app should load (e.g. https://trustfirst.onrender.com)"
+        description: "Live TrustFirst URL the app should load"
         required: true
+        default: "https://trustfirst-project-bt1h.onrender.com"
         type: string
 
 jobs:
@@ -298,5 +299,5 @@ jobs:
             $FLAG
 
           echo
-          echo "Set this on Render as ANDROID_APK_URL:"
+          echo "Set this on the Cloud Run service as ANDROID_APK_URL:"
           echo "https://github.com/${GITHUB_REPOSITORY}/releases/download/android-latest/trustfirst.apk"

@@ -1,0 +1,94 @@
+name: Keep the app warm
+
+# Why this exists: so nobody ever meets Render's "service waking up" page.
+#
+# That page is Render's, not ours, and no code in this repo can suppress it.
+# What it can do is make sure the service is never asleep when somebody knocks.
+# Render spins a free service down after 15 minutes without traffic, so a
+# request every 10 minutes means it never goes idle long enough to stop, and
+# the page never gets a chance to appear.
+#
+# THE QUOTA IS THE WHOLE DESIGN. A free workspace gets 750 instance-hours a
+# month, and spun-down time does not count against them. Running flat out for a
+# 31-day month is 744 hours, which fits — but with six hours to spare, and if
+# the allowance runs out Render SUSPENDS EVERY FREE SERVICE until the 1st.
+# That is a total outage, far worse than the page this is meant to avoid.
+#
+# So there is a gap, and it is made as small as the budget allows:
+#
+#   pings   03:00-00:59 UTC   22 hours a day
+#   asleep  roughly 01:05-03:00 UTC, after the 15-minute idle timeout
+#   usage   about 682 hours a month, leaving ~68 in hand
+#
+# THE GAP IS NOT DOWNTIME. The app answers every request during it. All the gap
+# decides is who pays for the wake-up — this ping, or the first visitor. And a
+# real visitor keeps the instance up for the next 15 minutes just as well as a
+# ping does, so at most one person waits, and only when the app was quiet
+# enough that almost nobody was there to wait.
+#
+# Two hours at 01:00-03:00 UTC is the least-bad slot for an audience that is
+# mostly South African but not only: 03:00-05:00 in Johannesburg, the middle of
+# the night in Europe, and pre-dawn across the Americas. It is the middle of
+# the working day in Asia, which is the cost of the choice. Shift the hours
+# below if the users turn out to sit somewhere else — the shape matters more
+# than the exact slot, and Render's dashboard shows where the hours actually go.
+#
+# ONE FREE SERVICE ONLY. The 750 hours belong to the workspace, not the
+# service. A second free web service running alongside this one halves the
+# budget and both get suspended when it runs out.
+#
+# IF THIS EVER RUNS OUT ANYWAY, that is information, not a bug: it means real
+# traffic is keeping the instance up around the clock on its own, which is 744
+# hours before this file pings anything. An app genuinely busy at every hour
+# has outgrown a 750-hour allowance and needs a host that charges by the
+# request instead — which is what cloudbuild.yaml is already written for.
+#
+# IF THE APP MOVES OFF RENDER, change APP_URL below and drop the gap entirely:
+# on a host that bills per request rather than per hour, an idle instance costs
+# nothing and there is no reason to let it sleep at all.
+
+on:
+  schedule:
+    # Every ten minutes, through every hour except 01:00 and 02:00 UTC.
+    # Times are UTC; South Africa is UTC+2 year round, no daylight saving.
+    - cron: "*/10 0,3-23 * * *"
+  # So it can be fired by hand to check it works, rather than waiting.
+  workflow_dispatch:
+
+# No repository permissions at all. This job reads one public URL and writes
+# nothing, so the token it gets should be able to do nothing either.
+permissions: {}
+
+# A run that overlaps the next one keeps nothing extra warm.
+concurrency:
+  group: keepwarm
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Knock on the door
+        env:
+          APP_URL: https://trustfirst-project-bt1h.onrender.com
+        run: |
+          # /healthz is the cheapest endpoint in the app: no database, no
+          # session, no template. See core/views.py. Falling back to / keeps
+          # this working if it is ever pinged before that deploy lands.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 "$APP_URL/healthz") || code=000
+          if [ "$code" = "404" ]; then
+            echo "No /healthz yet, falling back to /"
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 "$APP_URL/") || code=000
+          fi
+          echo "$APP_URL -> $code"
+
+          # --max-time is generous on purpose. If the service HAS gone cold this
+          # ping is the one paying for the wake-up, which is exactly its job;
+          # cutting it off early would mean never succeeding at it.
+          #
+          # Anything that answers means an instance is running, which is the
+          # goal. A red run here means the app was genuinely unreachable.
+          case "$code" in
+            2*|3*) exit 0 ;;
+            *) echo "::warning::No usable response from $APP_URL (got $code)"; exit 1 ;;
+          esac

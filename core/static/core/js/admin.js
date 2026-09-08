@@ -527,9 +527,9 @@ window.adminEddiePost = async function () {
 // PAYMENTS
 //
 // Registering the webhook is the one setup step that cannot be done from the
-// Yoco dashboard or from Render: it is an authenticated call that has to come
-// from this server with the secret key, and Yoco returns the signing secret
-// only once in reply. So it happens here, on a screen only an admin reaches,
+// Yoco dashboard or from a hosting console: it is an authenticated call that
+// has to come from this server with the secret key, and Yoco returns the
+// signing secret only once in reply. So it happens here, on a screen only an admin reaches,
 // rather than from a browser console on a phone.
 // ============================================================
 async function adminLoadPayments(body) {
@@ -570,7 +570,8 @@ async function adminLoadPayments(body) {
             '<div style="font-size:14px;font-weight:700;color:var(--text-primary,#000);margin-bottom:6px;">Tell Yoco where to send events</div>' +
             '<p style="font-size:12px;color:#888;margin:0 0 12px;line-height:1.5;">' +
                 'Run this once for each mode. Yoco shows the signing secret only once, ' +
-                'so copy it straight into Render. Nothing on this server keeps a copy.' +
+                'so copy it straight into the server\'s environment variables. Nothing ' +
+                'on this server keeps a copy.' +
             '</p>' +
             '<button id="admHookBtn" onclick="adminRegisterYocoWebhook()" style="width:100%;padding:12px;border-radius:12px;border:none;background:#007AFF;color:#fff;font-size:14px;font-weight:800;cursor:pointer;">Register webhook</button>' +
             '<div id="admHookOut" style="display:none;margin-top:12px;"></div>'
@@ -603,7 +604,14 @@ window.adminRegisterYocoWebhook = async function () {
             out.innerHTML =
                 '<div style="background:rgba(52,199,89,0.1);border:1px solid rgba(52,199,89,0.3);border-radius:11px;padding:12px;">' +
                     '<div style="font-size:12px;font-weight:700;color:#34C759;margin-bottom:8px;">Registered for ' + escapeHtml(d.mode || '') + '</div>' +
-                    '<div style="font-size:11px;color:#888;margin-bottom:4px;">Save this in Render as</div>' +
+                    // Shown because the address matters and is not obvious.
+                    // Events go to APP_PUBLIC_URL, not to whatever host this
+                    // screen was opened on, so if that domain is not resolving
+                    // yet every payment will be taken and no wallet credited.
+                    // Better to read the URL here than to find that out later.
+                    '<div style="font-size:11px;color:#888;margin-bottom:4px;">Events will be delivered to</div>' +
+                    '<div style="font-size:11px;font-family:monospace;word-break:break-all;color:var(--text-primary,#000);margin-bottom:10px;">' + escapeHtml(d.url || '') + '</div>' +
+                    '<div style="font-size:11px;color:#888;margin-bottom:4px;">Save this on the server as</div>' +
                     '<div style="font-size:13px;font-weight:800;color:var(--text-primary,#000);margin-bottom:10px;">' + escapeHtml(d.variable || '') + '</div>' +
                     '<div style="font-size:12px;font-family:monospace;word-break:break-all;background:var(--input-bg,#f0f0f0);border-radius:8px;padding:10px;color:var(--text-primary,#000);">' + escapeHtml(d.secret || '') + '</div>' +
                     '<button onclick="adminCopyHookSecret(this)" data-secret="' + escapeHtml(d.secret || '') + '" style="width:100%;margin-top:10px;padding:10px;border-radius:10px;border:none;background:#34C759;color:#fff;font-size:13px;font-weight:800;cursor:pointer;">Copy secret</button>' +
@@ -623,7 +631,7 @@ window.adminCopyHookSecret = function (el) {
     if (!v) return;
     try {
         navigator.clipboard.writeText(v);
-        showToast('Copied. Paste it into Render now.');
+        showToast('Copied. Save it on the server now.');
     } catch (e) {
         showToast('Select the text above and copy it');
     }

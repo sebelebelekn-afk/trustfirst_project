@@ -254,7 +254,12 @@ footer a:hover{color:#fff;}
             address below is fixed and every build replaces the file behind it.
 --------------------------------------------------------------------------- */
 // Where the app actually lives. Every link on this page is built from it, so
-// this is the one line to change if it moves to a domain of its own.
+// this is the one line to change if it moves again.
+//
+// Still the Render address, deliberately. The Cloud Run move is written and
+// ready in this repo, but it needs a card Google will accept, and until that
+// exists pointing this at a domain nobody has mapped would take the whole
+// marketing site down. One line, changed on the day it is true.
 var APP_URL = 'https://trustfirst-project-bt1h.onrender.com';
 
 // The Android build, pointed at straight rather than routed through the app.
@@ -262,10 +267,10 @@ var APP_URL = 'https://trustfirst-project-bt1h.onrender.com';
 // The workflow publishes every build to this one address and it does not change
 // between builds, so the reason to go through the app — that the filename moved
 // each time and links rotted — no longer applies. What is left is a difference
-// that matters: the app sleeps on its free plan and takes the better part of a
-// minute to wake, and a download is the worst moment to make somebody wait.
-// GitHub serves this from a CDN that is always up, so the button works even when
-// the app is cold, and it keeps working if the app is down entirely.
+// that still matters, though less than it did: the app is on a host that scales
+// to zero, so a request that arrives after a quiet spell waits for a container.
+// GitHub serves this from a CDN that is always up, so the download button works
+// even then, and it keeps working if the app is down entirely.
 //
 // It arrives with the right Content-Type for an Android package, which is what
 // makes a phone offer to install it instead of just saving a file, and with a
