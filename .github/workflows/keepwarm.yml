@@ -1,38 +1,43 @@
 name: Keep the app warm
 
-# The reason this file exists.
+# Why this exists: so nobody ever meets Render's "service waking up" page.
 #
-# Cloud Run scales to zero, which is what makes it free, and the cost of that is
-# that the first visitor after a quiet spell waits for a container to start.
-# That wait is a second or two rather than Render's minute-long branded holding
-# page, but it is still a wait, and it is avoidable for nothing.
+# That page is Render's, not ours, and no code in this repo can suppress it.
+# What it can do is make sure the service is never asleep when somebody knocks.
+# Render spins a free service down after 15 minutes without traffic, so a
+# request every 10 minutes means it never goes idle long enough to stop, and
+# the page never gets a chance to appear.
 #
-# Cloud Run bills CPU only while a request is being served. An instance that is
-# alive but idle costs nothing at all. So knocking on the door every ten minutes
-# keeps one instance up permanently and stays inside the free tier: roughly
-# 4,300 requests a month against the two million included, and no CPU beyond the
-# few milliseconds each ping actually takes.
+# THE QUOTA IS THE WHOLE DESIGN. A free workspace gets 750 instance-hours a
+# month, and spun-down time does not count against them. Running flat out for a
+# 31-day month is 744 hours, which fits — but with six hours to spare, and if
+# the allowance runs out Render SUSPENDS EVERY FREE SERVICE until the 1st.
+# That is a total outage, far worse than the page this is meant to avoid.
 #
-# /healthz is deliberately the cheapest endpoint in the app — no database, no
-# session, no template. See core/views.py.
+# So the app is deliberately allowed to sleep in the small hours:
 #
-# EITHER THIS OR CLOUD SCHEDULER, NOT BOTH. Cloud Scheduler is the better of the
-# two: its free tier covers three jobs, it fires on time, and it does not stop
-# because nobody pushed to the repository. GitHub disables scheduled workflows
-# on a repository with no activity for sixty days, and its cron is best-effort —
-# a run can be held back well past ten minutes when the runners are busy. Set up
-# whichever you prefer; the setup notes in cloudbuild.yaml cover Scheduler.
+#   pings   03:00-22:59 UTC   =  05:00-00:59 SAST   20 hours a day
+#   asleep  roughly 01:15-05:00 SAST, after the 15-minute idle timeout
+#   usage   about 620 hours a month, leaving ~130 in hand
 #
-# Nothing here is a secret. The URL is the public address of a public website,
-# so it lives in the file rather than in repository settings where it would be
-# invisible to anyone reading this.
+# The window is built around when South Africans actually use the app: awake
+# through the evening and past midnight, asleep only when almost nobody is
+# there. The 05:00 ping absorbs the cold start itself, so the first real
+# visitor of the morning already finds it running.
+#
+# ONE FREE SERVICE ONLY. The 750 hours belong to the workspace, not the
+# service. A second free web service running alongside this one halves the
+# budget and both get suspended when it runs out.
+#
+# IF THE APP MOVES OFF RENDER, change APP_URL below and widen the window: on a
+# host that bills per request rather than per hour, there is no reason to let
+# it sleep at all.
 
 on:
   schedule:
-    # Every ten minutes. Cloud Run keeps an idle instance for roughly fifteen
-    # before reclaiming it, so this leaves margin for a late run without
-    # pinging so often that it looks like traffic.
-    - cron: "*/10 * * * *"
+    # Every ten minutes, but only through the hours above. Times are UTC;
+    # South Africa is UTC+2 year round, with no daylight saving to track.
+    - cron: "*/10 3-22 * * *"
   # So it can be fired by hand to check it works, rather than waiting.
   workflow_dispatch:
 
@@ -51,18 +56,25 @@ jobs:
     steps:
       - name: Knock on the door
         env:
-          APP_URL: https://app.gettrustfirst.co.za
+          APP_URL: https://trustfirst-project-bt1h.onrender.com
         run: |
-          # --max-time is generous on purpose: if the instance HAS gone cold,
-          # this ping is the cold start, and cutting it off early would mean
-          # never succeeding at the one thing this job is for.
-          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 60 "$APP_URL/healthz") || code=000
-          echo "$APP_URL/healthz -> $code"
+          # /healthz is the cheapest endpoint in the app: no database, no
+          # session, no template. See core/views.py. Falling back to / keeps
+          # this working if it is ever pinged before that deploy lands.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 "$APP_URL/healthz") || code=000
+          if [ "$code" = "404" ]; then
+            echo "No /healthz yet, falling back to /"
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 "$APP_URL/") || code=000
+          fi
+          echo "$APP_URL -> $code"
 
-          # Anything that answers has an instance running, which is the goal.
-          # The job only fails when nothing answered at all, so a red run here
-          # means the app is genuinely unreachable and is worth looking at.
+          # --max-time is generous on purpose. If the service HAS gone cold this
+          # ping is the one paying for the wake-up, which is exactly its job;
+          # cutting it off early would mean never succeeding at it.
+          #
+          # Anything that answers means an instance is running, which is the
+          # goal. A red run here means the app was genuinely unreachable.
           case "$code" in
             2*|3*) exit 0 ;;
-            *) echo "::warning::No usable response from $APP_URL/healthz (got $code)"; exit 1 ;;
+            *) echo "::warning::No usable response from $APP_URL (got $code)"; exit 1 ;;
           esac

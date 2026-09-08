@@ -256,10 +256,11 @@ footer a:hover{color:#fff;}
 // Where the app actually lives. Every link on this page is built from it, so
 // this is the one line to change if it moves again.
 //
-// It has its own domain now rather than a hosting provider's address, which is
-// the point: the app moved off Render to Cloud Run and this line was the only
-// thing on this page that had to know. The next move will not need even that.
-var APP_URL = 'https://app.gettrustfirst.co.za';
+// Still the Render address, deliberately. The Cloud Run move is written and
+// ready in this repo, but it needs a card Google will accept, and until that
+// exists pointing this at a domain nobody has mapped would take the whole
+// marketing site down. One line, changed on the day it is true.
+var APP_URL = 'https://trustfirst-project-bt1h.onrender.com';
 
 // The Android build, pointed at straight rather than routed through the app.
 //

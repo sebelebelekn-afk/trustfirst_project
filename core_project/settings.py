@@ -39,11 +39,9 @@ if APP_PUBLIC_URL:
     if _public_host:
         _allowed.append(_public_host)
 
-# The old host, kept only so a rollback to Render still boots.
-#
-# Render set this by itself, which is why it was read here at all. Nothing sets
-# it on Cloud Run, so this is dead weight on the new host and costs nothing;
-# delete it once the Render service is torn down.
+# Render sets this by itself, which is why it is read here at all, and Render is
+# still where the app runs. Nothing sets it on Cloud Run, so it costs nothing
+# there either; delete it only once the Render service is actually torn down.
 _render_host = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
 if _render_host:
     _allowed.append(_render_host)

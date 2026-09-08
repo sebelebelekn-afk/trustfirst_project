@@ -4,6 +4,11 @@
 # the repository directly, so there is no service account key sitting in a
 # GitHub secret waiting to leak. Nothing here is a credential.
 #
+# NOT IN USE YET. This is written, tested and ready, and nothing runs it: Cloud
+# Run needs a billing account, and Google would not accept a card. Until that
+# changes the app stays on Render and the waking-up page is avoided by keeping
+# the instance from ever sleeping — see .github/workflows/keepwarm.yml.
+#
 # ONE-TIME SETUP, in the Google Cloud console:
 #
 #   1. Create a project, and enable billing on it. Cloud Run's free tier is
@@ -64,8 +69,12 @@
 #        frequency: */10 * * * *      target: HTTP
 #        URL: https://app.gettrustfirst.co.za/healthz      method: GET
 #
-#      .github/workflows/keepwarm.yml does the same thing from GitHub Actions
-#      if you would rather not set up Scheduler. Use one or the other, not both.
+#      .github/workflows/keepwarm.yml already does this from GitHub Actions, but
+#      it is pointed at Render, which is where the app still runs. Repoint its
+#      APP_URL when you cut over, and widen its schedule while you are there:
+#      the narrow window exists only because Render bills free usage by the hour
+#      and suspends everything when the 750 run out. Cloud Run bills per request,
+#      so there is no reason to let it sleep at all.
 #
 # After that, pushing to main builds and deploys itself, the same way the
 # landing site already does.

@@ -5,12 +5,13 @@
 # here instead, which is the point: the same image runs on Cloud Run, on a
 # plain server, or on anything else, and moving host again later costs nothing.
 #
-# Moving was not a preference. Render's free tier stops the instance when it is
-# idle and serves its own branded "service waking up" page to whoever knocks
-# first, for the thirty to sixty seconds it takes to start. That page is Render's,
-# not this app's, and no amount of code here can suppress it. Cloud Run also
-# scales to zero, but a cold request simply waits a second or two for the
-# container: Google never puts a page of its own in front of the app.
+# Not in use yet, and kept anyway. Render's free tier stops the instance when it
+# is idle and serves its own branded "service waking up" page to whoever knocks
+# first — that page is Render's, not this app's, and no amount of code here can
+# suppress it. Cloud Run also scales to zero but never puts a page of its own in
+# front of the app, so that is where this is going the day Google accepts a card.
+# Until then the page is avoided a cheaper way: see .github/workflows/keepwarm.yml,
+# which keeps the Render instance from ever being asleep when somebody knocks.
 #
 # Python 3.12 rather than 3.13: Django 4.2 supports 3.12, and every wheel this
 # project needs (cryptography, pillow, psycopg2) is published for it. Chasing a

@@ -37,7 +37,7 @@ on:
       app_url:
         description: "Live TrustFirst URL the app should load"
         required: true
-        default: "https://app.gettrustfirst.co.za"
+        default: "https://trustfirst-project-bt1h.onrender.com"
         type: string
 
 jobs:

@@ -1836,9 +1836,9 @@ def wallet_register_yoco_webhook(request):
         'secret': secret,
         'variable': ('YOCO_LIVE_WEBHOOK_SECRET' if settings.YOCO_MODE == 'live'
                      else 'YOCO_TEST_WEBHOOK_SECRET'),
-        'note': 'Yoco shows this secret once. Save it on the Cloud Run service '
-                'under the variable named above, then redeploy or restart. It is '
-                'not stored on this server.',
+        'note': 'Yoco shows this secret once. Save it in the server\'s environment '
+                'variables under the name above, then restart. It is not stored '
+                'on this server.',
     })
 
 
