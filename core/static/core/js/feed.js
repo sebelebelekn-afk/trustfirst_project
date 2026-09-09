@@ -19329,7 +19329,17 @@ const DeviceTrustManager = {
 
     async revokeDevice(deviceId) {
         var _self = this;
-        _showConfirmModal('Remove Device', "You'll need to log in again on that device.", function() { _self._doRevokeDevice(deviceId); });
+        // The old wording promised "You'll need to log in again on that device",
+        // which was not true and is a bad thing to be untrue on a security
+        // screen. This deletes the row from trusted_devices; it does not touch
+        // that device's session, because Supabase's client SDK can end this
+        // session, all other sessions, or all of them — never one named other
+        // one. Somebody removing a device they do not recognise wants it gone,
+        // so say which button actually does that.
+        _showConfirmModal(
+            'Remove device',
+            'This forgets the device, so it has to be trusted again. It does not sign it out — use "Sign out other devices" for that.',
+            function() { _self._doRevokeDevice(deviceId); });
     },
     async _doRevokeDevice(deviceId) {
 
@@ -19407,6 +19417,54 @@ const DeviceTrustManager = {
     // ==========================================================================
 // BLOCK 3C: RENDER SECURITY PAGE WITH DEVICE LIST
 // ==========================================================================
+
+// Kick everybody else out, without changing the password.
+//
+// The other half of the password-change fix. Somebody who thinks a session has
+// been taken should not have to change a password they still like just to end
+// it, and after a break-in the intruder's session is the thing that has to go
+// first — a new password does nothing on its own if the old session survives.
+//
+// scope 'others' rather than 'global': this device stays signed in, everything
+// else is gone. A person doing this on their phone should not be logged out of
+// the phone in their hand for their trouble.
+window.tfSignOutOtherDevices = function () {
+    _showConfirmModal(
+        'Sign out other devices',
+        'Every device except this one will be signed out. You stay signed in here.',
+        async function () {
+            try {
+                await waitForSb();
+                const r = await window.sb.auth.signOut({ scope: 'others' });
+                if (r && r.error) { showToast('Could not sign the other devices out. Try again.'); return; }
+
+                // trusted_devices is this app's own list and Supabase knows
+                // nothing about it, so ending the sessions leaves every one of
+                // those devices still marked trusted — and trusted is what lets
+                // a device back in without being checked again. Forget them
+                // too, or signing out is undone by the next sign-in.
+                try {
+                    const session = await DB.getSession();
+                    const current = await DeviceTrustManager.getCurrentDevice();
+                    const devices = session ? await DB.getUserDevices(session.user.id) : [];
+                    for (const d of devices) {
+                        if (!current || d.id !== current.id) await DB.removeDevice(d.id);
+                    }
+                } catch (e) {
+                    // The sessions are already gone, which is the part that
+                    // matters. A stale row in a list is not worth an error.
+                    console.warn('[Security] could not prune trusted devices:', e && e.message);
+                }
+
+                triggerHaptic(30);
+                showToast('Every other device has been signed out.');
+                renderSecurityPage();
+            } catch (e) {
+                showToast('Could not sign the other devices out. Try again.');
+            }
+        }
+    );
+};
 
 async function renderSecurityPage() {
     try {
