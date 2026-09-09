@@ -12951,13 +12951,24 @@ async function sendViewerGift(emoji, name, cost) {
     if (!window.sb || !currentUser) return;
     var sheet = document.getElementById('viewer-gift-sheet');
     var host = window._liveHostId || null;
+    // No host, no gift. This used to fall back to spend_coins so the gift
+    // "still goes through rather than failing outright", which sounds generous
+    // and is the worst of the three possible outcomes: spend_coins subtracts
+    // the sender's coins, credits nobody, and writes no platform_revenue row.
+    // The viewer pays, no creator is paid, and afterwards there is nothing
+    // recording who should have been. A refusal costs somebody one tap; that
+    // fallback cost them their coins and left no way to put it right.
+    if (!host) {
+        showToast('Cannot send that gift yet — still connecting to the stream.');
+        return;
+    }
+
     try {
         // send_gift charges the sender, pays the creator their 80% and records
-        // TrustFirst's 20%. If the host somehow isn't known, fall back to a plain
-        // spend so the gift still goes through rather than failing outright.
-        var r = host
-            ? await sb.rpc('send_gift', { p_creator_id: host, p_amount: cost, p_reason: 'gift:' + (name || emoji) })
-            : await sb.rpc('spend_coins', { p_amount: cost, p_reason: 'gift:' + (name || emoji) });
+        // TrustFirst's 20%, all in one transaction that cannot half-happen.
+        var r = await sb.rpc('send_gift', {
+            p_creator_id: host, p_amount: cost, p_reason: 'gift:' + (name || emoji)
+        });
         if (r.error) {
             var m = (r.error.message || '');
             // A gift has to be a whole multiple of five coins, because a fifth
