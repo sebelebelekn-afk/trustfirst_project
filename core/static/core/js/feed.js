@@ -190,6 +190,21 @@ function isSleepModeActive() {
     return nowMins >= bed && nowMins < wake;
 }
 
+// Five places call toast(message, kind) — contact sync, account deletion,
+// analytics, and until this commit the password screen. It was never defined
+// anywhere: the only `toast` identifiers in this file are local variables
+// inside other functions, holding a DOM node. So each of those calls threw a
+// ReferenceError and the message somebody was meant to read never appeared,
+// which is how "contact sync failed" and "deletion failed" both became buttons
+// that did nothing at all.
+//
+// One alias rather than five edits. The second argument is a severity that
+// showToast has no styling for, so it is accepted and ignored rather than
+// making every caller change.
+function toast(message, kind) {
+    return showToast(message);
+}
+
 function showToast(message, duration = 3000) {
     // Strip emojis/symbols from toasts for a clean, professional look (no caller changes needed)
     try {
@@ -51589,19 +51604,89 @@ async function clearAllOfflineVideos() {
 }
 
 
+// Changing a password is the thing somebody does when they think they have been
+// hacked, so it has to do all three parts of that job, and it was doing none of
+// them.
+//
+//   1. Every message here called toast(), which does not exist. There is no
+//      global toast in this codebase — only local variables of that name inside
+//      other functions — so every branch threw a ReferenceError inside an async
+//      function, which becomes a rejected promise nobody is listening to. Leave
+//      a field blank, mistype the confirmation, choose a weak password: the
+//      button did nothing at all, silently.
+//
+//   2. The Current Password box was read into a variable, checked for being
+//      non-empty, and then never used again. updateUser does not verify it. So
+//      anybody who got hold of a signed-in session — a borrowed phone, a stolen
+//      laptop — could change the password without knowing the old one, and lock
+//      the real owner out of their own account.
+//
+//   3. Nothing ended the other sessions. Supabase's own documentation says a
+//      session ends on a password change "depending on configuration", which is
+//      not something to leave to a setting nobody in this repository can see.
+//      Without it, changing the password after a break-in reassures the victim
+//      and leaves the intruder signed in, which is worse than doing nothing,
+//      because now they think they are safe.
 async function changePassword() {
-  const current = document.querySelector('#change-password-overlay input[placeholder="Current Password"]').value;
-  const newPass = document.querySelector('#change-password-overlay input[placeholder="New Password"]').value;
-  const confirm = document.querySelector('#change-password-overlay input[placeholder="Confirm New Password"]').value;
+  const overlay = document.getElementById('change-password-overlay');
+  const field = function (placeholder) {
+    const el = overlay && overlay.querySelector('input[placeholder="' + placeholder + '"]');
+    return el ? el.value : '';
+  };
+  const current = field('Current Password');
+  const newPass = field('New Password');
+  const confirm = field('Confirm New Password');
 
-  if (!current || !newPass || !confirm) { toast('Fill in all fields.', 'error'); return; }
-  if (newPass !== confirm) { toast('Passwords do not match.', 'error'); return; }
-  if (!isStrongPassword(newPass)) { toast('Password must be longer and include numbers & symbols.', 'error'); return; }
+  if (!current || !newPass || !confirm) { showToast('Fill in all three boxes.'); return; }
+  if (newPass !== confirm) { showToast('Those two passwords do not match.'); return; }
+  if (newPass === current) { showToast('That is already your password.'); return; }
+  if (!isStrongPassword(newPass)) { showToast('Use a longer password, with numbers and symbols.'); return; }
 
   await waitForSb();
-  const { error } = await window.sb.auth.updateUser({ password: newPass });
-  if (error) { toast('Error: ' + error.message, 'error'); return; }
-  showToast('Password updated.');
+
+  const who = await window.sb.auth.getUser();
+  const user = who && who.data && who.data.user;
+  if (!user) { showToast('Sign in again, then change your password.'); return; }
+
+  // Prove they know the current one, by signing in with it.
+  //
+  // Supabase has no "check this password" call, so the way to find out is to
+  // use it. This account may have been created with a phone number rather than
+  // an email, and either can be the identifier.
+  const creds = user.email ? { email: user.email, password: current }
+              : user.phone ? { phone: user.phone, password: current }
+              : null;
+  if (!creds) { showToast('This account has no email or number to check against.'); return; }
+
+  showToast('Checking…');
+  const reauth = await window.sb.auth.signInWithPassword(creds);
+  if (reauth.error) { showToast('That is not your current password.'); return; }
+
+  const upd = await window.sb.auth.updateUser({ password: newPass });
+  if (upd.error) { showToast(upd.error.message || 'Could not change your password.'); return; }
+
+  // Everywhere else is signed out. 'others' and not 'global', so the person
+  // who just did this stays signed in here and anybody else is gone — which is
+  // the whole point on a stolen phone.
+  let othersEnded = true;
+  try {
+    const so = await window.sb.auth.signOut({ scope: 'others' });
+    if (so && so.error) othersEnded = false;
+  } catch (e) { othersEnded = false; }
+
+  // For the Security screen, so somebody can see when this last happened.
+  // Best effort: a failed note must never look like a failed password change.
+  try {
+    await window.sb.from('users')
+      .update({ password_changed_at: new Date().toISOString() })
+      .eq('id', user.id);
+  } catch (e) {}
+
+  // Said plainly either way. If the other sessions survived, the person needs
+  // to know that rather than be told they are safe.
+  showToast(othersEnded
+    ? 'Password changed. Every other device has been signed out.'
+    : 'Password changed, but other devices may still be signed in. Freeze your account if you are worried.');
   closePage('change-password-overlay');
 }
 
