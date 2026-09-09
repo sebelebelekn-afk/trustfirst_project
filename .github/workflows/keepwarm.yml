@@ -1,5 +1,18 @@
 name: Keep the app warm
 
+# BACKUP ONLY. The real one is pg_cron, in supabase/keep_warm.sql.
+#
+# This was the first attempt and it does not work well enough alone. GitHub's
+# scheduled runs are best-effort: this workflow's hourly schedule actually
+# fired at 17:34, 20:28, 23:03 and 02:06 — every two and a half to three hours,
+# leaving holes of 90 to 120 minutes. Render spins down after 15, so the app
+# was asleep through most of every gap, which is the exact problem it was
+# written to solve. Making each run loop for 70 minutes helped and did not
+# close holes that long.
+#
+# It is kept because a public repository costs no Actions minutes and a second
+# pinger is free redundancy if pg_net ever stops silently. Do not rely on it.
+#
 # Why this exists: so nobody ever meets Render's "service waking up" page.
 #
 # That page is Render's, not ours, and no code in this repo can suppress it.
