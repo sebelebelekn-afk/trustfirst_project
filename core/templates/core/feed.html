@@ -2182,6 +2182,22 @@ function authenticateUser() {
         <div class="settings-section-title">DEVICES</div>
         <div class="settings-card" id="devices-list"></div>
 
+        <!-- The one control that actually ends a session somewhere else.
+             Removing a device above only forgets it; this signs it out. -->
+        <div class="settings-card" style="margin-top:10px;">
+            <div class="settings-row" onclick="tfSignOutOtherDevices()" style="cursor:pointer;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <i class="fa-solid fa-right-from-bracket" style="color:#FF3B30;width:20px;text-align:center;"></i>
+                    <div>
+                        <b style="font-size:14px;color:#FF3B30;">Sign out other devices</b>
+                        <p style="color:#888;font-size:12px;margin-top:3px;line-height:1.4;">
+                            Ends every session except this one. Use this if you think somebody else is signed in.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="settings-section-title">SIGN IN</div>
         <div class="settings-card">
             <div class="two-step-option">
