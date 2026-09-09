@@ -19478,36 +19478,91 @@ async function renderSecurityPage() {
         // Reflect saved two-step verification state (never fake-on).
         if (typeof _restore2FAToggles === 'function') _restore2FAToggles();
 
-        // Render security alerts
+        // What is actually true about this account.
+        //
+        // These two cards used to be written out unconditionally: "Account
+        // Secure — No suspicious activity" and "Identity Verified — Identity
+        // verification completed", shown to everybody regardless of anything.
+        // A screen whose job is to tell somebody whether they are safe, telling
+        // everybody they are safe, is not a security screen. It is a picture of
+        // one, and it is worse than nothing, because a person who came here
+        // worried reads it and stops looking.
+        //
+        // The device count was wrong in the same direction. It said
+        // "${devices.length} device(s) trusted" using the length of the whole
+        // list, when most of the rows in that table are is_trusted = false. It
+        // was reporting every device somebody had ever signed in from as
+        // trusted.
+        //
+        // Everything below is read from the same tables the rest of this screen
+        // already reads, so nothing new has to be collected to tell the truth.
         const alertsDiv = document.getElementById('security-alerts');
         if (alertsDiv) {
             const devices = await DB.getUserDevices(session.user.id);
-            const currentDevice = await DeviceTrustManager.getCurrentDevice();
+            const untrusted = devices.filter(d => !d.is_trusted).length;
 
-            alertsDiv.innerHTML = `
+            // Failed sign-ins, which is the signal somebody worried about being
+            // hacked actually came here to look for.
+            let failed = 0, activityKnown = true;
+            try {
+                const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
+                const activity = await DB.getLoginActivity(session.user.id, 100);
+                failed = activity.filter(a =>
+                    a.status && a.status !== 'success' &&
+                    new Date(a.created_at).getTime() >= since).length;
+            } catch (e) { activityKnown = false; }
+
+            // Verification, from the flags a review actually writes. These are
+            // the same ones the trigger in supabase/guard_user_flags.sql stops
+            // people awarding themselves, so what is shown here means something.
+            const u = currentUser || {};
+            const idDone = !!(u.verified || u.id_verified || u.badge_status === 'verified');
+            const liveDone = !!u.liveness_verified;
+
+            const card = (tone, icon, title, detail) => {
+                const colour = tone === 'good' ? '#34C759' : tone === 'warn' ? '#FF9500' : '#8E8E93';
+                return `
                 <div class="security-alert">
-                    <div class="security-alert-icon" style="background:rgba(52,199,89,0.15); color:#34C759;">
-                        <i class="fa-solid fa-check"></i>
+                    <div class="security-alert-icon" style="background:${colour}26; color:${colour};">
+                        <i class="fa-solid ${icon}"></i>
                     </div>
                     <div>
-                        <b style="font-size:14px;">Account Secure</b>
-                        <p style="color:#888; font-size:13px; margin-top:3px;">
-                            No suspicious activity. ${devices.length} device(s) trusted.
-                        </p>
+                        <b style="font-size:14px;">${title}</b>
+                        <p style="color:#888; font-size:13px; margin-top:3px;">${detail}</p>
                     </div>
-                </div>
-                <div class="security-alert">
-                    <div class="security-alert-icon" style="background:rgba(0,122,255,0.15); color:#007AFF;">
-                        <i class="fa-solid fa-shield-halved"></i>
-                    </div>
-                    <div>
-                        <b style="font-size:14px;">Identity Verified</b>
-                        <p style="color:#888; font-size:13px; margin-top:3px;">
-                            Identity verification completed
-                        </p>
-                    </div>
-                </div>
-            `;
+                </div>`;
+            };
+
+            const cards = [];
+
+            if (!activityKnown) {
+                cards.push(card('idle', 'fa-question', 'Sign-in history unavailable',
+                    'Could not check recent sign-ins just now.'));
+            } else if (failed > 0) {
+                cards.push(card('warn', 'fa-triangle-exclamation', 'Failed sign-in attempts',
+                    `${failed} failed attempt${failed === 1 ? '' : 's'} in the last 30 days. ` +
+                    'If none of them were you, change your password.'));
+            } else {
+                cards.push(card('good', 'fa-check', 'No failed sign-ins',
+                    'Nothing has been refused on this account in the last 30 days.'));
+            }
+
+            if (untrusted > 0) {
+                cards.push(card('warn', 'fa-mobile-screen', 'Devices you have not confirmed',
+                    `${untrusted} of ${devices.length} device${devices.length === 1 ? '' : 's'} ` +
+                    'below are not marked trusted. Remove any you do not recognise.'));
+            } else {
+                cards.push(card('good', 'fa-mobile-screen', 'All devices confirmed',
+                    `${devices.length} device${devices.length === 1 ? '' : 's'}, all trusted by you.`));
+            }
+
+            cards.push(idDone
+                ? card('good', 'fa-shield-halved', 'Identity verified',
+                    liveDone ? 'ID and liveness both checked.' : 'ID checked.')
+                : card('idle', 'fa-shield-halved', 'Identity not verified',
+                    'Verifying gets you a badge and raises your limits.'));
+
+            alertsDiv.innerHTML = cards.join('');
         }
 
         // Render devices list
