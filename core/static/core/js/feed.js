@@ -18851,66 +18851,57 @@ E2E.init().then(() => console.debug('[E2E] Encryption ready'));
 // ==========================================================================
 
 const DeviceFingerprint = {
+    // A remembered device is one that kept a token, not one we recognised.
+    //
+    // This used to hash what the browser could be measured for: screen size,
+    // CPU cores, device memory, a canvas drawing, the WebGL renderer string.
+    // That is textbook browser fingerprinting, and it failed for the same
+    // reason fingerprinting is supposed to fail — browsers now defend against
+    // it. Firefox randomises canvas readback per session as an anti-tracking
+    // measure, so every visit produced a different hash. The result, on this
+    // database: one person's Firefox on Windows recorded as 42 separate
+    // devices across three months, 42 distinct fingerprints for one browser on
+    // one machine. Chrome added six more, mostly from plugging in a monitor:
+    // screen.width was in the hash, so a second screen made a new device.
+    //
+    // The write was never the problem. DB.registerDevice already upserts on
+    // (user_id, device_fingerprint), so a stable value gives one row and
+    // updates it. It was the value that would not hold still.
+    //
+    // So the device keeps a random id instead. It survives sessions, it is the
+    // same on every visit, it identifies nothing about the machine, and it is
+    // what "remember this device" has always actually meant. Clearing site
+    // data makes the device look new and it has to be trusted again, which is
+    // the correct answer to somebody having wiped the browser.
+    //
+    // Everyone's existing devices become unrecognised once, and have to be
+    // trusted again. That is a one-off, and the list it replaces was 53 rows
+    // of the same four machines.
     async generate() {
-        const components = [];
-
-        // Screen
-        components.push(`${screen.width}x${screen.height}x${screen.colorDepth}`);
-
-        // Timezone
-        components.push(Intl.DateTimeFormat().resolvedOptions().timeZone);
-
-        // Language
-        components.push(navigator.language);
-
-        // Platform
-        components.push(navigator.platform);
-
-        // Hardware concurrency (CPU cores)
-        components.push(navigator.hardwareConcurrency || 'unknown');
-
-        // Device memory
-        components.push(navigator.deviceMemory || 'unknown');
-
-        // Touch support
-        components.push('ontouchstart' in window ? 'touch' : 'no-touch');
-
-        // Canvas fingerprint
+        const KEY = 'tf_device_id';
         try {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = 200;
-            canvas.height = 50;
-            ctx.textBaseline = 'top';
-            ctx.font = '14px Arial';
-            ctx.fillStyle = '#f60';
-            ctx.fillRect(0, 0, 200, 50);
-            ctx.fillStyle = '#069';
-            ctx.fillText('TrustFirst:fingerprint', 2, 15);
-            ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
-            ctx.fillText('TrustFirst:fingerprint', 4, 17);
-            components.push(canvas.toDataURL().slice(-50));
-        } catch (e) {
-            components.push('canvas-blocked');
-        }
-
-        // WebGL renderer
-        try {
-            const gl = document.createElement('canvas').getContext('webgl');
-            if (gl) {
-                const dbg = gl.getExtension('WEBGL_debug_renderer_info');
-                if (dbg) {
-                    components.push(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL));
-                }
+            let id = localStorage.getItem(KEY);
+            if (!id) {
+                id = (crypto.randomUUID && crypto.randomUUID()) ||
+                     (Date.now().toString(36) + Math.random().toString(36).slice(2, 12));
+                localStorage.setItem(KEY, id);
             }
+            return await this.sha256('tf-device-v2|' + id);
         } catch (e) {
-            components.push('webgl-blocked');
+            // Private browsing, or storage refused. Fall back to the traits
+            // that genuinely do not move — no canvas, no WebGL, no screen size,
+            // none of the things browsers deliberately vary. Two of somebody's
+            // own devices could collide here, which would let one inherit the
+            // other's trusted mark; that is a worse answer than the token above
+            // and a much better one than a new row every time the page loads.
+            const stable = [
+                navigator.platform || 'unknown',
+                navigator.language || 'unknown',
+                (Intl.DateTimeFormat().resolvedOptions().timeZone) || 'unknown',
+                ('ontouchstart' in window) ? 'touch' : 'no-touch',
+            ];
+            return await this.sha256('tf-device-v2-nostore|' + stable.join('|||'));
         }
-
-        // Generate hash from all components
-        const raw = components.join('|||');
-        const hash = await this.sha256(raw);
-        return hash;
     },
 
     async sha256(message) {
