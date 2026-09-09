@@ -104,6 +104,15 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Turns a throttled request into 429 JSON instead of Django's 403 HTML page.
+    #
+    # Setting RATELIMIT_VIEW alone does nothing: this middleware is the only
+    # thing that reads it. Without it, Ratelimited — which subclasses
+    # PermissionDenied — falls through to Django's own 403 handler, and a caller
+    # that only parses JSON gets an HTML page and no usable reason. Last in the
+    # list because process_exception runs bottom-up, so this sees the exception
+    # before anything else can turn it into something less specific.
+    'django_ratelimit.middleware.RatelimitMiddleware',
 ]
 
 ROOT_URLCONF = 'core_project.urls'
@@ -489,18 +498,53 @@ SECURE_HSTS_PRELOAD             = True
 # ------------------------------------------------------------------
 # CACHE  (Redis in prod, local memory in dev)
 # ------------------------------------------------------------------
+# Redis where there is one, and in-process memory where there is not.
+#
+# It used to be Redis or DummyCache, and DummyCache is not a cache: it accepts
+# every write and returns nothing, so django-ratelimit counted every caller as
+# being on their first request forever. RATELIMIT_ENABLE was therefore tied to
+# REDIS_URL, and since a free host has no Redis, every rate limit in this
+# codebase was switched off — including the ones on the endpoints that open
+# card payments, sign uploads and attempt logins. Decorators that read as
+# protection while doing nothing are worse than no decorators, because nobody
+# reads them twice.
+#
+# LocMemCache is a real cache. It is per-process, which is exactly right for how
+# this app is actually served: gunicorn runs one worker with eight threads (see
+# the Dockerfile), so one process handles every request and all eight threads
+# share these counters.
+#
+# WHAT IT DOES NOT DO. It is not shared between instances, so if this is ever
+# scaled beyond one, each gets its own counters and the effective limit
+# multiplies by the instance count. It also empties on restart, so a deploy
+# forgives everyone mid-window. Both are acceptable for throttling and neither
+# is acceptable for anything that has to be exactly right — nothing here counts
+# money, which is settled in Postgres by tf_wallet_settle_deposit. Set REDIS_URL
+# and both caveats disappear.
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/1"),
     } if os.environ.get("REDIS_URL") else {
-        "BACKEND": "django.core.cache.backends.dummy.DummyCache",
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        # Named, because an unnamed LocMemCache shares one store with every
+        # other unnamed one in the process.
+        "LOCATION": "trustfirst-throttle",
+        # A counter per caller per window, each tiny and short-lived. This
+        # bounds the memory a flood of distinct IPs can cost us; the oldest
+        # entries are dropped, which fails open for whoever has been quiet
+        # longest rather than for whoever is hammering hardest.
+        "OPTIONS": {"MAX_ENTRIES": 20000, "CULL_FREQUENCY": 4},
     }
 }
 
-# Rate limiting is only meaningful in production where Redis is shared across workers.
-# In local dev (no REDIS_URL), disable it so the dummy cache doesn't trigger errors.
-RATELIMIT_ENABLE = bool(os.environ.get("REDIS_URL"))
+# On everywhere, rather than only where Redis happens to exist. The escape
+# hatch is explicit so that turning throttling off is a decision somebody made
+# and can be seen to have made, not a side effect of the host being cheap.
+RATELIMIT_ENABLE = os.environ.get("RATELIMIT_ENABLE", "True") == "True"
+
+# Without this a throttled caller gets Django's 403 HTML page. See the view.
+RATELIMIT_VIEW = "core.views.ratelimited"
 
 # ------------------------------------------------------------------
 # CONTENT SECURITY POLICY

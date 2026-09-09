@@ -95,3 +95,20 @@ def healthz(request):
     # cached ping keeps nothing warm, which is the one thing it is for.
     resp['Cache-Control'] = 'no-store'
     return resp
+
+
+def ratelimited(request, exception):
+    """What a caller sees when they have gone too fast.
+
+    django-ratelimit raises Ratelimited, and Django turns an unhandled one into
+    403 Forbidden with an HTML error page. Both halves of that are wrong here.
+    403 tells a client it is not allowed to do this at all, when the truth is
+    "not this often" — the one status that says so, and that every HTTP client
+    already knows to back off on, is 429. And an HTML body reaches a caller that
+    asked for JSON and only ever parses JSON, so the app would fall back to a
+    generic "could not" message instead of the real reason.
+    """
+    return JsonResponse(
+        {'error': 'Too many requests. Wait a moment and try again.'},
+        status=429,
+    )
