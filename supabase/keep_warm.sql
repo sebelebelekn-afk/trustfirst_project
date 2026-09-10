@@ -29,7 +29,7 @@
 -- this is the one doing the work.
 --
 --
--- WHY IT SLEEPS AT ALL
+-- WHY IT SLEEPS AT ALL, AND WHY THESE PARTICULAR HOURS
 --
 -- Render allows 750 free instance-hours a month per workspace, and spun-down
 -- time does not count against them. Running around the clock is 744 hours in a
@@ -37,16 +37,41 @@
 -- out suspends every free service until the 1st — a total outage, far worse
 -- than one slow request.
 --
--- Skipping 01:00-03:59 UTC costs about 656 hours a month and leaves 94 in hand.
--- The instance spins down around 01:10 UTC and is woken by the 04:00 ping, so
--- the gap is 03:10-06:00 in Johannesburg, which is the quietest slot available
--- for an audience that is mostly South African. During it the app still answers
--- every request; the first visitor simply pays for the wake-up instead of this
--- job, and any real visitor keeps it open for the next 15 minutes just as well.
+-- So something has to sleep, and the hours were guessed the first time. They
+-- were wrong: the window ran to 06:00 in Johannesburg and somebody using the
+-- app at 04:00 met the waking-up page, which is the exact thing this exists to
+-- prevent.
+--
+-- They are no longer guessed. Grouping login_activity and trusted_devices by
+-- hour of the day in Johannesburg time gives the real shape, and it is busy
+-- almost everywhere: peaks at 14:00 and 21:00, real traffic through the
+-- evening, and something happening in nearly every hour of the night. The only
+-- two consecutive hours with no recorded activity at all are 05:00 and 06:00.
+--
+-- So that is the window, and only that:
+--
+--   pings   05:00-02:55 UTC every 5 minutes, plus one at 04:45
+--   asleep  roughly 03:10-04:45 UTC  =  05:10-06:45 SAST
+--   usage   about 695 hours a month, leaving ~55 in hand
+--
+-- The 04:45 ping is a second job on purpose. Without it the first knock would
+-- land at 05:00 UTC, which is 07:00 SAST — the hour activity picks back up —
+-- and the first person of the morning would pay for the wake-up instead of the
+-- scheduler. Waking fifteen minutes early costs nothing and moves that cost off
+-- a person.
+--
+-- Re-check this if usage changes. The query behind it:
+--
+--   select extract(hour from (created_at at time zone 'Africa/Johannesburg')) as h,
+--          count(*) from public.login_activity group by h order by h;
 --
 -- ONE FREE SERVICE ONLY: the 750 hours belong to the workspace, not the
 -- service. A second free web service halves the budget and both get suspended.
 --
+-- AND IF THERE IS EVER NO QUIET HOUR, this stops working and no schedule will
+-- save it: an app busy around the clock needs 744 hours and has six to spare,
+-- which is not a thing to run a business on. That is the point to leave the
+-- free tier, and cloudbuild.yaml is already written for it.
 --
 -- IF THE APP MOVES OFF RENDER
 --
@@ -60,7 +85,7 @@ select cron.unschedule('keep-trustfirst-warm')
 
 select cron.schedule(
   'keep-trustfirst-warm',
-  '*/5 0,4-23 * * *',
+  '*/5 0-2,5-23 * * *',
   -- /healthz is the cheapest endpoint in the app: no database, no session, no
   -- template. See core/views.py.
   --
@@ -76,6 +101,23 @@ select cron.schedule(
       timeout_milliseconds => 60000
     )$$
 );
+
+
+-- The early knock, fifteen minutes before the main schedule resumes, so the
+-- instance is already up when Johannesburg starts its day rather than the first
+-- visitor paying for it. Separate job because pg_cron takes one schedule each.
+select cron.unschedule('keep-trustfirst-warm-predawn')
+ where exists (select 1 from cron.job where jobname = 'keep-trustfirst-warm-predawn');
+
+select cron.schedule(
+  'keep-trustfirst-warm-predawn',
+  '45 4 * * *',
+  $$select net.http_get(
+      'https://trustfirst-project-bt1h.onrender.com/healthz',
+      timeout_milliseconds => 60000
+    )$$
+);
+
 
 -- Checking on it later:
 --
