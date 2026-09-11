@@ -12974,7 +12974,7 @@ async function sendViewerGift(emoji, name, cost) {
     // recording who should have been. A refusal costs somebody one tap; that
     // fallback cost them their coins and left no way to put it right.
     if (!host) {
-        showToast('Cannot send that gift yet — still connecting to the stream.');
+        showToast('Cannot send that gift yet. Still connecting to the stream.');
         return;
     }
 
@@ -19329,7 +19329,7 @@ const DeviceTrustManager = {
         // so say which button actually does that.
         _showConfirmModal(
             'Remove device',
-            'This forgets the device, so it has to be trusted again. It does not sign it out — use "Sign out other devices" for that.',
+            'This forgets the device, so it has to be trusted again. It does not sign it out. Use "Sign out other devices" for that.',
             function() { _self._doRevokeDevice(deviceId); });
     },
     async _doRevokeDevice(deviceId) {
