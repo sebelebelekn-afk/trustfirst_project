@@ -25,6 +25,20 @@ name: Build iOS app
 # and a separate cost.
 
 on:
+  # Runs on every push that touches the iOS app. This is the point: without a
+  # Mac there is no other way to find out whether the Swift compiles, so the
+  # compiler has to live here and answer on its own.
+  push:
+    branches:
+      - main
+      - "claude/**"
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+
+  # Manual runs only appear in the Actions tab once this file is on the default
+  # branch — GitHub reads the dispatch list from there, not from the branch you
+  # want to run. The push trigger above is what makes it work before then.
   workflow_dispatch:
 
 jobs:
