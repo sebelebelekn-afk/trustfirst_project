@@ -1,0 +1,154 @@
+name: Build iOS app
+
+# You do not need a Mac to see this app.
+#
+# Xcode only runs on macOS, and building an iOS app without it is not possible.
+# But GitHub rents macOS machines with Xcode already installed, and this
+# repository is public, so those machines are free and unmetered here — the
+# same reason the Android APK is built on a runner rather than locally.
+#
+# HOW TO USE IT
+#   Actions tab -> "Build iOS app" -> Run workflow -> pick your branch -> Run.
+#
+# WHAT YOU GET, under the run's Artifacts
+#   screenshots   PNGs of the app running on a real iOS simulator, light and
+#                 dark. This is how you look at it without owning a Mac.
+#   TrustFirst.app  the simulator build itself, for anyone who does have one.
+#   build-log     the full compiler output, kept whether or not it succeeded.
+#
+# WHEN IT FAILS, the "Compiler errors" step prints just the error lines rather
+# than making you read forty thousand lines of xcodebuild. That summary is the
+# thing worth pasting back into a conversation about a broken build.
+#
+# This does NOT produce anything installable on a real iPhone. That needs an
+# Apple Developer account and signing certificates, which is a separate step
+# and a separate cost.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Runner images carry several Xcodes. Liquid Glass needs the iOS 26 SDK,
+      # so pick the newest installed and refuse to continue on an older one
+      # rather than failing later with a confusing "unknown modifier" error.
+      - name: Choose Xcode
+        run: |
+          set -euo pipefail
+          ls -1 /Applications | grep -E '^Xcode' || true
+          NEWEST=$(ls -1d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$NEWEST/Contents/Developer"
+          xcodebuild -version
+          MAJOR=$(xcodebuild -version | head -1 | sed -E 's/Xcode ([0-9]+).*/\1/')
+          if [ "$MAJOR" -lt 26 ]; then
+            echo "::error::This runner's newest Xcode is $MAJOR. The app targets iOS 26 and needs Xcode 26 or later."
+            exit 1
+          fi
+          echo "Available iOS simulator runtimes:"
+          xcrun simctl list runtimes | grep -i ios || true
+
+      # Built for a generic simulator rather than a named device, so a runner
+      # image that drops "iPhone 17" from its device list does not break this.
+      # Code signing is off: a simulator build is never signed.
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ios/TrustFirst.xcodeproj \
+            -scheme TrustFirst \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build 2>&1 | tee build.log
+
+      # Runs even when the build failed — that is exactly when it is wanted.
+      - name: Compiler errors
+        if: always()
+        run: |
+          if grep -nE '(error|warning):' build.log > problems.txt; then
+            echo "### Compiler output" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            grep -E ' error: ' problems.txt | head -60 >> "$GITHUB_STEP_SUMMARY" || true
+            grep -E ' warning: ' problems.txt | head -20 >> "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "--- errors ---"; grep -E ' error: ' problems.txt || echo "none"
+            echo "--- warnings ---"; grep -E ' warning: ' problems.txt | head -40 || echo "none"
+          else
+            echo "Clean build — no errors or warnings." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # A booted simulator, the app installed on it, and a photograph of the
+      # result. The device is chosen from whatever the runner actually has.
+      # A booted simulator, the app installed on it, and a photograph of the
+      # result. The device is whichever iPhone the runner actually has, read
+      # out of simctl rather than hard-coded to a model that may be dropped.
+      - name: Screenshot it running
+        run: |
+          set -euo pipefail
+          mkdir -p screenshots
+
+          UUID='[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}'
+          DEVICE=$(xcrun simctl list devices available \
+            | awk '/^-- iOS/{ios=1; next} /^--/{ios=0} ios && /iPhone/{print}' \
+            | head -1 \
+            | grep -oE "$UUID" || true)
+
+          if [ -z "$DEVICE" ]; then
+            echo "::error::No iPhone simulator available on this runner."
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "Using simulator $DEVICE"
+
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+
+          APP=$(find build/Build/Products -maxdepth 2 -name 'TrustFirst.app' | head -1)
+          echo "Installing $APP"
+          xcrun simctl install "$DEVICE" "$APP"
+
+          for MODE in light dark; do
+            xcrun simctl ui "$DEVICE" appearance "$MODE"
+            xcrun simctl launch "$DEVICE" app.trustfirst.mobile || true
+            # The first screen fetches /api/config/ before it can draw, so give
+            # it long enough to have actually answered.
+            sleep 12
+            xcrun simctl io "$DEVICE" screenshot "screenshots/$MODE.png"
+            xcrun simctl terminate "$DEVICE" app.trustfirst.mobile || true
+          done
+
+          ls -la screenshots
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/
+          if-no-files-found: warn
+
+      - name: Upload the app
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrustFirst-simulator-app
+          path: build/Build/Products/Debug-iphonesimulator/TrustFirst.app
+          if-no-files-found: warn
+
+      - name: Upload the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: |
+            build.log
+            problems.txt
+          if-no-files-found: warn

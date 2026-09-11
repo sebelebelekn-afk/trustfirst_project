@@ -4,23 +4,43 @@ A native SwiftUI app, not a webview. It talks to the same backend the web app
 does: Supabase directly for data (under the same row-level security), and the
 Django service for anything that needs a server-held secret.
 
-## Requirements
+## Seeing it without a Mac
+
+Xcode only runs on macOS. If you do not have a Mac, you do not need one to
+look at this app — the same trick the Android build uses works here:
+
+> **Actions** tab -> **Build iOS app** -> **Run workflow** -> pick the branch
+> -> **Run workflow**
+
+GitHub builds it on a macOS machine with Xcode installed, boots an iOS
+simulator, installs the app and photographs it. When the run finishes, its
+**Artifacts** hold:
+
+- `screenshots` — the app running, light and dark. This is the part to look at.
+- `TrustFirst-simulator-app` — the build itself, for anyone who does have a Mac.
+- `build-log` — the full compiler output, kept whether it succeeded or not.
+
+If the build fails, the run's summary page prints just the error lines rather
+than the whole log. That summary is the useful thing to copy.
+
+This repository is public, so macOS runner minutes cost nothing. On a private
+repository they are billed at ten times the Linux rate, which is worth knowing
+before making this repository private.
+
+What it does **not** produce is anything installable on a real iPhone. That
+needs an Apple Developer account and signing certificates — a separate step,
+and 99 USD a year.
+
+## If you do have a Mac
 
 - **Xcode 26 or later**, and the iOS 26 SDK.
-- A Mac. There is no way around this one.
-
-The deployment target is iOS 26 and there are no compatibility branches. That
-is deliberate: Liquid Glass is the design here, not a finish applied to it, and
-every `if #available` fallback would be a second, worse design to maintain.
-
-## Opening it
 
 ```sh
 open ios/TrustFirst.xcodeproj
 ```
 
-Then pick a simulator and run. There are **no package dependencies** — nothing
-to resolve, nothing to install. Supabase is reached over plain REST by a small
+Pick a simulator and run. There are **no package dependencies** — nothing to
+resolve, nothing to install. Supabase is reached over plain REST by a small
 client in `Core/Networking`, which is why.
 
 If Xcode refuses to open the project file, regenerate it instead of repairing
@@ -34,6 +54,10 @@ cd ios && xcodegen generate
 `TrustFirst.xcodeproj` uses Xcode 26 *synchronized folders*: every file under
 `TrustFirst/` is part of the target automatically. Adding a Swift file means
 saving it to disk — the project file never needs editing.
+
+The deployment target is iOS 26 and there are no compatibility branches. That
+is deliberate: Liquid Glass is the design here, not a finish applied to it, and
+every `if #available` fallback would be a second, worse design to maintain.
 
 ## Layout
 
