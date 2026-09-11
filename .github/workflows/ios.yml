@@ -52,18 +52,32 @@ jobs:
       # Runner images carry several Xcodes. Liquid Glass needs the iOS 26 SDK,
       # so pick the newest installed and refuse to continue on an older one
       # rather than failing later with a confusing "unknown modifier" error.
+      # Runner images carry several Xcodes. Liquid Glass needs the iOS 26 SDK,
+      # so pick the newest installed and refuse to continue on an older one
+      # rather than failing later with a confusing "unknown modifier" error.
+      #
+      # xcodebuild is never piped into head. It writes two lines, and closing
+      # the pipe after the first one makes it die on SIGPIPE with an uncaught
+      # NSFileHandleOperationException and exit 134 — a crash that looks like a
+      # broken toolchain and is really just a closed pipe. Capture it whole and
+      # parse the variable instead.
       - name: Choose Xcode
         run: |
           set -euo pipefail
           ls -1 /Applications | grep -E '^Xcode' || true
+
           NEWEST=$(ls -1d /Applications/Xcode*.app | sort -V | tail -1)
           sudo xcode-select -s "$NEWEST/Contents/Developer"
-          xcodebuild -version
-          MAJOR=$(xcodebuild -version | head -1 | sed -E 's/Xcode ([0-9]+).*/\1/')
-          if [ "$MAJOR" -lt 26 ]; then
-            echo "::error::This runner's newest Xcode is $MAJOR. The app targets iOS 26 and needs Xcode 26 or later."
+
+          XCODE_VERSION="$(xcodebuild -version)"
+          echo "$XCODE_VERSION"
+
+          MAJOR="$(printf '%s\n' "$XCODE_VERSION" | sed -n '1s/^Xcode \([0-9][0-9]*\).*$/\1/p')"
+          if [ -z "$MAJOR" ] || [ "$MAJOR" -lt 26 ]; then
+            echo "::error::Newest Xcode here is '${MAJOR:-unknown}'. This app targets iOS 26 and needs Xcode 26 or later."
             exit 1
           fi
+
           echo "Available iOS simulator runtimes:"
           xcrun simctl list runtimes | grep -i ios || true
 
@@ -84,16 +98,24 @@ jobs:
             build 2>&1 | tee build.log
 
       # Runs even when the build failed — that is exactly when it is wanted.
+      # Runs even when the build failed — that is exactly when it is wanted.
       - name: Compiler errors
         if: always()
         run: |
+          if [ ! -f build.log ]; then
+            echo "The build step never ran, so there is no compiler output." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if grep -nE '(error|warning):' build.log > problems.txt; then
-            echo "### Compiler output" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            grep -E ' error: ' problems.txt | head -60 >> "$GITHUB_STEP_SUMMARY" || true
-            grep -E ' warning: ' problems.txt | head -20 >> "$GITHUB_STEP_SUMMARY" || true
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            echo "--- errors ---"; grep -E ' error: ' problems.txt || echo "none"
+            {
+              echo "### Compiler output"
+              echo '```'
+              grep -E ' error: ' problems.txt | head -60 || true
+              grep -E ' warning: ' problems.txt | head -20 || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "--- errors ---";   grep -E ' error: ' problems.txt || echo "none"
             echo "--- warnings ---"; grep -E ' warning: ' problems.txt | head -40 || echo "none"
           else
             echo "Clean build — no errors or warnings." | tee -a "$GITHUB_STEP_SUMMARY"
