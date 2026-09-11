@@ -20,45 +20,9 @@ struct MainTabView: View {
                 InboxView()
             }
             Tab("You", systemImage: "person.crop.circle", value: AppTab.you) {
-                YouView()
+                ProfileView()
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
-    }
-}
-
-// Placeholders so the shell builds and runs end to end. These are the next
-// screens to write, not a decision that they are empty.
-struct HomeView: View {
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                Text("Feed goes here")
-                    .font(TF.Type.rowBody)
-                    .foregroundStyle(TF.Colour.secondaryLabel)
-                    .frame(maxWidth: .infinity, minHeight: 400)
-            }
-            .background(TF.Colour.canvas)
-            .navigationTitle("Home")
-        }
-    }
-}
-
-struct YouView: View {
-    @Environment(AuthStore.self) private var auth
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 20) {
-                Text("Your profile goes here")
-                    .font(TF.Type.rowBody)
-                    .foregroundStyle(TF.Colour.secondaryLabel)
-                Button("Sign out") { Task { await auth.signOut() } }
-                    .buttonStyle(.glass)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(TF.Colour.canvas)
-            .navigationTitle("You")
-        }
     }
 }

@@ -235,16 +235,21 @@ private struct NotificationRow: View {
         .contentShape(.rect)
     }
 
+    /// The server writes a `message` for most notifications, and it is the only
+    /// one that knows the context — which post, which group. Use it when it is
+    /// there; the cases below are the fallback for rows written without one.
     private var title: String {
-        let who = notification.actor?.handle.isEmpty == false
-            ? notification.actor!.handle
-            : (notification.actor?.displayName ?? "Someone")
+        if let message = notification.message, !message.isEmpty { return message }
+        let who = notification.actor.map { actor in
+            actor.handle.isEmpty ? actor.displayName : actor.handle
+        } ?? "Someone"
         return switch notification.type {
         case "follow":   "\(who) started following you"
         case "like":     "\(who) liked your post"
         case "comment":  "\(who) replied to your post"
         case "mention":  "\(who) mentioned you"
         case "repost":   "\(who) reposted you"
+        case "group_add": "\(who) added you to a group"
         case "system":   "TrustFirst"
         default:         "\(who) sent you something"
         }

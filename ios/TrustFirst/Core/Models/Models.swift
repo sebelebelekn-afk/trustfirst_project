@@ -73,9 +73,13 @@ struct TFPost: Codable, Identifiable, Hashable, Sendable {
     var quotedPostId: String?
     var createdAt: Date?
     var users: TFUser?
+    /// Null when the post is on the open feed rather than inside a group.
+    var groupId: String?
+    /// Present when the post is fetched with its group joined in.
+    var groups: TFGroup?
 
     enum CodingKeys: String, CodingKey {
-        case id, users
+        case id, users, groups
         case userId = "user_id"
         case textContent = "text_content"
         case mediaURL = "media_url"
@@ -90,6 +94,7 @@ struct TFPost: Codable, Identifiable, Hashable, Sendable {
         case isPinned = "is_pinned"
         case quotedPostId = "quoted_post_id"
         case createdAt = "created_at"
+        case groupId = "group_id"
     }
 
     /// The nine kinds of thing a post can be, carried over from the web app.
@@ -106,21 +111,30 @@ struct TFNotification: Codable, Identifiable, Hashable, Sendable {
     let id: String
     var userId: String?
     var actorId: String?
+    /// Some writers on the server spell the actor `from_user_id` instead.
+    /// Read both; `actor` resolves to whichever is set.
+    var fromUserId: String?
     var type: String?
+    /// The server renders the headline itself. Preferred over anything this
+    /// app could reconstruct, because it knows the context — which post, which
+    /// group — that the notification row does not carry.
+    var message: String?
     var previewText: String?
     var read: Bool?
     var createdAt: Date?
     var actor: TFUser?
 
     enum CodingKeys: String, CodingKey {
-        case id, type, read, actor
+        case id, type, read, actor, message
         case userId = "user_id"
         case actorId = "actor_id"
+        case fromUserId = "from_user_id"
         case previewText = "preview_text"
         case createdAt = "created_at"
     }
 
     var isUnread: Bool { read != true }
+    var actorID: String? { actorId ?? fromUserId }
 }
 
 // MARK: - Conversation
@@ -192,6 +206,86 @@ extension Date {
         default:
             let weeks = Int(seconds / 604_800)
             return weeks < 52 ? "\(weeks)w" : "\(weeks / 52)y"
+        }
+    }
+}
+
+// MARK: - Group
+
+/// A group is where a post lives. `posts.group_id` is nullable, so a post is
+/// either in a group or on the open feed — the same shape a subreddit has, and
+/// the reason a group needs an identity of its own rather than just a name:
+/// it is attributed on every post, in every notification, and in the drawer.
+struct TFGroup: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    var name: String?
+    var description: String?
+    var emoji: String?
+    /// Stored as a hex string on the server. Drives the group's circle so the
+    /// list is scannable without anyone having to upload an icon.
+    var color: String?
+    var privacy: String?
+    var visibility: String?
+    var memberCount: Int?
+    var adminId: String?
+    var isActive: Bool?
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, description, emoji, color, privacy, visibility
+        case memberCount = "member_count"
+        case adminId = "admin_id"
+        case isActive = "is_active"
+        case createdAt = "created_at"
+    }
+
+    var displayName: String { name ?? "Group" }
+
+    /// Private groups are marked everywhere they appear. Someone should never
+    /// have to open a group to find out that what they post in it is walled.
+    var isPrivate: Bool { (privacy ?? visibility)?.lowercased() == "private" }
+
+    var memberCountLabel: String {
+        guard let count = memberCount else { return "" }
+        return count == 1 ? "1 member" : "\(count.tfCompact) members"
+    }
+}
+
+struct TFGroupMember: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    var groupId: String?
+    var userId: String?
+    var role: String?
+    var joinedAt: Date?
+    /// Present when the membership row is fetched with the group joined in.
+    var groups: TFGroup?
+
+    enum CodingKeys: String, CodingKey {
+        case id, role, groups
+        case groupId = "group_id"
+        case userId = "user_id"
+        case joinedAt = "joined_at"
+    }
+
+    var isAdmin: Bool {
+        let role = role?.lowercased()
+        return role == "admin" || role == "owner"
+    }
+}
+
+extension Int {
+    /// 1200 -> "1.2k". Member and like counts are glanced at, not read.
+    var tfCompact: String {
+        switch self {
+        case ..<1_000: String(self)
+        case ..<1_000_000:
+            let thousands = Double(self) / 1_000
+            return thousands < 10
+                ? String(format: "%.1fk", thousands).replacingOccurrences(of: ".0k", with: "k")
+                : "\(Int(thousands))k"
+        default:
+            let millions = Double(self) / 1_000_000
+            return String(format: "%.1fm", millions).replacingOccurrences(of: ".0m", with: "m")
         }
     }
 }
