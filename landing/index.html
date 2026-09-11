@@ -59,7 +59,7 @@ h1{
   font-size:clamp(38px,11vw,60px);font-weight:900;letter-spacing:-1.2px;
   margin:0 0 10px;line-height:1.05;
 }
-.sub{color:var(--muted);font-size:16px;margin:0 auto 30px;max-width:30ch;}
+.sub{color:var(--muted);font-size:16px;line-height:1.6;margin:0 auto 30px;max-width:46ch;}
 
 /* buttons ----------------------------------------------------------------- */
 .btn{
@@ -81,7 +81,9 @@ h1{
 /* sections ---------------------------------------------------------------- */
 section{padding:44px 0;border-top:1px solid var(--line);}
 h2{font-size:22px;font-weight:800;letter-spacing:-0.4px;margin:0 0 6px;}
-.lede{color:var(--muted);font-size:15px;margin:0 0 26px;}
+.lede{color:var(--muted);font-size:15px;line-height:1.65;margin:0 0 26px;}
+.lede .inline,a.inline{color:inherit;text-decoration:underline;text-underline-offset:2px;}
+.lede .inline:hover,a.inline:hover{color:var(--text);}
 
 .cards{display:grid;gap:14px;grid-template-columns:1fr;}
 @media(min-width:680px){.cards{grid-template-columns:1fr 1fr;}}
@@ -147,7 +149,8 @@ footer a:hover{color:#fff;}
   <div class="hero">
     <img class="logo" src="icon.svg" alt="TrustFirst">
     <h1 translate="no">TrustFirst</h1>
-    <p class="sub">Connect with people you can trust.</p>
+    <p class="sub">A South African social app where people are verified, direct messages
+      are encrypted, and creators keep 80% of every gift they are sent.</p>
 
     <div class="stack">
       <!-- Filled in by the script below with whatever suits the device you are
@@ -158,9 +161,53 @@ footer a:hover{color:#fff;}
     <p class="note" id="heroNote"></p>
   </div>
 
+  <section>
+    <h2>What TrustFirst is</h2>
+    <p class="lede">
+      A place to post, message and get paid, built in South Africa and run under
+      South African law. Accounts can be verified against a real identity, so the
+      person you are talking to is the person they say they are. The money is in
+      Rands. Nothing here is sold to advertisers &mdash; see the
+      <a class="inline" data-app-path="/privacy/">privacy policy</a>, which says so
+      in those words.
+    </p>
+    <div class="feats">
+      <div class="feat">
+        <b>Messages only you can read</b>
+        <span>Direct messages are end&#8209;to&#8209;end encrypted. They are unreadable in
+        transit, and unreadable by us &mdash; we hold the ciphertext, not the words.</span>
+      </div>
+      <div class="feat">
+        <b>TrustClips</b>
+        <span>Short videos from the people you follow, with the editor built in:
+        trim, captions, music, and a cutout tool that runs on your own phone.</span>
+      </div>
+      <div class="feat">
+        <b>A wallet in Rands</b>
+        <span>Top up with a card, send a creator a gift, and they keep 80% of it.
+        Card details are typed on the payment provider&rsquo;s page, never ours.</span>
+      </div>
+      <div class="feat">
+        <b>Eddie, built in</b>
+        <span>An assistant that lives in the app: ask it something, mention it in a
+        comment, have it read a post aloud, or make you a picture.</span>
+      </div>
+      <div class="feat">
+        <b>Going dark</b>
+        <span>Mute everything for a day or a month. Your circle is told you are
+        taking space, so silence is not mistaken for being ignored.</span>
+      </div>
+      <div class="feat">
+        <b>Accounts for under&#8209;18s</b>
+        <span>A child&rsquo;s account is approved by a parent, and what it can see and
+        who can reach it stays under their control.</span>
+      </div>
+    </div>
+  </section>
+
   <section id="get">
     <h2>Get TrustFirst</h2>
-    <p class="lede">Two ways in, depending on your phone.</p>
+    <p class="lede">Free, and no Play Store needed. Two ways in, depending on your phone.</p>
 
     <div class="cards">
       <div class="card">
@@ -183,25 +230,6 @@ footer a:hover{color:#fff;}
           <li>Choose <b>Add to Home Screen</b>.</li>
         </ol>
         <a class="btn btn-ghost" id="iosBtn" href="#">Open in Safari</a>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <h2>What you get</h2>
-    <p class="lede">Small on purpose. These are the parts people use.</p>
-    <div class="feats">
-      <div class="feat">
-        <b>TrustClips</b>
-        <span>Short videos from the people you follow, with an editor built in.</span>
-      </div>
-      <div class="feat">
-        <b>Messages only you can read</b>
-        <span>Direct messages are end&#8209;to&#8209;end encrypted, so they are unreadable in transit.</span>
-      </div>
-      <div class="feat">
-        <b>Going dark</b>
-        <span>Mute everything for a day or a month. Your circle is told you are taking space.</span>
       </div>
     </div>
   </section>
