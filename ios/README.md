@@ -31,6 +31,43 @@ What it does **not** produce is anything installable on a real iPhone. That
 needs an Apple Developer account and signing certificates — a separate step,
 and 99 USD a year.
 
+## Setting up the screenshot account
+
+Without an account the run captures the sign-in screen and stops there, which
+is the one screen with nothing in it. To see the feed, the groups drawer, the
+inbox and the profile, the build needs to sign in.
+
+1. Make a **throwaway TrustFirst account**. Not your own.
+2. Put it in a group or two and post something, or every screenshot will be of
+   an empty state.
+3. Add two repository secrets — **Settings -> Secrets and variables -> Actions
+   -> New repository secret**:
+   - `TF_TEST_USERNAME` — the username or email
+   - `TF_TEST_PASSWORD` — the password
+4. Push anything under `ios/`. The next run captures eight screenshots: the
+   sign-in screen, Home, Inbox and You, each in light and dark.
+
+### What this account will expose
+
+**This repository is public, and artifacts on a public repository can be
+downloaded by anyone with the link.** Every screenshot the run produces is
+public the moment it uploads. Whatever that account can see — its feed, its
+groups, its notifications, its name and picture — is in those images.
+
+That is the whole reason for a throwaway. Do not sign in as yourself, do not
+use an account that is in a private group, and do not use a password you use
+anywhere else.
+
+The credentials themselves are not in the images. GitHub encrypts secrets,
+does not expose them to pull requests from forks, and masks them if something
+prints one. They reach the app as environment variables rather than launch
+arguments, so they stay out of `ps`, out of crash reports, and out of the
+build log. And every line of the app that reads them is inside `#if DEBUG`,
+so no shipping build contains that code at all.
+
+To stop it, delete the two secrets. The run keeps working and goes back to
+capturing the sign-in screen alone.
+
 ## If you do have a Mac
 
 - **Xcode 26 or later**, and the iOS 26 SDK.

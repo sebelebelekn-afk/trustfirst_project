@@ -9,7 +9,13 @@ enum AppTab: Hashable {
 /// scrolls underneath, and .tabBarMinimizeBehavior(.onScrollDown) is what makes
 /// it shrink out of the way when someone starts reading.
 struct MainTabView: View {
-    @State private var selection: AppTab = .home
+    @State private var selection: AppTab = {
+        #if DEBUG
+        return Automation.startTab ?? .home
+        #else
+        return .home
+        #endif
+    }()
 
     var body: some View {
         TabView(selection: $selection) {

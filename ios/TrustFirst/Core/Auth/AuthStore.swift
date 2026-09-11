@@ -83,6 +83,18 @@ final class AuthStore {
         try adopt(session)
     }
 
+    /// Signs in with whatever someone typed, working out for itself whether it
+    /// is an email or a username. One rule, in one place, so the sign-in screen
+    /// and any automated sign-in can never disagree about what "@" means.
+    func signIn(identifier: String, password: String) async throws {
+        let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.contains("@") && trimmed.contains(".") {
+            try await signIn(email: trimmed, password: password)
+        } else {
+            try await signIn(username: trimmed, password: password)
+        }
+    }
+
     /// Email sign-in can go straight to GoTrue — no server-side lookup needed.
     func signIn(email: String, password: String) async throws {
         try await exchange(grant: "password", body: ["email": email, "password": password])

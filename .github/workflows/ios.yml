@@ -121,15 +121,27 @@ jobs:
             echo "Clean build — no errors or warnings." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
-      # A booted simulator, the app installed on it, and a photograph of the
-      # result. The device is chosen from whatever the runner actually has.
-      # A booted simulator, the app installed on it, and a photograph of the
-      # result. The device is whichever iPhone the runner actually has, read
+      # A booted simulator, the app installed on it, and a photograph of each
+      # screen. The device is whichever iPhone the runner actually has, read
       # out of simctl rather than hard-coded to a model that may be dropped.
+      #
+      # With TF_TEST_USERNAME and TF_TEST_PASSWORD set as repository secrets,
+      # the app signs itself in and every tab is captured. Without them the run
+      # still works and captures the sign-in screen alone.
+      #
+      # The credentials are passed as environment variables, never as launch
+      # arguments: argv is visible in ps, in crash reports, and in anything
+      # that echoes a command. simctl forwards SIMCTL_CHILD_-prefixed variables
+      # into the app's environment, which none of those can see. Nothing here
+      # echoes them either.
       - name: Screenshot it running
+        env:
+          TF_TEST_USERNAME: ${{ secrets.TF_TEST_USERNAME }}
+          TF_TEST_PASSWORD: ${{ secrets.TF_TEST_PASSWORD }}
         run: |
           set -euo pipefail
           mkdir -p screenshots
+          BUNDLE=app.trustfirst.mobile
 
           UUID='[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}'
           DEVICE=$(xcrun simctl list devices available \
@@ -151,14 +163,45 @@ jobs:
           echo "Installing $APP"
           xcrun simctl install "$DEVICE" "$APP"
 
+          shoot() {
+            # $1 name, $2 seconds to wait before the shutter
+            sleep "$2"
+            xcrun simctl io "$DEVICE" screenshot "screenshots/$1.png"
+            echo "captured $1"
+          }
+
+          # The sign-in screen first, while no session exists yet. Signing in
+          # writes a refresh token to the keychain, so after that point this
+          # screen cannot be reached again without signing out.
           for MODE in light dark; do
             xcrun simctl ui "$DEVICE" appearance "$MODE"
-            xcrun simctl launch "$DEVICE" app.trustfirst.mobile || true
-            # The first screen fetches /api/config/ before it can draw, so give
-            # it long enough to have actually answered.
-            sleep 12
-            xcrun simctl io "$DEVICE" screenshot "screenshots/$MODE.png"
-            xcrun simctl terminate "$DEVICE" app.trustfirst.mobile || true
+            xcrun simctl terminate "$DEVICE" "$BUNDLE" >/dev/null 2>&1 || true
+            xcrun simctl launch "$DEVICE" "$BUNDLE" >/dev/null
+            # Long enough for /api/config/ to have answered.
+            shoot "signin-$MODE" 12
+          done
+
+          if [ -z "${TF_TEST_USERNAME:-}" ] || [ -z "${TF_TEST_PASSWORD:-}" ]; then
+            echo "No test account configured. Set the TF_TEST_USERNAME and" \
+                 "TF_TEST_PASSWORD repository secrets to capture the signed-in" \
+                 "screens as well." | tee -a "$GITHUB_STEP_SUMMARY"
+            ls -la screenshots
+            exit 0
+          fi
+
+          # One launch per tab. simctl cannot tap, and a UI test written to
+          # press three buttons is a lot of machinery for three buttons.
+          for MODE in light dark; do
+            xcrun simctl ui "$DEVICE" appearance "$MODE"
+            for TAB in home inbox you; do
+              xcrun simctl terminate "$DEVICE" "$BUNDLE" >/dev/null 2>&1 || true
+              SIMCTL_CHILD_TF_TEST_USERNAME="$TF_TEST_USERNAME" \
+              SIMCTL_CHILD_TF_TEST_PASSWORD="$TF_TEST_PASSWORD" \
+              SIMCTL_CHILD_TF_START_TAB="$TAB" \
+              xcrun simctl launch "$DEVICE" "$BUNDLE" >/dev/null
+              # Sign in, then load the tab's first page from the database.
+              shoot "$TAB-$MODE" 16
+            done
           done
 
           ls -la screenshots

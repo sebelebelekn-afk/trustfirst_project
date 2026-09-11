@@ -90,12 +90,7 @@ struct SignInView: View {
 
         Task {
             do {
-                let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.contains("@") && trimmed.contains(".") {
-                    try await auth.signIn(email: trimmed, password: password)
-                } else {
-                    try await auth.signIn(username: trimmed, password: password)
-                }
+                try await auth.signIn(identifier: identifier, password: password)
             } catch {
                 withAnimation(TF.Motion.settle) { failure = error.localizedDescription }
             }

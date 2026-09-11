@@ -26,6 +26,22 @@ struct TrustFirstApp: App {
                     // it knows where Supabase is.
                     await config.load()
                     await auth.restore()
+
+                    // Screenshot builds only. Compiled out of Release entirely,
+                    // and a no-op unless the environment carries an account.
+                    #if DEBUG
+                    if case .signedOut = auth.state, let account = Automation.credentials {
+                        do {
+                            try await auth.signIn(
+                                identifier: account.identifier,
+                                password: account.password
+                            )
+                        } catch {
+                            // Say which step failed, never what was tried with.
+                            print("Automated sign-in failed: \(error.localizedDescription)")
+                        }
+                    }
+                    #endif
                 }
         }
     }
