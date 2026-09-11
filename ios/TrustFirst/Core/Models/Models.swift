@@ -277,7 +277,7 @@ extension Int {
     /// 1200 -> "1.2k". Member and like counts are glanced at, not read.
     var tfCompact: String {
         switch self {
-        case ..<1_000: String(self)
+        case ..<1_000: return String(self)
         case ..<1_000_000:
             let thousands = Double(self) / 1_000
             return thousands < 10
