@@ -19,9 +19,11 @@ media/
 .remotion/
 .cache/
 
-# Capacitor generated native projects (recreated by `npx cap add` in CI)
+# Capacitor generated native project (recreated by `npx cap add` in CI).
+# Only Android is wrapped this way. iOS is a real native app under /ios and is
+# checked in — that path used to be ignored for a Capacitor shell that was
+# never added, which would have silently swallowed every Swift file.
 /android/
-/ios/
 # Generated during the Android build from core/static/core/icon-dark.svg
 assets/
 android/
@@ -30,3 +32,12 @@ key.properties
 
 # Local cache from `wrangler dev`, rebuilt on demand.
 .wrangler/
+
+# Xcode build artifacts and per-developer state. The project file itself is
+# checked in; none of this is.
+ios/build/
+ios/DerivedData/
+ios/.swiftpm/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint

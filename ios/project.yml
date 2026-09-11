@@ -1,0 +1,35 @@
+# A fallback, not the source of truth. TrustFirst.xcodeproj is checked in and
+# opens directly; this exists so that if Xcode ever refuses that file, the
+# project can be regenerated from scratch in one command rather than repaired
+# by hand:
+#
+#   brew install xcodegen && cd ios && xcodegen generate
+#
+name: TrustFirst
+options:
+  bundleIdPrefix: app.trustfirst
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    TARGETED_DEVICE_FAMILY: "1"
+targets:
+  TrustFirst:
+    type: application
+    platform: iOS
+    sources:
+      - path: TrustFirst
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.trustfirst.mobile
+        GENERATE_INFOPLIST_FILE: true
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        INFOPLIST_KEY_CFBundleDisplayName: TrustFirst
+        INFOPLIST_KEY_UILaunchScreen_Generation: true
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_NSCameraUsageDescription: "TrustFirst uses the camera so you can record clips, stories and video calls."
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "TrustFirst uses the microphone for voice notes, calls and the sound on your videos."
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "TrustFirst needs your photo library so you can post photos and videos you have already taken."

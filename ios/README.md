@@ -1,0 +1,77 @@
+# TrustFirst for iOS
+
+A native SwiftUI app, not a webview. It talks to the same backend the web app
+does: Supabase directly for data (under the same row-level security), and the
+Django service for anything that needs a server-held secret.
+
+## Requirements
+
+- **Xcode 26 or later**, and the iOS 26 SDK.
+- A Mac. There is no way around this one.
+
+The deployment target is iOS 26 and there are no compatibility branches. That
+is deliberate: Liquid Glass is the design here, not a finish applied to it, and
+every `if #available` fallback would be a second, worse design to maintain.
+
+## Opening it
+
+```sh
+open ios/TrustFirst.xcodeproj
+```
+
+Then pick a simulator and run. There are **no package dependencies** — nothing
+to resolve, nothing to install. Supabase is reached over plain REST by a small
+client in `Core/Networking`, which is why.
+
+If Xcode refuses to open the project file, regenerate it instead of repairing
+it by hand:
+
+```sh
+brew install xcodegen
+cd ios && xcodegen generate
+```
+
+`TrustFirst.xcodeproj` uses Xcode 26 *synchronized folders*: every file under
+`TrustFirst/` is part of the target automatically. Adding a Swift file means
+saving it to disk — the project file never needs editing.
+
+## Layout
+
+```
+TrustFirst/
+  App/            the app entry point and the three-tab shell
+  DesignSystem/   colours, type, metrics, and the Liquid Glass controls
+  Core/
+    Config/       what the server tells the app on boot
+    Networking/   HTTP, and the typed PostgREST query builder
+    Auth/         sign-in, token refresh, Keychain
+    Models/       rows as the database stores them
+  Features/       one folder per screen
+```
+
+## How it reaches the backend
+
+- **`GET /api/config/`** on boot hands back the Supabase URL and anon key, the
+  media host, and the payment mode. Nothing is hard-coded, so rotating any of
+  them never needs a new build through review.
+- **Data** goes straight to Supabase over PostgREST with the signed-in user's
+  access token. The database decides what is visible; the app is never trusted.
+- **Sign-in by username** goes through Django, because turning a username into
+  an email needs the service key and that key never leaves the server. Sign-in
+  by email goes straight to Supabase.
+- **Refresh tokens live in the Keychain**, not UserDefaults, and are marked
+  `ThisDeviceOnly` so they do not travel in a backup.
+
+## Not done yet
+
+- Realtime. Messages, calls, live rooms and notification badges all need a
+  websocket; the REST layer here does not cover it.
+- Media upload through the R2 presign endpoint.
+- The feed, profile, clips, stories, groups, channels, live and wallet screens.
+
+## One thing to settle before the wallet is built
+
+Coins are bought through Yoco on web and Android. On iOS, Apple requires
+in-app purchase for digital goods and takes a commission on them. That is a
+different flow, not a restyled one, and it is worth deciding before the wallet
+screens are written rather than after App Review sees them.
