@@ -176,14 +176,14 @@ struct ProfileView: View {
                 }
                 if let handle = model.user?.handle, !handle.isEmpty {
                     Text(handle)
-                        .font(TF.Type.rowBody)
+                        .font(TF.Typography.rowBody)
                         .foregroundStyle(TF.Colour.secondaryLabel)
                 }
             }
 
             if let bio = model.user?.bio, !bio.isEmpty {
                 Text(bio)
-                    .font(TF.Type.rowBody)
+                    .font(TF.Typography.rowBody)
                     .foregroundStyle(TF.Colour.label)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -216,7 +216,7 @@ struct ProfileView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(TF.Colour.label)
             Text(label)
-                .font(TF.Type.caption)
+                .font(TF.Typography.caption)
                 .foregroundStyle(TF.Colour.secondaryLabel)
         }
         .frame(maxWidth: .infinity)
@@ -250,7 +250,7 @@ struct ProfileView: View {
 
     private func placeholder(_ text: String) -> some View {
         Text(text)
-            .font(TF.Type.rowBody)
+            .font(TF.Typography.rowBody)
             .foregroundStyle(TF.Colour.secondaryLabel)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 60)
@@ -290,7 +290,7 @@ struct AccountSheet: View {
                         Image(systemName: item.symbol)
                             .font(.system(size: 19))
                             .frame(width: 26)
-                        Text(item.title).font(TF.Type.rowBody)
+                        Text(item.title).font(TF.Typography.rowBody)
                         Spacer(minLength: 0)
                     }
                     .foregroundStyle(TF.Colour.label)
@@ -309,7 +309,7 @@ struct AccountSheet: View {
                     Image(systemName: "rectangle.portrait.and.arrow.right")
                         .font(.system(size: 19))
                         .frame(width: 26)
-                    Text("Sign out").font(TF.Type.rowBody)
+                    Text("Sign out").font(TF.Typography.rowBody)
                     Spacer(minLength: 0)
                 }
                 .foregroundStyle(TF.Colour.destructive)

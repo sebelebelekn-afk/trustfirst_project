@@ -31,7 +31,7 @@ struct TFActionSheet: View {
                                 .font(.system(size: 19, weight: .regular))
                                 .frame(width: 26)
                             Text(action.title)
-                                .font(TF.Type.rowBody)
+                                .font(TF.Typography.rowBody)
                             Spacer(minLength: 0)
                         }
                         .foregroundStyle(action.isDestructive ? TF.Colour.destructive : TF.Colour.label)

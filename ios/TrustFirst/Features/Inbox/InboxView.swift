@@ -207,20 +207,20 @@ private struct NotificationRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(TF.Type.rowTitle)
+                    .font(TF.Typography.rowTitle)
                     .foregroundStyle(TF.Colour.label)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let preview = notification.previewText, !preview.isEmpty {
                     Text(preview)
-                        .font(TF.Type.rowBody)
+                        .font(TF.Typography.rowBody)
                         .foregroundStyle(TF.Colour.secondaryLabel)
                         .lineLimit(2)
                 }
 
                 if let created = notification.createdAt {
                     Text(created.tfShortRelative)
-                        .font(TF.Type.caption)
+                        .font(TF.Typography.caption)
                         .foregroundStyle(TF.Colour.tertiaryLabel)
                         .padding(.top, 2)
                 }
@@ -277,10 +277,10 @@ struct EmptyState: View {
                 .font(.system(size: 40, weight: .light))
                 .foregroundStyle(TF.Colour.tertiaryLabel)
             Text(title)
-                .font(TF.Type.screenTitle)
+                .font(TF.Typography.screenTitle)
                 .foregroundStyle(TF.Colour.label)
             Text(message)
-                .font(TF.Type.rowBody)
+                .font(TF.Typography.rowBody)
                 .foregroundStyle(TF.Colour.secondaryLabel)
                 .multilineTextAlignment(.center)
         }

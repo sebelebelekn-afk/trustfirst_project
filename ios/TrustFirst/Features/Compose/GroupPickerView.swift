@@ -55,7 +55,7 @@ struct GroupPickerView: View {
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(TF.Colour.secondaryLabel)
                 TextField("Search for a group", text: $term)
-                    .font(TF.Type.rowBody)
+                    .font(TF.Typography.rowBody)
                     .tint(TF.Colour.accent)
                     .autocorrectionDisabled()
             }
@@ -71,7 +71,7 @@ struct GroupPickerView: View {
     private var header: some View {
         ZStack {
             Text("Post to")
-                .font(TF.Type.screenTitle)
+                .font(TF.Typography.screenTitle)
                 .foregroundStyle(TF.Colour.label)
             HStack {
                 TFGlassIconButton(systemImage: "xmark", accessibilityLabel: "Close") { dismiss() }
@@ -97,10 +97,10 @@ struct GroupPickerView: View {
                 .frame(width: 44, height: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Your feed")
-                        .font(TF.Type.rowTitle)
+                        .font(TF.Typography.rowTitle)
                         .foregroundStyle(TF.Colour.label)
                     Text("Anyone who follows you")
-                        .font(TF.Type.caption)
+                        .font(TF.Typography.caption)
                         .foregroundStyle(TF.Colour.secondaryLabel)
                 }
                 Spacer(minLength: 0)
@@ -127,7 +127,7 @@ struct GroupPickerView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
                         Text(group.displayName)
-                            .font(TF.Type.rowTitle)
+                            .font(TF.Typography.rowTitle)
                             .foregroundStyle(TF.Colour.label)
                         if group.isPrivate {
                             Image(systemName: "lock.fill")
@@ -137,12 +137,12 @@ struct GroupPickerView: View {
                     }
                     if !group.memberCountLabel.isEmpty {
                         Text(group.memberCountLabel)
-                            .font(TF.Type.caption)
+                            .font(TF.Typography.caption)
                             .foregroundStyle(TF.Colour.secondaryLabel)
                     }
                     if let description = group.description, !description.isEmpty {
                         Text(description)
-                            .font(TF.Type.caption)
+                            .font(TF.Typography.caption)
                             .foregroundStyle(TF.Colour.secondaryLabel)
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)

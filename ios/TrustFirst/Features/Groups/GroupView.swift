@@ -18,12 +18,12 @@ struct GroupView: View {
                     ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
                 } else if let failure {
                     Text(failure)
-                        .font(TF.Type.caption)
+                        .font(TF.Typography.caption)
                         .foregroundStyle(TF.Colour.destructive)
                         .padding(TF.Metric.gutter)
                 } else if posts.isEmpty {
                     Text("Nothing posted in \(group.displayName) yet.")
-                        .font(TF.Type.rowBody)
+                        .font(TF.Typography.rowBody)
                         .foregroundStyle(TF.Colour.secondaryLabel)
                         .padding(TF.Metric.gutter)
                 } else {
@@ -59,7 +59,7 @@ struct GroupView: View {
                     }
                     if !group.memberCountLabel.isEmpty {
                         Text(group.memberCountLabel)
-                            .font(TF.Type.caption)
+                            .font(TF.Typography.caption)
                             .foregroundStyle(TF.Colour.secondaryLabel)
                     }
                 }
@@ -68,7 +68,7 @@ struct GroupView: View {
 
             if let description = group.description, !description.isEmpty {
                 Text(description)
-                    .font(TF.Type.rowBody)
+                    .font(TF.Typography.rowBody)
                     .foregroundStyle(TF.Colour.secondaryLabel)
                     .fixedSize(horizontal: false, vertical: true)
             }

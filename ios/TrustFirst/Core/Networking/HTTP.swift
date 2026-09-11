@@ -65,13 +65,17 @@ struct HTTP: Sendable {
         return encoder
     }()
 
-    private static let iso8601Fractional: ISO8601DateFormatter = {
+    // Configured once here and never mutated again. Foundation's date
+    // formatters are thread-safe for parsing, so concurrent decodes are fine;
+    // nonisolated(unsafe) is that guarantee stated to the compiler, which
+    // cannot see it for itself.
+    nonisolated(unsafe) private static let iso8601Fractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
 
-    private static let iso8601Plain: ISO8601DateFormatter = {
+    nonisolated(unsafe) private static let iso8601Plain: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter

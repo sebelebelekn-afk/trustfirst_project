@@ -105,7 +105,7 @@ struct TFSearchField: View {
                     .foregroundStyle(TF.Colour.secondaryLabel)
             }
             TextField(placeholder, text: $text)
-                .font(TF.Type.rowBody)
+                .font(TF.Typography.rowBody)
                 .foregroundStyle(TF.Colour.label)
                 .tint(TF.Colour.accent)
                 .textInputAutocapitalization(.never)
@@ -153,7 +153,7 @@ struct TFSegmentedTabs<Value: Hashable>: View {
                 } label: {
                     VStack(spacing: 10) {
                         Text(item.title)
-                            .font(TF.Type.segment(selected: isSelected))
+                            .font(TF.Typography.segment(selected: isSelected))
                             .foregroundStyle(isSelected ? TF.Colour.label : TF.Colour.secondaryLabel)
                         ZStack {
                             // An always-present clear bar keeps every tab the

@@ -15,7 +15,7 @@ struct PostRow: View {
                         TFGroupChip(group: group)
                         if let created = post.createdAt {
                             Text("· \(created.tfShortRelative)")
-                                .font(TF.Type.caption)
+                                .font(TF.Typography.caption)
                                 .foregroundStyle(TF.Colour.tertiaryLabel)
                         }
                         Spacer(minLength: 0)
@@ -29,7 +29,7 @@ struct PostRow: View {
 
             if let text = post.textContent, !text.isEmpty {
                 Text(text)
-                    .font(TF.Type.rowBody)
+                    .font(TF.Typography.rowBody)
                     .foregroundStyle(TF.Colour.label)
                     .lineLimit(8)
                     .fixedSize(horizontal: false, vertical: true)

@@ -19,7 +19,7 @@ struct GroupsPanel: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("Your groups")
-                    .font(TF.Type.screenTitle)
+                    .font(TF.Typography.screenTitle)
                     .foregroundStyle(TF.Colour.label)
                 Spacer()
                 TFGlassIconButton(systemImage: "xmark", accessibilityLabel: "Close menu", action: onClose)
@@ -35,11 +35,11 @@ struct GroupsPanel: View {
                 ProgressView().frame(maxWidth: .infinity)
             } else if let failure = store.failure, store.groups.isEmpty {
                 Text(failure)
-                    .font(TF.Type.caption)
+                    .font(TF.Typography.caption)
                     .foregroundStyle(TF.Colour.destructive)
             } else if store.groups.isEmpty {
                 Text("You are not in any groups yet. Join one and its posts show up on your home feed.")
-                    .font(TF.Type.rowBody)
+                    .font(TF.Typography.rowBody)
                     .foregroundStyle(TF.Colour.secondaryLabel)
             } else {
                 ScrollView {
@@ -70,7 +70,7 @@ struct GroupsPanel: View {
                                                 Text("Admin").foregroundStyle(TF.Colour.accent)
                                             }
                                         }
-                                        .font(TF.Type.caption)
+                                        .font(TF.Typography.caption)
                                         .foregroundStyle(TF.Colour.tertiaryLabel)
                                     }
                                     Spacer(minLength: 0)

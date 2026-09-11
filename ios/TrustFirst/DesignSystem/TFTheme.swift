@@ -44,7 +44,7 @@ enum TF {
 
     // MARK: - Type
 
-    enum Type {
+    enum Typography {
         static let screenTitle  = Font.system(size: 20, weight: .semibold)
         static let sectionTitle = Font.system(size: 15, weight: .semibold)
         static let rowTitle     = Font.system(size: 17, weight: .semibold)
@@ -113,7 +113,7 @@ extension UIColor {
 struct TFFieldStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .font(TF.Type.rowBody)
+            .font(TF.Typography.rowBody)
             .foregroundStyle(TF.Colour.label)
             .tint(TF.Colour.accent)
             .padding(.horizontal, 16)

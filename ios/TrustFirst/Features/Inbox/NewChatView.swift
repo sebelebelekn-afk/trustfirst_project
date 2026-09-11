@@ -23,7 +23,7 @@ struct NewChatView: View {
             header
 
             Text("Search for people by username to chat with them.")
-                .font(TF.Type.rowBody)
+                .font(TF.Typography.rowBody)
                 .foregroundStyle(TF.Colour.secondaryLabel)
 
             TFSearchField(placeholder: "Search for a username", text: $term)
@@ -35,13 +35,13 @@ struct NewChatView: View {
 
             if term.count < minimumTerm {
                 Text("Type at least \(minimumTerm) characters to search for a username.")
-                    .font(TF.Type.rowBody)
+                    .font(TF.Typography.rowBody)
                     .foregroundStyle(TF.Colour.secondaryLabel)
             } else if isSearching {
                 HStack { ProgressView(); Spacer() }
             } else if results.isEmpty {
                 Text("Nobody by that name.")
-                    .font(TF.Type.rowBody)
+                    .font(TF.Typography.rowBody)
                     .foregroundStyle(TF.Colour.secondaryLabel)
             } else {
                 resultsList
@@ -83,7 +83,7 @@ struct NewChatView: View {
                     } label: {
                         HStack(spacing: 6) {
                             TFAvatar(url: user.avatarURL, fallback: user.displayName, size: 22)
-                            Text(user.handle).font(TF.Type.caption)
+                            Text(user.handle).font(TF.Typography.caption)
                             Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
                         }
                         .foregroundStyle(TF.Colour.label)
@@ -113,12 +113,12 @@ struct NewChatView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 4) {
                                     Text(user.displayName)
-                                        .font(TF.Type.rowTitle)
+                                        .font(TF.Typography.rowTitle)
                                         .foregroundStyle(TF.Colour.label)
                                     if let badge = user.badge { TFBadge(badge: badge) }
                                 }
                                 Text(user.handle)
-                                    .font(TF.Type.caption)
+                                    .font(TF.Typography.caption)
                                     .foregroundStyle(TF.Colour.secondaryLabel)
                             }
                             Spacer(minLength: 0)

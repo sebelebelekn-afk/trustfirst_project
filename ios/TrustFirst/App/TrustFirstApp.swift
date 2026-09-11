@@ -67,10 +67,10 @@ struct StartupFailureView: View {
                 .font(.system(size: 44))
                 .foregroundStyle(TF.Colour.tertiaryLabel)
             Text("TrustFirst could not start")
-                .font(TF.Type.screenTitle)
+                .font(TF.Typography.screenTitle)
                 .foregroundStyle(TF.Colour.label)
             Text(message)
-                .font(TF.Type.rowBody)
+                .font(TF.Typography.rowBody)
                 .foregroundStyle(TF.Colour.secondaryLabel)
                 .multilineTextAlignment(.center)
             Button("Try again") {

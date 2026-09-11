@@ -24,7 +24,7 @@ struct SignInView: View {
                     .font(.system(size: 30, weight: .bold))
                     .foregroundStyle(TF.Colour.label)
                 Text("Sign in to pick up where you left off.")
-                    .font(TF.Type.rowBody)
+                    .font(TF.Typography.rowBody)
                     .foregroundStyle(TF.Colour.secondaryLabel)
             }
             .padding(.bottom, 10)
@@ -51,7 +51,7 @@ struct SignInView: View {
 
             if let failure {
                 Text(failure)
-                    .font(TF.Type.caption)
+                    .font(TF.Typography.caption)
                     .foregroundStyle(TF.Colour.destructive)
                     .multilineTextAlignment(.center)
                     .transition(.opacity)

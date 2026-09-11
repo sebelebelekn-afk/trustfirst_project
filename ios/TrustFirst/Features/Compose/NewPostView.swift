@@ -41,7 +41,7 @@ struct NewPostView: View {
 
             if let failure {
                 Text(failure)
-                    .font(TF.Type.caption)
+                    .font(TF.Typography.caption)
                     .foregroundStyle(TF.Colour.destructive)
                     .padding(.horizontal, TF.Metric.gutter)
                     .padding(.bottom, 8)
