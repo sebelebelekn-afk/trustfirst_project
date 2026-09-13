@@ -3,16 +3,28 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>TrustFirst · Connect with people you can trust</title>
-<meta name="description" content="TrustFirst is a social app built around people you actually trust. Get it on Android, or add it to your home screen on iPhone.">
+<title>TrustFirst · A social app that knows who is real</title>
+<meta name="description" content="A social app that knows who is real. Accounts can be verified against a real identity, messages are encrypted, and creators keep 80% of every gift. Free on Android and iPhone.">
 <meta name="theme-color" content="#000000">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 
 <!-- Open Graph, so a link pasted into WhatsApp shows a card instead of a bare URL -->
-<meta property="og:title" content="TrustFirst">
-<meta property="og:description" content="Connect with people you can trust.">
+<meta property="og:site_name" content="TrustFirst">
+<meta property="og:title" content="A social app that knows who is real.">
+<meta property="og:description" content="Verified accounts, encrypted messages, and creators keep 80% of every gift.">
 <meta property="og:type" content="website">
-<meta property="og:image" content="icon.svg">
+<meta property="og:url" content="https://gettrustfirst.co.za/">
+<!-- Absolute, and a real picture of the app. Scrapers do not resolve relative
+     paths, and the SVG that used to be here was rejected by most of them: a
+     link pasted into WhatsApp showed a bare URL with no card at all. -->
+<meta property="og:image" content="https://gettrustfirst.co.za/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="TrustFirst, with a TrustClip playing on a phone">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="A social app that knows who is real.">
+<meta name="twitter:description" content="Verified accounts, encrypted messages, and creators keep 80% of every gift.">
+<meta name="twitter:image" content="https://gettrustfirst.co.za/og.jpg">
 
 <style>
 /* ---------------------------------------------------------------------------
@@ -193,6 +205,8 @@ section:first-of-type{border-top:none;}
 }
 .phone-notch i{display:block;width:78px;height:5px;border-radius:3px;background:#2a2a2e;}
 .phone-body{padding:0 0 18px;}
+.phone-shot{max-width:280px;}
+.phone-shot img{display:block;width:100%;height:auto;}
 .phone img{display:block;width:100%;height:auto;}
 
 /* the Eddie exchange, rendered rather than screenshotted --------------------
@@ -250,21 +264,11 @@ section:first-of-type{border-top:none;}
 .fact b{display:block;font-size:15px;font-weight:700;margin-bottom:3px;}
 .fact span{color:var(--muted);font-size:14px;line-height:1.55;}
 
-/* One quiet line under the download button, where the hesitation actually
-   happens. This used to be a whole section headed "do not take our word for any
-   of this", which answered the objection and advertised it at the same time: a
-   page that argues at length about not being a scam reads like one that needs
-   to. The facts were right, the volume was wrong. */
-.reassure{
-  color:var(--muted);font-size:12.5px;line-height:1.6;
-  margin:12px 2px 0;
-}
-.reassure .inline{color:var(--muted);text-decoration:underline;text-underline-offset:2px;}
-.reassure .inline:hover{color:var(--text);}
-
 /* small print --------------------------------------------------------------- */
+/* A footnote, not a panel. Boxed and bordered it read as another card and
+   pulled more attention than a line of small print deserves. */
 .early{
-  margin:30px auto 0;max-width:44ch;
+  margin:30px auto 0;max-width:46ch;
   color:var(--muted);font-size:13px;line-height:1.65;
 }
 </style>
@@ -284,8 +288,8 @@ section:first-of-type{border-top:none;}
     <img class="logo" src="icon.svg" alt="TrustFirst">
     <h1 translate="no">A social app that knows who is real.</h1>
     <p class="sub">
-      Accounts can be verified against a real identity. Messages are encrypted.
-      Creators keep 80% of what they are sent. Built in Cape Town.
+      Accounts can be verified against a real identity, messages are encrypted,
+      and creators keep 80% of every gift they are sent.
     </p>
 
     <div class="stack">
@@ -308,9 +312,9 @@ section:first-of-type{border-top:none;}
           where everyone can see it. No separate app, no tab to switch to.
         </p>
         <p>
-          It reads posts aloud, answers questions, and makes pictures. Every reply
-          is labelled <b>AI</b>, because an assistant that could be mistaken for a
-          person is a strange thing to put in an app about knowing who is real.
+          It answers questions and makes pictures. Every reply is labelled
+          <b>AI</b>, because an assistant that could be mistaken for a person is a
+          strange thing to put in an app about knowing who is real.
         </p>
       </div>
 
@@ -365,9 +369,9 @@ section:first-of-type{border-top:none;}
       <div class="row-text">
         <h3>Messages only you can read</h3>
         <p>
-          Direct messages are end&#8209;to&#8209;end encrypted. Unreadable in transit,
-          and unreadable by us. What sits on the server is ciphertext, not words,
-          so there is nothing to hand over and nothing to leak.
+          Direct messages are end&#8209;to&#8209;end encrypted. They are scrambled on
+          your phone and only unscrambled on theirs, so we cannot read them. There
+          is nothing on our side to leak or hand over.
         </p>
       </div>
       <div class="row-text">
@@ -375,7 +379,7 @@ section:first-of-type{border-top:none;}
         <p>
           Top up with a card, send a creator a gift, and they keep <b>80%</b> of it.
           Card details are typed on the payment provider&rsquo;s own page and never
-          touch this app. Money out goes to a South African bank account.
+          touch this app.
         </p>
       </div>
     </div>
@@ -388,13 +392,24 @@ section:first-of-type{border-top:none;}
           captions, music, and a cutout tool that runs on your own phone rather
           than on somebody&rsquo;s server.
         </p>
-      </div>
-      <div class="row-text">
-        <h3>Going dark</h3>
+        <h3 style="margin-top:26px;">Going dark</h3>
         <p>
           Mute everything for a day or a month. The people who follow you are told
           you are taking space, so silence is not mistaken for being ignored.
         </p>
+      </div>
+
+      <!-- A frame lifted straight out of a screen recording of the app. Not a
+           render, not a stock clip standing in for one: the chrome around the
+           video is the real interface, which is the entire point on a page
+           answering people who think this app does not exist. -->
+      <div class="phone phone-shot">
+        <div class="phone-notch"><i></i></div>
+        <picture>
+          <source srcset="shot-clips.webp" type="image/webp">
+          <img src="shot-clips.jpg" width="600" height="1223" loading="lazy" decoding="async"
+               alt="A TrustClip playing, with the like, comment, share and save controls down the right side">
+        </picture>
       </div>
     </div>
   </section>
@@ -416,11 +431,11 @@ section:first-of-type{border-top:none;}
         </ol>
         <a class="btn btn-primary" id="apkBtn" href="#">Download the app</a>
         <p class="reassure">
-          Android warns about anything installed outside the Play Store. The file is
-          built automatically from
+          Android warns about anything installed from outside the Play Store. The
+          file is built automatically from
           <a class="inline" href="https://github.com/sebelebelekn-afk/trustfirst_project"
-             target="_blank" rel="noopener noreferrer">public source</a>, so you can see
-          exactly what is in it.
+             target="_blank" rel="noopener noreferrer">public source</a>, so anyone can
+          see exactly what is in it.
         </p>
       </div>
 
@@ -444,13 +459,9 @@ section:first-of-type{border-top:none;}
       <a class="btn btn-primary" id="registerBtn" href="#">Create account</a>
       <a class="btn btn-ghost" id="loginBtn" href="#">Log in</a>
     </div>
-    <!-- Kept, and kept small. Saying plainly that this is early and built by one
-         person is not an apology, it is the thing that separates an honest small
-         app from one pretending to be a company. As a footnote it reassures
-         without turning the page into a defence. -->
     <p class="early">
-      Built and run by one person in Cape Town, under South African law.
-      Everything on this page describes what works today, not what is planned.
+      Everything on this page is in the app today. Nothing here describes something
+      that is planned.
     </p>
   </section>
 
