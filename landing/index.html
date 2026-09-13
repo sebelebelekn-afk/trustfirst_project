@@ -250,13 +250,23 @@ section:first-of-type{border-top:none;}
 .fact b{display:block;font-size:15px;font-weight:700;margin-bottom:3px;}
 .fact span{color:var(--muted);font-size:14px;line-height:1.55;}
 
+/* One quiet line under the download button, where the hesitation actually
+   happens. This used to be a whole section headed "do not take our word for any
+   of this", which answered the objection and advertised it at the same time: a
+   page that argues at length about not being a scam reads like one that needs
+   to. The facts were right, the volume was wrong. */
+.reassure{
+  color:var(--muted);font-size:12.5px;line-height:1.6;
+  margin:12px 2px 0;
+}
+.reassure .inline{color:var(--muted);text-decoration:underline;text-underline-offset:2px;}
+.reassure .inline:hover{color:var(--text);}
+
 /* small print --------------------------------------------------------------- */
 .early{
-  margin-top:34px;padding:16px 18px;border:1px solid var(--line);
-  border-radius:14px;background:var(--panel);
-  color:var(--muted);font-size:13.5px;line-height:1.6;
+  margin:30px auto 0;max-width:44ch;
+  color:var(--muted);font-size:13px;line-height:1.65;
 }
-.early b{color:var(--text);}
 </style>
 </head>
 <body>
@@ -389,72 +399,11 @@ section:first-of-type{border-top:none;}
     </div>
   </section>
 
-  <section id="safe">
-    <span class="eyebrow">Before you install</span>
-    <h2>Do not take our word for any of this.</h2>
-    <p class="lede" style="max-width:46ch;">
-      It is a fair question whether a small app asking for an ID document and a card
-      is safe. Here is what you can check without trusting us.
-    </p>
-
-    <div class="facts">
-      <div class="fact">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M9 9l-2 3 2 3M15 9l2 3-2 3"/></svg>
-        <div>
-          <b>The code is public</b>
-          <span>Every line of the app, and of this page, is
-            <a class="inline" href="https://github.com/sebelebelekn-afk/trustfirst_project"
-               target="_blank" rel="noopener noreferrer">on GitHub</a>. Read it before you trust it.</span>
-        </div>
-      </div>
-      <div class="fact">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 4v5c0 4.4-3 8.3-7 9-4-0.7-7-4.6-7-9V7z"/><path d="M9.5 12l1.8 1.8L15 10"/></svg>
-        <div>
-          <b>The download is built in the open</b>
-          <span>The Android file is compiled by
-            <a class="inline" href="https://github.com/sebelebelekn-afk/trustfirst_project/actions"
-               target="_blank" rel="noopener noreferrer">GitHub Actions</a> from that public code.
-            Nobody uploads it by hand.</span>
-        </div>
-      </div>
-      <div class="fact">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>
-        <div>
-          <b>You do not have to install anything</b>
-          <span>It runs in a browser. On iPhone that is the only way in. If the
-            install prompt bothers you, skip it. Nothing is held back.</span>
-        </div>
-      </div>
-      <div class="fact">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l9 15.5H3z"/><path d="M12 10v4M12 17v.01"/></svg>
-        <div>
-          <b>Your phone will warn you</b>
-          <span>Android warns about anything installed outside the Play Store, and it
-            is right to. Better said here than as a surprise. It is not a verdict on the file.</span>
-        </div>
-      </div>
-      <div class="fact">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5L12 4l9 6.5"/><path d="M5 10v9h14v-9"/><path d="M10 19v-5h4v5"/></svg>
-        <div>
-          <b>Cape Town, South African law</b>
-          <span>The <a class="inline" data-app-path="/terms/">Terms</a> and
-            <a class="inline" data-app-path="/privacy/">Privacy Policy</a> are written to
-            be read by people. The privacy policy says nothing is sold to advertisers, in those words.</span>
-        </div>
-      </div>
-    </div>
-
-    <p class="early">
-      <b>It is early, and it says so.</b> TrustFirst is built and run by one person,
-      not a company with a support floor. Everything on this page describes what
-      works today, not what is planned.
-    </p>
-  </section>
-
   <section id="get">
     <span class="eyebrow">Install</span>
     <h2>Get TrustFirst</h2>
-    <p class="lede">Free, and no Play Store needed. Two ways in, depending on your phone.</p>
+    <p class="lede">Free, and no Play Store needed. Two ways in, depending on your phone.
+      You can also just use it in a browser without installing anything.</p>
 
     <div class="cards">
       <div class="card">
@@ -466,6 +415,13 @@ section:first-of-type{border-top:none;}
           <li>Choose <b>Add to Home screen</b>.</li>
         </ol>
         <a class="btn btn-primary" id="apkBtn" href="#">Download the app</a>
+        <p class="reassure">
+          Android warns about anything installed outside the Play Store. The file is
+          built automatically from
+          <a class="inline" href="https://github.com/sebelebelekn-afk/trustfirst_project"
+             target="_blank" rel="noopener noreferrer">public source</a>, so you can see
+          exactly what is in it.
+        </p>
       </div>
 
       <div class="card">
@@ -488,6 +444,14 @@ section:first-of-type{border-top:none;}
       <a class="btn btn-primary" id="registerBtn" href="#">Create account</a>
       <a class="btn btn-ghost" id="loginBtn" href="#">Log in</a>
     </div>
+    <!-- Kept, and kept small. Saying plainly that this is early and built by one
+         person is not an apology, it is the thing that separates an honest small
+         app from one pretending to be a company. As a footnote it reassures
+         without turning the page into a defence. -->
+    <p class="early">
+      Built and run by one person in Cape Town, under South African law.
+      Everything on this page describes what works today, not what is planned.
+    </p>
   </section>
 
 </main>
