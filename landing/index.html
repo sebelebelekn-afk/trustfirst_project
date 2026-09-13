@@ -7,6 +7,9 @@
 <meta name="description" content="A social app that knows who is real. Accounts can be verified against a real identity, messages are encrypted, and creators keep 80% of every gift. Free on Android and iPhone.">
 <meta name="theme-color" content="#000000">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
+<!-- Asked for while the HTML is still parsing, so the screenshot is
+     already there by the time somebody scrolls to it. -->
+<link rel="preload" as="image" href="shot-clips.webp" type="image/webp">
 
 <!-- Open Graph, so a link pasted into WhatsApp shows a card instead of a bare URL -->
 <meta property="og:site_name" content="TrustFirst">
@@ -207,7 +210,8 @@ section:first-of-type{border-top:none;}
 .phone-body{padding:0 0 18px;}
 .phone-shot{max-width:280px;}
 .phone-shot img{display:block;width:100%;height:auto;}
-.phone img{display:block;width:100%;height:auto;}
+/* Scoped to the screenshot: a bare .phone img also caught the avatar in the
+   conversation above and outranked .avatar, blowing it up to full width. */
 
 /* the Eddie exchange, rendered rather than screenshotted --------------------
    This is a real question somebody asked and a real answer Eddie gave, marked
@@ -217,6 +221,7 @@ section:first-of-type{border-top:none;}
 .post{padding:16px 15px 6px;}
 .post-top{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
 .avatar{width:38px;height:38px;border-radius:50%;flex:none;object-fit:cover;background:#2c2c2e;}
+img.avatar{background:#000;}
 .avatar.eddie{
   background:#0a0a0a;border:1px solid rgba(255,255,255,0.14);
   display:flex;align-items:center;justify-content:center;
@@ -327,10 +332,10 @@ section:first-of-type{border-top:none;}
         <div class="phone-body">
           <article class="post">
             <div class="post-top">
-              <div class="avatar" aria-hidden="true"></div>
+              <img class="avatar" src="icon.svg" alt="" width="38" height="38">
               <div class="who">
-                <b>Someone you follow</b>
-                <span>in the feed</span>
+                <b>TrustFirst<svg class="tick" viewBox="0 0 24 24" aria-label="Verified"><circle cx="12" cy="12" r="11" fill="#1d9bf0"/><path d="M17 8.5l-6.3 6.5L7 11.4" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></b>
+                <span>@trustfirst</span>
               </div>
             </div>
             <p>Hey <b style="color:var(--blue);">@eddie</b> which one would you choose
@@ -407,7 +412,7 @@ section:first-of-type{border-top:none;}
         <div class="phone-notch"><i></i></div>
         <picture>
           <source srcset="shot-clips.webp" type="image/webp">
-          <img src="shot-clips.jpg" width="600" height="1223" loading="lazy" decoding="async"
+          <img src="shot-clips.jpg" width="600" height="1223" fetchpriority="high" decoding="async"
                alt="A TrustClip playing, with the like, comment, share and save controls down the right side">
         </picture>
       </div>
