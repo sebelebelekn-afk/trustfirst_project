@@ -133,6 +133,130 @@ footer a:hover{color:#fff;}
 }
 .foot-links a:hover{color:#fff;text-decoration:underline;}
 .foot-name{font-weight:600;color:var(--muted);font-size:12.5px;}
+
+/* ---------------------------------------------------------------------------
+   SECOND PASS, after "it looks like a fake app made by AI".
+
+   The copy was not the main problem. The shape was: twelve identical bordered
+   cards in one column, which is what a generated page looks like. Real product
+   pages change shape as you scroll, so this one does too: a hero with the
+   product in it, one wide showcase, alternating rows, a quiet strip of facts,
+   then the install steps.
+
+   No stock photography anywhere, deliberately. A page defending itself against
+   "this is fake" cannot use a stock video of a band to stand in for the feed:
+   a reverse image search is ten seconds and settles the argument the wrong way.
+   What is shown is either the real interface or nothing.
+--------------------------------------------------------------------------- */
+
+/* type scale ---------------------------------------------------------------
+   The old page ran everything at roughly one size. A real hierarchy does more
+   for "professional" than any amount of decoration. */
+h1{font-size:clamp(38px,9vw,64px);line-height:1.04;letter-spacing:-0.035em;
+   font-weight:800;margin:0 0 16px;text-wrap:balance;}
+h2{font-size:clamp(26px,5.2vw,38px);line-height:1.12;letter-spacing:-0.025em;
+   font-weight:800;margin:0 0 12px;text-wrap:balance;}
+h3{font-size:19px;line-height:1.25;letter-spacing:-0.01em;font-weight:700;margin:0 0 6px;}
+section{padding:64px 0;border-top:1px solid var(--line);}
+section:first-of-type{border-top:none;}
+
+/* eyebrow: a small label that tells you where you are without a heading ---- */
+.eyebrow{
+  display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:0.13em;
+  text-transform:uppercase;color:var(--muted);margin:0 0 14px;
+}
+
+/* hero --------------------------------------------------------------------- */
+.hero{padding:52px 0 0;text-align:left;}
+.hero .logo{width:52px;height:52px;margin:0 0 22px;display:block;}
+.hero .sub{
+  color:var(--muted);font-size:clamp(16px,4vw,19px);line-height:1.55;
+  margin:0 0 30px;max-width:34ch;
+}
+.hero .stack{max-width:360px;margin-left:0;margin-right:0;}
+.hero .note{margin-top:16px;}
+/* The closing section stays centred, so it still wants the auto margins. */
+.account .stack{margin-left:auto;margin-right:auto;}
+
+/* phone frame -------------------------------------------------------------
+   Drawn in CSS rather than shipped as a PNG of a handset, so it stays sharp,
+   weighs nothing, and cannot be mistaken for a marketing render of a device
+   that does not exist. What sits inside it is the real interface. */
+.phone{
+  width:100%;max-width:320px;margin:0 auto;
+  border:9px solid #1c1c1e;border-radius:42px;
+  background:#000;overflow:hidden;
+  box-shadow:0 30px 70px -20px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.07);
+}
+.phone-notch{
+  height:26px;display:flex;align-items:center;justify-content:center;
+}
+.phone-notch i{display:block;width:78px;height:5px;border-radius:3px;background:#2a2a2e;}
+.phone-body{padding:0 0 18px;}
+.phone img{display:block;width:100%;height:auto;}
+
+/* the Eddie exchange, rendered rather than screenshotted --------------------
+   This is a real question somebody asked and a real answer Eddie gave, marked
+   up in the app's own styles. Not a mockup of a conversation that never
+   happened, and not a picture of one either, so it stays readable, selectable
+   and translatable. */
+.post{padding:16px 15px 6px;}
+.post-top{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.avatar{width:38px;height:38px;border-radius:50%;flex:none;object-fit:cover;background:#2c2c2e;}
+.avatar.eddie{
+  background:#0a0a0a;border:1px solid rgba(255,255,255,0.14);
+  display:flex;align-items:center;justify-content:center;
+}
+.avatar.eddie svg{width:22px;height:22px;}
+.who{min-width:0;}
+.who b{display:block;font-size:14.5px;font-weight:700;line-height:1.2;}
+.who span{font-size:12.5px;color:var(--muted);}
+.badge-ai{
+  display:inline-block;vertical-align:2px;margin-left:6px;
+  font-size:9.5px;font-weight:800;letter-spacing:0.06em;
+  background:#fff;color:#000;border-radius:4px;padding:1px 4px;
+}
+.tick{width:14px;height:14px;vertical-align:-2px;margin-left:4px;}
+.post p{margin:0;font-size:14.5px;line-height:1.5;}
+.post .meta{
+  display:flex;gap:18px;align-items:center;margin-top:12px;
+  font-size:12.5px;color:var(--muted);
+}
+.reply{
+  margin:14px 0 0;padding:14px 15px 16px;
+  border-top:1px solid rgba(255,255,255,0.08);
+  background:rgba(255,255,255,0.02);
+}
+
+/* alternating rows --------------------------------------------------------- */
+.row{display:grid;gap:26px;align-items:center;grid-template-columns:1fr;}
+@media(min-width:820px){
+  .row{grid-template-columns:1fr 1fr;gap:52px;}
+  .row.flip .row-text{order:2;}
+}
+.row + .row{margin-top:58px;}
+.row-text p{color:var(--muted);font-size:15.5px;line-height:1.65;margin:0 0 14px;max-width:42ch;}
+.row-text p:last-child{margin-bottom:0;}
+@media(max-width:819px){.row + .row{margin-top:40px;} .row{gap:34px;}}
+
+/* a quiet strip of checkable facts, instead of six more cards -------------- */
+.facts{display:grid;gap:0;grid-template-columns:1fr;margin-top:6px;}
+.fact{
+  display:grid;grid-template-columns:22px 1fr;gap:13px;align-items:start;
+  padding:17px 0;border-top:1px solid var(--line);
+}
+.fact:first-child{border-top:none;}
+.fact svg{width:19px;height:19px;margin-top:1px;color:var(--muted);flex:none;}
+.fact b{display:block;font-size:15px;font-weight:700;margin-bottom:3px;}
+.fact span{color:var(--muted);font-size:14px;line-height:1.55;}
+
+/* small print --------------------------------------------------------------- */
+.early{
+  margin-top:34px;padding:16px 18px;border:1px solid var(--line);
+  border-radius:14px;background:var(--panel);
+  color:var(--muted);font-size:13.5px;line-height:1.6;
+}
+.early b{color:var(--text);}
 </style>
 </head>
 <body>
@@ -146,11 +270,13 @@ footer a:hover{color:#fff;}
 
 <main class="wrap" id="top">
 
-  <div class="hero">
+  <section class="hero">
     <img class="logo" src="icon.svg" alt="TrustFirst">
-    <h1 translate="no">TrustFirst</h1>
-    <p class="sub">A South African social app where people are verified, direct messages
-      are encrypted, and creators keep 80% of every gift they are sent.</p>
+    <h1 translate="no">A social app that knows who is real.</h1>
+    <p class="sub">
+      Accounts can be verified against a real identity. Messages are encrypted.
+      Creators keep 80% of what they are sent. Built in Cape Town.
+    </p>
 
     <div class="stack">
       <!-- Filled in by the script below with whatever suits the device you are
@@ -159,53 +285,174 @@ footer a:hover{color:#fff;}
       <a class="btn btn-ghost" id="ctaSecondary" href="#account">Log in</a>
     </div>
     <p class="note" id="heroNote"></p>
-  </div>
+  </section>
 
-  <section>
-    <h2>What TrustFirst is</h2>
-    <p class="lede">
-      A place to post, message and get paid, built in South Africa and run under
-      South African law. Accounts can be verified against a real identity, so the
-      person you are talking to is the person they say they are. The money is in
-      Rands. Nothing here is sold to advertisers. The
-      <a class="inline" data-app-path="/privacy/">privacy policy</a> says so in those
-      words.
-    </p>
-    <div class="feats">
-      <div class="feat">
-        <b>Messages only you can read</b>
-        <span>Direct messages are end&#8209;to&#8209;end encrypted. They are unreadable in
-        transit, and unreadable by us. We hold the ciphertext, not the words.</span>
+  <section id="eddie">
+    <span class="eyebrow">Ask Eddie</span>
+    <h2>There is an assistant in the feed.</h2>
+
+    <div class="row">
+      <div class="row-text">
+        <p>
+          Mention <b>@eddie</b> under any post and it answers there, in the thread,
+          where everyone can see it. No separate app, no tab to switch to.
+        </p>
+        <p>
+          It reads posts aloud, answers questions, and makes pictures. Every reply
+          is labelled <b>AI</b>, because an assistant that could be mistaken for a
+          person is a strange thing to put in an app about knowing who is real.
+        </p>
       </div>
-      <div class="feat">
-        <b>TrustClips</b>
-        <span>Short videos from the people you follow, with the editor built in:
-        trim, captions, music, and a cutout tool that runs on your own phone.</span>
-      </div>
-      <div class="feat">
-        <b>A wallet in Rands</b>
-        <span>Top up with a card, send a creator a gift, and they keep 80% of it.
-        Card details are typed on the payment provider&rsquo;s page, never ours.</span>
-      </div>
-      <div class="feat">
-        <b>Eddie, built in</b>
-        <span>An assistant that lives in the app: ask it something, mention it in a
-        comment, have it read a post aloud, or make you a picture.</span>
-      </div>
-      <div class="feat">
-        <b>Going dark</b>
-        <span>Mute everything for a day or a month. Your circle is told you are
-        taking space, so silence is not mistaken for being ignored.</span>
-      </div>
-      <div class="feat">
-        <b>Accounts for under&#8209;18s</b>
-        <span>A child&rsquo;s account is approved by a parent, and what it can see and
-        who can reach it stays under their control.</span>
+
+      <!-- A real exchange from the app, marked up in the app's own styles rather
+           than shipped as a screenshot: it stays sharp on every screen, can be
+           selected and translated, and weighs nothing. The wording is verbatim.
+           The person who asked is not named, because their name is theirs. -->
+      <div class="phone" aria-label="A question in the feed and Eddie's reply">
+        <div class="phone-notch"><i></i></div>
+        <div class="phone-body">
+          <article class="post">
+            <div class="post-top">
+              <div class="avatar" aria-hidden="true"></div>
+              <div class="who">
+                <b>Someone you follow</b>
+                <span>in the feed</span>
+              </div>
+            </div>
+            <p>Hey <b style="color:var(--blue);">@eddie</b> which one would you choose
+              between the Samsung Z fold 8 and the iPhone duo</p>
+            <div class="meta"><span>1 comment</span></div>
+          </article>
+
+          <div class="reply">
+            <div class="post-top">
+              <div class="avatar eddie" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round">
+                  <circle cx="8.5" cy="9.5" r="1.4" fill="#fff" stroke="none"></circle>
+                  <circle cx="15.5" cy="9.5" r="1.4" fill="#fff" stroke="none"></circle>
+                  <path d="M8 14.5c1.1 1.2 2.5 1.8 4 1.8s2.9-.6 4-1.8"></path>
+                </svg>
+              </div>
+              <div class="who">
+                <b>Eddie<span class="badge-ai">AI</span></b>
+                <span>replied in the thread</span>
+              </div>
+            </div>
+            <p>I&rsquo;d go with the Samsung Z Fold 8. Its foldable display lets you
+              multitask like a small tablet while still fitting in a pocket, and the
+              cameras and battery are strong competitors to the iPhone Duo.</p>
+          </div>
+        </div>
       </div>
     </div>
   </section>
 
+  <section id="what">
+    <span class="eyebrow">What you get</span>
+    <h2>Three things it does properly.</h2>
+
+    <div class="row">
+      <div class="row-text">
+        <h3>Messages only you can read</h3>
+        <p>
+          Direct messages are end&#8209;to&#8209;end encrypted. Unreadable in transit,
+          and unreadable by us. What sits on the server is ciphertext, not words,
+          so there is nothing to hand over and nothing to leak.
+        </p>
+      </div>
+      <div class="row-text">
+        <h3>A wallet in Rands</h3>
+        <p>
+          Top up with a card, send a creator a gift, and they keep <b>80%</b> of it.
+          Card details are typed on the payment provider&rsquo;s own page and never
+          touch this app. Money out goes to a South African bank account.
+        </p>
+      </div>
+    </div>
+
+    <div class="row flip">
+      <div class="row-text">
+        <h3>TrustClips</h3>
+        <p>
+          Short videos from people you follow, with the editor built in: trim,
+          captions, music, and a cutout tool that runs on your own phone rather
+          than on somebody&rsquo;s server.
+        </p>
+      </div>
+      <div class="row-text">
+        <h3>Going dark</h3>
+        <p>
+          Mute everything for a day or a month. The people who follow you are told
+          you are taking space, so silence is not mistaken for being ignored.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="safe">
+    <span class="eyebrow">Before you install</span>
+    <h2>Do not take our word for any of this.</h2>
+    <p class="lede" style="max-width:46ch;">
+      It is a fair question whether a small app asking for an ID document and a card
+      is safe. Here is what you can check without trusting us.
+    </p>
+
+    <div class="facts">
+      <div class="fact">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M9 9l-2 3 2 3M15 9l2 3-2 3"/></svg>
+        <div>
+          <b>The code is public</b>
+          <span>Every line of the app, and of this page, is
+            <a class="inline" href="https://github.com/sebelebelekn-afk/trustfirst_project"
+               target="_blank" rel="noopener noreferrer">on GitHub</a>. Read it before you trust it.</span>
+        </div>
+      </div>
+      <div class="fact">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 4v5c0 4.4-3 8.3-7 9-4-0.7-7-4.6-7-9V7z"/><path d="M9.5 12l1.8 1.8L15 10"/></svg>
+        <div>
+          <b>The download is built in the open</b>
+          <span>The Android file is compiled by
+            <a class="inline" href="https://github.com/sebelebelekn-afk/trustfirst_project/actions"
+               target="_blank" rel="noopener noreferrer">GitHub Actions</a> from that public code.
+            Nobody uploads it by hand.</span>
+        </div>
+      </div>
+      <div class="fact">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>
+        <div>
+          <b>You do not have to install anything</b>
+          <span>It runs in a browser. On iPhone that is the only way in. If the
+            install prompt bothers you, skip it. Nothing is held back.</span>
+        </div>
+      </div>
+      <div class="fact">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l9 15.5H3z"/><path d="M12 10v4M12 17v.01"/></svg>
+        <div>
+          <b>Your phone will warn you</b>
+          <span>Android warns about anything installed outside the Play Store, and it
+            is right to. Better said here than as a surprise. It is not a verdict on the file.</span>
+        </div>
+      </div>
+      <div class="fact">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5L12 4l9 6.5"/><path d="M5 10v9h14v-9"/><path d="M10 19v-5h4v5"/></svg>
+        <div>
+          <b>Cape Town, South African law</b>
+          <span>The <a class="inline" data-app-path="/terms/">Terms</a> and
+            <a class="inline" data-app-path="/privacy/">Privacy Policy</a> are written to
+            be read by people. The privacy policy says nothing is sold to advertisers, in those words.</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="early">
+      <b>It is early, and it says so.</b> TrustFirst is built and run by one person,
+      not a company with a support floor. Everything on this page describes what
+      works today, not what is planned.
+    </p>
+  </section>
+
   <section id="get">
+    <span class="eyebrow">Install</span>
     <h2>Get TrustFirst</h2>
     <p class="lede">Free, and no Play Store needed. Two ways in, depending on your phone.</p>
 
@@ -215,7 +462,7 @@ footer a:hover{color:#fff;}
         <p id="androidCopy">Download and install the app. Your phone will ask you to allow installing from your browser. That is normal for apps that are not from the Play Store yet.</p>
         <ol class="steps" id="androidSteps" style="display:none;">
           <li>Open TrustFirst in <b>Chrome</b>.</li>
-          <li>Tap the <b>⋮</b> menu, top right.</li>
+          <li>Tap the <b>&#8942;</b> menu, top right.</li>
           <li>Choose <b>Add to Home screen</b>.</li>
         </ol>
         <a class="btn btn-primary" id="apkBtn" href="#">Download the app</a>
@@ -234,61 +481,9 @@ footer a:hover{color:#fff;}
     </div>
   </section>
 
-  <section id="safe">
-    <h2>&ldquo;Is this safe to install?&rdquo;</h2>
-    <p class="lede">
-      A fair question, and the honest answer is that you should not take our word
-      for it. Here is what you can check yourself.
-    </p>
-
-    <div class="feats">
-      <div class="feat">
-        <b>You do not have to install anything</b>
-        <span>TrustFirst runs in the browser. On iPhone that is the only way in;
-        on Android the download is a convenience, not a requirement. If the
-        install prompt bothers you, skip it. Nothing is held back.</span>
-      </div>
-      <div class="feat">
-        <b>The code is public</b>
-        <span>Every line of this app, and of this page, is
-        <a class="inline" href="https://github.com/sebelebelekn-afk/trustfirst_project"
-           target="_blank" rel="noopener noreferrer">on GitHub</a>. Read it before you
-        trust it. That is a standing invitation, not a slogan.</span>
-      </div>
-      <div class="feat">
-        <b>The download is built in the open</b>
-        <span>The Android file is compiled by
-        <a class="inline" href="https://github.com/sebelebelekn-afk/trustfirst_project/actions"
-           target="_blank" rel="noopener noreferrer">GitHub Actions</a> from that public
-        code and published straight to a release. Nobody uploads it by hand.</span>
-      </div>
-      <div class="feat">
-        <b>Your phone will warn you</b>
-        <span>Android warns about anything installed outside the Play Store, and it
-        is right to. We would rather say so here than have the warning be a
-        surprise. It is not a verdict on the file.</span>
-      </div>
-      <div class="feat">
-        <b>Cape Town, South African law</b>
-        <span>Run from Cape Town under South African law, with the
-        <a class="inline" data-app-path="/terms/">Terms</a> and
-        <a class="inline" data-app-path="/privacy/">Privacy Policy</a> written to be
-        read by people rather than lawyers.</span>
-      </div>
-      <div class="feat">
-        <b>Still early, and it says so</b>
-        <span>A small app, built and run by one person, not a company with a
-        support floor. Everything above describes what exists today, not what is
-        planned.</span>
-      </div>
-    </div>
-  </section>
-
   <section class="account" id="account">
     <h2>Already have an account?</h2>
-    <p class="lede">
-      Pick up where you left off, or make an account in a minute.
-    </p>
+    <p class="lede">Pick up where you left off, or make an account in a minute.</p>
     <div class="stack">
       <a class="btn btn-primary" id="registerBtn" href="#">Create account</a>
       <a class="btn btn-ghost" id="loginBtn" href="#">Log in</a>
@@ -299,17 +494,7 @@ footer a:hover{color:#fff;}
 
 <footer>
   <div class="wrap">
-    <!-- Inline SVG, not an icon font: the page loads nothing from anywhere else
-         and one social link is not a reason to start. -->
-    <a class="social" href="https://x.com/_trustfirst" target="_blank" rel="noopener noreferrer"
-       aria-label="TrustFirst on X">
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true">
-        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-      </svg>
-    </a>
-    <!-- These point at the app's own pages, which are real URLs now rather than
-         screens inside it, so the same address works here, in the app and in a
-         Play Store listing. Filled in by the script from APP_URL. -->
+    <a class="mark" href="#top" aria-label="TrustFirst"><img src="icon.svg" alt=""></a>
     <nav class="foot-links">
       <a data-app-path="/help/">Help</a>
       <a data-app-path="/privacy/">Privacy</a>
