@@ -631,7 +631,11 @@ function authenticateUser() {
     <b style="font-size:16px;">Select Clips</b>
     <button id="clipNextBtn" onclick="openPreviewEditScreen()" style="background:#007AFF;color:white;border:none;border-radius:20px;padding:8px 18px;font-size:14px;font-weight:700;cursor:pointer;opacity:0.4;pointer-events:none;">Next</button>
   </div>
-  <div id="clip-gallery-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:2px;overflow-y:auto;flex:1;padding:2px;"></div>
+  <!-- minmax(0,1fr), not 1fr. A bare 1fr is minmax(auto,1fr), and the auto floor
+       is the tile's min-content width, which aspect-ratio:9/16 inflates once the
+       grid is tall. That let one column swallow the row and squeezed the others to
+       nothing, which is what made this page show a single full-width tile. -->
+  <div id="clip-gallery-grid" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;overflow-y:auto;flex:1;padding:2px;"></div>
 </div>
 
 <!-- ========== VIDEO EDITOR SCREEN ========== -->

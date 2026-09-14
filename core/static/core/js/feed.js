@@ -20104,6 +20104,7 @@ function openContextualVideo(videoUrl, context, startIndex, clipArray) {
     // clip counted for nothing. The observer picks up any [data-post-id]; it
     // just needed telling that new ones exist.
     if (typeof _tfObserveNewPosts === 'function') _tfObserveNewPosts();
+    _tfBindReelLongPress(scroller);
     _tfPlayOneAtATime(scroller);
     return;
 }
@@ -20842,6 +20843,43 @@ function _tfEdlAttr(row) {
 
 
 // Long-press menu for the active reels tab (initReels / .reel-page).
+// Binds hold-to-open-menu on a clip scroller. Written out here because the
+// profile's clip viewer (#tfClipScroller) needs the same gesture the reels tab
+// (#reel-scroller) has, and it had none: long-pressing a clip opened from a
+// profile did nothing at all.
+function _tfBindReelLongPress(scroller) {
+    if (!scroller || scroller._lpBound) return;
+    scroller._lpBound = true;
+    var t = null, x = 0, y = 0;
+    function stop() { clearTimeout(t); t = null; }
+    scroller.addEventListener('touchstart', function (e) {
+        if (e.touches.length > 1) return;
+        var p = e.touches[0]; x = p.clientX; y = p.clientY;
+        var page = e.target.closest('.reel-page');
+        if (!page || page.hasAttribute('data-suggest-page')) return;
+        if (e.target.closest('button,a,input,textarea,.reel-action,.reel-sidebar')) return;
+        stop();
+        t = setTimeout(function () {
+            t = null;
+            openReelLongPressMenu(page);
+            if (typeof triggerHaptic === 'function') triggerHaptic(30);
+        }, 480);
+    }, { passive: true });
+    scroller.addEventListener('touchmove', function (e) {
+        var p = e.touches[0];
+        if (t && p && (Math.abs(p.clientX - x) > 12 || Math.abs(p.clientY - y) > 12)) stop();
+    }, { passive: true });
+    scroller.addEventListener('touchend', stop, { passive: true });
+    scroller.addEventListener('touchcancel', stop, { passive: true });
+    // Desktop, and the same gesture a trackpad long-press produces.
+    scroller.addEventListener('contextmenu', function (e) {
+        var page = e.target.closest('.reel-page');
+        if (!page || page.hasAttribute('data-suggest-page')) return;
+        e.preventDefault();
+        openReelLongPressMenu(page);
+    });
+}
+
 function openReelLongPressMenu(page) {
     if (!page) return;
     document.getElementById('reelLongPressMenu')?.remove();
@@ -20852,6 +20890,12 @@ function openReelLongPressMenu(page) {
     var pageUrl = (pageVid && (pageVid.currentSrc || pageVid.src)) || '';
     var noDl = page.getAttribute('data-no-downloads') === '1';
     window._reelMenuUrl = pageUrl;
+    // Delete is offered only on your own clip. The row is a convenience; the
+    // delete itself is scoped to your user id as well, and RLS is the actual
+    // guard on the server.
+    var _owner = page.getAttribute('data-user-id') || '';
+    var _mine  = !!(currentUser && currentUser.id && _owner === currentUser.id);
+    window._reelMenuPage = page;
 
     function row(icon, color, label, action, last) {
         return '<div onclick="reelMenuAction(\'' + action + '\',\'' + pid + '\')" style="display:flex;align-items:center;gap:14px;padding:16px 20px;cursor:pointer;' + (last ? '' : 'border-bottom:0.5px solid rgba(255,255,255,0.08);') + '">' +
@@ -20871,7 +20915,8 @@ function openReelLongPressMenu(page) {
                     row('fa-download', '#5856D6', 'Download', 'download')) +
                 row('fa-arrow-up-from-bracket', '#34C759', 'Share', 'share') +
                 row('fa-eye-slash', '#FF9500', 'Not interested', 'notinterested') +
-                row('fa-flag', '#FF3B30', 'Report', 'report', true) +
+                row('fa-flag', '#FF3B30', 'Report', 'report', !_mine) +
+                (_mine ? row('fa-trash', '#FF3B30', 'Delete', 'delete', true) : '') +
             '</div>' +
 
             /* Playback controls. These lived on the renderReel screen, which the
@@ -20905,10 +20950,40 @@ function openReelLongPressMenu(page) {
     triggerHaptic && triggerHaptic(30);
 }
 
+// Delete your own clip. Scoped to your user id as well as the row id, so a
+// tampered page attribute cannot aim it at somebody else's post; RLS refuses
+// that on the server regardless.
+async function _tfDeleteMyClip(pid, page) {
+    if (!pid) return;
+    if (!window.sb || !currentUser || !currentUser.id) { showToast('Please sign in'); return; }
+    tfConfirm('Delete this clip?', async function () {
+        var res = await sb.from('posts').delete().eq('id', pid).eq('user_id', currentUser.id);
+        if (res.error) { showToast('Could not delete: ' + res.error.message); return; }
+        // Take it off the screen rather than making them reload to see it gone.
+        var node = (page && page.parentNode) ? page
+                 : document.querySelector('.reel-page[data-post-id="' + String(pid).replace(/"/g, '') + '"]');
+        if (node && node.parentNode) node.parentNode.removeChild(node);
+        document.querySelectorAll('[data-post-id="' + String(pid).replace(/"/g, '') + '"]').forEach(function (el) {
+            if (el.parentNode) el.parentNode.removeChild(el);
+        });
+        if (typeof triggerHaptic === 'function') triggerHaptic(20);
+        showToast('Clip deleted');
+    }, {
+        sub: 'This removes it for everyone, and it cannot be undone.',
+        icon: 'fa-solid fa-trash',
+        iconBg: 'rgba(255,59,48,0.12)',
+        iconColor: '#FF3B30',
+        confirmBg: '#FF3B30',
+        confirmLabel: 'Delete'
+    });
+}
+
 function reelMenuAction(action, pid) {
     document.getElementById('reelLongPressMenu')?.remove();
     triggerHaptic && triggerHaptic(15);
-    if (action === 'report') {
+    if (action === 'delete') {
+        _tfDeleteMyClip(pid, window._reelMenuPage);
+    } else if (action === 'report') {
         if (typeof openReportMenu === 'function') openReportMenu(pid || '', 'post');
         else showToast('Reported. Our team will review');
     } else if (action === 'save') {
@@ -43115,7 +43190,7 @@ function edOpenOverlayPicker() {
             '<button onclick="document.getElementById(\'edOverlayFileInput\').click()" style="background:#007AFF;border:none;color:white;font-size:13px;font-weight:700;padding:8px 16px;border-radius:20px;cursor:pointer;">Browse Files</button>' +
         '</div>' +
         '<input id="edOverlayFileInput" type="file" accept="image/*,video/*,.mov" style="display:none" onchange="edPickerFileChosen(this)">' +
-        '<div id="edPickerGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:2px;overflow-y:auto;flex:1;padding:2px;"></div>';
+        '<div id="edPickerGrid" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;overflow-y:auto;flex:1;padding:2px;"></div>';
     var overlay = document.getElementById('preview-edit-overlay');
     if (overlay) overlay.appendChild(picker);
     // Load recent images/videos from _edState or show browse prompt
@@ -47161,10 +47236,10 @@ function selectTcLocation(name) {
     triggerHaptic(15);
 }
 
-function handleClipFileSelect(input) {
-    if (!input.files || !input.files.length) return;
-    openPreviewEditScreen();
-}
+// handleClipFileSelect lives with the rest of the TrustClip flow, further up.
+// A second copy used to sit here that only called openPreviewEditScreen(), and
+// because it was declared later it was the one that ran: the files the user
+// picked were never recorded and the Select Clips grid stayed empty.
 
 function addChecklistItem() {
     var inp = document.getElementById('ckNewItem');
