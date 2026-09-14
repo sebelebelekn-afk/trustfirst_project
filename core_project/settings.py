@@ -32,6 +32,7 @@ _allowed = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 # Empty is fine and is what a local machine has: nothing below fires, and the
 # app runs on localhost exactly as before.
 APP_PUBLIC_URL = (os.environ.get('APP_PUBLIC_URL', '') or '').strip().rstrip('/')
+
 _public_host = ''
 if APP_PUBLIC_URL:
     from urllib.parse import urlsplit
@@ -69,6 +70,18 @@ if _public_host:
     CSRF_TRUSTED_ORIGINS.append('https://' + _public_host)
 if _render_host:
     CSRF_TRUSTED_ORIGINS.append('https://' + _render_host)
+
+# The version of the Terms of Service that is currently live.
+#
+# Bump this - in the environment, no deploy needed - whenever the Terms
+# actually change. Every account whose users.terms_accepted_version does not
+# match is shown the notice once on next open, and acknowledging writes this
+# value to their row. A date is easier to reason about later than a number,
+# because it says when, and that is the question anyone asks of a Terms record.
+#
+# Do not bump it for a typo fix. The notice means "this changed and you should
+# look", and a notice that cries wolf is worse than none.
+TERMS_VERSION = (os.environ.get('TERMS_VERSION', '') or '2026-09-14').strip()
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

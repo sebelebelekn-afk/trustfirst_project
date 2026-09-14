@@ -97,6 +97,106 @@ if (window.self !== window.top) {
     var _presenceKick = setInterval(function(){ if (currentUser && window.sb) { pingActivity(true); clearInterval(_presenceKick); } }, 1500);
 })();
 
+// ============================================
+// TERMS OF SERVICE NOTICE
+//
+// When the Terms change, every account is told once. settings.TERMS_VERSION is
+// the live version and rides along in /api/config; users.terms_accepted_version
+// is what each account last acknowledged. They differ, you get the sheet.
+//
+// Per account, not per device: a legal acknowledgement belongs to the person,
+// so a second phone does not ask again and clearing a browser does not wipe the
+// record. That is also why this is a column rather than localStorage.
+//
+// The sheet does not close by tapping away. Acknowledging the Terms should take
+// a deliberate act, and a sheet that vanishes on a stray tap records consent
+// nobody gave. Tapping outside shakes it instead, which says "not that way"
+// without trapping anyone in a dead end.
+// ============================================
+(function tfTermsNotice() {
+    var done = false;
+    var kick = setInterval(function () {
+        if (done) { clearInterval(kick); return; }
+        if (!window.sb || !window._tfConfig || !currentUser || !currentUser.id) return;
+        clearInterval(kick);
+        done = true;
+        tfCheckTermsVersion();
+    }, 1200);
+    // Nothing here is worth holding a timer open for a whole session.
+    setTimeout(function () { clearInterval(kick); }, 90000);
+})();
+
+async function tfCheckTermsVersion() {
+    var live = (window._tfConfig && window._tfConfig.terms_version) || '';
+    if (!live || !currentUser || !currentUser.id) return;
+    try {
+        var r = await sb.from('users').select('terms_accepted_version')
+                        .eq('id', currentUser.id).maybeSingle();
+        // A read that fails is not consent. Say nothing and try again next open,
+        // rather than showing a notice we cannot record the answer to.
+        if (r.error || !r.data) return;
+        if (r.data.terms_accepted_version === live) return;
+        tfShowTermsSheet(live);
+    } catch (e) {}
+}
+
+function tfShowTermsSheet(version) {
+    if (document.getElementById('tfTermsOverlay')) return;
+
+    var ov = document.createElement('div');
+    ov.id = 'tfTermsOverlay';
+    ov.style.cssText = 'position:absolute;inset:0;z-index:30000;background:rgba(0,0,0,0.45);' +
+        'backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);' +
+        'display:flex;align-items:flex-end;justify-content:center;';
+    ov.innerHTML =
+        '<div id="tfTermsSheet" style="width:100%;max-width:520px;background:var(--card-bg,#fff);' +
+            'border-radius:28px 28px 0 0;padding:34px 26px max(28px,env(safe-area-inset-bottom,28px));' +
+            'animation:slideUpOverlay 0.32s cubic-bezier(0.32,0.72,0,1);' +
+            'box-shadow:0 -16px 50px rgba(0,0,0,0.3);">' +
+            '<h2 style="font-size:30px;line-height:1.15;font-weight:800;letter-spacing:-0.02em;' +
+                'color:var(--text-primary,#000);margin:0 0 16px;">Updates to our Terms of Service</h2>' +
+            '<p style="font-size:16px;line-height:1.5;color:var(--text-secondary,#555);margin:0 0 26px;">' +
+                'We&rsquo;re updating our <a href="/terms/" target="_blank" rel="noopener" ' +
+                'style="color:#007AFF;text-decoration:none;">Terms of Service</a>. ' +
+                'Now&rsquo;s a good time to read them.</p>' +
+            '<button id="tfTermsOk" style="width:100%;padding:17px;border-radius:32px;border:none;' +
+                'background:var(--text-primary,#111);color:var(--card-bg,#fff);font-size:17px;' +
+                'font-weight:700;cursor:pointer;">Got it</button>' +
+        '</div>';
+
+    ov.addEventListener('click', function (e) {
+        if (e.target !== ov) return;          // a tap on the sheet is not a tap outside
+        var sheet = document.getElementById('tfTermsSheet');
+        if (!sheet) return;
+        sheet.classList.remove('tf-shake');
+        void sheet.offsetWidth;               // restart the animation on a repeat tap
+        sheet.classList.add('tf-shake');
+        if (typeof triggerHaptic === 'function') triggerHaptic(12);
+    });
+
+    (document.getElementById('app') || document.body).appendChild(ov);
+
+    document.getElementById('tfTermsOk').addEventListener('click', async function () {
+        var btn = this;
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+        try {
+            var r = await sb.from('users').update({ terms_accepted_version: version })
+                            .eq('id', currentUser.id);
+            if (r.error) throw r.error;
+        } catch (e) {
+            // Closing on a failed write would mean never asking again while the
+            // record still says they never agreed. Keep the sheet up and say so.
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            if (typeof showToast === 'function') showToast('Could not save that. Check your connection.');
+            return;
+        }
+        if (typeof triggerHaptic === 'function') triggerHaptic(10);
+        ov.remove();
+    });
+}
+
 function dismissSplash() {
     var splash = document.getElementById('appSplashScreen');
     if (!splash) return;
@@ -16124,6 +16224,13 @@ const USER_PUBLIC_COLS = [
 ].join(',');
 
 DB.createUserProfile = async function(profile) {
+    // Signing up is agreeing to the Terms live at that moment, so the account
+    // starts out acknowledging them. Without this a brand new user would be
+    // shown "we have updated our Terms" seconds after accepting them.
+    if (profile && profile.terms_accepted_version == null) {
+        var _tv = (window._tfConfig && window._tfConfig.terms_version) || null;
+        if (_tv) profile.terms_accepted_version = _tv;
+    }
     const { data, error } = await sb.from('users').insert(profile).select(USER_PUBLIC_COLS).single();
     if (error) throw error;
     return data;

@@ -236,6 +236,10 @@ def get_config(request):
         # app's the moment the domain mapping is finished. Public by
         # definition: it is the address of a public website.
         "app_public_url": getattr(settings, "APP_PUBLIC_URL", ""),
+        # The Terms version now live. The client compares it with the one on the
+        # signed-in account and shows the update notice when they differ, so
+        # bumping the environment variable is the whole release process.
+        "terms_version": getattr(settings, "TERMS_VERSION", ""),
         # A Sentry DSN is a public identifier by design: it says where to send
         # events, and carries no permission to read anything back. Empty turns
         # browser monitoring off, which is what happens locally.
