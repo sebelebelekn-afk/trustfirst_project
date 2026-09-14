@@ -725,55 +725,9 @@ function proceedAfterAccountType() {
     }
 }
 
-function linkParentAccount() {
-    var parentId = (document.getElementById('parent-link-id') || {}).value || '';
-    if (!parentId.trim()) { showToast('Enter your parent\'s Trust-ID'); return; }
-
-    if (window.sb) {
-        sb.from('users')
-            .select('id, username, full_name, verified, account_type, badge_tier')
-            .eq('username', parentId.trim().toLowerCase().replace('@',''))
-            .maybeSingle()
-            .then(function(result) {
-                if (!result.data) { showToast('Parent account not found. Check the username.'); return; }
-                if (!result.data.verified) { showToast('Parent must be verified (any coloured badge) to link accounts.'); return; }
-                if (result.data.account_type === 'child') { showToast('A child account cannot be a parent.'); return; }
-
-                // All verified account types (blue, silver, red) can be parents
-                secureSave('parent_link_request', {
-                    parent_id: result.data.id,
-                    parent_username: result.data.username,
-                    parent_name: result.data.full_name,
-                    parent_badge: result.data.badge_tier,
-                    status: 'pending',
-                    timestamp: Date.now()
-                });
-
-                showToast('Link request sent to ' + result.data.full_name + '! They must approve in Family Center.');
-
-                // Notify parent
-                if (window.sb) {
-                    sb.from('notifications').insert({
-                        user_id: result.data.id,
-                        type: 'child_link_request',
-                        message: 'A child account wants to link to you in Family Center',
-                        preview_text: 'Open Family Center to approve',
-                        read: false
-                    }).then(function(){}).catch(function(){});
-                }
-
-                setTimeout(function() { completeRegistration(false); }, 2000);
-            });
-    } else {
-        secureSave('parent_link_request', {
-            parent_username: parentId.trim(),
-            status: 'pending',
-            timestamp: Date.now()
-        });
-        showToast('Link request saved. Parent must approve when online.');
-        setTimeout(function() { completeRegistration(false); }, 2000);
-    }
-}
+// linkParentAccount lives further down. An older copy stood here and was dead:
+// it selected a `name` column that does not exist on users, so every parent
+// Trust-ID came back "not found".
 
 function getTierForType(type) {
     const map = { personal: 'verify-blue', business: 'verify-silver', government: 'verify-red', child: 'verify-green' };
@@ -13744,14 +13698,10 @@ function toggleLiveCamera() {
     });
 }
 
-function toggleLiveMic() {
-    if (!liveStream) return;
-    const audioTrack = liveStream.getAudioTracks()[0];
-    if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        triggerHaptic(10);
-    }
-}
+// toggleLiveMic is defined further up, with the full version. A second copy
+// stood here that only flipped the track and buzzed - no icon change, no colour,
+// no toast - and being later it was the one that ran, so muting your mic on a
+// live stream gave no feedback at all.
 
 function sendLiveComment() {
     const input = document.getElementById('live-chat-input');
@@ -16070,8 +16020,16 @@ function waitForSb() {
         var check = setInterval(function() {
             if (window.sb) { clearInterval(check); resolve(); }
         }, 100);
-        // Safety timeout after 10 seconds
-        setTimeout(function() { clearInterval(check); resolve(); }, 10000);
+        // Give up after ten seconds and let the caller carry on rather than
+        // reject. Five of the six callers have no try/catch, so rejecting here
+        // kills those flows outright on a cold start; carrying on lets them
+        // fail where they actually use sb, with a real error. Logged, because
+        // reaching this at all means something is wrong.
+        setTimeout(function() {
+            clearInterval(check);
+            if (!window.sb) console.warn('[waitForSb] gave up after 10s; sb never arrived');
+            resolve();
+        }, 10000);
     });
 }
  DB.signUp = async function(email, password, metadata) {
@@ -21541,10 +21499,16 @@ function openClipCamera(preSelectedAudio) {
         </div>
     `;
 
-    startCamera();
+    startClipCamera();
 }
 
-async function startCamera() {
+// The clip camera, which is a different camera from startCamera() further up:
+// that one fills #camera-preview inside #camera-overlay and is what the chat,
+// composer and attach-modal camera buttons open. This one fills #cameraPreview,
+// which only exists while the clip camera screen is up. They shared the name
+// startCamera, so this one silently replaced the other and every one of those
+// buttons turned the camera on and then showed nothing.
+async function startClipCamera() {
     try {
         // Same as the chat camera: asking for 9:16 makes the browser crop the
         // sensor to that shape, which narrows the field of view and reads as
@@ -21569,7 +21533,7 @@ async function rotateCamera() {
     if (cameraStream) {
         cameraStream.getTracks().forEach(t => t.stop());
     }
-    await startCamera();
+    await startClipCamera();
 }
 
 function cycleFlash() {
@@ -22901,7 +22865,9 @@ function startLiveNow() {
 // ============================================
 function openSoundHubFromCamera() { if(typeof closeLgCam==='function')closeLgCam(); openSoundHub('Add Audio'); }
 
-function closeSoundHub() { stopSoundPreview&&stopSoundPreview(); var p=document.getElementById('soundHubPage'); if(p)p.remove(); var _rc=document.getElementById('reelsContainer'); if(!_rc) { showNavBar&&showNavBar(); } }
+// closeSoundHub is defined further down; that copy also restores the clip that
+// was silenced and puts the nav bar back, which this one did not.
+
 async function openSoundHub(soundName, fallbackVideoUrl, sourceClipId) {
     soundName = soundName || 'Original audio';
     // Two clips that each recorded their own audio are not the same sound,
@@ -39349,7 +39315,9 @@ function showMessageContextMenu(bubbleEl) {
 // Stubs for new context menu actions
 function resendMessage(msgId) { showToast('Resending…'); }
 function saveVoiceForNotifications(msgId) { showToast('Saved as notification tone'); }
-function selectMessage(msgId) { showToast('Message selected'); }
+// selectMessage is defined further down. A stub stood here that only showed a
+// "Message selected" toast.
+
 function deleteForBoth(msgId) { showToast('Deleted for both'); }
 function cancelUpload(msgId) { showToast('Upload cancelled'); }
 // Reliable OSM slippy-map tile for a lat/lng (the old staticmap service was flaky/"restricted").
@@ -49088,7 +49056,8 @@ async function realDsFollow(userId, btn) {
 
 function toggleDsFollow(id, btn) { realDsFollow(id, btn); }
 function renderDsSuggested() { _dsRenderSuggested(); }
-function tfToggleTopicFollow(cat, btn) { _dsToggleTopicFollow(cat, btn); }
+// tfToggleTopicFollow is defined further down. A one-line copy stood here that
+// delegated to _dsToggleTopicFollow; neither is called from anywhere.
 
 // ============================================================
 // CHAT CALENDAR MODAL
@@ -50553,42 +50522,9 @@ window.confirmLinkedClip = function() {
 };
 
 /* --- POLL CREATOR --- */
-function openPollCreator() {
-    var existing = document.getElementById('pollCreatorPage');
-    if (existing) existing.remove();
-    var page = document.createElement('div');
-    page.id = 'pollCreatorPage';
-    page.style.cssText = 'position:absolute;inset:0;z-index:9600;display:flex;flex-direction:column;background:var(--bg-primary,#fff);animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
-    page.innerHTML =
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:0.5px solid var(--border-color,#f0f0f0);">' +
-            '<button onclick="document.getElementById(\'pollCreatorPage\').remove()" style="background:none;border:none;color:#007AFF;font-size:16px;cursor:pointer;font-weight:500;">Cancel</button>' +
-            '<b style="font-size:17px;color:var(--text-primary,#000);">Create poll</b>' +
-            '<button onclick="savePoll()" style="background:none;border:none;color:#007AFF;font-size:16px;font-weight:700;cursor:pointer;">Done</button>' +
-        '</div>' +
-        '<div style="flex:1;overflow-y:auto;padding:20px 20px 60px;">' +
-            '<div style="background:var(--card-bg,#f7f7f7);border-radius:16px;padding:16px;margin-bottom:18px;">' +
-                '<input id="pollQuestion" placeholder="Ask a question…" maxlength="140" style="width:100%;background:none;border:none;outline:none;font-size:17px;font-weight:600;color:var(--text-primary,#000);font-family:inherit;">' +
-                '<div style="margin-top:4px;font-size:12px;color:#aaa;text-align:right;" id="pollQCount">0 / 140</div>' +
-            '</div>' +
-            '<div id="pollOptions" style="display:flex;flex-direction:column;gap:10px;margin-bottom:12px;">' +
-                '<div class="poll-opt-pill" style="display:flex;align-items:center;background:var(--card-bg,#f7f7f7);border-radius:50px;padding:14px 18px;border:1.5px solid var(--border-color,#e8e8e8);"><input placeholder="Yes" style="flex:1;background:none;border:none;outline:none;font-size:15px;font-weight:600;color:var(--text-primary,#000);font-family:inherit;"></div>' +
-                '<div class="poll-opt-pill" style="display:flex;align-items:center;background:var(--card-bg,#f7f7f7);border-radius:50px;padding:14px 18px;border:1.5px solid var(--border-color,#e8e8e8);"><input placeholder="No" style="flex:1;background:none;border:none;outline:none;font-size:15px;font-weight:600;color:var(--text-primary,#000);font-family:inherit;"></div>' +
-            '</div>' +
-            '<button onclick="addPollOption()" id="addPollOptBtn" style="width:100%;padding:13px;border-radius:50px;border:1.5px dashed #007AFF;background:none;color:#007AFF;font-size:15px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">' +
-                '<i class="fa-solid fa-plus"></i> Add another option' +
-            '</button>' +
-            '<div style="margin-top:24px;padding:18px;background:var(--card-bg,#f7f7f7);border-radius:16px;">' +
-                '<p style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:14px;">Schedule duration</p>' +
-                '<div style="display:flex;align-items:center;justify-content:space-between;">' +
-                    '<div><div style="font-size:15px;font-weight:600;color:var(--text-primary,#000);">3-day limit</div><div style="font-size:13px;color:#888;margin-top:2px;">Poll auto-closes after 3 days</div></div>' +
-                    '<div class="toggle active" id="poll3DayToggle" onclick="this.classList.toggle(\'active\');triggerHaptic(12);"></div>' +
-                '</div>' +
-            '</div>' +
-        '</div>';
-    var qInp = page.querySelector('#pollQuestion');
-    if (qInp) qInp.addEventListener('input', function(){ var c=document.getElementById('pollQCount');if(c)c.textContent=this.value.length+' / 140'; });
-    (document.getElementById('app')||document.body).appendChild(page);
-}
+// openPollCreator is defined further down, and builds the clip poll the
+// composer actually opens. A different, unreferenced poll creator stood here.
+
 window.addPollOption = function() {
     var opts = document.getElementById('pollOptions');
     var items = opts ? opts.querySelectorAll('.poll-opt-pill') : [];
@@ -53068,19 +53004,10 @@ function formatCount(n) {
     return String(n);
 }
 
-function waitForSb() {
-    if (window.sb) return Promise.resolve();
-    return new Promise(function(resolve, reject) {
-        var check = setInterval(function() {
-            if (window.sb) { clearInterval(check); resolve(); }
-        }, 100);
-        setTimeout(function() {
-            clearInterval(check);
-            if (!window.sb) reject(new Error('Supabase connection timeout'));
-            else resolve();
-        }, 10000);
-    });
-}
+// waitForSb is defined further up. A second copy stood here that rejected on
+// timeout instead of resolving. Five of its six callers have no try/catch, so on
+// a cold start slow enough to hit the ten second limit that flow died on an
+// unhandled rejection.
 
 // ── Image viewer ──
 function openImgViewer(src) {
