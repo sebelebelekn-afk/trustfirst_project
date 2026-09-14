@@ -14924,9 +14924,19 @@ function tfReelPageHTML(post, avatarHtml, username, verified, likes) {
         ' data-user-id="' + escapeHtml(String(post.user_id || '')) + '">' +
         // data-edl carries the editor's cuts; _tfEdlAttach honours them on play and
         // takes over looping. Absent on any clip that was never edited.
+        // preload="none" and no autoplay, deliberately. Both observers below
+        // already start whichever clip is on screen, so the attributes only ever
+        // meant "every clip on the page starts downloading at once": twenty
+        // videos splitting one mobile connection, and none of them finishing.
+        // _tfWarmNearbyClips promotes the current one and the next to preload
+        //="auto" so the connection goes to the clip actually being watched.
+        //
+        // poster is the thumbnail, so the frame is filled while the video loads
+        // rather than showing black.
         '<video src="' + escapeHtml(src) + '" class="reel-video" data-vol="' + (post.volume == null ? 100 : post.volume) + '"' + _tfEdlAttr(post) +
             (post.voice_effect && post.voice_effect !== 'none' ? ' data-voice="' + escapeHtml(post.voice_effect) + '"' : '') +
-            ' autoplay muted loop playsinline preload="auto" style="width:100%;height:100%;object-fit:cover;opacity:1;" onclick="reelTogglePlay(this)"></video>' +
+            (post.thumbnail_url ? ' poster="' + escapeHtml(String(post.thumbnail_url)) + '"' : '') +
+            ' muted loop playsinline preload="none" style="width:100%;height:100%;object-fit:cover;opacity:1;" onclick="reelTogglePlay(this)"></video>' +
         '<div class="reel-play-indicator" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:82px;height:82px;border-radius:50%;background:rgba(0,0,0,0.42);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;pointer-events:none;z-index:25;"><i class="fa-solid fa-play" style="color:#fff;font-size:32px;margin-left:4px;"></i></div>' +
         '<button class="reel-mute-btn" onclick="toggleReelMute(this)" style="position:absolute;top:max(54px,env(safe-area-inset-top,54px));right:14px;width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,0.5);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:30;"><i class="fa-solid fa-volume-xmark" style="color:#fff;font-size:15px;"></i></button>' +
         // Spoken captions sit above the name block and below the middle of the
@@ -15243,6 +15253,10 @@ setTimeout(function() {
         videos.forEach(function (v) { io.observe(v); });
         scroller._tfIoReels = io;
     }
+
+    // Same bandwidth rule as the profile viewer: warm the clip in view and the
+    // next one, leave the rest alone.
+    _tfWarmNearbyClips(scroller);
 
     // Scroll-snap smoother on mobile
     scroller.style.scrollSnapType = 'y mandatory';
@@ -20113,6 +20127,7 @@ function openContextualVideo(videoUrl, context, startIndex, clipArray) {
     // just needed telling that new ones exist.
     if (typeof _tfObserveNewPosts === 'function') _tfObserveNewPosts();
     _tfBindReelLongPress(scroller);
+    _tfWarmNearbyClips(scroller);
     _tfPlayOneAtATime(scroller);
     return;
 }
@@ -20159,6 +20174,60 @@ async function openClipById(clipId) {
 // videos at once: nine of them playing out of sight, which is most of what
 // "it plays in the background" was. The clips page has an observer that does
 // this; the viewer a feed or profile video opens never had one.
+// Give the connection to the clip being watched, and the one after it.
+//
+// Every clip used to carry autoplay + preload="auto", so opening the page
+// started up to twenty downloads at once over one mobile connection. Nothing
+// finished, and the first clip - the only one anybody is waiting for - was
+// competing with nineteen others for bandwidth.
+//
+// This warms the clip in view and the next one down, and leaves the rest at
+// preload="none" until they are nearly on screen.
+function _tfWarmNearbyClips(scroller) {
+    if (!scroller || typeof IntersectionObserver === 'undefined') return;
+    if (scroller._tfWarmIo) { try { scroller._tfWarmIo.disconnect(); } catch (e) {} }
+
+    function warm(v) {
+        if (!v || v.getAttribute('preload') === 'auto') return;
+        v.setAttribute('preload', 'auto');
+        // load() on a video that is already buffering throws away what it has.
+        if (v.readyState === 0) { try { v.load(); } catch (e) {} }
+    }
+
+    // The next clip down, so scrolling on does not start from nothing.
+    function nextVideo(v) {
+        var page = v.closest ? v.closest('.reel-page') : null;
+        var sib = page && page.nextElementSibling;
+        return sib ? sib.querySelector('video') : null;
+    }
+
+    var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+            if (!e.isIntersecting) return;
+            var v = e.target;
+            warm(v);
+            // The lookahead waits. Starting it now would split one mobile
+            // connection between the clip somebody is waiting for and one they
+            // may never reach; this way the visible clip gets the line to
+            // itself until it has enough to play, which is the whole point.
+            if (v._tfChained) return;
+            v._tfChained = true;
+            var go = function () { warm(nextVideo(v)); };
+            if (v.readyState >= 3) go();
+            else {
+                v.addEventListener('canplay', go, { once: true });
+                // A clip that never reaches canplay must not block the next one
+                // for ever - a dead or unplayable source is exactly when moving
+                // on matters most.
+                setTimeout(go, 6000);
+            }
+        });
+    }, { root: scroller, threshold: 0.1 });
+
+    scroller.querySelectorAll('video').forEach(function (v) { io.observe(v); });
+    scroller._tfWarmIo = io;
+}
+
 function _tfPlayOneAtATime(scroller) {
     if (!scroller || typeof IntersectionObserver === 'undefined') return;
     var vids = scroller.querySelectorAll('video');
