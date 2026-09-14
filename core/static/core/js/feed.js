@@ -6669,6 +6669,14 @@ function openShare(postId, kind) {
     var sheet = document.getElementById('share-sheet');
     sheet.style.display = 'flex';
     sheet.classList.add('active');
+    // Same stacking problem the comment sheet had: this sheet sits at 6000 and
+    // the clip viewer a profile opens is at 9400, so sharing from a clip put the
+    // sheet behind the video. Lifted only while something is above it, and never
+    // past #call-overlay at 9500.
+    var _sLift = document.querySelector('.post-detail-overlay') ? '9950'
+               : (_tfClipViewerOpen() ? '9450' : '');
+    if (_sLift) sheet.style.setProperty('z-index', _sLift, 'important');
+    else sheet.style.removeProperty('z-index');
     triggerHaptic(10);
     // Close on outside tap
     setTimeout(function() {
@@ -29044,11 +29052,22 @@ async function realOpenComments(postId) {
     var overlay = document.getElementById('comment-overlay');
     if (overlay) {
         overlay.style.display = 'flex';
-        // Opened from a quoted post, the detail sheet sits at 9900 and the
-        // comment sheet's own 6500 put it underneath, invisible: tapping
-        // "Post your comment" looked like it did nothing. Same post id either
-        // way, so the comments themselves are already the same thread.
-        overlay.style.zIndex = document.querySelector('.post-detail-overlay') ? '9950' : '';
+        // This sheet is pinned to 8500 by an !important rule, so it opens behind
+        // anything stacked above that: the quoted-post detail sheet at 9900, and
+        // the clip viewer a profile opens at 9400. Same post id either way, so
+        // the thread is right - it was just underneath and invisible.
+        //
+        // setProperty with 'important' rather than overlay.style.zIndex: an
+        // author !important declaration outranks a plain inline style, so the
+        // assignment this replaces was silently losing to the 8500 rule and
+        // never lifted the sheet at all.
+        //
+        // 9450 clears the clip viewer without going over #call-overlay at 9500,
+        // which has to stay on top of everything.
+        var _lift = document.querySelector('.post-detail-overlay') ? '9950'
+                  : (_tfClipViewerOpen() ? '9450' : '');
+        if (_lift) overlay.style.setProperty('z-index', _lift, 'important');
+        else overlay.style.removeProperty('z-index');
     }
     if (typeof syncCommentBarAvatar === 'function') syncCommentBarAvatar();
 
@@ -53305,6 +53324,16 @@ function openLiquidGlassCameraWithFile(file, url) {
 // Whichever clip surface is on screen: the viewer a feed video opens, or the
 // TrustClip page. Sheets belonging to a clip card have to attach to this, not to
 // one of them by name.
+// True while a clip viewer is actually on screen. Sheets that open from a clip
+// have to clear it, and it is removed from the DOM on close rather than hidden,
+// so presence plus offsetParent is the honest test.
+function _tfClipViewerOpen() {
+    var v = document.getElementById('tfClipViewer');
+    if (v && v.offsetParent !== null) return true;
+    var r = document.getElementById('reel-overlay');
+    return !!(r && r.offsetParent !== null);
+}
+
 function _tfActiveClipSurface() {
     var viewer = document.getElementById('tfClipViewer');
     if (viewer && viewer.offsetParent !== null) return viewer;
