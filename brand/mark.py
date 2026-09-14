@@ -147,7 +147,56 @@ def rasterise(jobs):
         os.unlink(script)
 
 
+def splash_pieces():
+    """The three pieces as separate paths, plus the offsets the splash flies
+    them in from.
+
+        python3 brand/mark.py --splash
+
+    feed.js carries a copy of these in createSplashScreen. They are stable as
+    long as the mark is, so they are pasted rather than loaded at runtime; print
+    them with this and replace them by hand if the mark ever changes.
+    """
+    import math
+    P = pieces()
+    xs = [p[0] for q in P for p in q]
+    ys = [p[1] for q in P for p in q]
+    box = 760.0
+    s = box / max(max(xs) - min(xs), max(ys) - min(ys))
+    mx, my = (max(xs) + min(xs)) / 2.0, (max(ys) + min(ys)) / 2.0
+
+    def fmt(v):
+        t = '%.2f' % v
+        return t.rstrip('0').rstrip('.') if '.' in t else t
+
+    out = []
+    for q in P:
+        pts = [((x - mx) * s + 512, (y - my) * s + 512) for x, y in q]
+        out.append('M ' + ' L '.join('%s %s' % (fmt(x), fmt(y)) for x, y in pts) + ' Z')
+
+    # The shear axis itself: 9 across as it falls 7, pointing up and to the
+    # right. Each piece starts this far out along it and slides home, so nothing
+    # travels in a direction the mark does not already contain.
+    length = math.hypot(RUN, FALL)
+    ax, ay = RUN / length, -FALL / length
+    dist = 460.0
+    return out, [
+        ('splashWing', -ax * dist,        -ay * dist),
+        ('splashHead',  ax * dist,         ay * dist),
+        ('splashStem', -ax * dist * 0.75, -ay * dist * 0.75),
+    ]
+
+
 def main():
+    if '--splash' in sys.argv:
+        paths, offs = splash_pieces()
+        print('paths, for the <path d="..."> in createSplashScreen:')
+        for name, d in zip(('wing', 'head', 'stem'), paths):
+            print('  %-5s %s' % (name, d))
+        print('\noffsets, for the translate() in each @keyframes tfPiece*:')
+        for name, dx, dy in offs:
+            print('  %-11s translate(%.1fpx, %.1fpx)' % (name, dx, dy))
+        return
     print('SVG')
     for rel, fg, bg in SVGS:
         with open(os.path.join(ROOT, rel), 'w') as f:

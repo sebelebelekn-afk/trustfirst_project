@@ -2810,33 +2810,47 @@ html, body { background: #000; }
     opacity: 0;
     pointer-events: none;
 }
-#appSplashScreen .splash-infinity-svg {
-    width: 160px;
-    height: 80px;
+#appSplashScreen .splash-mark {
+    width: 150px;
+    height: 150px;
     overflow: visible;
 }
-#appSplashScreen .splash-infinity-path {
-    fill: none;
-    stroke: white;
-    stroke-width: 10;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    stroke-dasharray: 1000;
-    stroke-dashoffset: 1000;
-    animation: drawInfinity 1.4s cubic-bezier(0.4,0,0.2,1) 0.2s forwards;
+/* Each piece starts off-screen along the shear axis the mark is built on and
+   slides home. The offsets are that axis, 9 across to 7 down, times a distance;
+   they are in viewBox units, not pixels, so they scale with the mark. */
+#appSplashScreen .splash-piece { opacity: 0; }
+#appSplashScreen #splashWing { animation: tfPieceWing .52s cubic-bezier(.2,.9,.25,1) .06s forwards; }
+#appSplashScreen #splashHead { animation: tfPieceHead .52s cubic-bezier(.2,.9,.25,1) .17s forwards; }
+#appSplashScreen #splashStem { animation: tfPieceStem .52s cubic-bezier(.2,.9,.25,1) .28s forwards; }
+@keyframes tfPieceWing {
+    from { opacity: 0; transform: translate(-363.1px, 282.4px); }
+    to   { opacity: 1; transform: none; }
+}
+@keyframes tfPieceHead {
+    from { opacity: 0; transform: translate(363.1px, -282.4px); }
+    to   { opacity: 1; transform: none; }
+}
+@keyframes tfPieceStem {
+    from { opacity: 0; transform: translate(-272.3px, 211.8px); }
+    to   { opacity: 1; transform: none; }
 }
 #appSplashScreen .splash-text {
     color: white;
-    font-size: 22px;
+    font-size: 15px;
     font-weight: 900;
-    letter-spacing: 2px;
+    letter-spacing: 4px;
     text-transform: uppercase;
     opacity: 0;
-    margin-top: 28px;
-    animation: splashFadeIn 0.6s ease 1.4s forwards;
+    margin-top: 26px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    animation: splashFadeIn 0.38s ease 0.62s forwards;
 }
-@keyframes drawInfinity {
-    to { stroke-dashoffset: 0; }
+/* Referenced by .splash-text and never defined, so the wordmark under the logo
+   animated to a keyframe that did not exist: it kept its opacity:0 and has
+   never once been visible on the splash. */
+@keyframes splashFadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
 }
 @keyframes splashScaleIn {
     from { transform: scale(0.85); opacity: 0; }
