@@ -41634,6 +41634,7 @@ function _renderClipGallery(files) {
             '<div class="clip-check" style="position:absolute;top:5px;right:5px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,0.3);border:2px solid white;display:flex;align-items:center;justify-content:center;"></div>';
         item.addEventListener('click', function(){ toggleClipSelection(idx, item); });
         grid.appendChild(item);
+        if (isVid) _tfShowFirstFrame(item.querySelector('video'));
     });
     // Add more button at end
     var addMore = document.createElement('div');
@@ -46583,6 +46584,11 @@ function openNewTrustClipPost() {
             }
         }
     }
+    // Every branch above asks the video to play and swallows a refusal, so the
+    // tile could end up black with nothing saying why. Seek it as well: that
+    // paints a frame even where autoplay was denied.
+    if (tcVid && tcVid.getAttribute('src') !== null) _tfShowFirstFrame(tcVid);
+
     // Show the "Replying to @user" banner if this clip is a comment reply.
     if (typeof applyClipReplyBanner === 'function') applyClipReplyBanner();
 }
@@ -53396,6 +53402,34 @@ function openLiquidGlassCameraWithFile(file, url) {
 // True while a clip viewer is actually on screen. Sheets that open from a clip
 // have to clear it, and it is removed from the DOM on close rather than hidden,
 // so presence plus offsetParent is the honest test.
+// Make a <video> actually show a picture.
+//
+// A video element paints nothing until it has decoded a frame. preload
+// ="metadata" fetches the header and stops, so a thumbnail tile sits black -
+// which is what the clip picker and the Edit cover tile both showed. play() is
+// the usual workaround, but the browser is allowed to refuse it and iOS often
+// does, and every one of those calls here ends in .catch(function(){}), so the
+// refusal was silent and the tile just stayed black.
+//
+// Seeking is not refusable. Setting currentTime forces a decode and the frame
+// paints whether or not playback was ever allowed.
+function _tfShowFirstFrame(v, at) {
+    if (!v || v._tfFramed) return;
+    v._tfFramed = true;
+    function seek() {
+        try {
+            // A little way in, never frame zero: the first frame of a phone
+            // recording is usually black while the sensor settles, which looks
+            // exactly like the bug this is fixing.
+            var d = v.duration;
+            var t = (isFinite(d) && d > 0) ? Math.min(at || 0.15, d / 2) : (at || 0.15);
+            if (!(v.currentTime > 0.01)) v.currentTime = t;
+        } catch (e) {}
+    }
+    if (v.readyState >= 1) seek();
+    else v.addEventListener('loadedmetadata', seek, { once: true });
+}
+
 function _tfClipViewerOpen() {
     var v = document.getElementById('tfClipViewer');
     if (v && v.offsetParent !== null) return true;
