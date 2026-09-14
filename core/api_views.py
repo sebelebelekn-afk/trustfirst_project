@@ -1436,15 +1436,22 @@ def username_login(request):
     # out which usernames are real.
     WRONG = JsonResponse({'error': 'Wrong username or password'}, status=401)
 
+    # Case-insensitively, via tf_login_email. Usernames are stored with whatever
+    # capitals the owner typed, so matching on the lowercased name with a plain
+    # equality filter silently fails for anybody whose name is not already all
+    # lowercase - they get told their password is wrong when it is not. The
+    # function compares lower() on both sides, which is what the browser did
+    # before this endpoint existed. Do not drop it while this path relies on it.
     try:
-        r = httpx.get(
-            f'{settings.SUPABASE_URL}/rest/v1/users',
-            params={'username': f'eq.{username}', 'select': 'email,is_locked,is_banned',
-                    'limit': '1'},
+        r = httpx.post(
+            f'{settings.SUPABASE_URL}/rest/v1/rpc/tf_login_email',
+            json={'uname': username},
             headers=_service_headers(),
             timeout=10,
         )
         rows = r.json() if r.status_code == 200 else []
+        if isinstance(rows, dict):
+            rows = [rows]
     except Exception:
         return JsonResponse({'error': 'Could not reach the server'}, status=503)
 
