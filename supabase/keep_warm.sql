@@ -97,7 +97,7 @@ select cron.schedule(
   -- this job look broken every single morning. Once warm the same call answers
   -- in well under a second.
   $$select net.http_get(
-      'https://trustfirst-project-bt1h.onrender.com/healthz',
+      'https://app.gettrustfirst.co.za/healthz',
       timeout_milliseconds => 60000
     )$$
 );
@@ -113,7 +113,7 @@ select cron.schedule(
   'keep-trustfirst-warm-predawn',
   '45 4 * * *',
   $$select net.http_get(
-      'https://trustfirst-project-bt1h.onrender.com/healthz',
+      'https://app.gettrustfirst.co.za/healthz',
       timeout_milliseconds => 60000
     )$$
 );

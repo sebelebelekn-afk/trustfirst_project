@@ -111,7 +111,7 @@ jobs:
     steps:
       - name: Hold the service open
         env:
-          APP_URL: https://trustfirst-project-bt1h.onrender.com
+          APP_URL: https://app.gettrustfirst.co.za
           MINUTES: "70"
           EVERY: "300"          # seconds between pings; the idle timeout is 900
         run: |

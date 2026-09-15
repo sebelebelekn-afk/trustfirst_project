@@ -500,11 +500,10 @@ img.avatar{background:#000;}
 // Where the app actually lives. Every link on this page is built from it, so
 // this is the one line to change if it moves again.
 //
-// Still the Render address, deliberately. The Cloud Run move is written and
-// ready in this repo, but it needs a card Google will accept, and until that
-// exists pointing this at a domain nobody has mapped would take the whole
-// marketing site down. One line, changed on the day it is true.
-var APP_URL = 'https://trustfirst-project-bt1h.onrender.com';
+// The app's own name, on our own domain. It is a CNAME onto Render, so the
+// host behind this can change without the address people see changing with it,
+// which is the whole reason for naming it rather than linking the host.
+var APP_URL = 'https://app.gettrustfirst.co.za';
 
 // The Android build, pointed at straight rather than routed through the app.
 //
