@@ -109,6 +109,11 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Straight after SecurityMiddleware, so http has already been turned into
+    # https and this only ever has to think about the hostname, and before
+    # anything that touches sessions or CSRF, so a request that is only going to
+    # be redirected does no work first.
+    'core.middleware.CanonicalHostRedirectMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'csp.middleware.CSPMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
