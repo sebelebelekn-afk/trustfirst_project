@@ -600,20 +600,27 @@ def _factcheck_context(system, spec, asked, claim=None):
     except Exception:
         return system, []
     try:
-        # Both kinds: check this claim, and go and find this out. The second
-        # was missing, so "what did so-and-so say about AI" and "go online"
-        # never fetched anything and were answered from memory -- which is how
-        # Eddie produced a quotation, in quotation marks, with a year on it,
-        # from a named public figure who had not said it.
-        if not eddie_search.needs_evidence(asked):
-            return system, []
-
-        # A real web search beats a Wikipedia lookup, so take it when the
-        # deploy has one. This is answered from an hourly cache of what Groq
-        # will serve this key, not a live probe, so it costs nothing here.
-        if eddie_providers.can_search_live():
+        # When there is a real search to run, the default is to run it.
+        #
+        # Eddie was answering questions about the world out of its own memory
+        # and presenting the result as fact -- which is how it produced a
+        # quotation, in quotation marks, with a year on it, from a named
+        # public figure who had not said it. should_search() is the whole
+        # world minus the things the web cannot help with: using this app,
+        # making something, Eddie's own opinion, and hello.
+        #
+        # Answered from an hourly cache of what Groq will serve this key, not
+        # a live probe, so asking costs nothing on the hot path.
+        if eddie_search.should_search(asked) and eddie_providers.can_search_live():
             spec['wants_search'] = True
             return system + eddie_search.LIVE_NOTE, []
+
+        # No live search on this deploy. Fall back to looking the claim up in
+        # reference material, but only when the message actually asked for a
+        # check or a lookup -- there is no point fetching Wikipedia for every
+        # passing question when it cannot answer most of them.
+        if not eddie_search.needs_evidence(asked):
+            return system, []
 
         addition, sources = eddie_search.brief(claim or asked)
         if addition:

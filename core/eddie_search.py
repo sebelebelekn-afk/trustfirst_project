@@ -206,6 +206,45 @@ def needs_evidence(text):
     return looks_like_check(text) or wants_lookup(text)
 
 
+# Questions that have nothing to do with the world outside this app: using
+# TrustFirst, asking Eddie to make something, asking what it reckons, or
+# saying hello. These are the exception; everything else gets searched when
+# there is a search to run.
+_NO_SEARCH = re.compile(r"""
+      \btrustfirst\b
+    | \b(my|this)\s+(account|profile|password|post|clip|story|feed|wallet|coins|settings)\b
+    | \bhow\s+(do|can)\s+i\s+\w*\s*(post|upload|delete|change|turn|switch|find|get\s+to|verify|log)\b
+    | \b(draw|generate|create|make|write|compose)\s+(me\s+)?(an?|some|a\s+few)\b
+    | \bwrite\s+(me\s+)?(a|an|some)\b
+    | \b(your|you)\s+(favourite|favorite|opinion|think|reckon|feel)\b
+    | \bwhat\s+do\s+you\s+(think|reckon|prefer)\b
+    | ^\s*(hi|hey|hello|yo|sup|thanks|thank\s+you|ok(ay)?|lol|haha)\b
+    | \b(tell|say)\s+(me\s+)?(a\s+)?(joke|something\s+funny|story)\b
+""", re.I | re.X)
+
+
+def should_search(text):
+    """Whether a live web search is worth running for this message.
+
+    The default is yes. Eddie was answering questions about the world out of
+    its own memory and presenting the result as fact, which is how it produced
+    a quotation from a public figure who never said it. If there is a search
+    available, the honest default is to use it and answer from what comes
+    back.
+
+    The exceptions are the things the web cannot help with: how to use this
+    app, asking Eddie to make or write something, asking its opinion, and
+    saying hello. Those are answered as before.
+    """
+    text = (text or '').strip()
+    if not text:
+        return False
+    # An explicit ask always wins, even if it also looks like app help.
+    if needs_evidence(text):
+        return True
+    return not _NO_SEARCH.search(text)
+
+
 # ---- turning a claim into a query -----------------------------------------
 
 # Words that carry no signal in a search index. Question words are in here on
@@ -394,9 +433,14 @@ def no_evidence_note():
 
 LIVE_NOTE = """
 
-CHECKING THIS CLAIM
-This deploy can search the web, and somebody is asking you to check something,
-so look it up before you answer rather than going from memory. Then:
+YOU CAN SEARCH THE WEB
+You have a working web search on this turn. Use it.
+
+Search before you answer anything about the world - people, companies, events,
+numbers, dates, what somebody said - rather than answering from memory and
+hoping. If somebody asks you to go online, to check, or for the latest on
+something, that is exactly what this is for: do it, do not tell them you
+cannot. Then:
 - Lead with the verdict, and name the sources you actually read.
 - Cite only pages you genuinely retrieved on this turn. If the search came back
   with nothing useful, say so and answer from what you know, making clear that

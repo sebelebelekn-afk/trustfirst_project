@@ -136,19 +136,24 @@ def _needs_depth(spec):
 
 def _route(spec):
     """Pick the engine for this specific turn."""
+    # A turn that needs the web goes to the engine that can reach it, before
+    # anything else gets a say.
+    #
+    # This used to sit below the EDDIE_PROVIDER check, which meant pinning a
+    # provider for ordinary chat silently switched web search off for every
+    # question that needed it -- the one setting nobody would expect to do
+    # that. It also beats _needs_depth(), which reads "is it true" as a deep
+    # question and sends it to Gemini, whose search is the billed one.
+    if spec.get('wants_search'):
+        client = _groq_client()
+        if client is not None and _groq_search_model(client):
+            return 'groq'
+
     choice = (getattr(settings, 'EDDIE_PROVIDER', '') or '').strip().lower()
     if choice in ('groq', 'gemini', 'anthropic') and _have(
             {'groq': 'GROQ_API_KEY', 'gemini': 'GEMINI_API_KEY',
              'anthropic': 'ANTHROPIC_API_KEY'}[choice]):
         return choice           # an explicit choice is not second-guessed
-
-    # A claim to check goes to the engine that can actually look it up, even
-    # though _needs_depth() would otherwise call "is it true" a deep question
-    # and send it to Gemini -- whose search is the billed one Eddie cannot use.
-    if spec.get('wants_search'):
-        client = _groq_client()
-        if client is not None and _groq_search_model(client):
-            return 'groq'
 
     # Fast by default, deep when the question earns it and a deep engine exists.
     if _needs_depth(spec):

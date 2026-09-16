@@ -108,6 +108,40 @@ class IntentTests(SimpleTestCase):
             self.assertFalse(eddie_search.looks_like_check(text), text)
 
 
+class SearchByDefaultTests(SimpleTestCase):
+    """With a working search, answering from memory is the exception."""
+
+    def test_questions_about_the_world_search(self):
+        for text in ('who is the president of South Africa',
+                     'what did Trump say about AI',
+                     'how much is bitcoin worth',
+                     'what happened in the election',
+                     'tell me about Anthropic',
+                     'Go online'):
+            self.assertTrue(eddie_search.should_search(text), text)
+
+    def test_things_the_web_cannot_help_with_do_not(self):
+        for text in ('hey eddie how do I post a clip',
+                     'how do I verify my account',
+                     'my account is locked',
+                     "what's your favourite colour",
+                     'what do you think of my post',
+                     'draw me a cat',
+                     'write me a poem',
+                     'hi',
+                     'tell me a joke'):
+            self.assertFalse(eddie_search.should_search(text), text)
+
+    def test_an_explicit_ask_beats_the_exceptions(self):
+        # "is this true" about a TrustFirst claim is still a claim to check.
+        self.assertTrue(
+            eddie_search.should_search('is it true that TrustFirst was hacked?'))
+
+    def test_nothing_to_search_is_not_searched(self):
+        self.assertFalse(eddie_search.should_search(''))
+        self.assertFalse(eddie_search.should_search('   '))
+
+
 class LookupIntentTests(SimpleTestCase):
     """Asking Eddie to find something out, as opposed to check a claim."""
 
@@ -276,7 +310,7 @@ class ContextTests(_SearchTestCase):
 
     def test_a_live_search_deploy_lets_the_model_do_the_looking(self):
         system, sources, spec = self._run(CLAIM, live=True)
-        self.assertIn('This deploy can search the web', system)
+        self.assertIn('YOU CAN SEARCH THE WEB', system)
         self.assertNotIn('EVIDENCE YOU JUST LOOKED UP', system)
         self.assertTrue(spec['wants_search'])
         self.assertEqual(sources, [])
