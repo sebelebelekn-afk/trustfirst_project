@@ -108,6 +108,38 @@ class IntentTests(SimpleTestCase):
             self.assertFalse(eddie_search.looks_like_check(text), text)
 
 
+class LookupIntentTests(SimpleTestCase):
+    """Asking Eddie to find something out, as opposed to check a claim."""
+
+    def test_requests_to_go_and_look(self):
+        for text in ('Go online', 'No search for recent news',
+                     'search the web for me', 'look it up', 'google it',
+                     'browse the web', 'what is the latest news on AI',
+                     "what's the latest on load shedding",
+                     'any news about the election'):
+            self.assertTrue(eddie_search.wants_lookup(text), text)
+
+    def test_asking_what_a_person_said(self):
+        # The shape that goes most badly wrong: asked what a named person
+        # said, a model will produce a fluent quotation with a date on it
+        # whether or not it has anything real to draw on.
+        for text in ('what did Trump say about AI',
+                     'who said AI could wipe out the human race',
+                     'did Musk say that',
+                     'what did she announce yesterday'):
+            self.assertTrue(eddie_search.wants_lookup(text), text)
+
+    def test_ordinary_chat_is_still_left_alone(self):
+        for text in ('hey eddie how do I post a clip',
+                     "what's your favourite colour",
+                     'draw me a cat',
+                     'how do I verify my account',
+                     'what is the capital of France',
+                     'tell me a joke',
+                     'say something nice'):
+            self.assertFalse(eddie_search.needs_evidence(text), text)
+
+
 class QueryTests(SimpleTestCase):
     """Turning what somebody typed into something a search index can match."""
 
@@ -252,9 +284,31 @@ class ContextTests(_SearchTestCase):
 
     def test_finding_nothing_tells_eddie_to_say_so(self):
         system, sources, _ = self._run('is this true? blorptangle frobnicator')
-        self.assertIn('could not check it against a source', system)
+        self.assertIn('not a fresh check', system)
+        self.assertIn('cannot browse the live web', system)
         self.assertIn('Never invent a citation', system)
         self.assertEqual(sources, [])
+
+    def test_finding_nothing_still_says_what_eddie_can_do(self):
+        # "I don't have the ability to browse the web" is true and useless.
+        # Somebody who asked Eddie to go online wants to know what happens
+        # next; a bare no reads as a broken feature rather than a limit.
+        system, _, _ = self._run('go online and find blorptangle frobnicator')
+        self.assertIn('can check reference material', system)
+        self.assertIn('not a flat refusal', system)
+
+    def test_being_asked_to_look_something_up_fetches_evidence(self):
+        # This is what was missing. "What did so-and-so say about AI" matched
+        # nothing, so no lookup ran, and the answer came out of the model's
+        # memory as a quotation with a year attached.
+        for asked in ('go online and check the news',
+                      'what did Musk say about AI',
+                      'search the web for the latest on this',
+                      "what's the latest on this"):
+            self.calls = []
+            system, _, _ = self._run(asked)
+            self.assertNotEqual(system, 'BASE', asked)
+            self.assertTrue(self.calls, 'no lookup ran for: ' + asked)
 
     def test_a_failure_anywhere_costs_the_citations_not_the_answer(self):
         def boom():

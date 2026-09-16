@@ -169,6 +169,43 @@ def looks_like_check(text):
     return bool(text) and bool(_CHECK.search(str(text)))
 
 
+# Asking Eddie to go and find something out, rather than to check a claim.
+# Different question, same need: it must not answer from memory and present
+# the result as though it looked it up.
+#
+# "What did so-and-so say" is in here because that is the shape of the answer
+# that goes most badly wrong. Asked what a named person said about something,
+# a model will produce a fluent quotation, in quotation marks, with a date --
+# and if it has nothing real to draw on it will assemble one out of what
+# people like that tend to say. That is not a hedge-worthy inaccuracy, it is
+# words in a real person's mouth.
+_LOOKUP = re.compile(r"""
+      \b(go\s+online|browse\s+(the\s+)?web|get\s+online)\b
+    | \bsearch\s+(the\s+web|online|google|for\s+me|it)\b
+    | \b(look|read)\s+(it|this|that|them)\s+up\b
+    | \bgoogle\s+(it|this|that)\b
+    | \b(latest|recent|current|newest|breaking|up[\s-]?to[\s-]?date)\s+
+        (news|updates?|information|info|figures?|numbers?|prices?|scores?|results?|stats?)\b
+    | \bnews\s+(about|on|for|regarding)\b
+    | \b(latest|newest|current)\s+(on|about|with|from)\b
+    | \bwhat(?:'s|\s+is|\s+are)\s+(happening|going\s+on|new|the\s+latest)\b
+    | \bwhat\s+did\s+[\w.'-]+\s+(say|said|tell|claim|announce)\b
+    | \b(who|when)\s+said\b
+    | \bdid\s+[\w.'-]+\s+(ever\s+)?(say|claim|announce|tweet)\b
+    | \bquote\s+(from|by)\b
+""", re.I | re.X)
+
+
+def wants_lookup(text):
+    """Whether this message is asking Eddie to find something out."""
+    return bool(text) and bool(_LOOKUP.search(str(text)))
+
+
+def needs_evidence(text):
+    """Either kind: check this claim, or go and find this out."""
+    return looks_like_check(text) or wants_lookup(text)
+
+
 # ---- turning a claim into a query -----------------------------------------
 
 # Words that carry no signal in a search index. Question words are in here on
@@ -334,16 +371,25 @@ def brief(claim):
 
 
 def no_evidence_note():
-    """What to tell the model when a check was asked for and nothing came back.
+    """What to tell the model when a lookup was asked for and nothing came back.
 
     Without this the model falls back on the system prompt's old assumption
     that it can search, and writes as though it did.
+
+    It also has to say what Eddie *can* do. "I don't have the ability to browse
+    the web" is true and useless: somebody who asked Eddie to go online wants
+    to know what happens next, and a bare no reads as a broken feature rather
+    than a limit.
     """
     return (
-        "\n\nCHECKING THIS CLAIM\nYou tried to look this up and found nothing "
-        "usable, and you have no live web search. Answer from what you already "
-        "know, say clearly that you could not check it against a source, and "
-        "do not imply otherwise. Never invent a citation or a link.")
+        "\n\nLOOKING THIS UP\nYou tried and found nothing usable. You can check "
+        "reference material, but you cannot browse the live web, so anything "
+        "from the last day or two, or behind a login, is out of reach.\n"
+        "Answer from what you already know and be plain that it is not a fresh "
+        "check. Say in one short sentence what you could not reach and why, "
+        "then give them what you do know - not a flat refusal and nothing "
+        "else.\nNever invent a citation, a link, or a quotation, and never "
+        "describe yourself as having looked something up when you did not.")
 
 
 LIVE_NOTE = """

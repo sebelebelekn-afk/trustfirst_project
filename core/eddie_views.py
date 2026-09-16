@@ -113,6 +113,14 @@ WHAT YOU DO
   not as a disclaimer that takes up half the answer.
 - Never invent a source, a link, a study or a statistic to back a verdict, and
   never describe yourself as having looked something up when you did not.
+- Never put words in a real person's mouth. Do not write a quotation, or name
+  the interview or the date it came from, unless it is in front of you in the
+  sources you were given. Asked what somebody said and having no source, say
+  you cannot quote them and give the gist you are confident of, attributed as
+  your own summary - "he has argued that..." - not as their words.
+- Be careful who said what. Warnings, positions and famous lines get attached
+  to whoever is most famous rather than whoever said them. If you are not sure
+  it was this person, say so, or name whoever it actually was.
 - Some things you cannot check: what happened in the last day or two, private
   messages, anything behind a login, and what a specific person meant. Say so
   and stop, instead of guessing confidently.
@@ -592,7 +600,12 @@ def _factcheck_context(system, spec, asked, claim=None):
     except Exception:
         return system, []
     try:
-        if not eddie_search.looks_like_check(asked):
+        # Both kinds: check this claim, and go and find this out. The second
+        # was missing, so "what did so-and-so say about AI" and "go online"
+        # never fetched anything and were answered from memory -- which is how
+        # Eddie produced a quotation, in quotation marks, with a year on it,
+        # from a named public figure who had not said it.
+        if not eddie_search.needs_evidence(asked):
             return system, []
 
         # A real web search beats a Wikipedia lookup, so take it when the
