@@ -359,9 +359,15 @@ class ContextTests(_SearchTestCase):
 class _FakeGroq:
     """Just enough of the OpenAI client for the routing logic."""
 
-    def __init__(self, served, failures=None):
+    def __init__(self, served, failures=None, stream_fail=None,
+                 emit_before_fail=False):
         self.served = served
         self.failures = failures or {}
+        # Raised while the stream is being consumed rather than when the call
+        # is made -- the case that reached a user.
+        self.stream_fail = stream_fail or {}
+        self.emit_before_fail = emit_before_fail
+        self.sent = []
         self.tried = []
         self.models = type('M', (), {'list': self._list})()
         self.chat = type('C', (), {'completions': self})()
@@ -372,10 +378,26 @@ class _FakeGroq:
 
     def create(self, model=None, **kwargs):
         self.tried.append(model)
+        self.sent.append(kwargs)
         failure = self.failures.get(model)
         if failure:
             raise failure
-        return 'answer from %s' % model
+        if not kwargs.get('stream'):
+            return 'answer from %s' % model
+        return self._stream(model)
+
+    def _stream(self, model):
+        def chunk(text):
+            delta = type('D', (), {'content': text, 'type': 'text'})()
+            choice = type('C', (), {'delta': delta, 'message': None})()
+            return type('K', (), {'choices': [choice]})()
+
+        boom = self.stream_fail.get(model)
+        if boom and self.emit_before_fail:
+            yield chunk('partial ')
+        if boom:
+            raise boom
+        yield chunk('answer from %s' % model)
 
 
 SERVED = ['llama-3.1-8b-instant', 'groq/compound', 'groq/compound-mini',
@@ -506,3 +528,83 @@ class RoutingTests(SimpleTestCase):
         self.assertEqual(
             eddie_providers._route({'prompt': 'hi', 'route_text': 'hi'}),
             'groq')
+
+
+class SearchFallbackTests(SimpleTestCase):
+    """A searching model is an upgrade on the turn, never a dependency of it."""
+
+    def setUp(self):
+        eddie_providers._GROQ_LIVE.update({'at': 0.0, 'names': [], 'search': []})
+        eddie_providers._GROQ_WORKING = None
+        self._real = eddie_providers._groq_client
+        self.addCleanup(setattr, eddie_providers, '_groq_client', self._real)
+        import logging
+        logging.disable(logging.CRITICAL)
+        self.addCleanup(logging.disable, logging.NOTSET)
+
+    def _client(self, **kw):
+        c = _FakeGroq(SERVED, **kw)
+        eddie_providers._groq_client = lambda: c
+        return c
+
+    def _run(self, client):
+        queue, events = [], []
+
+        def emit(kind, data):
+            events.append((kind, data))
+            queue.append('frame')
+
+        list(eddie_providers._groq_stream(
+            {'history': [], 'prompt': 'when is the iPhone out',
+             'wants_search': True}, 'SYSTEM', queue, emit, 2000))
+        return events
+
+    def test_a_413_while_streaming_still_answers(self):
+        # This is the one that reached a user: the search model failed partway
+        # through, the exception came out of the iteration rather than the
+        # call, and the turn died showing "Request Entity Too Large".
+        client = self._client(stream_fail={'groq/compound': RuntimeError(
+            'Request Entity Too Large')})
+        events = self._run(client)
+        kinds = [k for k, _ in events]
+        self.assertIn('searching', kinds)
+        self.assertIn('text', kinds, 'the turn produced no answer at all')
+        self.assertIn('groq/compound', client.tried)
+        self.assertGreater(len(client.tried), 1, 'never fell back')
+
+    def test_the_fallback_is_told_it_can_no_longer_search(self):
+        # Otherwise "YOU CAN SEARCH THE WEB" is still above it and it writes
+        # as though it did.
+        client = self._client(stream_fail={'groq/compound': RuntimeError('413')})
+        self._run(client)
+        second = client.sent[-1]
+        system = second['messages'][0]['content']
+        self.assertIn('CORRECTION', system)
+        self.assertIn('could not look it up', system)
+
+    def test_a_searching_turn_sends_less_history(self):
+        client = self._client()
+        queue = []
+        history = [{'role': 'user', 'text': 'x' * 2000} for _ in range(20)]
+        list(eddie_providers._groq_stream(
+            {'history': history, 'prompt': 'q', 'wants_search': True},
+            'SYSTEM', queue, lambda k, d: queue.append('f'), 2000))
+        sent = client.sent[0]['messages']
+        self.assertLessEqual(len(sent), 1 + eddie_providers._GROQ_SEARCH_HISTORY + 1)
+        for m in sent[1:]:
+            self.assertLessEqual(
+                len(m['content']),
+                eddie_providers._GROQ_SEARCH_TURN_CHARS + 10)
+
+    def test_a_failure_after_words_are_on_screen_is_not_restarted(self):
+        # Starting a second answer underneath the first is worse than the error.
+        client = self._client(stream_fail={'groq/compound': RuntimeError('boom')},
+                              emit_before_fail=True)
+        with self.assertRaises(Exception):
+            self._run(client)
+
+    def test_groq_wording_for_413_is_recognised(self):
+        for text in ('Request Entity Too Large', 'Error code: 413',
+                     'payload too large', 'request too large'):
+            self.assertTrue(
+                eddie_providers._groq_is_too_large(Exception(text)), text)

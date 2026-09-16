@@ -422,7 +422,15 @@ def _groq_client():
         return None
 
 
-def _groq_messages(spec, system):
+# A searching model reads whole web pages into its own context before it
+# answers, so the room left for our half of the request is much smaller than
+# for a plain chat turn. Twenty turns of history and an eight-thousand
+# character system prompt is what came back as "Request Entity Too Large".
+_GROQ_SEARCH_HISTORY = 6
+_GROQ_SEARCH_TURN_CHARS = 700
+
+
+def _groq_messages(spec, system, searching=False):
     """Neutral spec -> OpenAI chat messages.
 
     Attachments are dropped rather than described: _needs_depth() already
@@ -431,8 +439,11 @@ def _groq_messages(spec, system):
     silent drop beats a confident answer about a file nobody looked at.
     """
     msgs = [{'role': 'system', 'content': system}]
-    for turn in (spec.get('history') or [])[-20:]:
+    depth = _GROQ_SEARCH_HISTORY if searching else 20
+    for turn in (spec.get('history') or [])[-depth:]:
         text = (turn.get('text') or '').strip()
+        if searching and len(text) > _GROQ_SEARCH_TURN_CHARS:
+            text = text[:_GROQ_SEARCH_TURN_CHARS] + '...'
         if text:
             msgs.append({
                 'role': 'assistant' if turn.get('role') == 'assistant' else 'user',
@@ -501,10 +512,14 @@ def _groq_is_too_large(exc):
     retired 70b landed on a 120b whose free-tier budget is smaller, and a plain
     "Hi" came back 413.
     """
-    text = str(exc)
+    text = str(exc).lower()
     return ('413' in text
-            or 'request too large' in text.lower()
-            or 'rate_limit_exceeded' in text and 'tokens per m' in text.lower())
+            # Groq's own wording for this is "Request Entity Too Large", which
+            # contains neither "413" nor "request too large" once the SDK has
+            # taken the status code off the front of it.
+            or 'too large' in text
+            or 'payload too large' in text
+            or ('rate_limit_exceeded' in text and 'tokens per m' in text))
 
 
 # What Groq is actually serving today, asked once an hour.
@@ -715,6 +730,16 @@ def _groq_call(client, prefer=None, **kwargs):
     raise last if last else RuntimeError('no Groq model available')
 
 
+# Appended when a search was promised and then could not be run. Without it
+# the model still has "YOU CAN SEARCH THE WEB" above it and writes as though
+# it did.
+_SEARCH_LOST_NOTE = (
+    "\n\nCORRECTION: the web search is not available on this turn after all. "
+    "Ignore any instruction above saying you can search. Answer from what you "
+    "already know, say plainly that you could not look it up, and never invent "
+    "a source, a link or a quotation.")
+
+
 def _groq_stream(spec, system, queue, emit, max_tokens):
     client = _groq_client()
     if client is None:
@@ -723,46 +748,75 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
             yield queue.pop(0)
         return
 
-    # A fact-check gets the searching model when this key has one. Everything
-    # else stays on the fast chat models it has always used.
+    # A question that needs the web gets the searching model when this key has
+    # one. Everything else stays on the fast chat models it has always used.
     prefer = _groq_search_model(client) if spec.get('wants_search') else None
     if prefer:
         emit('searching', {'name': 'web_search'})
         while queue:
             yield queue.pop(0)
 
-    stream = _groq_call(
-        client,
-        prefer=prefer,
-        messages=_groq_messages(spec, system),
-        max_tokens=min(max_tokens, _GROQ_MAX_TOKENS),
-        stream=True,
-    )
-    text_open = False
-    sources, seen = [], set()
-    for chunk in stream:
-        choices = getattr(chunk, 'choices', None) or []
-        if not choices:
+    # Two goes: the searching model, then a plain one.
+    #
+    # _groq_call() already drops a model that refuses the request, but that
+    # only covers a failure raised while the call is being made. Groq answered
+    # 413 "Request Entity Too Large" partway through, the exception came out of
+    # the iteration below rather than out of the call, and the whole turn died
+    # with the raw upstream wording on screen. A searching model is an upgrade
+    # on the turn, never a dependency of it, so it gets dropped here too.
+    #
+    # Only before any text has been shown. Once words are on screen, starting
+    # a second answer underneath the first is worse than the error.
+    attempts = [prefer, None] if prefer else [None]
+    for index, attempt in enumerate(attempts):
+        last_attempt = index == len(attempts) - 1
+        searching = attempt is not None
+        # Falling back means the promise in the system prompt is no longer
+        # true, so it goes with the model. Telling it that it can search when
+        # it cannot is the whole family of bugs this keeps producing.
+        this_system = system if searching else system + _SEARCH_LOST_NOTE
+        text_open = False
+        sources, seen = [], set()
+        try:
+            stream = _groq_call(
+                client,
+                prefer=attempt,
+                messages=_groq_messages(spec, this_system, searching=searching),
+                max_tokens=min(max_tokens, _GROQ_MAX_TOKENS),
+                stream=True,
+            )
+            for chunk in stream:
+                choices = getattr(chunk, 'choices', None) or []
+                if not choices:
+                    continue
+                delta = getattr(choices[0], 'delta', None)
+                piece = getattr(delta, 'content', None)
+                if piece:
+                    if not text_open:
+                        emit('text_start', {})
+                        text_open = True
+                    emit('text', {'text': piece})
+                if searching:
+                    # Groq reports the searches it ran on the delta on some
+                    # responses and on a message block on others, so read both.
+                    for holder in (delta, getattr(choices[0], 'message', None)):
+                        for found in _groq_executed_sources(holder):
+                            _add_source(found['url'], found['title'], sources, seen)
+                while queue:
+                    yield queue.pop(0)
+        except Exception as exc:
+            if text_open or last_attempt:
+                raise
+            import logging
+            logging.getLogger(__name__).warning(
+                'Groq search model failed mid-turn (%s), answering without it',
+                str(exc)[:120])
             continue
-        delta = getattr(choices[0], 'delta', None)
-        piece = getattr(delta, 'content', None)
-        if piece:
-            if not text_open:
-                emit('text_start', {})
-                text_open = True
-            emit('text', {'text': piece})
-        if prefer:
-            # Groq reports the searches it ran on the delta on some responses
-            # and on a message block on others, so both are read.
-            for holder in (delta, getattr(choices[0], 'message', None)):
-                for found in _groq_executed_sources(holder):
-                    _add_source(found['url'], found['title'], sources, seen)
+        if sources:
+            emit('sources', {'sources': sources[:8]})
         while queue:
             yield queue.pop(0)
-    if sources:
-        emit('sources', {'sources': sources[:8]})
-    while queue:
-        yield queue.pop(0)
+        return
 
 
 def _groq_once(spec, system, max_tokens):

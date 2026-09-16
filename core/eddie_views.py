@@ -649,6 +649,37 @@ def eddie_once(prompt, history=None, attachments=None, max_tokens=2000,
     return text, (sources or prefetched)
 
 
+# Upstream wording is not an error message. "Eddie hit a problem: Request
+# Entity Too Large" is what Groq says to a machine, shown to somebody who
+# asked when a phone comes out: it names nothing they can act on and reads as
+# though the app is broken in a way only they are seeing.
+_ERROR_WORDING = (
+    (('too large', '413', 'context length', 'too many tokens'),
+     'That got too big for Eddie to handle in one go. Try a shorter message, '
+     'or start a new chat.'),
+    (('rate limit', 'rate_limit', '429', 'quota', 'resource_exhausted'),
+     'Eddie is busy right now. Give it a minute and try again.'),
+    (('timeout', 'timed out', 'deadline'),
+     'That took too long and Eddie gave up. Try again.'),
+    (('connection', 'network', 'unreachable', 'dns', 'ssl'),
+     'Eddie could not be reached. Check your connection and try again.'),
+    (('authentication', 'api key', 'unauthorized', '401', '403'),
+     'Eddie is not set up correctly on the server. This one is not your fault.'),
+)
+
+
+def _friendly_error(exc):
+    """Something a person can act on, and the detail in the log instead."""
+    import logging
+    logging.getLogger(__name__).warning('Eddie turn failed: %s',
+                                        str(exc)[:400], exc_info=True)
+    text = str(exc).lower()
+    for needles, wording in _ERROR_WORDING:
+        if any(n in text for n in needles):
+            return wording
+    return 'Eddie could not finish that one. Try again.'
+
+
 @csrf_exempt
 @ratelimit(key='ip', rate='20/m', method='POST', block=True)
 @require_http_methods(["POST"])
@@ -748,7 +779,7 @@ def eddie_chat(request):
                               sources=collected['sources'])
             yield _sse('done', {})
         except Exception as exc:
-            yield _sse('error', {'message': 'Eddie hit a problem: ' + str(exc)[:180]})
+            yield _sse('error', {'message': _friendly_error(exc)})
             yield _sse('done', {})
 
     resp = StreamingHttpResponse(generate(), content_type='text/event-stream')
