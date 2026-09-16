@@ -55053,6 +55053,28 @@ function _eddieStyles() {
         'font-size:12.5px;font-weight:600;padding:5px 12px;border-radius:20px;cursor:pointer;' +
         'margin-left:auto;}' +
         '.eddie-notice-retry:hover{background:rgba(255,255,255,.18);}' +
+        // The answer itself: text on the page, not a card floating on it. A
+        // bubble is for a message somebody sent you; this is Eddie talking in
+        // the room, the same way the thought summary and the status line are.
+        '.eddie-answer{color:rgba(255,255,255,.93);font-size:15.5px;line-height:1.62;' +
+        'max-width:100%;padding-left:3px;word-wrap:break-word;overflow-wrap:anywhere;}' +
+        '.eddie-answer a{color:#5AA9FF;text-decoration:underline;text-underline-offset:2px;}' +
+        '.eddie-answer b{color:#fff;font-weight:700;}' +
+        '.eddie-code{background:rgba(255,255,255,.13);color:#fff;padding:1px 5px;' +
+        'border-radius:5px;font-size:0.9em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}' +
+        '.eddie-answer img{max-width:min(100%,340px);border-radius:14px;display:block;}' +
+        '.eddie-sources-wrap{margin-top:11px;padding-top:10px;padding-left:3px;' +
+        'border-top:1px solid rgba(255,255,255,.1);max-width:100%;}' +
+        '.eddie-sources-head{color:rgba(255,255,255,.4);font-size:11px;font-weight:700;' +
+        'text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px;}' +
+        // Written as .eddie-answer a.eddie-source so it outweighs the link
+        // colour above it; a bare .eddie-source loses on specificity and the
+        // chips came out underlined and blue.
+        '.eddie-answer a.eddie-source,.eddie-source{display:inline-flex;align-items:center;gap:5px;' +
+        'background:rgba(255,255,255,.08);color:rgba(255,255,255,.8);text-decoration:none;' +
+        'font-size:12px;padding:5px 10px;border-radius:20px;max-width:100%;}' +
+        '.eddie-source:hover{background:rgba(255,255,255,.14);}' +
+        '.eddie-source span:first-child{color:rgba(255,255,255,.4);}' +
         '.eddie-act{background:none;border:none;color:rgba(255,255,255,.45);cursor:pointer;font-size:13px;padding:6px;border-radius:8px;}' +
         '.eddie-act:hover{color:#fff;background:rgba(255,255,255,.08);}' +
         '.eddie-act.on{color:#0A84FF;}' +
@@ -55084,7 +55106,7 @@ function _eddieEsc(t) { return escapeHtml(t == null ? '' : String(t)); }
 // Small, deliberate subset of markdown: bold, inline code, and line breaks.
 function _eddieFormat(text) {
     var h = _eddieEsc(text);
-    h = h.replace(/`([^`\n]+)`/g, '<code style="background:rgba(0,0,0,0.08);padding:1px 5px;border-radius:5px;font-size:0.9em;">$1</code>');
+    h = h.replace(/`([^`\n]+)`/g, '<code class="eddie-code">$1</code>');
     h = h.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
     return h.replace(/\n/g, '<br>');
 }
@@ -55493,15 +55515,14 @@ function _eddieTurnHTML(t, i) {
 
     var sources = '';
     if (t.sources && t.sources.length) {
-        sources = '<div class="eddie-sources" style="margin-top:10px;padding-top:9px;border-top:1px solid rgba(0,0,0,0.08);">' +
-            '<div style="color:#888;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Sources</div>' +
+        sources = '<div class="eddie-sources eddie-sources-wrap">' +
+            '<div class="eddie-sources-head">Sources</div>' +
             '<div style="display:flex;flex-wrap:wrap;gap:6px;">' +
             t.sources.map(function (s, n) {
                 var host = '';
                 try { host = new URL(s.url).hostname.replace(/^www\./, ''); } catch (e) { host = s.url; }
-                return '<a href="' + _eddieEsc(s.url) + '" target="_blank" rel="noopener noreferrer" ' +
-                    'style="display:inline-flex;align-items:center;gap:5px;background:rgba(0,0,0,0.05);color:#333;text-decoration:none;font-size:12px;padding:5px 10px;border-radius:20px;max-width:100%;">' +
-                    '<span style="color:#888;">' + (n + 1) + '</span>' +
+                return '<a class="eddie-source" href="' + _eddieEsc(s.url) + '" target="_blank" rel="noopener noreferrer">' +
+                    '<span>' + (n + 1) + '</span>' +
                     '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _eddieEsc(host) + '</span></a>';
             }).join('') + '</div></div>';
     }
@@ -55531,21 +55552,24 @@ function _eddieTurnHTML(t, i) {
     }
 
     var body = t.image
-        ? '<img src="' + _eddieEsc(t.image) + '" style="width:100%;border-radius:12px;display:block;">'
+        ? '<img src="' + _eddieEsc(t.image) + '" alt="">'
         : _eddieFormat(t.content);
 
-    // No answer yet means no bubble at all, rather than an empty one holding
-    // a status line. The shimmer sits on the black background on its own,
-    // and the bubble arrives with the first words that go in it.
-    var bubble = '';
+    // The answer is text on the page now, not a white card sitting on it.
+    //
+    // A bubble is for a message somebody sent you, and it was doing real harm
+    // here: a white panel on a black screen is the brightest thing in the app,
+    // it boxed every reply into 88% of the width whatever its length, and a
+    // generated picture came out wearing a thick white frame. The thought
+    // summary, the status line and failures had already moved out of it. The
+    // answer is the last thing that was still in one.
+    var answer = '';
     if (body || sources) {
-        bubble = '<div style="max-width:88%;background:#fff;color:#111;border-radius:18px 18px 18px 5px;padding:11px 14px;font-size:15px;line-height:1.5;box-shadow:0 2px 10px rgba(0,0,0,0.25);">' +
-            body + sources +
-        '</div>';
+        answer = '<div class="eddie-answer">' + body + sources + '</div>';
     }
 
     return '<div style="display:flex;flex-direction:column;align-items:flex-start;margin:10px 0;">' +
-        thinking + status + bubble + notice + actions +
+        thinking + status + answer + notice + actions +
     '</div>';
 }
 
