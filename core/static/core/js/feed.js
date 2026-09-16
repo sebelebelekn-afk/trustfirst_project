@@ -55555,10 +55555,45 @@ function eddieSend() {
     _eddieRenderAttachments();
 }
 
-// "draw me a…" routes to image generation instead of chat.
+// Does this ask Eddie to make a picture?
+//
+// The old test was anchored to the start of the message, so it only fired when
+// somebody opened with the verb: "generate a picture of a banana" worked and
+// "can you generate a picture of a banana" did not. The second is how people
+// actually ask, and it fell through to chat, where the model does not know this
+// app can make images at all and helpfully recommended DALL-E instead.
+//
+// A false positive is worse than a false negative here: answering a real
+// question with a picture is more annoying than missing a request the person
+// can rephrase. So a how-to, a support question, or anything about a picture
+// already in the conversation is excluded first, and what is left has to carry
+// both a making verb and an image word.
 function _eddieWantsImage(text) {
-    return /^\s*(draw|generate|make|create)\s+(me\s+)?(an?\s+)?(image|picture|photo|drawing|illustration|logo)\b/i.test(text)
-        || /^\s*\/image\b/i.test(text);
+    if (!text) return false;
+    var t = String(text);
+
+    if (/^\s*\/(image|img|draw|pic)\b/i.test(t)) return true;
+
+    // Somebody's existing picture. "make my profile picture rounder" carries a
+    // making verb and an image word but is a support question, not a request.
+    if (/\b(my|your|their|his|her|our)\s+(profile\s+|cover\s+|banner\s+)?(picture|photo|image|avatar|pic)\b/i.test(t)) return false;
+
+    // Asking about pictures, not for one.
+    if (/\b(how\s+(do|can|would|should)\s+(i|you|we)|what\s+(is|are|does)|why\s+(is|are|does|do|can.?t)|where\s+(do|is|are)|upload|uploading|attach|attaching|posted|this\s+(image|picture|photo)|the\s+(image|picture|photo)\s+i)\b/i.test(t)) return false;
+
+    var MAKE = /\b(draw|generate|create|make|render|design|paint|sketch|illustrate|produce|imagine)\b/i;
+    var PIC  = /\b(image|images|picture|pictures|pic|pics|photo|photos|drawing|illustration|logo|art|artwork|painting|sketch|poster|wallpaper|avatar|icon|banner|graphic|meme)\b/i;
+    if (MAKE.test(t) && PIC.test(t)) return true;
+
+    // "draw me a dragon" - these verbs need no noun to be unambiguous, but do
+    // need an object, so "draw a conclusion" is not caught by the article alone.
+    if (/\b(draw|sketch|paint|illustrate)\s+(me\s+)?(an?|the)\s+(?!conclusion|comparison|parallel|distinction|line\b|attention)\w+/i.test(t)) return true;
+
+    // "I want a picture of a banana", "show me an image of ...". The article is
+    // required: without it "I need help with my profile picture" looks the same.
+    if (/\b(i\s+want|i\s+need|give\s+me|show\s+me|can\s+i\s+get|could\s+i\s+get)\s+(an?|some)\s+(image|picture|photo|drawing|illustration|logo|art)\b/i.test(t)) return true;
+
+    return false;
 }
 
 async function _eddieAsk(text, attachments) {
