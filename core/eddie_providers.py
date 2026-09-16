@@ -435,6 +435,10 @@ _GROQ_SEARCH_TURN_CHARS = 700
 # little for the searching. Enough for any reply a chat bubble should hold.
 _GROQ_SEARCH_MAX_TOKENS = 1500
 
+# Groq deprecated max_tokens in favour of max_completion_tokens. Deprecated is
+# one release away from rejected, and it is the number the per-minute budget is
+# measured against, so the calls below send the current name.
+
 
 def _groq_messages(spec, system, searching=False):
     """Neutral spec -> OpenAI chat messages.
@@ -799,9 +803,9 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
                 client,
                 prefer=attempt,
                 messages=_groq_messages(spec, this_system, searching=searching),
-                max_tokens=min(max_tokens,
-                               _GROQ_SEARCH_MAX_TOKENS if searching
-                               else _GROQ_MAX_TOKENS),
+                max_completion_tokens=min(max_tokens,
+                                          _GROQ_SEARCH_MAX_TOKENS if searching
+                                          else _GROQ_MAX_TOKENS),
                 stream=True,
             )
             for chunk in stream:
@@ -846,8 +850,10 @@ def _groq_once(spec, system, max_tokens):
     result = _groq_call(
         client,
         prefer=prefer,
-        messages=_groq_messages(spec, system),
-        max_tokens=min(max_tokens, _GROQ_MAX_TOKENS),
+        messages=_groq_messages(spec, system, searching=bool(prefer)),
+        max_completion_tokens=min(max_tokens,
+                                  _GROQ_SEARCH_MAX_TOKENS if prefer
+                                  else _GROQ_MAX_TOKENS),
     )
     choices = getattr(result, 'choices', None) or []
     if not choices:

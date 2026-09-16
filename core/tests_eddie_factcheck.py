@@ -619,7 +619,7 @@ class SearchFallbackTests(SimpleTestCase):
         system = sent['messages'][0]['content']
         self.assertEqual(system, eddie_search.SEARCH_SYSTEM)
         self.assertLess(len(system), 2500)
-        self.assertLessEqual(sent['max_tokens'],
+        self.assertLessEqual(sent['max_completion_tokens'],
                              eddie_providers._GROQ_SEARCH_MAX_TOKENS)
 
     def test_a_plain_turn_still_gets_the_full_prompt(self):

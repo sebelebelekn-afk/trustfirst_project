@@ -948,3 +948,80 @@ def eddie_usage(request):
             'images': settings.EDDIE_LIMIT_IMAGES,
         },
     })
+
+
+# ---------------------------------------------------------------------------
+# DIAGNOSTICS
+#
+# `manage.py eddie_status --test` reports all of this, and needs a shell on the
+# server to run it. Render's free tier does not give you one, so the command
+# was useless exactly where it was needed and three rounds of this were spent
+# reasoning about an upstream error nobody could see.
+#
+# Same information over HTTP, admin only. Open it in a browser while signed in
+# as an admin and it says whether the search model answers, and the exact
+# upstream error when it does not.
+# ---------------------------------------------------------------------------
+@require_http_methods(["GET"])
+def eddie_diag(request):
+    from .api_views import _require_admin
+    try:
+        _require_admin(request)
+    except ValueError:
+        return JsonResponse({'error': 'Admins only'}, status=403)
+    except Exception:
+        return JsonResponse({'error': 'Sign in as an admin'}, status=401)
+
+    from . import eddie_search, eddie_image
+
+    out = {
+        'keys': {name: bool(getattr(settings, name, ''))
+                 for name in ('GROQ_API_KEY', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY',
+                              'CLOUDFLARE_API_TOKEN', 'OPENAI_API_KEY',
+                              'POLLINATIONS_TOKEN')},
+        'chat_engine': eddie_providers.active(),
+        'eddie_provider_setting': getattr(settings, 'EDDIE_PROVIDER', '') or '(auto)',
+        'image_provider': eddie_image._provider(),
+    }
+
+    client = eddie_providers._groq_client()
+    model = None
+    if client is not None:
+        try:
+            eddie_providers._groq_live_models(client)
+        except Exception as exc:
+            out['groq_model_list_error'] = str(exc)[:300]
+        out['groq_chat_models'] = eddie_providers._GROQ_LIVE.get('names') or []
+        out['groq_search_models'] = eddie_providers._GROQ_LIVE.get('search') or []
+        model = eddie_providers._groq_search_model(client)
+    out['search_model'] = model
+    out['live_search'] = bool(model)
+
+    # The part that matters: actually run one and report what happens.
+    if request.GET.get('test') and model:
+        spec = {'history': [], 'attachments': [], 'wants_search': True,
+                'prompt': 'In one sentence: what is today\'s date, and one '
+                          'thing in the news right now?',
+                'search_system': eddie_search.SEARCH_SYSTEM}
+        import time as _t
+        started = _t.time()
+        try:
+            text, sources = eddie_providers._groq_once(
+                spec, eddie_search.SEARCH_SYSTEM, 1500)
+            out['test'] = {
+                'ok': True,
+                'seconds': round(_t.time() - started, 2),
+                'answer': (text or '')[:600],
+                'sources': [s.get('url') for s in (sources or [])][:6],
+            }
+        except Exception as exc:
+            out['test'] = {
+                'ok': False,
+                'seconds': round(_t.time() - started, 2),
+                'error_type': type(exc).__name__,
+                'error': str(exc)[:1200],
+            }
+    elif request.GET.get('test'):
+        out['test'] = {'ok': False, 'error': 'no search-capable model available'}
+
+    return JsonResponse(out, json_dumps_params={'indent': 2})
