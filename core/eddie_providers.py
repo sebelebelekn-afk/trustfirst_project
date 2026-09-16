@@ -780,8 +780,18 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
         # Falling back means the promise in the system prompt is no longer
         # true, so it goes with the model. Telling it that it can search when
         # it cannot is the whole family of bugs this keeps producing.
-        this_system = ((spec.get('search_system') or system) if searching
-                       else system + _SEARCH_LOST_NOTE)
+        # The correction belongs only to a turn that tried to search and could
+        # not. Appending it whenever `searching` is false put "the web search
+        # is not available after all" on top of every ordinary message too --
+        # so "hi" and "how do I post a clip" would have been answered by a
+        # model apologising for a search it had never attempted.
+        fell_back = prefer is not None and attempt is None
+        if searching:
+            this_system = spec.get('search_system') or system
+        elif fell_back:
+            this_system = system + _SEARCH_LOST_NOTE
+        else:
+            this_system = system
         text_open = False
         sources, seen = [], set()
         try:
