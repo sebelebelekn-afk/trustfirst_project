@@ -449,6 +449,14 @@ EDDIE_GEMINI_MODEL = os.environ.get('EDDIE_GEMINI_MODEL', 'gemini-3.5-flash')
 # process) or 'on' after adding billing to a Google Cloud project.
 EDDIE_WEB_SEARCH = os.environ.get('EDDIE_WEB_SEARCH', 'off')
 
+# Fact-checking without a search key. When somebody asks Eddie whether a claim
+# is true, core/eddie_search.py looks it up on Wikipedia -- keyless, allowed,
+# and about half a second -- and hands the article openings to the model with
+# instructions to work from them or admit it could not check. If the Groq key
+# can reach one of Groq's compound models, a real web search is used instead
+# and this never runs. Set to 'off' to switch the lookups off entirely.
+EDDIE_FACTCHECK = os.environ.get('EDDIE_FACTCHECK', 'on')
+
 # minimal | low | medium | high. Higher means slower replies, and Eddie lives
 # in a chat bubble where waiting is the worst part.
 EDDIE_THINKING = os.environ.get('EDDIE_THINKING', 'low')

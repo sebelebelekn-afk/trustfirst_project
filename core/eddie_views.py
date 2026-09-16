@@ -104,9 +104,20 @@ WHAT YOU DO
   for admins. When someone is stuck, give the actual tap-by-tap path rather than
   a vague description.
 - When someone tags you on a post and asks whether it is true, read the post you
-  were given, weigh it, and answer honestly. Search the web when the claim is
-  checkable and current. Say what is supported, what is not, and what you could
-  not verify. Do not pretend to a certainty you do not have.
+  were given, weigh it, and answer honestly. Give the verdict first - true,
+  false, misleading, or genuinely unsettled - then the reason for it in a
+  sentence or two.
+- Be straight about where the verdict comes from. If you were handed sources
+  for this message, use them and name them. If you were not, say you are going
+  on what you already know rather than a fresh check, and say it in passing,
+  not as a disclaimer that takes up half the answer.
+- Never invent a source, a link, a study or a statistic to back a verdict, and
+  never describe yourself as having looked something up when you did not.
+- Some things you cannot check: what happened in the last day or two, private
+  messages, anything behind a login, and what a specific person meant. Say so
+  and stop, instead of guessing confidently.
+- Say what is supported, what is not, and what you could not verify. Do not
+  pretend to a certainty you do not have.
 - Help people grow. You can see a creator's real figures (followers, likes,
   comments, views, how often they post, what they post about) and you can see
   what is performing on TrustFirst. When someone asks for content ideas, how
@@ -518,7 +529,8 @@ def eddie_mention(request):
 
     text, _sources = eddie_once(_mention_prompt(question, post_text),
                                 history=history, route_text=question,
-                                attachments=images)
+                                attachments=images,
+                                claim=((post_text or '') + ' ' + (question or '')).strip())
     text = (text or '').strip()
     if not text:
         _release_mention(claim.get('id'))
@@ -559,16 +571,62 @@ def eddie_mention(request):
     })
 
 
+def _factcheck_context(system, spec, asked, claim=None):
+    """Attach evidence when somebody is asking Eddie to check a claim.
+
+    Eddie's prompt used to tell it to search the web, on a deploy where search
+    was switched off, which is the one instruction you must never give a
+    language model: told it has sources, it writes as though it has them. This
+    is the other half of the fix. The prompt now describes whichever of these
+    three situations the turn is actually in:
+
+      1. the key can reach a searching model  -> let it search, cite what it read
+      2. it cannot, but Wikipedia had the claim -> here are the passages
+      3. neither                                -> say plainly you could not check
+
+    Returns (system, sources). Never raises: a lookup that goes wrong costs the
+    citations, never the answer.
+    """
+    try:
+        from . import eddie_search
+    except Exception:
+        return system, []
+    try:
+        if not eddie_search.looks_like_check(asked):
+            return system, []
+
+        # A real web search beats a Wikipedia lookup, so take it when the
+        # deploy has one. This is answered from an hourly cache of what Groq
+        # will serve this key, not a live probe, so it costs nothing here.
+        if eddie_providers.can_search_live():
+            spec['wants_search'] = True
+            return system + eddie_search.LIVE_NOTE, []
+
+        addition, sources = eddie_search.brief(claim or asked)
+        if addition:
+            return system + '\n\n' + addition, sources
+        return system + eddie_search.no_evidence_note(), []
+    except Exception:
+        return system, []
+
+
 def eddie_once(prompt, history=None, attachments=None, max_tokens=2000,
-               route_text=None):
+               route_text=None, claim=None):
     """One non-streaming Eddie turn, for places with no UI to stream to,
     such as replying to an @eddie mention. Returns (text, sources).
+
+    `claim` is the text being checked, which on a mention is the post rather
+    than the question: "is this true?" is not something you can look up, and
+    the sentence above it is.
     """
     spec = _build_spec(history, prompt, attachments, route_text=route_text)
+    system, prefetched = _factcheck_context(
+        EDDIE_SYSTEM, spec, route_text or prompt, claim=claim)
     try:
-        return eddie_providers.once(spec, EDDIE_SYSTEM, max_tokens)
+        text, sources = eddie_providers.once(spec, system, max_tokens)
     except Exception:
         return '', []
+    return text, (sources or prefetched)
 
 
 @csrf_exempt
@@ -625,9 +683,12 @@ def eddie_chat(request):
     except Exception:
         pass        # a stats failure must never cost the user their answer
 
+    # "Is this true?" gets evidence attached before the model sees it.
+    system, prefetched = _factcheck_context(system, spec, prompt)
+
     def generate():
         queue = []
-        collected = {'text': [], 'thinking': [], 'sources': []}
+        collected = {'text': [], 'thinking': [], 'sources': list(prefetched)}
         try:
             def emit(kind, data):
                 if kind == 'text':
@@ -637,6 +698,13 @@ def eddie_chat(request):
                 elif kind == 'sources':
                     collected['sources'] = data.get('sources', [])
                 queue.append(_sse(kind, data))
+
+            # Show the pages Eddie was handed before the answer starts, the
+            # same way the paid search backends surface their results. The
+            # bubble already knows how to render this shape.
+            if prefetched:
+                yield _sse('searching', {'name': 'web_search'})
+                yield _sse('sources', {'sources': prefetched[:8]})
 
             # Storage happens after the answer, not before it. Creating the
             # conversation and saving the question are three round trips to

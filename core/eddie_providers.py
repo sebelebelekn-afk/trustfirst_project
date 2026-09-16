@@ -9,13 +9,21 @@ for the day there is funding: set EDDIE_PROVIDER=anthropic. Nothing else in
 the app changes, because both backends emit the same events and the same
 `sources` shape that eddie_views.py already stores and feed.js already renders.
 
-Web search is the one Eddie feature the free tier will not do. Google offers
-free Search grounding on gemini-2.5-flash only, and that model is closed to
-new API keys, so a new free account gets a quota error the moment it asks to
-ground. Eddie therefore treats search as optional: it tries once, and on a
-quota refusal it turns search off for an hour and tells the model to stop
-implying it looked anything up. Add billing and search switches itself back on
-with no code change.
+Web search is the one Eddie feature the paid tiers hand over and the free ones
+do not. Google offers free Search grounding on gemini-2.5-flash only, and that
+model is closed to new API keys, so a new free account gets a quota error the
+moment it asks to ground. Eddie therefore treats Gemini grounding as optional:
+it tries once, and on a quota refusal it turns search off for an hour and tells
+the model to stop implying it looked anything up. Add billing and it switches
+itself back on with no code change.
+
+There are two ways Eddie searches without that bill. Groq serves "compound"
+models that run a web search server-side, on the same free tier and the same
+key as ordinary chat; when the key can reach one, fact-checks are routed to it
+and the searches it ran come back as citations. When it cannot, the keyless
+Wikipedia lookup in eddie_search.py supplies the evidence instead. Either way
+the prompt is written to match what actually happened on the turn, because a
+model told it has sources will write as though it does.
 
 No key ever reaches the browser. Callers pass a neutral spec:
 
@@ -133,6 +141,14 @@ def _route(spec):
             {'groq': 'GROQ_API_KEY', 'gemini': 'GEMINI_API_KEY',
              'anthropic': 'ANTHROPIC_API_KEY'}[choice]):
         return choice           # an explicit choice is not second-guessed
+
+    # A claim to check goes to the engine that can actually look it up, even
+    # though _needs_depth() would otherwise call "is it true" a deep question
+    # and send it to Gemini -- whose search is the billed one Eddie cannot use.
+    if spec.get('wants_search'):
+        client = _groq_client()
+        if client is not None and _groq_search_model(client):
+            return 'groq'
 
     # Fast by default, deep when the question earns it and a deep engine exists.
     if _needs_depth(spec):
@@ -493,7 +509,7 @@ def _groq_is_too_large(exc):
 # when llama-3.3-70b-versatile was withdrawn and the list had no way to know.
 # Groq publishes what it currently serves, so ask it, and keep the written list
 # only as the order of preference and as the answer when the network is down.
-_GROQ_LIVE = {'at': 0.0, 'names': []}
+_GROQ_LIVE = {'at': 0.0, 'names': [], 'search': []}
 _GROQ_LIVE_TTL = 3600
 
 
@@ -515,7 +531,7 @@ def _groq_live_models(client):
     """Model ids Groq will accept right now, best-first. Never raises."""
     if time.time() - _GROQ_LIVE['at'] < _GROQ_LIVE_TTL and _GROQ_LIVE['names']:
         return _GROQ_LIVE['names']
-    names = []
+    names, search = [], []
     try:
         listing = client.models.list()
         for m in (getattr(listing, 'data', None) or []):
@@ -527,9 +543,18 @@ def _groq_live_models(client):
             low = mid.lower()
             if any(s in low for s in ('whisper', 'guard', 'tts', 'embed', 'prompt-guard')):
                 continue
+            # The compound models run tools server-side, web search among them.
+            # They are held back for fact-checks rather than left in the
+            # ordinary rotation: they are slower than a plain chat model and a
+            # "how do I post a clip" does not need a search engine.
+            if _is_search_model(mid):
+                search.append(mid)
+                continue
             names.append(mid)
     except Exception:
         return _GROQ_FALLBACKS            # offline, or an older SDK: use the list
+
+    _GROQ_LIVE['search'] = search
 
     if not names:
         return _GROQ_FALLBACKS
@@ -548,12 +573,103 @@ def _groq_live_models(client):
     return _GROQ_LIVE['names']
 
 
-def _groq_call(client, **kwargs):
+# ---- Groq's search-capable models -----------------------------------------
+#
+# Groq serves "compound" models: the same open-weights models, wrapped in a
+# server-side agent that can run a web search before it answers. The search
+# happens on Groq's side, it needs no second account and no second key, and it
+# is covered by the same free tier as ordinary chat. For TrustFirst that is the
+# difference between Eddie guessing at a claim and Eddie checking one.
+#
+# Whether a given key can reach them is not assumed. Groq publishes what it
+# will serve that key, so the list is read at runtime and a compound model is
+# used only if it is actually on it. When it is not, fact-checks fall back to
+# the keyless Wikipedia lookup in eddie_search.py, which is why that exists.
+
+_GROQ_SEARCH_PREF = ('groq/compound', 'groq/compound-mini')
+
+
+def _is_search_model(name):
+    return 'compound' in (name or '').lower()
+
+
+def _groq_search_model(client):
+    """A Groq model that can search the web, or None if this key has none."""
+    try:
+        _groq_live_models(client)           # fills _GROQ_LIVE['search']
+    except Exception:
+        return None
+    have = _GROQ_LIVE.get('search') or []
+    for name in _GROQ_SEARCH_PREF:
+        if name in have:
+            return name
+    return have[0] if have else None
+
+
+def can_search_live():
+    """Whether Eddie has a real web search available on this deploy.
+
+    Answered from the hourly model-list cache, so asking costs nothing on the
+    hot path. False is not a failure: it means fact-checks use the Wikipedia
+    lookup instead, and the prompt is written to match.
+    """
+    client = _groq_client()
+    if client is None:
+        return False
+    return _groq_search_model(client) is not None
+
+
+_URL_RE = None
+
+
+def _groq_executed_sources(message):
+    """Citations out of a compound model's server-side tool run.
+
+    The shape of executed_tools is Groq's to change, and it has more than one
+    form in the wild -- a structured results list on some responses, a text
+    blob on others -- so both are read, and anything unrecognised yields no
+    sources rather than an exception. Losing the citations is survivable;
+    losing the answer is not.
+    """
+    global _URL_RE
+    sources, seen = [], set()
+    try:
+        tools = _attr(message, 'executed_tools') or []
+        for tool in tools:
+            # The structured form: output/search_results carrying url + title.
+            for key in ('search_results', 'results', 'output'):
+                block = _attr(tool, key)
+                if isinstance(block, dict):
+                    block = block.get('results') or block.get('sources')
+                if isinstance(block, list):
+                    for item in block:
+                        _add_source(_attr(item, 'url') or _attr(item, 'link'),
+                                    _attr(item, 'title'), sources, seen)
+            # The text form: pull the links out of whatever came back.
+            out = _attr(tool, 'output')
+            if isinstance(out, str) and out:
+                if _URL_RE is None:
+                    import re
+                    _URL_RE = re.compile(r'https?://[^\s<>"\'\)\]]+')
+                for url in _URL_RE.findall(out)[:8]:
+                    _add_source(url.rstrip('.,'), '', sources, seen)
+    except Exception:
+        return sources
+    return sources
+
+
+def _groq_call(client, prefer=None, **kwargs):
     """Call Groq, moving down the list when a model has been retired.
 
     Only a missing model is retried. A bad key, a rate limit or a network
     failure is raised as it is, because trying four more models would turn one
     clear error into four confusing ones.
+
+    `prefer` puts one model at the front for this turn -- how a fact-check gets
+    the searching model without changing what ordinary chat runs on. It is a
+    preference, not a requirement: a compound model that fails for any reason
+    at all hands the turn back to the plain chat models, because an answer
+    without citations still beats no answer.
     """
     pinned = getattr(settings, 'EDDIE_GROQ_MODEL', '')
     available = _groq_live_models(client)
@@ -561,24 +677,35 @@ def _groq_call(client, **kwargs):
         ([_GROQ_WORKING] if _GROQ_WORKING in available else []) +
         [m for m in available if m != _GROQ_WORKING]
     )
+    if prefer:
+        candidates = [prefer] + [m for m in candidates if m != prefer]
     last = None
     for name in candidates:
         try:
             result = client.chat.completions.create(model=name, **kwargs)
         except Exception as exc:
             last = exc
-            if not pinned and (_groq_is_missing_model(exc) or _groq_is_too_large(exc)):
+            retry = _groq_is_missing_model(exc) or _groq_is_too_large(exc)
+            # A searching model is an upgrade on the turn, never a dependency
+            # of it, so any failure from one moves on rather than surfacing.
+            if _is_search_model(name) and len(candidates) > 1:
+                retry = True
+            if retry and (not pinned or _is_search_model(name)):
                 import logging
                 logging.getLogger(__name__).warning(
                     'Groq model %s refused (%s), trying the next one', name,
-                    'retired' if _groq_is_missing_model(exc) else 'request too large')
+                    'retired' if _groq_is_missing_model(exc) else
+                    'request too large' if _groq_is_too_large(exc) else str(exc)[:80])
                 # A retirement means the cached list is stale, so throw it away
                 # and ask Groq again rather than walking a list of dead names.
                 if _groq_is_missing_model(exc):
                     _GROQ_LIVE['at'] = 0.0
                 continue
             raise
-        globals()['_GROQ_WORKING'] = name
+        # Only plain chat models are remembered. Sticking on a compound model
+        # would quietly route every "hi" through a web search.
+        if not _is_search_model(name):
+            globals()['_GROQ_WORKING'] = name
         return result
     raise last if last else RuntimeError('no Groq model available')
 
@@ -591,13 +718,23 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
             yield queue.pop(0)
         return
 
+    # A fact-check gets the searching model when this key has one. Everything
+    # else stays on the fast chat models it has always used.
+    prefer = _groq_search_model(client) if spec.get('wants_search') else None
+    if prefer:
+        emit('searching', {'name': 'web_search'})
+        while queue:
+            yield queue.pop(0)
+
     stream = _groq_call(
         client,
+        prefer=prefer,
         messages=_groq_messages(spec, system),
         max_tokens=min(max_tokens, _GROQ_MAX_TOKENS),
         stream=True,
     )
     text_open = False
+    sources, seen = [], set()
     for chunk in stream:
         choices = getattr(chunk, 'choices', None) or []
         if not choices:
@@ -609,8 +746,16 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
                 emit('text_start', {})
                 text_open = True
             emit('text', {'text': piece})
+        if prefer:
+            # Groq reports the searches it ran on the delta on some responses
+            # and on a message block on others, so both are read.
+            for holder in (delta, getattr(choices[0], 'message', None)):
+                for found in _groq_executed_sources(holder):
+                    _add_source(found['url'], found['title'], sources, seen)
         while queue:
             yield queue.pop(0)
+    if sources:
+        emit('sources', {'sources': sources[:8]})
     while queue:
         yield queue.pop(0)
 
@@ -619,15 +764,19 @@ def _groq_once(spec, system, max_tokens):
     client = _groq_client()
     if client is None:
         return '', []
+    prefer = _groq_search_model(client) if spec.get('wants_search') else None
     result = _groq_call(
         client,
+        prefer=prefer,
         messages=_groq_messages(spec, system),
         max_tokens=min(max_tokens, _GROQ_MAX_TOKENS),
     )
     choices = getattr(result, 'choices', None) or []
     if not choices:
         return '', []
-    return ((getattr(choices[0].message, 'content', '') or '').strip(), [])
+    message = choices[0].message
+    sources = _groq_executed_sources(message) if prefer else []
+    return ((getattr(message, 'content', '') or '').strip(), sources[:8])
 
 
 # ---- Anthropic ------------------------------------------------------------
