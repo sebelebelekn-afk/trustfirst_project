@@ -55130,36 +55130,47 @@ async function _eddieLoadHistory() {
     }
 }
 
+// The "nothing here" state, needed in two places: on a first load with no
+// history, and after deleting the last conversation.
+function _eddieHistoryEmptyHTML() {
+    return '<div style="text-align:center;padding:60px 20px;color:rgba(255,255,255,0.35);">' +
+        '<i class="fa-solid fa-clock-rotate-left" style="font-size:30px;display:block;margin-bottom:14px;"></i>' +
+        '<p style="font-size:14px;">Nothing here yet. Your chats with Eddie will show up here.</p></div>';
+}
+
 function _eddieHistoryHTML(j) {
     var images = j.images || [], convos = j.conversations || [];
-    if (!images.length && !convos.length) {
-        return '<div style="text-align:center;padding:60px 20px;color:rgba(255,255,255,0.35);">' +
-            '<i class="fa-solid fa-clock-rotate-left" style="font-size:30px;display:block;margin-bottom:14px;"></i>' +
-            '<p style="font-size:14px;">Nothing here yet. Your chats with Eddie will show up here.</p></div>';
-    }
+    if (!images.length && !convos.length) return _eddieHistoryEmptyHTML();
 
     var html = '';
     if (images.length) {
-        html += '<div style="color:#fff;font-size:19px;font-weight:800;margin:10px 0 14px;">Images</div>' +
+        html += '<div id="eddieImageSection">' +
+            '<div style="color:#fff;font-size:19px;font-weight:800;margin:10px 0 14px;">Images</div>' +
             '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:28px;">' +
             images.map(function (im) {
-                return '<div onclick="eddieViewImage(\'' + _eddieEsc(im.image_url) + '\')" ' +
+                return '<div data-eddie-image onclick="eddieViewImage(\'' + _eddieEsc(im.image_url) + '\')" ' +
                     'style="aspect-ratio:1;border-radius:12px;overflow:hidden;background:#111;cursor:pointer;">' +
                     '<img src="' + _eddieEsc(im.image_url) + '" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;"></div>';
-            }).join('') + '</div>';
+            }).join('') + '</div></div>';
     }
 
     if (convos.length) {
-        html += '<div style="color:#fff;font-size:19px;font-weight:800;margin:6px 0 12px;">Conversations</div>' +
+        // The heading lives in the same wrapper as the rows so it can go when
+        // the last one is deleted, instead of sitting over an empty space.
+        html += '<div id="eddieConvoSection">' +
+            '<div style="color:#fff;font-size:19px;font-weight:800;margin:6px 0 12px;">Conversations</div>' +
             convos.map(function (c) {
-                return '<div style="display:flex;align-items:flex-start;gap:10px;padding:12px 0;">' +
+                // data-eddie-convo is the handle the delete uses to find this
+                // one row. Matching on the attribute rather than building a
+                // selector out of the id keeps it safe whatever the id contains.
+                return '<div data-eddie-convo="' + _eddieEsc(c.id) + '" style="display:flex;align-items:flex-start;gap:10px;padding:12px 0;">' +
                     '<div onclick="eddieOpenConversation(\'' + _eddieEsc(c.id) + '\')" style="flex:1;min-width:0;cursor:pointer;">' +
                         '<div style="color:#fff;font-size:17px;font-weight:700;line-height:1.3;">' + _eddieEsc(c.title || 'New chat') + '</div>' +
                         '<div style="color:rgba(255,255,255,0.4);font-size:14px;margin-top:4px;">' + _eddieEsc(_eddieWhen(c.updated_at)) + '</div>' +
                     '</div>' +
                     '<button onclick="eddieDeleteConversation(\'' + _eddieEsc(c.id) + '\',event)" title="Delete" style="background:none;border:none;color:rgba(255,255,255,0.3);cursor:pointer;padding:6px;"><i class="fa-solid fa-trash-can" style="font-size:13px;"></i></button>' +
                 '</div>';
-            }).join('');
+            }).join('') + '</div>';
     }
     return html;
 }
@@ -55198,8 +55209,68 @@ async function eddieOpenConversation(id) {
     } catch (e) { showToast('Could not open that chat'); }
 }
 
+// The row for one conversation. Compared by attribute rather than looked up
+// with a selector, because a conversation id goes into the markup verbatim and
+// a selector built from one would need escaping to be safe.
+function _eddieConvoRow(id) {
+    var rows = document.querySelectorAll('[data-eddie-convo]');
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].getAttribute('data-eddie-convo') === String(id)) return rows[i];
+    }
+    return null;
+}
+
+// Collapse a row out of the list. Its height is measured first so the close
+// can animate from a real number to zero; transitioning from 'auto' does
+// nothing and the row would just blink out and yank the list up.
+function _eddieCollapseRow(row, done) {
+    if (!row) { if (done) done(); return; }
+    // offsetHeight counts the padding, so the height set from it only matches
+    // under border-box. feed.css sets that globally, but the animation should
+    // not quietly depend on a rule in another file: pin it and the collapse
+    // starts from exactly the height the row already had.
+    row.style.boxSizing = 'border-box';
+    row.style.height = row.offsetHeight + 'px';
+    row.style.overflow = 'hidden';
+    void row.offsetHeight;                      // flush, so there is a start value
+    row.style.transition = 'height .22s ease, opacity .18s ease, padding .22s ease';
+    row.style.height = '0px';
+    row.style.opacity = '0';
+    row.style.paddingTop = '0px';
+    row.style.paddingBottom = '0px';
+    setTimeout(function () { row.remove(); if (done) done(); }, 240);
+}
+
+// Once a row is gone: drop the "Conversations" heading if it has nothing left
+// under it, and fall back to the empty state if the whole page is now bare.
+function _eddieHistoryAfterDelete() {
+    var body = document.getElementById('eddieHistBody');
+    if (!body) return;
+    if (!body.querySelector('[data-eddie-convo]')) {
+        var section = document.getElementById('eddieConvoSection');
+        if (section) section.remove();
+    }
+    if (!body.querySelector('[data-eddie-convo]') && !body.querySelector('[data-eddie-image]')) {
+        body.innerHTML = _eddieHistoryEmptyHTML();
+    }
+}
+
 async function eddieDeleteConversation(id, ev) {
     if (ev) ev.stopPropagation();
+
+    // Deleting one chat used to call openEddieHistory(), which tore the page
+    // down and re-fetched everything -- skeleton rows, scroll position lost,
+    // for a row that is already known to be going. Take out the one row.
+    var row = _eddieConvoRow(id);
+    // Dim it immediately so the tap registers, but do not remove it until the
+    // server confirms: a row that vanishes and reappears is worse than one
+    // that takes a moment to go.
+    if (row) { row.style.opacity = '0.4'; row.style.pointerEvents = 'none'; }
+
+    function restore() {
+        if (row) { row.style.opacity = ''; row.style.pointerEvents = ''; }
+    }
+
     try {
         var token = await _eddieToken();
         var r = await fetch('/api/eddie/delete/', {
@@ -55207,11 +55278,11 @@ async function eddieDeleteConversation(id, ev) {
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
             body: JSON.stringify({ id: id })
         });
-        if (!r.ok) { showToast('Could not delete'); return; }
+        if (!r.ok) { restore(); showToast('Could not delete'); return; }
         if (_eddie.convoId === id) eddieNewChat();
-        openEddieHistory();
+        _eddieCollapseRow(row, _eddieHistoryAfterDelete);
         showToast('Chat deleted');
-    } catch (e) { showToast('Could not delete'); }
+    } catch (e) { restore(); showToast('Could not delete'); }
 }
 
 async function eddieRefreshUsage() {
