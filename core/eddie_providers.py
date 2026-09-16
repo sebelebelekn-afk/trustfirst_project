@@ -429,6 +429,12 @@ def _groq_client():
 _GROQ_SEARCH_HISTORY = 6
 _GROQ_SEARCH_TURN_CHARS = 700
 
+# Groq charges the tokens you *declare* against the per-minute budget, not the
+# ones the model produces, and a compound model's search spends that same
+# budget on the pages it reads. Declaring 2,000 for the answer leaves too
+# little for the searching. Enough for any reply a chat bubble should hold.
+_GROQ_SEARCH_MAX_TOKENS = 1500
+
 
 def _groq_messages(spec, system, searching=False):
     """Neutral spec -> OpenAI chat messages.
@@ -774,7 +780,8 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
         # Falling back means the promise in the system prompt is no longer
         # true, so it goes with the model. Telling it that it can search when
         # it cannot is the whole family of bugs this keeps producing.
-        this_system = system if searching else system + _SEARCH_LOST_NOTE
+        this_system = ((spec.get('search_system') or system) if searching
+                       else system + _SEARCH_LOST_NOTE)
         text_open = False
         sources, seen = [], set()
         try:
@@ -782,7 +789,9 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
                 client,
                 prefer=attempt,
                 messages=_groq_messages(spec, this_system, searching=searching),
-                max_tokens=min(max_tokens, _GROQ_MAX_TOKENS),
+                max_tokens=min(max_tokens,
+                               _GROQ_SEARCH_MAX_TOKENS if searching
+                               else _GROQ_MAX_TOKENS),
                 stream=True,
             )
             for chunk in stream:

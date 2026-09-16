@@ -15,6 +15,12 @@ from django.core.management.base import BaseCommand
 class Command(BaseCommand):
     help = "Show which Eddie backends are configured and whether web search works"
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--test', action='store_true',
+            help='Actually run a search through the model and print what '
+                 'comes back, or the exact error if it fails.')
+
     def handle(self, *args, **options):
         from django.conf import settings
         from core import eddie_providers, eddie_image, eddie_search
@@ -71,4 +77,43 @@ class Command(BaseCommand):
         line('Eddie AI mark',
              getattr(settings, 'EDDIE_IMAGE_WATERMARK', 'on')
              + ('' if provider != 'pollinations' else ' (not applied: backend brands its own)'))
+
+        if options.get('test'):
+            self._live_test(eddie_providers, eddie_search)
         self.stdout.write('')
+
+    def _live_test(self, eddie_providers, eddie_search):
+        """Make a real searching call. The point is the error when it fails.
+
+        Everything above reports what is configured. This reports what
+        actually happens, which is the only thing that settles an argument
+        about whether search works.
+        """
+        self.stdout.write(self.style.MIGRATE_HEADING('\nLive search test'))
+        client = eddie_providers._groq_client()
+        model = eddie_providers._groq_search_model(client) if client else None
+        if not model:
+            self.stdout.write(self.style.WARNING(
+                '  Skipped: no search-capable model available.'))
+            return
+
+        spec = {'history': [], 'attachments': [],
+                'prompt': 'In one sentence, what is the date today and one '
+                          'thing in the news right now?',
+                'wants_search': True,
+                'search_system': eddie_search.SEARCH_SYSTEM}
+        self.stdout.write('  model: %s' % model)
+        try:
+            text, sources = eddie_providers._groq_once(
+                spec, eddie_search.SEARCH_SYSTEM, 1500)
+        except Exception as exc:
+            self.stdout.write(self.style.ERROR('  FAILED: %s' % exc))
+            self.stdout.write(
+                '  ^ this is the exact upstream error. 413/"too large" means '
+                'the request plus the\n    declared max_tokens exceeded the '
+                'per-minute budget.')
+            return
+        self.stdout.write(self.style.SUCCESS('  OK'))
+        self.stdout.write('  answer : %s' % (text or '(empty)')[:300])
+        self.stdout.write('  sources: %s' % (
+            ', '.join(s['url'] for s in sources[:4]) or 'none reported'))

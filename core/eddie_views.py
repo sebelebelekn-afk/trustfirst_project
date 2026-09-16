@@ -613,6 +613,11 @@ def _factcheck_context(system, spec, asked, claim=None):
         # a live probe, so asking costs nothing on the hot path.
         if eddie_search.should_search(asked) and eddie_providers.can_search_live():
             spec['wants_search'] = True
+            # A searching turn gets its own, much shorter prompt. The full one
+            # is ~2,400 tokens of app features and coaching rules that cannot
+            # help answer a question about the world, and on Groq's free tier
+            # that budget is shared with the pages the search pulls in.
+            spec['search_system'] = eddie_search.SEARCH_SYSTEM
             return system + eddie_search.LIVE_NOTE, []
 
         # No live search on this deploy. Fall back to looking the claim up in

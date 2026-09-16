@@ -603,6 +603,33 @@ class SearchFallbackTests(SimpleTestCase):
         with self.assertRaises(Exception):
             self._run(client)
 
+    def test_a_search_turn_sends_the_short_prompt_not_the_whole_rulebook(self):
+        # Groq charges the declared tokens against a per-minute budget that
+        # the search shares with the pages it reads. Eddie's full prompt is
+        # ~2,400 tokens of app features and coaching rules that cannot help
+        # answer a question about the world, and sending it is most of what
+        # came back "Request Entity Too Large".
+        client = self._client()
+        queue = []
+        list(eddie_providers._groq_stream(
+            {'history': [], 'prompt': 'q', 'wants_search': True,
+             'search_system': eddie_search.SEARCH_SYSTEM},
+            'X' * 9000, queue, lambda k, d: queue.append('f'), 2000))
+        sent = client.sent[0]
+        system = sent['messages'][0]['content']
+        self.assertEqual(system, eddie_search.SEARCH_SYSTEM)
+        self.assertLess(len(system), 2500)
+        self.assertLessEqual(sent['max_tokens'],
+                             eddie_providers._GROQ_SEARCH_MAX_TOKENS)
+
+    def test_a_plain_turn_still_gets_the_full_prompt(self):
+        client = self._client()
+        queue = []
+        list(eddie_providers._groq_stream(
+            {'history': [], 'prompt': 'hi'}, 'FULL PROMPT',
+            queue, lambda k, d: queue.append('f'), 2000))
+        self.assertEqual(client.sent[0]['messages'][0]['content'], 'FULL PROMPT')
+
     def test_groq_wording_for_413_is_recognised(self):
         for text in ('Request Entity Too Large', 'Error code: 413',
                      'payload too large', 'request too large'):
