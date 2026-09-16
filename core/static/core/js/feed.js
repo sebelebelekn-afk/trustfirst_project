@@ -24056,13 +24056,7 @@ function openReportProblem() {
     document.getElementById('rp-screenshots').innerHTML = '';
     var sendBtn = document.getElementById('rp-send-btn');
     if (sendBtn) { sendBtn.style.opacity = '0.4'; sendBtn.style.pointerEvents = 'none'; }
-    // Shake toggle init
-    var shakeToggle = document.getElementById('rp-shake-toggle');
-    if (shakeToggle) {
-        var shakeEnabled = localStorage.getItem('tf-shake-report') !== '0';
-        if (!shakeEnabled) shakeToggle.classList.remove('active');
-        else shakeToggle.classList.add('active');
-    }
+    tfSyncShakeToggle();
     rpGoToScreen(1);
     el.style.display = 'flex';
     el.style.flexDirection = 'column';
@@ -24250,16 +24244,105 @@ async function submitReportProblem() {
         }
     });
     }
-    if (typeof DeviceMotionEvent.requestPermission === 'function') {
-        // iOS 13+ requires user gesture to get motion permission
-        document.addEventListener('click', function _askMotion() {
-            document.removeEventListener('click', _askMotion);
-            DeviceMotionEvent.requestPermission().then(function(s){ if(s==='granted') _attachShake(); }).catch(function(){});
+    // ----------------------------------------------------------------------
+    // Motion access on iOS.
+    //
+    // This used to fire DeviceMotionEvent.requestPermission() on the first tap
+    // of every single session, so iOS put "TrustFirst would like to access
+    // Motion and Orientation" in front of every user, every time they opened
+    // the app -- for shake-to-report, which is an escape hatch most people
+    // never use. On an app whose whole pitch is trust, asking for the
+    // accelerometer before anybody has done anything is exactly the wrong
+    // first impression, and the answer was never remembered either.
+    //
+    // Now it is opt-in and the answer sticks:
+    //   - said yes before  -> re-arm quietly on the next tap (iOS still wants
+    //                         the call to come from a gesture, but having
+    //                         already granted it, it resolves without a prompt)
+    //   - said no before   -> never ask again
+    //   - never asked      -> do not ask. The toggle in Report a Problem is
+    //                         where somebody who wants this turns it on, and
+    //                         tapping it is itself the gesture iOS requires.
+    // ----------------------------------------------------------------------
+    if (typeof DeviceMotionEvent.requestPermission !== 'function') {
+        _attachShake();                     // no permission model: just listen
+    } else if (_tfMotionAnswer() === 'granted' &&
+               localStorage.getItem('tf-shake-report') !== '0') {
+        document.addEventListener('click', function _rearmMotion() {
+            document.removeEventListener('click', _rearmMotion);
+            tfRequestMotionAccess();
         }, { once: true });
-    } else {
-        _attachShake();
     }
+
+    // Reachable from the settings toggle, which is a real user gesture.
+    window.tfRequestMotionAccess = function () {
+        if (typeof DeviceMotionEvent === 'undefined' ||
+            typeof DeviceMotionEvent.requestPermission !== 'function') {
+            _attachShake();
+            return Promise.resolve(true);
+        }
+        return DeviceMotionEvent.requestPermission().then(function (state) {
+            _tfSetMotionAnswer(state === 'granted' ? 'granted' : 'denied');
+            if (state === 'granted') { _attachShake(); return true; }
+            return false;
+        }).catch(function () { return false; });
+    };
 })();
+
+// Whether iOS has already been asked for motion access, and what it said.
+// Kept out of the IIFE above so the settings toggle can read it too.
+function _tfMotionAnswer() {
+    try { return localStorage.getItem('tf-motion-perm') || ''; } catch (e) { return ''; }
+}
+function _tfSetMotionAnswer(v) {
+    try { localStorage.setItem('tf-motion-perm', v); } catch (e) {}
+}
+
+// Show whether shake-to-report actually works, not just whether the preference
+// is set. On iOS the feature also needs motion access, and the two came apart:
+// the switch is markup that ships already on, so a new iPhone user saw it on
+// while motion had never been granted -- a switch sitting over a feature that
+// could not fire, and tapping it only turned the thing further off. Off here
+// means "tap me to turn this on", which is what asks.
+function tfSyncShakeToggle() {
+    var el = document.getElementById('rp-shake-toggle');
+    if (!el) return;
+    var enabled = true;
+    try { enabled = localStorage.getItem('tf-shake-report') !== '0'; } catch (e) {}
+    var needsMotion = typeof DeviceMotionEvent !== 'undefined' &&
+                      typeof DeviceMotionEvent.requestPermission === 'function';
+    el.classList.toggle('active',
+        enabled && (!needsMotion || _tfMotionAnswer() === 'granted'));
+}
+
+// The shake-to-report switch. Turning it on is the moment to ask iOS for
+// motion access: the person has just said they want the feature, which is both
+// the gesture iOS requires and the only good reason to show them that prompt.
+// If they refuse, the switch goes back off rather than sitting on over a
+// feature that cannot work.
+function tfToggleShakeReport(el) {
+    if (!el) return;
+    var turningOn = !el.classList.contains('active');
+    el.classList.toggle('active', turningOn);
+    try { localStorage.setItem('tf-shake-report', turningOn ? '1' : '0'); } catch (e) {}
+    if (!turningOn) return;
+
+    var needsAsk = typeof DeviceMotionEvent !== 'undefined' &&
+                   typeof DeviceMotionEvent.requestPermission === 'function' &&
+                   _tfMotionAnswer() !== 'granted';
+    if (!needsAsk) return;
+
+    tfRequestMotionAccess().then(function (ok) {
+        if (ok) return;
+        el.classList.remove('active');
+        try { localStorage.setItem('tf-shake-report', '0'); } catch (e) {}
+        if (typeof showToast === 'function') {
+            showToast(_tfMotionAnswer() === 'denied'
+                ? 'Motion access is off for TrustFirst. Turn it on in iPhone Settings > Safari to shake to report.'
+                : 'Could not turn on shake to report.');
+        }
+    });
+}
 
 // ============================================================
 // REPORTS & VIOLATIONS HISTORY

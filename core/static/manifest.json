@@ -3,6 +3,8 @@
   "short_name": "TrustFirst",
   "description": "The trust-first social platform",
   "start_url": "/",
+  "id": "/",
+  "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#000000",

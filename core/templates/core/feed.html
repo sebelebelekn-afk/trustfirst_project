@@ -4212,7 +4212,7 @@ function authenticateUser() {
       </div>
       <div style="margin-top:28px;display:flex;align-items:center;justify-content:space-between;width:100%;background:var(--card-bg,#fff);border-radius:14px;padding:14px 16px;border:0.5px solid var(--border-color,#eee);">
         <div><b style="font-size:14px;color:var(--text-primary,#000);">Shake phone to report a problem</b><p style="font-size:12px;color:#888;margin:2px 0 0;">Toggle off to disable</p></div>
-        <div class="toggle active" id="rp-shake-toggle" onclick="this.classList.toggle('active'); localStorage.setItem('tf-shake-report', this.classList.contains('active') ? '1' : '0');"></div>
+        <div class="toggle active" id="rp-shake-toggle" onclick="tfToggleShakeReport(this)"></div>
       </div>
     </div>
 
@@ -4435,7 +4435,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=287"></script>
+<script src="{% static 'core/js/feed.js' %}?v=288"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
