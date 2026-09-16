@@ -54918,15 +54918,42 @@ function _eddieStyles() {
     var s = document.createElement('style');
     s.id = 'eddieStyles';
     s.textContent =
-        '@keyframes eddieDot{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}' +
-        '.eddie-dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;animation:eddieDot 1.1s infinite;}' +
-        '.eddie-dot:nth-child(2){animation-delay:.15s}.eddie-dot:nth-child(3){animation-delay:.3s}' +
-        '@keyframes eddieShimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}' +
-        '.eddie-shimmer{background:linear-gradient(90deg,rgba(255,255,255,.35),rgba(255,255,255,.9),rgba(255,255,255,.35));' +
-        'background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:eddieShimmer 1.8s linear infinite;}' +
+        // The status line while Eddie works: a skeleton loader's sweep, run
+        // over the text itself rather than over a grey box. background-clip
+        // paints the gradient inside the glyphs, so the words stay readable
+        // the whole time instead of being replaced by a placeholder bar.
+        '@keyframes eddieShimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}' +
+        '.eddie-shimmer{background:linear-gradient(90deg,rgba(255,255,255,.26) 20%,rgba(255,255,255,.96) 45%,' +
+        'rgba(255,255,255,.96) 55%,rgba(255,255,255,.26) 80%);background-size:200% 100%;' +
+        '-webkit-background-clip:text;background-clip:text;color:transparent;' +
+        '-webkit-text-fill-color:transparent;animation:eddieShimmer 1.5s linear infinite;}' +
+        '@keyframes eddieGlow{0%,100%{opacity:.3}50%{opacity:.85}}' +
+        '.eddie-status{display:flex;align-items:center;gap:8px;margin:2px 0 7px;padding-left:3px;' +
+        'font-size:14px;font-weight:500;}' +
+        '.eddie-status i{font-size:13px;color:#fff;animation:eddieGlow 1.5s ease-in-out infinite;}' +
+        // Thinking is Eddie working, not Eddie talking, so it gets no bubble:
+        // a quiet rule down the left, the way a margin note reads.
+        '.eddie-think{margin:2px 0 9px;padding-left:3px;max-width:88%;}' +
+        '.eddie-think-btn{display:inline-flex;align-items:center;gap:6px;background:none;border:none;' +
+        'padding:2px 0;color:rgba(255,255,255,.45);font-size:12.5px;font-weight:600;cursor:pointer;}' +
+        '.eddie-think-btn:hover{color:rgba(255,255,255,.78);}' +
+        '.eddie-think-body{margin-top:7px;padding-left:12px;border-left:2px solid rgba(255,255,255,.15);' +
+        'color:rgba(255,255,255,.52);font-size:13px;line-height:1.6;white-space:pre-wrap;}' +
+        '@keyframes eddieRise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}' +
+        '.eddie-sources{animation:eddieRise .34s ease-out both;}' +
         '.eddie-act{background:none;border:none;color:rgba(255,255,255,.45);cursor:pointer;font-size:13px;padding:6px;border-radius:8px;}' +
         '.eddie-act:hover{color:#fff;background:rgba(255,255,255,.08);}' +
-        '.eddie-act.on{color:#0A84FF;}';
+        '.eddie-act.on{color:#0A84FF;}' +
+        // A sweeping highlight is exactly what motion sensitivity is about, so
+        // it stops. The words have to stay legible without it, which means
+        // putting the fill colour back: transparent text with no gradient
+        // behind it is invisible text.
+        '@media (prefers-reduced-motion:reduce){' +
+            '.eddie-shimmer{animation:none;background-image:none;color:rgba(255,255,255,.82);' +
+            '-webkit-text-fill-color:rgba(255,255,255,.82);}' +
+            '.eddie-status i{animation:none;opacity:.75;}' +
+            '.eddie-sources{animation:none;}' +
+        '}';
     document.head.appendChild(s);
 }
 
@@ -55242,35 +55269,48 @@ function _eddieTurnHTML(t, i) {
             '</div></div>';
     }
 
-    // Assistant bubble: white.
+    // Assistant turn. Only the answer itself gets a bubble.
+    //
+    // Everything that comes before it -- the thought summary, "Searching the
+    // web" -- used to be inside one, which read as Eddie saying those things.
+    // It isn't saying them, it is doing them, and a bubble is for speech. It
+    // also meant an empty bubble appeared the instant you hit send and sat
+    // there until the first token arrived.
     var thinking = '';
     if (t.thinking) {
         var open = t.showThinking ? '' : 'display:none;';
         thinking =
-            '<div style="margin-bottom:8px;">' +
-                '<button onclick="eddieToggleThoughts(' + i + ')" style="background:rgba(0,0,0,0.06);border:none;color:#555;font-size:12px;font-weight:600;padding:5px 11px;border-radius:20px;cursor:pointer;">' +
-                    '<i class="fa-solid fa-lightbulb" style="margin-right:5px;"></i>' + (t.showThinking ? 'Hide thoughts' : 'Show thoughts') +
+            '<div class="eddie-think">' +
+                '<button class="eddie-think-btn" onclick="eddieToggleThoughts(' + i + ')">' +
+                    '<i class="fa-solid fa-lightbulb"></i>' +
+                    '<span>' + (t.showThinking ? 'Hide thoughts' : 'Show thoughts') + '</span>' +
                 '</button>' +
-                '<div style="' + open + 'margin-top:8px;padding:10px 12px;background:rgba(0,0,0,0.045);border-radius:12px;color:#4a4a4a;font-size:13px;line-height:1.5;white-space:pre-wrap;">' +
+                '<div class="eddie-think-body" style="' + open + '">' +
                     _eddieEsc(t.thinking) +
                 '</div>' +
             '</div>';
     }
 
+    // The working line, shimmering while it is true and gone the moment it
+    // is not. Each state says what is actually happening: "Searching the web"
+    // on an image request was a small lie the old shared status told.
     var status = '';
-    if (t.status === 'thinking') {
-        status = '<div style="display:flex;align-items:center;gap:7px;color:#777;font-size:13px;">' +
-            '<span class="eddie-dot"></span><span class="eddie-dot"></span><span class="eddie-dot"></span>' +
-            '<span style="margin-left:4px;">Thinking</span></div>';
+    if (t.status === 'thinking' && !t.thinking) {
+        // Only until the thought summary itself starts arriving -- after that
+        // the streaming thoughts above are the better progress indicator.
+        status = '<div class="eddie-status"><i class="fa-regular fa-lightbulb"></i>' +
+            '<span class="eddie-shimmer">Thinking</span></div>';
     } else if (t.status === 'searching') {
-        status = '<div style="display:flex;align-items:center;gap:8px;color:#777;font-size:13px;">' +
-            '<i class="fa-solid fa-globe" style="animation:spin 2.4s linear infinite;"></i>' +
-            '<span>Searching the web…</span></div>';
+        status = '<div class="eddie-status"><i class="fa-solid fa-globe"></i>' +
+            '<span class="eddie-shimmer">Searching the web</span></div>';
+    } else if (t.status === 'imaging') {
+        status = '<div class="eddie-status"><i class="fa-solid fa-wand-magic-sparkles"></i>' +
+            '<span class="eddie-shimmer">Creating the image</span></div>';
     }
 
     var sources = '';
     if (t.sources && t.sources.length) {
-        sources = '<div style="margin-top:10px;padding-top:9px;border-top:1px solid rgba(0,0,0,0.08);">' +
+        sources = '<div class="eddie-sources" style="margin-top:10px;padding-top:9px;border-top:1px solid rgba(0,0,0,0.08);">' +
             '<div style="color:#888;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Sources</div>' +
             '<div style="display:flex;flex-wrap:wrap;gap:6px;">' +
             t.sources.map(function (s, n) {
@@ -55299,12 +55339,20 @@ function _eddieTurnHTML(t, i) {
 
     var body = t.image
         ? '<img src="' + _eddieEsc(t.image) + '" style="width:100%;border-radius:12px;display:block;">'
-        : (_eddieFormat(t.content) || status);
+        : _eddieFormat(t.content);
+
+    // No answer yet means no bubble at all, rather than an empty one holding
+    // a status line. The shimmer sits on the black background on its own,
+    // and the bubble arrives with the first words that go in it.
+    var bubble = '';
+    if (body || sources) {
+        bubble = '<div style="max-width:88%;background:#fff;color:#111;border-radius:18px 18px 18px 5px;padding:11px 14px;font-size:15px;line-height:1.5;box-shadow:0 2px 10px rgba(0,0,0,0.25);">' +
+            body + sources +
+        '</div>';
+    }
 
     return '<div style="display:flex;flex-direction:column;align-items:flex-start;margin:10px 0;">' +
-        '<div style="max-width:88%;background:#fff;color:#111;border-radius:18px 18px 18px 5px;padding:11px 14px;font-size:15px;line-height:1.5;box-shadow:0 2px 10px rgba(0,0,0,0.25);">' +
-            thinking + body + (t.content && status ? '<div style="margin-top:6px;">' + status + '</div>' : '') + sources +
-        '</div>' + actions +
+        thinking + status + bubble + actions +
     '</div>';
 }
 
@@ -55683,7 +55731,9 @@ function _eddieEvent(turn, ev) {
 }
 
 async function _eddieMakeImage(prompt, turn) {
-    turn.status = 'searching';
+    // Its own status. Sharing 'searching' meant asking for a picture put
+    // "Searching the web" on screen, which is not what is happening.
+    turn.status = 'imaging';
     turn.thinking = '';
     _eddieRender();
     try {
