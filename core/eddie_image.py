@@ -66,29 +66,75 @@ def _provider():
 
 # ---- Pollinations ---------------------------------------------------------
 
+# Pollinations rations anonymous traffic per IP, and every request from this
+# app leaves on the same one. A busy minute therefore looks exactly like a
+# broken backend unless you retry, so a refusal that might clear gets one
+# second attempt before anybody is told it failed.
+_POLL_TIMEOUT = 40
+_POLL_RETRY_AFTER = 3
+
+
 def _pollinations_generate(prompt, size):
     """Generate with no API key at all. Returns (bytes, error).
 
     The prompt goes in the URL path, so it is percent-encoded and length-capped
     rather than trusted. Nothing user-identifying is sent: no key, no user id.
+    The referrer names the app, which is how Pollinations asks callers to
+    identify themselves and is what separates us from anonymous traffic.
     """
+    import logging
+    import time as _time
+    log = logging.getLogger(__name__)
+
     try:
         width, height = (int(x) for x in size.split('x', 1))
     except Exception:
         width = height = 1024
     path = urllib.parse.quote(prompt[:600], safe='')
+    referrer = (getattr(settings, 'APP_PUBLIC_URL', '')
+                or 'https://gettrustfirst.co.za')
     url = ('https://image.pollinations.ai/prompt/' + path
-           + '?width=%d&height=%d&nologo=true' % (width, height))
-    try:
-        r = requests.get(url, timeout=90)
-    except Exception:
-        return None, 'The image service did not respond in time'
-    if r.status_code != 200:
+           + '?width=%d&height=%d&nologo=true&referrer=%s'
+           % (width, height, urllib.parse.quote(referrer, safe='')))
+
+    last = None
+    for attempt in (1, 2):
+        try:
+            r = requests.get(url, timeout=_POLL_TIMEOUT,
+                             headers={'Referer': referrer})
+        except Exception as exc:
+            last = 'The image service did not respond in time'
+            log.warning('Image: pollinations attempt %d did not respond (%s)',
+                        attempt, str(exc)[:160])
+            if attempt == 1:
+                _time.sleep(_POLL_RETRY_AFTER)
+                continue
+            return None, last
+
+        if r.status_code == 200:
+            # An error page rendered as HTML would sail through a status check.
+            if (r.content or b'')[:2] in (b'\xff\xd8', b'\x89P', b'RI'):
+                return r.content, None
+            log.warning('Image: pollinations returned %s, %d bytes, not an image: %s',
+                        r.headers.get('content-type', '?'), len(r.content or b''),
+                        (r.content or b'')[:200])
+            return None, 'The image service returned something that is not an image'
+
+        # Whatever went wrong, write it down. Without this the only evidence
+        # was "could not make that one", which says nothing anybody can act on.
+        log.warning('Image: pollinations attempt %d refused with HTTP %s: %s',
+                    attempt, r.status_code, (r.text or '')[:200].replace('\n', ' '))
+
+        if r.status_code in (429, 500, 502, 503, 504) and attempt == 1:
+            _time.sleep(_POLL_RETRY_AFTER)
+            continue
+
+        if r.status_code == 429:
+            return None, ('The image service is busy right now. '
+                          'Give it a minute and try again.')
         return None, 'The image service could not make that one'
-    if not (r.content or b'')[:2] in (b'\xff\xd8', b'\x89P', b'RI'):
-        # An error page rendered as HTML would sail through a status check.
-        return None, 'The image service returned something that is not an image'
-    return r.content, None
+
+    return None, last or 'The image service could not make that one'
 
 
 def _not_configured_message():

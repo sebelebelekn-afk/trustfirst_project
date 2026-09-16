@@ -55024,6 +55024,21 @@ function _eddieStyles() {
         'color:rgba(255,255,255,.52);font-size:13px;line-height:1.6;white-space:pre-wrap;}' +
         '@keyframes eddieRise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}' +
         '.eddie-sources{animation:eddieRise .34s ease-out both;}' +
+        // A failure is the app reporting, not Eddie speaking. It gets no
+        // bubble, no avatar side, and none of the copy/share/read-aloud/rate
+        // actions -- there is nothing there worth copying or rating, and
+        // offering to read "the image service could not make that one" aloud
+        // in Eddie's voice is how a broken backend ends up sounding like the
+        // assistant let you down.
+        '.eddie-notice{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:4px 0 2px;' +
+        'padding:9px 12px;border-radius:12px;background:rgba(255,69,58,.09);' +
+        'border:1px solid rgba(255,69,58,.22);color:rgba(255,255,255,.72);' +
+        'font-size:13.5px;line-height:1.45;max-width:88%;}' +
+        '.eddie-notice i{color:#FF453A;font-size:13px;flex-shrink:0;}' +
+        '.eddie-notice-retry{background:rgba(255,255,255,.1);border:none;color:#fff;' +
+        'font-size:12.5px;font-weight:600;padding:5px 12px;border-radius:20px;cursor:pointer;' +
+        'margin-left:auto;}' +
+        '.eddie-notice-retry:hover{background:rgba(255,255,255,.18);}' +
         '.eddie-act{background:none;border:none;color:rgba(255,255,255,.45);cursor:pointer;font-size:13px;padding:6px;border-radius:8px;}' +
         '.eddie-act:hover{color:#fff;background:rgba(255,255,255,.08);}' +
         '.eddie-act.on{color:#0A84FF;}' +
@@ -55477,6 +55492,16 @@ function _eddieTurnHTML(t, i) {
             }).join('') + '</div></div>';
     }
 
+    // Something went wrong: say so as the app, not as Eddie.
+    var notice = '';
+    if (t.error) {
+        notice = '<div class="eddie-notice">' +
+            '<i class="fa-solid fa-circle-exclamation"></i>' +
+            '<span>' + _eddieEsc(t.error) + '</span>' +
+            '<button class="eddie-notice-retry" onclick="eddieRetry(' + i + ')">Try again</button>' +
+        '</div>';
+    }
+
     var actions = '';
     if (t.status === 'done' && t.content) {
         actions = '<div style="display:flex;gap:2px;margin-top:6px;margin-left:4px;">' +
@@ -55506,7 +55531,7 @@ function _eddieTurnHTML(t, i) {
     }
 
     return '<div style="display:flex;flex-direction:column;align-items:flex-start;margin:10px 0;">' +
-        thinking + status + bubble + actions +
+        thinking + status + bubble + notice + actions +
     '</div>';
 }
 
@@ -55838,7 +55863,7 @@ async function _eddieAsk(text, attachments) {
                 return;
             }
             turn.status = 'done';
-            turn.content = err.error || 'Eddie could not answer that.';
+            turn.error = err.error || 'Eddie could not answer that.';
             _eddie.busy = false; _eddieRender(); eddieRefreshUsage();
             return;
         }
@@ -55863,7 +55888,7 @@ async function _eddieAsk(text, attachments) {
         }
     } catch (e) {
         if (!(e && e.name === 'AbortError')) {
-            turn.content = turn.content || 'Connection interrupted.';
+            turn.error = 'Connection interrupted.';
         }
     }
     turn.status = 'done';
@@ -55881,7 +55906,7 @@ function _eddieEvent(turn, ev) {
     else if (ev.type === 'searching') { turn.status = 'searching'; }
     else if (ev.type === 'text') { turn.content += ev.text || ''; turn.status = 'writing'; }
     else if (ev.type === 'sources') { turn.sources = ev.sources || []; }
-    else if (ev.type === 'error') { turn.content += (turn.content ? '\n\n' : '') + (ev.message || 'Something went wrong.'); }
+    else if (ev.type === 'error') { turn.error = ev.message || 'Something went wrong.'; }
 }
 
 async function _eddieMakeImage(prompt, turn) {
@@ -55903,7 +55928,7 @@ async function _eddieMakeImage(prompt, turn) {
         });
         var j = await r.json();
         if (!r.ok) {
-            turn.content = j.error || 'Could not make that image.';
+            turn.error = j.error || 'Could not make that image.';
         } else if (j.url) {
             turn.image = j.url;
             turn.content = '';
@@ -55911,12 +55936,12 @@ async function _eddieMakeImage(prompt, turn) {
             turn.image = 'data:image/png;base64,' + j.image_b64;
             turn.content = '';
         } else {
-            turn.content = 'Could not make that image.';
+            turn.error = 'Could not make that image.';
         }
     } catch (e) {
         // A stop is not a failure; eddieStop has already written the turn.
         if (e && e.name === 'AbortError') return;
-        turn.content = 'Could not reach the image service.';
+        turn.error = 'Could not reach the image service.';
     }
     turn.status = 'done';
     _eddie.busy = false;
