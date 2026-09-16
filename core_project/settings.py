@@ -474,6 +474,24 @@ CLOUDFLARE_API_TOKEN  = os.environ.get('CLOUDFLARE_API_TOKEN', '')
 EDDIE_CF_IMAGE_MODEL  = os.environ.get(
     'EDDIE_CF_IMAGE_MODEL', '@cf/black-forest-labs/flux-1-schnell')
 
+# Pollinations is the keyless fallback, and its anonymous tier is the reason
+# Eddie's pictures look worse than everyone else's: it forces every request
+# onto the small 'sana' model at medium quality, caps the size at 768px, and
+# stamps its own watermark on however many times you send nologo=true. A token
+# (free, from auth.pollinations.ai) moves off that tier. Better still, set
+# CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN above: Workers AI runs FLUX on
+# its free allowance and puts no watermark on anything.
+POLLINATIONS_TOKEN = os.environ.get('POLLINATIONS_TOKEN', '')
+
+# Rewrite a typed request into a described scene before generating. This is
+# most of the difference between "can you generate an image of a banana" and
+# the prompt an image model actually wants. Costs one fast-model call.
+EDDIE_IMAGE_REWRITE = os.environ.get('EDDIE_IMAGE_REWRITE', 'on')
+
+# Sign Eddie's pictures. Only applies to backends that do not brand their own
+# output, so it never paints over somebody else's attribution.
+EDDIE_IMAGE_WATERMARK = os.environ.get('EDDIE_IMAGE_WATERMARK', 'on')
+
 OPENAI_API_KEY     = os.environ.get('OPENAI_API_KEY', '')
 EDDIE_IMAGE_MODEL  = os.environ.get('EDDIE_IMAGE_MODEL', 'gpt-image-1')
 

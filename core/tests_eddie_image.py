@@ -141,3 +141,176 @@ class PollinationsTests(SimpleTestCase):
         raw, err = eddie_image._pollinations_generate('a banana', 'not-a-size')
         self.assertIsNone(err)
         self.assertIn('width=1024', self.calls[0]['url'])
+
+
+class PromptTests(SimpleTestCase):
+    """What somebody types is a request; the model needs a described scene."""
+
+    def test_the_asking_part_is_dropped(self):
+        cases = {
+            'Can you generate an image of a banana': 'a banana',
+            'eddie please draw me a picture of a red bicycle at night':
+                'a red bicycle at night',
+            'generate: a cat wearing sunglasses': 'a cat wearing sunglasses',
+            # The article belongs to the subject when no "picture of" follows.
+            'draw me a banana': 'a banana',
+            'paint a sunset over the ocean': 'a sunset over the ocean',
+        }
+        for asked, want in cases.items():
+            self.assertEqual(eddie_image._strip_framing(asked), want, asked)
+
+    def test_words_that_describe_the_picture_are_kept(self):
+        # "drawing" here is what is in the picture, not a request to draw.
+        for text in ('a painting of a man drawing a bicycle',
+                     'sunset over Cape Town',
+                     'generated images are cool'):
+            self.assertEqual(eddie_image._strip_framing(text), text)
+
+    def test_stripping_never_empties_the_prompt(self):
+        # If the request WAS the subject, keep it rather than sending nothing.
+        self.assertTrue(eddie_image._strip_framing('draw me a picture'))
+        self.assertTrue(eddie_image._strip_framing('make an image'))
+
+    @override_settings(GROQ_API_KEY='', GEMINI_API_KEY='', ANTHROPIC_API_KEY='')
+    def test_with_no_model_the_rewrite_falls_back_rather_than_failing(self):
+        self.assertEqual(
+            eddie_image._rewrite_prompt('Can you generate an image of a banana'),
+            'a banana')
+
+    @override_settings(EDDIE_IMAGE_REWRITE='off')
+    def test_the_rewrite_can_be_switched_off(self):
+        self.assertEqual(
+            eddie_image._rewrite_prompt('Can you generate an image of a banana'),
+            'a banana')
+
+    def test_a_model_that_ignores_the_instruction_is_not_used(self):
+        # A conversational reply or an empty one is worse than what they typed.
+        import core.eddie_providers as providers
+        real = providers.once
+        self.addCleanup(setattr, providers, 'once', real)
+        for reply in ("Sure! Here's a prompt for you:", 'ok', '', 'x' * 2000,
+                      'I cannot create that image.',
+                      'Here is your prompt:', 'As an AI, I can help with that'):
+            providers.once = lambda *a, **k: (reply, [])
+            with override_settings(GROQ_API_KEY='k'):
+                self.assertEqual(
+                    eddie_image._rewrite_prompt('draw me a banana'), 'a banana',
+                    reply[:30])
+
+
+class ShapeTests(SimpleTestCase):
+    """A cityscape in a square crops off the city."""
+
+    def test_scenes_are_landscape(self):
+        self.assertEqual(
+            eddie_image._dimensions('a man looking over a futuristic city at sunset'),
+            (1344, 768))
+
+    def test_portraits_and_wallpapers_are_tall(self):
+        for text in ('a full-body portrait of a woman',
+                     'a phone wallpaper of mountains',
+                     'a vertical poster'):
+            w, h = eddie_image._dimensions(text)
+            self.assertGreater(h, w, text)
+
+    def test_avatars_and_logos_are_square(self):
+        for text in ('a profile picture of a lion', 'a logo for a coffee shop',
+                     'an app icon', 'a sticker of a frog'):
+            self.assertEqual(eddie_image._dimensions(text), (1024, 1024), text)
+
+    def test_openai_only_ever_gets_a_size_it_accepts(self):
+        allowed = {'1024x1024', '1024x1536', '1536x1024'}
+        for text in ('a city at sunset', 'a portrait of a man', 'an app icon'):
+            w, h = eddie_image._dimensions(text)
+            self.assertIn(eddie_image._openai_size(w, h), allowed, text)
+
+
+class SeedAndTokenTests(SimpleTestCase):
+
+    def setUp(self):
+        self.urls, self.headers = [], []
+        real = eddie_image.requests.get
+        self.addCleanup(setattr, eddie_image.requests, 'get', real)
+
+        def fake_get(url, **kwargs):
+            self.urls.append(url)
+            self.headers.append(kwargs.get('headers') or {})
+            return _Resp(200, JPEG)
+
+        eddie_image.requests.get = fake_get
+
+    def test_every_request_gets_its_own_seed(self):
+        # Pollinations defaults to seed 42, so without this the same words
+        # always came back as the same picture and Try again was a no-op.
+        for _ in range(6):
+            eddie_image._pollinations_generate('a banana', '1024x1024')
+        seeds = {u.split('seed=')[1].split('&')[0] for u in self.urls}
+        self.assertGreater(len(seeds), 1)
+
+    @override_settings(POLLINATIONS_TOKEN='')
+    def test_without_a_token_no_authorization_is_sent(self):
+        eddie_image._pollinations_generate('a banana', '1024x1024')
+        self.assertNotIn('Authorization', self.headers[0])
+
+    @override_settings(POLLINATIONS_TOKEN='tok_abc')
+    def test_a_token_is_sent_when_there_is_one(self):
+        # The anonymous tier forces every request onto a small model and
+        # stamps its own watermark on whatever nologo says.
+        eddie_image._pollinations_generate('a banana', '1024x1024')
+        self.assertEqual(self.headers[0]['Authorization'], 'Bearer tok_abc')
+
+
+class WatermarkTests(SimpleTestCase):
+
+    def _png(self, colour, size=(400, 300)):
+        import io
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.new('RGB', size, colour).save(buf, 'PNG')
+        return buf.getvalue()
+
+    def test_a_backend_that_brands_its_own_output_is_left_alone(self):
+        # Painting over pollinations.ai would be taking their attribution off
+        # their free service and putting ours on their work.
+        raw = self._png((30, 30, 30))
+        self.assertIs(eddie_image._watermark(raw, 'pollinations'), raw)
+
+    def test_eddies_own_output_is_signed(self):
+        raw = self._png((30, 30, 30))
+        for provider in ('cloudflare', 'openai'):
+            self.assertNotEqual(eddie_image._watermark(raw, provider), raw, provider)
+
+    def test_the_mark_reads_against_both_light_and_dark(self):
+        from PIL import Image
+        import io
+        for colour in ((240, 238, 230), (12, 12, 16)):
+            out = eddie_image._watermark(self._png(colour), 'cloudflare')
+            im = Image.open(io.BytesIO(out)).convert('L')
+            w, h = im.size
+            corner = list(im.crop((w - 160, h - 50, w, h)).getdata())
+            # Whatever the background, the text has to differ from it.
+            self.assertGreater(max(corner) - min(corner), 60, colour)
+
+    @override_settings(EDDIE_IMAGE_WATERMARK='off')
+    def test_it_can_be_switched_off(self):
+        raw = self._png((30, 30, 30))
+        self.assertIs(eddie_image._watermark(raw, 'cloudflare'), raw)
+
+    def test_bytes_that_are_not_an_image_survive_untouched(self):
+        self.assertEqual(eddie_image._watermark(b'not an image', 'cloudflare'),
+                         b'not an image')
+        self.assertEqual(eddie_image._watermark(b'', 'cloudflare'), b'')
+
+
+    def test_a_preamble_above_the_real_prompt_keeps_the_prompt(self):
+        import core.eddie_providers as providers
+        real = providers.once
+        self.addCleanup(setattr, providers, 'once', real)
+        providers.once = lambda *a, **k: (
+            "Here is your prompt:\nA ripe yellow banana on a white studio "
+            "backdrop, soft diffused light, shallow depth of field, "
+            "photorealistic close-up", [])
+        with override_settings(GROQ_API_KEY='k'):
+            out = eddie_image._rewrite_prompt('draw me a banana')
+        self.assertTrue(out.startswith('A ripe yellow banana'), out)
+        self.assertNotIn('Here is your prompt', out)
