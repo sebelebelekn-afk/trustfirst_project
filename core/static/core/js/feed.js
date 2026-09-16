@@ -24858,7 +24858,9 @@ function _loginIdentifierNext(inputId) {
 
     if (inputId !== 'login-username-in') { go(v); return; }
 
-    // Signup stores usernames lowercased, so match on the same shape.
+    // Strip the @ people type because that is how the app shows usernames.
+    // Lowercasing is only for what gets carried to the password step; the
+    // existence check below must not assume it, see there.
     var clean = v.replace(/^@+/, '').toLowerCase();
     if (!clean) return;
 
@@ -24897,7 +24899,19 @@ function _loginIdentifierNext(inputId) {
     });
 
     setTimeout(proceed, 2500);
-    sb.from('users').select('username').eq('username', clean).maybeSingle().then(function (r) {
+    // Case-insensitively, via tf_username_taken.
+    //
+    // This was .eq('username', clean) against a lowercased name, on the
+    // assumption that signup stores usernames lowercased. Signup does, now --
+    // but accounts made before that rule still carry capitals, and Postgres
+    // equality is case-sensitive, so every one of those users was told "No
+    // account found with that username" and shaken off this screen before it
+    // ever asked for a password. Their password was never wrong; they were
+    // never allowed to type it.
+    //
+    // The function returns a boolean and nothing else, which is strictly less
+    // than the table read it replaces.
+    sb.rpc('tf_username_taken', { uname: clean }).then(function (r) {
         if (r.error || r.data) proceed(); else reject();
     }, proceed);
 }
