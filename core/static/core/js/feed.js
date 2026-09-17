@@ -55059,6 +55059,13 @@ function _eddieStyles() {
         '.eddie-answer{color:rgba(255,255,255,.93);font-size:15.5px;line-height:1.62;' +
         'max-width:100%;padding-left:3px;word-wrap:break-word;overflow-wrap:anywhere;}' +
         '.eddie-answer a{color:#5AA9FF;text-decoration:underline;text-underline-offset:2px;}' +
+        // An inline citation: the site, small and quiet, sitting in the
+        // sentence rather than eighty characters of URL.
+        '.eddie-answer a.eddie-cite{display:inline-flex;align-items:center;' +
+        'vertical-align:baseline;margin:0 2px;padding:1px 7px;border-radius:20px;' +
+        'background:rgba(90,169,255,.14);color:#7FBCFF;text-decoration:none;' +
+        'font-size:11.5px;font-weight:600;white-space:nowrap;}' +
+        '.eddie-answer a.eddie-cite:hover{background:rgba(90,169,255,.24);}' +
         '.eddie-answer b{color:#fff;font-weight:700;}' +
         '.eddie-code{background:rgba(255,255,255,.13);color:#fff;padding:1px 5px;' +
         'border-radius:5px;font-size:0.9em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}' +
@@ -55175,11 +55182,32 @@ function _eddieCodeBlock(tag, code, open) {
     '</div>';
 }
 
+// The searching model cites by dropping the whole URL inline, wrapped in
+// lenticular brackets: 【https://www.reuters.com/world/europe/russia-strikes-
+// ukraines-kyiv-injures-three-odesa-officials-say-2026-09-17/】. Left alone
+// that is eighty unreadable characters in the middle of a sentence. It becomes
+// the site's name, linked, which is what a citation is for.
+function _eddieCitations(escaped) {
+    return escaped.replace(/【([^】]*)】/g, function (whole, inner) {
+        var urls = inner.match(/https?:\/\/[^\s,;】]+/g) || [];
+        if (!urls.length) return '';        // an empty bracket cites nothing
+        return urls.map(function (url) {
+            var host = url;
+            try {
+                host = new URL(url.replace(/&amp;/g, '&')).hostname.replace(/^www\./, '');
+            } catch (e) {}
+            return '<a class="eddie-cite" href="' + url + '" target="_blank" ' +
+                'rel="noopener noreferrer">' + _eddieEsc(host) + '</a>';
+        }).join('');
+    });
+}
+
 // The small, deliberate subset of markdown outside a code fence.
 function _eddieInline(text) {
     var h = _eddieEsc(text);
     h = h.replace(/`([^`\n]+)`/g, '<code class="eddie-code">$1</code>');
     h = h.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+    h = _eddieCitations(h);
     return h.replace(/\n/g, '<br>');
 }
 
