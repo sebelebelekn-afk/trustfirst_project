@@ -55085,6 +55085,18 @@ function _eddieStyles() {
         '.eddie-codecopy:hover{color:#fff;background:rgba(255,255,255,.1);}' +
         '.eddie-codeblock pre{margin:0;padding:12px 13px;overflow-x:auto;' +
         '-webkit-overflow-scrolling:touch;}' +
+        // Token colours. Tuned for this black surface: bright enough to
+        // separate at 13px, close enough in weight that no one colour jumps
+        // out of the block.
+        '.eddie-codeblock .tok-com{color:#8b949e;font-style:italic;}' +
+        '.eddie-codeblock .tok-str{color:#a5d6ff;}' +
+        '.eddie-codeblock .tok-num{color:#79c0ff;}' +
+        '.eddie-codeblock .tok-lit{color:#79c0ff;}' +
+        '.eddie-codeblock .tok-key{color:#ff7b72;}' +
+        '.eddie-codeblock .tok-fn{color:#d2a8ff;}' +
+        '.eddie-codeblock .tok-prop{color:#7ee787;}' +
+        '.eddie-codeblock .tok-tag{color:#7ee787;}' +
+        '.eddie-codeblock .tok-pun{color:rgba(255,255,255,.5);}' +
         '.eddie-codeblock code{display:block;background:none;padding:0;border-radius:0;' +
         'font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;' +
         'line-height:1.55;color:rgba(255,255,255,.92);white-space:pre;overflow-wrap:normal;}' +
@@ -55163,6 +55175,123 @@ function _eddieLangName(tag) {
     return key.charAt(0).toUpperCase() + key.slice(1);
 }
 
+// ---- syntax colouring -----------------------------------------------------
+//
+// Small, deliberately shallow, and per language. Not a parser: a list of
+// patterns tried in order, first match wins, everything else left alone. That
+// is enough to make code scannable and cheap enough to run on every render --
+// which matters, because a streaming answer re-renders on every chunk.
+//
+// Tokenising happens on the RAW text and each token is escaped as it is
+// emitted, so nothing a model writes inside a block can become markup. The
+// order of the rules is the whole design: comments before strings, strings
+// before everything, punctuation last.
+var _EDDIE_HL_RULES = {
+    json: { flags: 'g', rules: [
+        ['prop', '"(?:[^"\\\\]|\\\\.)*"(?=\\s*:)'],
+        ['str',  '"(?:[^"\\\\]|\\\\.)*"'],
+        ['lit',  '\\b(?:true|false|null)\\b'],
+        ['num',  '-?\\b\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b'],
+        ['pun',  '[{}\\[\\],:]']
+    ]},
+    js: { flags: 'g', rules: [
+        ['com', '//[^\\n]*|/\\*[\\s\\S]*?\\*/'],
+        ['str', '`(?:[^`\\\\]|\\\\.)*`|"(?:[^"\\\\\\n]|\\\\.)*"|\'(?:[^\'\\\\\\n]|\\\\.)*\''],
+        ['key', '\\b(?:const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|class|extends|super|this|typeof|instanceof|try|catch|finally|throw|async|await|import|export|from|default|delete|void|in|of|yield|static|interface|type|enum|implements)\\b'],
+        ['lit', '\\b(?:true|false|null|undefined|NaN|Infinity)\\b'],
+        ['num', '\\b(?:0[xXbBoO][0-9a-fA-F]+|\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)\\b'],
+        ['fn',  '\\b[A-Za-z_$][\\w$]*(?=\\s*\\()'],
+        ['pun', '[{}()\\[\\];,.]']
+    ]},
+    css: { flags: 'g', rules: [
+        ['com',  '/\\*[\\s\\S]*?\\*/'],
+        ['str',  '"(?:[^"\\\\\\n]|\\\\.)*"|\'(?:[^\'\\\\\\n]|\\\\.)*\''],
+        ['key',  '@[\\w-]+'],
+        ['prop', '[-a-zA-Z]+(?=\\s*:)'],
+        ['fn',   '\\b[a-zA-Z-]+(?=\\()'],
+        ['num',  '#[0-9a-fA-F]{3,8}\\b|[-+]?\\b\\d*\\.?\\d+(?:px|em|rem|%|vh|vw|dvh|dvw|s|ms|deg|fr|ch|pt|vmin|vmax)?\\b'],
+        ['pun',  '[{}();,:]']
+    ]},
+    html: { flags: 'g', rules: [
+        ['com',  '<!--[\\s\\S]*?-->'],
+        ['tag',  '</?[A-Za-z][\\w:-]*|/?>'],
+        ['str',  '"[^"]*"|\'[^\']*\''],
+        ['prop', '\\b[A-Za-z_:][\\w:.-]*(?=\\s*=)'],
+        ['pun',  '=']
+    ]},
+    python: { flags: 'g', rules: [
+        ['com', '#[^\\n]*'],
+        ['str', '"""[\\s\\S]*?"""|\'\'\'[\\s\\S]*?\'\'\'|"(?:[^"\\\\\\n]|\\\\.)*"|\'(?:[^\'\\\\\\n]|\\\\.)*\''],
+        ['key', '\\b(?:def|class|return|if|elif|else|for|while|import|from|as|try|except|finally|raise|with|lambda|yield|global|nonlocal|pass|break|continue|and|or|not|in|is|assert|async|await|del)\\b'],
+        ['lit', '\\b(?:True|False|None|self|cls)\\b'],
+        ['num', '\\b\\d+(?:\\.\\d+)?\\b'],
+        ['fn',  '\\b[A-Za-z_]\\w*(?=\\s*\\()'],
+        ['pun', '[{}()\\[\\]:,.]']
+    ]},
+    shell: { flags: 'g', rules: [
+        ['com', '#[^\\n]*'],
+        ['str', '"(?:[^"\\\\]|\\\\.)*"|\'[^\']*\''],
+        ['key', '\\b(?:if|then|else|elif|fi|for|in|do|done|while|case|esac|function|export|return|local|source|echo|cd|sudo|git|npm|npx|pip3?|python3?|node|curl|docker|make)\\b'],
+        ['fn',  '(?:^|\\s)--?[\\w-]+'],
+        ['num', '\\b\\d+\\b'],
+        ['pun', '[|&;<>$]']
+    ]},
+    sql: { flags: 'gi', rules: [
+        ['com', '--[^\\n]*|/\\*[\\s\\S]*?\\*/'],
+        ['str', '\'(?:[^\']|\'\')*\''],
+        ['key', '\\b(?:select|from|where|insert|into|values|update|set|delete|create|replace|table|view|alter|drop|join|left|right|inner|outer|full|on|group|by|order|having|limit|offset|as|and|or|not|null|is|distinct|union|all|case|when|then|else|end|returning|with|index|unique|primary|key|foreign|references|default|exists|between|like|ilike|asc|desc|function|trigger|grant|revoke)\\b'],
+        ['lit', '\\b(?:true|false)\\b'],
+        ['num', '\\b\\d+(?:\\.\\d+)?\\b'],
+        ['pun', '[(),;.*]']
+    ]}
+};
+
+// From the label shown on the block to the rules used inside it, so the
+// aliases are normalised in exactly one place.
+var _EDDIE_HL_FOR = {
+    'JSON': 'json', 'JavaScript': 'js', 'TypeScript': 'js',
+    'CSS': 'css', 'SCSS': 'css', 'Sass': 'css', 'Less': 'css',
+    'HTML': 'html', 'XML': 'html', 'SVG': 'html',
+    'Python': 'python', 'Shell': 'shell', 'SQL': 'sql'
+};
+
+var _eddieHlCache = {};
+
+function _eddieHlRegex(key) {
+    if (_eddieHlCache[key]) return _eddieHlCache[key];
+    var lang = _EDDIE_HL_RULES[key];
+    // Every sub-pattern is written with non-capturing groups only, so group N
+    // of the combined regex is rule N and nothing shifts.
+    var src = lang.rules.map(function (r) { return '(' + r[1] + ')'; }).join('|');
+    _eddieHlCache[key] = new RegExp(src, lang.flags);
+    return _eddieHlCache[key];
+}
+
+// Escaped, coloured HTML for one block's contents.
+function _eddieHighlight(code, langName) {
+    var key = _EDDIE_HL_FOR[langName];
+    // Anything with no rules, and anything long enough that colouring it on
+    // every streamed chunk would be felt, is shown plain.
+    if (!key || !code || code.length > 20000) return _eddieEsc(code);
+
+    var lang = _EDDIE_HL_RULES[key];
+    var re = _eddieHlRegex(key);
+    var out = '', last = 0, m;
+    re.lastIndex = 0;
+    while ((m = re.exec(code)) !== null) {
+        if (!m[0]) { re.lastIndex++; continue; }     // never loop on a zero-width match
+        if (m.index > last) out += _eddieEsc(code.slice(last, m.index));
+        var cls = 'pun';
+        for (var g = 1; g < m.length; g++) {
+            if (m[g] !== undefined) { cls = lang.rules[g - 1][0]; break; }
+        }
+        out += '<span class="tok-' + cls + '">' + _eddieEsc(m[0]) + '</span>';
+        last = m.index + m[0].length;
+    }
+    return out + _eddieEsc(code.slice(last));
+}
+
+
 // One fenced block: a labelled container with its own copy button.
 //
 // `open` means the closing fence has not arrived yet, which is the normal
@@ -55171,14 +55300,15 @@ function _eddieLangName(tag) {
 // fence to close would show raw backticks until the last moment.
 function _eddieCodeBlock(tag, code, open) {
     var body = String(code == null ? '' : code).replace(/\n$/, '');
+    var lang = _eddieLangName(tag);
     return '<div class="eddie-codeblock' + (open ? ' is-open' : '') + '">' +
         '<div class="eddie-codehead">' +
-            '<span class="eddie-codelang">' + _eddieEsc(_eddieLangName(tag)) + '</span>' +
+            '<span class="eddie-codelang">' + _eddieEsc(lang) + '</span>' +
             '<button class="eddie-codecopy" type="button" onclick="eddieCopyCode(this)">' +
                 '<i class="fa-regular fa-copy"></i><span>Copy</span>' +
             '</button>' +
         '</div>' +
-        '<pre><code>' + _eddieEsc(body) + '</code></pre>' +
+        '<pre><code>' + _eddieHighlight(body, lang) + '</code></pre>' +
     '</div>';
 }
 
