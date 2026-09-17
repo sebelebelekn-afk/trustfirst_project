@@ -536,6 +536,45 @@ def _groq_is_missing_model(exc):
             or ('404' in text and 'does not exist' in text))
 
 
+def _groq_rate_headers(exc):
+    """Groq's rate-limit headers off a failed call, as a small dict.
+
+    A 413 from Groq says "Request Entity Too Large" whether the request really
+    is too big or whether it merely does not fit in what is left of the
+    per-minute budget. Those need opposite responses -- cut the request, or
+    wait -- and the headers are the only thing that tells them apart. Never
+    raises: this runs inside error handling.
+    """
+    out = {}
+    try:
+        headers = getattr(getattr(exc, 'response', None), 'headers', None) or {}
+        for key in ('x-ratelimit-limit-tokens', 'x-ratelimit-remaining-tokens',
+                    'x-ratelimit-reset-tokens', 'x-ratelimit-limit-requests',
+                    'x-ratelimit-remaining-requests', 'retry-after'):
+            value = headers.get(key)
+            if value is not None:
+                out[key] = str(value)
+    except Exception:
+        pass
+    return out
+
+
+# A 413 that is really "no budget left this minute" stops search for a while.
+# Retrying into an exhausted budget spends nothing but time and keeps the
+# budget exhausted.
+_GROQ_SEARCH_OFF_UNTIL = 0.0
+_GROQ_SEARCH_COOLDOWN = 60
+
+
+def _groq_search_paused():
+    return time.time() < _GROQ_SEARCH_OFF_UNTIL
+
+
+def _groq_pause_search(seconds=None):
+    globals()['_GROQ_SEARCH_OFF_UNTIL'] = time.time() + (
+        seconds if seconds else _GROQ_SEARCH_COOLDOWN)
+
+
 def _groq_is_too_large(exc):
     """413: this model's per-minute token budget is smaller than the request.
 
@@ -830,7 +869,11 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
     # models. compound returning nothing is not a reason to give up on
     # searching altogether when compound-mini is sitting right there.
     search_models = []
-    if spec.get('wants_search'):
+    if spec.get('wants_search') and _groq_search_paused():
+        globals()['_GROQ_LAST_SEARCH_ERROR'] = (
+            'search paused for another %.0fs after a 413 from Groq'
+            % (_GROQ_SEARCH_OFF_UNTIL - time.time()))
+    elif spec.get('wants_search'):
         _groq_search_model(client)                 # fills _GROQ_LIVE['search']
         have = _GROQ_LIVE.get('search') or []
         search_models = ([m for m in _GROQ_SEARCH_PREF if m in have]
@@ -986,8 +1029,20 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
                     yield queue.pop(0)
         except Exception as exc:
             if searching:
-                globals()['_GROQ_LAST_SEARCH_ERROR'] = '%s: %s' % (
-                    type(exc).__name__, str(exc)[:600])
+                limits = _groq_rate_headers(exc)
+                globals()['_GROQ_LAST_SEARCH_ERROR'] = '%s: %s%s' % (
+                    type(exc).__name__, str(exc)[:500],
+                    (' | rate limits: ' + repr(limits)) if limits else
+                    ' | no rate-limit headers on the response')
+                if _groq_is_too_large(exc):
+                    # Out of budget, not oversized: waiting is the only thing
+                    # that helps, and asking again makes it worse.
+                    wait = 0
+                    try:
+                        wait = float(limits.get('retry-after') or 0)
+                    except Exception:
+                        wait = 0
+                    _groq_pause_search(wait or None)
             if text_open or last_attempt:
                 raise
             import logging
@@ -1019,7 +1074,11 @@ def _groq_once(spec, system, max_tokens):
     # models. compound returning nothing is not a reason to give up on
     # searching altogether when compound-mini is sitting right there.
     search_models = []
-    if spec.get('wants_search'):
+    if spec.get('wants_search') and _groq_search_paused():
+        globals()['_GROQ_LAST_SEARCH_ERROR'] = (
+            'search paused for another %.0fs after a 413 from Groq'
+            % (_GROQ_SEARCH_OFF_UNTIL - time.time()))
+    elif spec.get('wants_search'):
         _groq_search_model(client)                 # fills _GROQ_LIVE['search']
         have = _GROQ_LIVE.get('search') or []
         search_models = ([m for m in _GROQ_SEARCH_PREF if m in have]

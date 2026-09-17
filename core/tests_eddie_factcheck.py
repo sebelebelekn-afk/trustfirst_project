@@ -428,6 +428,9 @@ class GroqSearchModelTests(SimpleTestCase):
     def _reset(self):
         eddie_providers._GROQ_LIVE.update({'at': 0.0, 'names': [], 'search': []})
         eddie_providers._GROQ_WORKING = None
+        # A 413 in one test pauses search process-wide; do not leak that.
+        eddie_providers._GROQ_SEARCH_OFF_UNTIL = 0.0
+        eddie_providers._GROQ_LAST_SEARCH_ERROR = None
 
     def test_compound_models_are_kept_out_of_ordinary_chat(self):
         # They run a web search before answering, which is right for a claim
@@ -462,6 +465,9 @@ class GroqCallTests(SimpleTestCase):
     def setUp(self):
         eddie_providers._GROQ_LIVE.update({'at': 0.0, 'names': [], 'search': []})
         eddie_providers._GROQ_WORKING = None
+        # A 413 in one test pauses search process-wide; do not leak that.
+        eddie_providers._GROQ_SEARCH_OFF_UNTIL = 0.0
+        eddie_providers._GROQ_LAST_SEARCH_ERROR = None
 
     def test_prefer_puts_the_search_model_first(self):
         client = _FakeGroq(SERVED)
@@ -520,6 +526,9 @@ class RoutingTests(SimpleTestCase):
     def setUp(self):
         eddie_providers._GROQ_LIVE.update({'at': 0.0, 'names': [], 'search': []})
         eddie_providers._GROQ_WORKING = None
+        # A 413 in one test pauses search process-wide; do not leak that.
+        eddie_providers._GROQ_SEARCH_OFF_UNTIL = 0.0
+        eddie_providers._GROQ_LAST_SEARCH_ERROR = None
         self._real = eddie_providers._groq_client
         eddie_providers._groq_client = lambda: _FakeGroq(SERVED)
         self.addCleanup(setattr, eddie_providers, '_groq_client', self._real)
@@ -550,6 +559,9 @@ class SearchFallbackTests(SimpleTestCase):
     def setUp(self):
         eddie_providers._GROQ_LIVE.update({'at': 0.0, 'names': [], 'search': []})
         eddie_providers._GROQ_WORKING = None
+        # A 413 in one test pauses search process-wide; do not leak that.
+        eddie_providers._GROQ_SEARCH_OFF_UNTIL = 0.0
+        eddie_providers._GROQ_LAST_SEARCH_ERROR = None
         self._real = eddie_providers._groq_client
         self.addCleanup(setattr, eddie_providers, '_groq_client', self._real)
         import logging
@@ -683,6 +695,38 @@ class SearchFallbackTests(SimpleTestCase):
         searches = [m for m in client.tried if 'compound' in m]
         self.assertEqual(sorted(searches),
                          ['groq/compound', 'groq/compound-mini'])
+
+    def test_a_413_pauses_search_instead_of_asking_again(self):
+        # Groq says "Request Entity Too Large" both when a request really is
+        # oversized and when it simply does not fit in what is left of the
+        # per-minute budget. In the second case asking again spends time and
+        # keeps the budget empty.
+        client = self._client(stream_fail={
+            'groq/compound': RuntimeError('Error code: 413 - request_too_large'),
+            'groq/compound-mini': RuntimeError('Error code: 413 - request_too_large')})
+        self._run(client)
+        self.assertTrue(eddie_providers._groq_search_paused())
+
+        # The turn after it does not touch a search model at all.
+        nxt = self._client()
+        self._run(nxt)
+        self.assertEqual([m for m in nxt.tried if 'compound' in m], [])
+        self.assertIn('paused', eddie_providers._GROQ_LAST_SEARCH_ERROR)
+
+    def test_rate_limit_headers_are_kept_with_the_failure(self):
+        # They are the only thing that says whether to cut the request or wait.
+        class Boom(RuntimeError):
+            response = type('R', (), {'headers': {
+                'x-ratelimit-remaining-tokens': '0',
+                'x-ratelimit-reset-tokens': '42s'}})()
+
+        client = self._client(stream_fail={
+            'groq/compound': Boom('413 request_too_large'),
+            'groq/compound-mini': Boom('413 request_too_large')})
+        self._run(client)
+        recorded = eddie_providers._GROQ_LAST_SEARCH_ERROR
+        self.assertIn('x-ratelimit-remaining-tokens', recorded)
+        self.assertIn('42s', recorded)
 
     def test_mini_gets_a_go_before_search_is_abandoned(self):
         # compound coming back empty is not a reason to stop searching when
