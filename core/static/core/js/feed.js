@@ -55062,6 +55062,29 @@ function _eddieStyles() {
         '.eddie-answer b{color:#fff;font-weight:700;}' +
         '.eddie-code{background:rgba(255,255,255,.13);color:#fff;padding:1px 5px;' +
         'border-radius:5px;font-size:0.9em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}' +
+        // A fenced block: its own container, saying what it is, with its own
+        // copy button. Scrolls sideways rather than wrapping, because wrapped
+        // code stops being readable as code.
+        '.eddie-codeblock{margin:11px 0;border-radius:12px;overflow:hidden;max-width:100%;' +
+        'background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);}' +
+        '.eddie-codehead{display:flex;align-items:center;justify-content:space-between;gap:10px;' +
+        'padding:6px 8px 6px 13px;background:rgba(255,255,255,.05);' +
+        'border-bottom:1px solid rgba(255,255,255,.08);}' +
+        '.eddie-codelang{color:rgba(255,255,255,.55);font-size:11.5px;font-weight:700;' +
+        'letter-spacing:.4px;white-space:nowrap;}' +
+        '.eddie-codecopy{display:inline-flex;align-items:center;gap:6px;background:none;' +
+        'border:none;color:rgba(255,255,255,.5);font-size:12px;font-weight:600;' +
+        'padding:4px 8px;border-radius:7px;cursor:pointer;white-space:nowrap;}' +
+        '.eddie-codecopy:hover{color:#fff;background:rgba(255,255,255,.1);}' +
+        '.eddie-codeblock pre{margin:0;padding:12px 13px;overflow-x:auto;' +
+        '-webkit-overflow-scrolling:touch;}' +
+        '.eddie-codeblock code{display:block;background:none;padding:0;border-radius:0;' +
+        'font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;' +
+        'line-height:1.55;color:rgba(255,255,255,.92);white-space:pre;overflow-wrap:normal;}' +
+        // Still arriving: a quiet pulse on the edge so it reads as unfinished.
+        '@keyframes eddieCodeOpen{0%,100%{border-color:rgba(255,255,255,.1)}' +
+        '50%{border-color:rgba(255,255,255,.26)}}' +
+        '.eddie-codeblock.is-open{animation:eddieCodeOpen 1.6s ease-in-out infinite;}' +
         '.eddie-answer img{max-width:min(100%,340px);border-radius:14px;display:block;}' +
         '.eddie-sources-wrap{margin-top:11px;padding-top:10px;padding-left:3px;' +
         'border-top:1px solid rgba(255,255,255,.1);max-width:100%;}' +
@@ -55087,6 +55110,7 @@ function _eddieStyles() {
             '-webkit-text-fill-color:rgba(255,255,255,.82);}' +
             '.eddie-status i{animation:none;opacity:.75;}' +
             '.eddie-sources{animation:none;}' +
+            '.eddie-codeblock.is-open{animation:none;}' +
         '}';
     document.head.appendChild(s);
 }
@@ -55104,11 +55128,104 @@ async function _eddieToken() {
 function _eddieEsc(t) { return escapeHtml(t == null ? '' : String(t)); }
 
 // Small, deliberate subset of markdown: bold, inline code, and line breaks.
-function _eddieFormat(text) {
+// What a fence's tag is called when it is shown above the block. The tag is
+// whatever the model typed, so the same language arrives spelled several ways.
+var _EDDIE_LANGS = {
+    js: 'JavaScript', jsx: 'JavaScript', javascript: 'JavaScript', mjs: 'JavaScript',
+    ts: 'TypeScript', tsx: 'TypeScript', typescript: 'TypeScript',
+    json: 'JSON', json5: 'JSON', jsonc: 'JSON',
+    html: 'HTML', htm: 'HTML', xml: 'XML', svg: 'SVG',
+    css: 'CSS', scss: 'SCSS', sass: 'Sass', less: 'Less',
+    py: 'Python', python: 'Python',
+    sh: 'Shell', bash: 'Shell', zsh: 'Shell', shell: 'Shell', console: 'Shell',
+    sql: 'SQL', graphql: 'GraphQL', java: 'Java', kt: 'Kotlin', kotlin: 'Kotlin',
+    swift: 'Swift', c: 'C', h: 'C', cpp: 'C++', 'c++': 'C++', cs: 'C#',
+    go: 'Go', rs: 'Rust', rust: 'Rust', rb: 'Ruby', ruby: 'Ruby', php: 'PHP',
+    yaml: 'YAML', yml: 'YAML', toml: 'TOML', ini: 'INI', env: 'Env',
+    md: 'Markdown', markdown: 'Markdown', diff: 'Diff', patch: 'Diff',
+    dockerfile: 'Dockerfile', docker: 'Dockerfile', make: 'Makefile',
+    text: 'Plain text', txt: 'Plain text', plaintext: 'Plain text', plain: 'Plain text'
+};
+
+function _eddieLangName(tag) {
+    var key = String(tag || '').trim().toLowerCase();
+    if (!key) return 'Plain text';
+    if (_EDDIE_LANGS[key]) return _EDDIE_LANGS[key];
+    // Something we have no name for is still a language, so show what was
+    // written rather than mislabelling it as plain text.
+    return key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+// One fenced block: a labelled container with its own copy button.
+//
+// `open` means the closing fence has not arrived yet, which is the normal
+// state while an answer is still streaming. It renders as a block anyway --
+// watching code appear inside the container is right, and waiting for the
+// fence to close would show raw backticks until the last moment.
+function _eddieCodeBlock(tag, code, open) {
+    var body = String(code == null ? '' : code).replace(/\n$/, '');
+    return '<div class="eddie-codeblock' + (open ? ' is-open' : '') + '">' +
+        '<div class="eddie-codehead">' +
+            '<span class="eddie-codelang">' + _eddieEsc(_eddieLangName(tag)) + '</span>' +
+            '<button class="eddie-codecopy" type="button" onclick="eddieCopyCode(this)">' +
+                '<i class="fa-regular fa-copy"></i><span>Copy</span>' +
+            '</button>' +
+        '</div>' +
+        '<pre><code>' + _eddieEsc(body) + '</code></pre>' +
+    '</div>';
+}
+
+// The small, deliberate subset of markdown outside a code fence.
+function _eddieInline(text) {
     var h = _eddieEsc(text);
     h = h.replace(/`([^`\n]+)`/g, '<code class="eddie-code">$1</code>');
     h = h.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
     return h.replace(/\n/g, '<br>');
+}
+
+function _eddieFormat(text) {
+    var src = String(text == null ? '' : text);
+    var out = '';
+    var fence = /```([A-Za-z0-9+#._-]*)[ \t]*\r?\n?([\s\S]*?)```/g;
+    var last = 0, m;
+    while ((m = fence.exec(src)) !== null) {
+        out += _eddieInline(src.slice(last, m.index));
+        out += _eddieCodeBlock(m[1], m[2], false);
+        last = fence.lastIndex;
+    }
+
+    // Whatever is left may contain a fence that has been opened and not yet
+    // closed, because the answer is still arriving.
+    var rest = src.slice(last);
+    var opening = /```([A-Za-z0-9+#._-]*)[ \t]*\r?\n?([\s\S]*)$/.exec(rest);
+    if (opening) {
+        out += _eddieInline(rest.slice(0, opening.index));
+        out += _eddieCodeBlock(opening[1], opening[2], true);
+    } else {
+        out += _eddieInline(rest);
+    }
+    return out;
+}
+
+// Copy one block. The text comes off the rendered element rather than an
+// attribute: escapeHtml() leaves quotes alone, which is fine inside a text
+// node and would break out of one in an attribute.
+function eddieCopyCode(btn) {
+    var wrap = btn && btn.closest ? btn.closest('.eddie-codeblock') : null;
+    var el = wrap && wrap.querySelector('code');
+    if (!el) return;
+    var label = btn.querySelector('span');
+    function done(ok) {
+        if (!label) return;
+        var was = label.textContent;
+        label.textContent = ok ? 'Copied' : 'Press and hold to copy';
+        setTimeout(function () { label.textContent = was; }, 1600);
+    }
+    try {
+        navigator.clipboard.writeText(el.textContent).then(
+            function () { done(true); }, function () { done(false); });
+    } catch (e) { done(false); }
+    if (typeof triggerHaptic === 'function') triggerHaptic(8);
 }
 
 function openEddieChat() {
