@@ -314,3 +314,32 @@ class WatermarkTests(SimpleTestCase):
             out = eddie_image._rewrite_prompt('draw me a banana')
         self.assertTrue(out.startswith('A ripe yellow banana'), out)
         self.assertNotIn('Here is your prompt', out)
+
+
+class EnvNameTests(SimpleTestCase):
+    """Credential names are case-sensitive; the places they get typed are not."""
+
+    def test_the_exact_name_wins(self):
+        import os
+        from core_project.settings import _env
+        os.environ['TF_TEST_KEY'] = 'exact'
+        os.environ.pop('TF_TEST_key', None)
+        self.addCleanup(os.environ.pop, 'TF_TEST_KEY', None)
+        self.assertEqual(_env('TF_TEST_KEY'), 'exact')
+
+    def test_a_miscased_name_is_still_found(self):
+        # CLOUDFLARE_API_Token sat in Render for a day looking exactly like a
+        # key that had never been added, because os.environ.get() is exact.
+        import os
+        import importlib
+        import core_project.settings as cfg
+        os.environ['TF_TEST_MISCASED_Token'] = 'found'
+        self.addCleanup(os.environ.pop, 'TF_TEST_MISCASED_Token', None)
+        importlib.reload(cfg)          # the folded map is built at import
+        self.assertEqual(cfg._env('TF_TEST_MISCASED_TOKEN'), 'found')
+
+    def test_a_name_that_is_really_absent_is_still_absent(self):
+        from core_project.settings import _env
+        self.assertEqual(_env('TF_TEST_DEFINITELY_NOT_SET'), '')
+        self.assertEqual(_env('TF_TEST_DEFINITELY_NOT_SET', 'fallback'),
+                         'fallback')

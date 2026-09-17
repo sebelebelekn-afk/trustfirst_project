@@ -405,10 +405,30 @@ if SENTRY_DSN:
 # Left unset, Eddie routes per message: Groq for ordinary chat because it
 # answers in well under a second, Gemini for anything with an attachment or a
 # question that earns the wait. Set to groq/gemini/anthropic to pin one.
+# ---------------------------------------------------------------------------
+# Environment variable names are case-sensitive on Linux, and the places these
+# get typed -- a Render dashboard, a .env file -- are not. CLOUDFLARE_API_Token
+# sat in the environment for a day looking exactly like a key that had never
+# been added, because os.environ.get('CLOUDFLARE_API_TOKEN') does not find it.
+#
+# So the exact name wins, and if it is absent a case-insensitive match is
+# accepted rather than silently running without the key. Only for credentials,
+# where "it is there but spelled differently" is otherwise indistinguishable
+# from "it is not there".
+# ---------------------------------------------------------------------------
+_ENV_FOLDED = {k.upper(): v for k, v in os.environ.items()}
+
+
+def _env(name, default=''):
+    if name in os.environ:
+        return os.environ[name]
+    return _ENV_FOLDED.get(name.upper(), default)
+
+
 EDDIE_PROVIDER = os.environ.get('EDDIE_PROVIDER', '')
 
 # Groq speaks the OpenAI wire format, so it reuses the openai package.
-GROQ_API_KEY     = os.environ.get('GROQ_API_KEY', '')
+GROQ_API_KEY     = _env('GROQ_API_KEY')
 
 # Deliberately empty by default, which is not the same as unset.
 #
@@ -441,7 +461,7 @@ EDDIE_TTS_GROQ_VOICE = os.environ.get('EDDIE_TTS_GROQ_VOICE', 'tara')
 # summaries. Do not "fix" this to gemini-2.5-flash: that model is closed to
 # new API keys and 404s. Web search is billed on every model a new free key
 # can reach, so Eddie detects the refusal and carries on without it.
-GEMINI_API_KEY     = os.environ.get('GEMINI_API_KEY', '')
+GEMINI_API_KEY     = _env('GEMINI_API_KEY')
 EDDIE_GEMINI_MODEL = os.environ.get('EDDIE_GEMINI_MODEL', 'gemini-3.5-flash')
 
 # Search grounding is billed. Asking for it on a free key wastes ~40s before
@@ -461,7 +481,7 @@ EDDIE_FACTCHECK = os.environ.get('EDDIE_FACTCHECK', 'on')
 # in a chat bubble where waiting is the worst part.
 EDDIE_THINKING = os.environ.get('EDDIE_THINKING', 'low')
 
-ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+ANTHROPIC_API_KEY = _env('ANTHROPIC_API_KEY')
 EDDIE_MODEL       = os.environ.get('EDDIE_MODEL', 'claude-opus-4-8')
 
 # Image generation is its own provider, in its own module. Left unset it uses
@@ -469,8 +489,8 @@ EDDIE_MODEL       = os.environ.get('EDDIE_MODEL', 'claude-opus-4-8')
 # Cloudflare (10,000 neurons/day free) and OpenAI take over automatically once
 # their credentials exist.
 EDDIE_IMAGE_PROVIDER  = os.environ.get('EDDIE_IMAGE_PROVIDER', '')
-CLOUDFLARE_ACCOUNT_ID = os.environ.get('CLOUDFLARE_ACCOUNT_ID', '')
-CLOUDFLARE_API_TOKEN  = os.environ.get('CLOUDFLARE_API_TOKEN', '')
+CLOUDFLARE_ACCOUNT_ID = _env('CLOUDFLARE_ACCOUNT_ID')
+CLOUDFLARE_API_TOKEN  = _env('CLOUDFLARE_API_TOKEN')
 EDDIE_CF_IMAGE_MODEL  = os.environ.get(
     'EDDIE_CF_IMAGE_MODEL', '@cf/black-forest-labs/flux-1-schnell')
 
@@ -481,7 +501,7 @@ EDDIE_CF_IMAGE_MODEL  = os.environ.get(
 # (free, from auth.pollinations.ai) moves off that tier. Better still, set
 # CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN above: Workers AI runs FLUX on
 # its free allowance and puts no watermark on anything.
-POLLINATIONS_TOKEN = os.environ.get('POLLINATIONS_TOKEN', '')
+POLLINATIONS_TOKEN = _env('POLLINATIONS_TOKEN')
 
 # Rewrite a typed request into a described scene before generating. This is
 # most of the difference between "can you generate an image of a banana" and
@@ -492,7 +512,7 @@ EDDIE_IMAGE_REWRITE = os.environ.get('EDDIE_IMAGE_REWRITE', 'on')
 # output, so it never paints over somebody else's attribution.
 EDDIE_IMAGE_WATERMARK = os.environ.get('EDDIE_IMAGE_WATERMARK', 'on')
 
-OPENAI_API_KEY     = os.environ.get('OPENAI_API_KEY', '')
+OPENAI_API_KEY     = _env('OPENAI_API_KEY')
 EDDIE_IMAGE_MODEL  = os.environ.get('EDDIE_IMAGE_MODEL', 'gpt-image-1')
 
 # Daily per-user caps, enforced server-side before any model call.
