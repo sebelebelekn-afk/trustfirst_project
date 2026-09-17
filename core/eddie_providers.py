@@ -503,6 +503,7 @@ _GROQ_FALLBACKS = [
 _GROQ_MAX_TOKENS = 2000
 
 _GROQ_WORKING = None
+_GROQ_LAST_TRIED = []
 
 
 def _groq_model():
@@ -742,6 +743,11 @@ def _groq_call(client, prefer=None, only=False, **kwargs):
         candidates = [prefer]
     last = None
     for name in candidates:
+        # Kept for the diagnostic, which otherwise cannot say which model
+        # actually answered a turn.
+        globals().setdefault('_GROQ_LAST_TRIED', [])
+        _GROQ_LAST_TRIED.append(name)
+        del _GROQ_LAST_TRIED[:-6]
         try:
             call = dict(kwargs)
             if _is_search_model(name):

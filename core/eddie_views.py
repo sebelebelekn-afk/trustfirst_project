@@ -997,59 +997,71 @@ def eddie_diag(request):
     out['search_model'] = model
     out['live_search'] = bool(model)
 
-    # The part that matters: actually run one and report what happens.
-    if request.GET.get('test') and model:
-        spec = {'history': [], 'attachments': [], 'wants_search': True,
-                'prompt': 'In one sentence: what is today\'s date, and one '
-                          'thing in the news right now?',
-                'search_system': eddie_search.SEARCH_SYSTEM}
+    # The part that matters: run the real path and report what happens.
+    #
+    # This used to make its own tidy call to the provider, which meant it
+    # tested something the chat does not do: it passed while the chat failed,
+    # and the gap between them was where the bug lived. It now goes through
+    # _factcheck_context and stream_turn -- the same two functions a message
+    # in the chat goes through -- so a pass here means the chat works.
+    if request.GET.get('test'):
         import time as _t
-        started = _t.time()
+        asked = (request.GET.get('q')
+                 or 'Search the web: what is today\'s date and one thing in '
+                    'the news right now?')
+        spec = _build_spec([], asked, [], route_text=asked)
+        system, prefetched = _factcheck_context(EDDIE_SYSTEM, spec, asked)
+        decision = {
+            'asked': asked,
+            'should_search': eddie_search.should_search(asked),
+            'can_search_live': out['live_search'],
+            'wants_search': bool(spec.get('wants_search')),
+            'routed_to': None,
+            'prefetched_sources': len(prefetched or []),
+        }
         try:
-            # A raw call rather than _groq_once, so an empty answer can be
-            # explained rather than just reported. "ok: true, answer: ''" cost
-            # a round of this: the call had succeeded and the model had spent
-            # its whole token budget reasoning, and nothing said so.
-            raw = eddie_providers._groq_call(
-                client,
-                prefer=model,
-                messages=eddie_providers._groq_messages(
-                    spec, eddie_search.SEARCH_SYSTEM, searching=True),
-                max_completion_tokens=eddie_providers._GROQ_SEARCH_MAX_TOKENS,
-            )
-            choice = (getattr(raw, 'choices', None) or [None])[0]
-            message = getattr(choice, 'message', None)
-            text = (getattr(message, 'content', '') or '').strip()
-            usage = getattr(raw, 'usage', None)
-            out['test'] = {
+            decision['routed_to'] = eddie_providers._route(spec)
+        except Exception as exc:
+            decision['route_error'] = str(exc)[:200]
+
+        events, text, sources = [], [], []
+        queue = []
+        started = _t.time()
+
+        def emit(kind, data):
+            events.append(kind)
+            if kind == 'text':
+                text.append(data.get('text', ''))
+            elif kind == 'sources':
+                sources.extend(s.get('url') for s in (data.get('sources') or []))
+            queue.append('frame')
+
+        try:
+            for _ in eddie_providers.stream_turn(spec, system, queue, emit, 16000):
+                pass
+            answer = ''.join(text).strip()
+            decision.update({
                 'ok': True,
                 'seconds': round(_t.time() - started, 2),
-                'model_used': getattr(raw, 'model', None),
-                'finish_reason': getattr(choice, 'finish_reason', None),
-                'answer_chars': len(text),
-                'answer': text[:600],
-                'max_completion_tokens_sent':
-                    eddie_providers._GROQ_SEARCH_MAX_TOKENS,
-                'usage': {k: getattr(usage, k, None) for k in
-                          ('prompt_tokens', 'completion_tokens', 'total_tokens')}
-                         if usage else None,
-                'executed_tools': len(getattr(message, 'executed_tools', None) or []),
-                'sources': [x.get('url') for x in
-                            eddie_providers._groq_executed_sources(message)][:6],
-            }
-            if not text:
-                out['test']['why_empty'] = (
-                    'The call succeeded but the model returned no text. '
-                    'finish_reason "length" means the token budget was spent '
-                    'on reasoning and tool calls before it wrote anything.')
+                'events': events,
+                'models_tried': list(getattr(eddie_providers, '_GROQ_LAST_TRIED', [])),
+                'answer_chars': len(answer),
+                'answer': answer[:600],
+                'sources': sources[:6],
+            })
+            if 'searching' not in events:
+                decision['note'] = ('No search ran on this turn. If wants_search '
+                                    'is true the search model was asked and '
+                                    'returned nothing, and the answer came from '
+                                    'the fallback.')
         except Exception as exc:
-            out['test'] = {
+            decision.update({
                 'ok': False,
                 'seconds': round(_t.time() - started, 2),
+                'events': events,
                 'error_type': type(exc).__name__,
                 'error': str(exc)[:1200],
-            }
-    elif request.GET.get('test'):
-        out['test'] = {'ok': False, 'error': 'no search-capable model available'}
+            })
+        out['test'] = decision
 
     return JsonResponse(out, json_dumps_params={'indent': 2})
