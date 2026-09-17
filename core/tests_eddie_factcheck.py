@@ -384,9 +384,18 @@ class _FakeGroq:
         failure = self.failures.get(model)
         if failure:
             raise failure
-        if not kwargs.get('stream'):
-            return 'answer from %s' % model
-        return self._stream(model)
+        if kwargs.get('stream'):
+            return self._stream(model)
+        # A searching turn is not streamed, so its failures land here too.
+        boom = self.stream_fail.get(model)
+        if boom:
+            raise boom
+        message = type('M', (), {
+            'content': 'answer from %s' % model,
+            'executed_tools': (self.tool_results or {}).get(model),
+        })()
+        choice = type('C', (), {'message': message, 'finish_reason': 'stop'})()
+        return type('R', (), {'choices': [choice], 'model': model, 'usage': None})()
 
     def _stream(self, model):
         def chunk(text, tools=None):
@@ -468,9 +477,8 @@ class GroqCallTests(SimpleTestCase):
     def test_a_failing_search_model_hands_the_turn_back(self):
         client = _FakeGroq(SERVED,
                            failures={'groq/compound': RuntimeError('500 upstream')})
-        answer = eddie_providers._groq_call(client, prefer='groq/compound',
-                                            messages=[])
-        self.assertNotIn('compound', answer)
+        eddie_providers._groq_call(client, prefer='groq/compound', messages=[])
+        self.assertNotIn('compound', client.tried[-1])
         self.assertGreater(len(client.tried), 1)
 
     def test_ordinary_chat_still_picks_a_plain_model_and_sticks_to_it(self):
@@ -601,10 +609,16 @@ class SearchFallbackTests(SimpleTestCase):
                 len(m['content']),
                 eddie_providers._GROQ_SEARCH_TURN_CHARS + 10)
 
-    def test_a_failure_after_words_are_on_screen_is_not_restarted(self):
-        # Starting a second answer underneath the first is worse than the error.
-        client = self._client(stream_fail={'groq/compound': RuntimeError('boom')},
-                              emit_before_fail=True)
+    def test_a_failure_on_the_last_attempt_surfaces(self):
+        # The searching attempt is not streamed, so half an answer followed by
+        # a failure can only happen on the plain one -- which is the last, and
+        # has nothing left to fall back to.
+        client = self._client(
+            stream_fail={'groq/compound': RuntimeError('413'),
+                         'llama-3.3-70b-versatile': RuntimeError('boom'),
+                         'llama-3.1-8b-instant': RuntimeError('boom'),
+                         'openai/gpt-oss-120b': RuntimeError('boom')},
+            emit_before_fail=True)
         with self.assertRaises(Exception):
             self._run(client)
 

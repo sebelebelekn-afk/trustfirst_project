@@ -710,7 +710,7 @@ def _groq_executed_sources(message):
     return sources
 
 
-def _groq_call(client, prefer=None, **kwargs):
+def _groq_call(client, prefer=None, only=False, **kwargs):
     """Call Groq, moving down the list when a model has been retired.
 
     Only a missing model is retried. A bad key, a rate limit or a network
@@ -731,6 +731,15 @@ def _groq_call(client, prefer=None, **kwargs):
     )
     if prefer:
         candidates = [prefer] + [m for m in candidates if m != prefer]
+    # `only` means this call is for one model and no other.
+    #
+    # Without it a searching call that failed fell back to a plain model in
+    # here, quietly, and answered under a system prompt still promising it
+    # could search the web -- the exact dishonesty this keeps producing. The
+    # caller wants to know the search model failed so it can swap the prompt
+    # as well as the model.
+    if only and prefer:
+        candidates = [prefer]
     last = None
     for name in candidates:
         try:
@@ -828,6 +837,53 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
         said_searching = False
         sources, seen = [], set()
         try:
+            if searching:
+                # A searching turn does not stream.
+                #
+                # Not a preference -- a measurement. The same key, model and
+                # prompt answer perfectly through the non-streaming call, with
+                # real sources, and return nothing at all with stream=True. A
+                # compound system does its searching and reasoning before it
+                # writes a word anyway, so there is no partial answer to stream:
+                # you wait either way, and this way an answer arrives.
+                emit('working', {})
+                while queue:
+                    yield queue.pop(0)
+
+                result = _groq_call(
+                    client,
+                    prefer=attempt,
+                    only=True,
+                    messages=_groq_messages(spec, this_system, searching=True),
+                    max_completion_tokens=min(max_tokens, _GROQ_SEARCH_MAX_TOKENS),
+                )
+                picked = (getattr(result, 'choices', None) or [None])[0]
+                message = getattr(picked, 'message', None)
+                for found in _groq_executed_sources(message):
+                    _add_source(found['url'], found['title'], sources, seen)
+                if sources:
+                    emit('searching', {'name': 'web_search'})
+                    while queue:
+                        yield queue.pop(0)
+
+                answer = (getattr(message, 'content', '') or '').strip()
+                if answer:
+                    text_open = True
+                    emit('text_start', {})
+                    emit('text', {'text': answer})
+                    while queue:
+                        yield queue.pop(0)
+                if not text_open and not last_attempt:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        'Groq search model returned no text, answering without it')
+                    continue
+                if sources:
+                    emit('sources', {'sources': sources[:8]})
+                while queue:
+                    yield queue.pop(0)
+                return
+
             stream = _groq_call(
                 client,
                 prefer=attempt,
