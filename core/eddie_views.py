@@ -14,6 +14,7 @@ directly. /api/config/ must never return one.
 
 import datetime
 import json
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 
@@ -975,13 +976,26 @@ def eddie_diag(request):
     from . import eddie_search, eddie_image
 
     out = {
+        # CLOUDFLARE_ACCOUNT_ID was missing from this list, which is exactly
+        # the sort of thing that makes a diagnostic worse than useless: images
+        # need the account id AND the token, and only one of them was being
+        # reported, so "I added it and it still says false" had no answer here.
         'keys': {name: bool(getattr(settings, name, ''))
                  for name in ('GROQ_API_KEY', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY',
-                              'CLOUDFLARE_API_TOKEN', 'OPENAI_API_KEY',
-                              'POLLINATIONS_TOKEN')},
+                              'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN',
+                              'OPENAI_API_KEY', 'POLLINATIONS_TOKEN')},
         'chat_engine': eddie_providers.active(),
         'eddie_provider_setting': getattr(settings, 'EDDIE_PROVIDER', '') or '(auto)',
         'image_provider': eddie_image._provider(),
+        # The NAMES of anything Cloudflare-shaped actually present in the
+        # environment, so a variable saved under the wrong name is visible
+        # rather than indistinguishable from one that was never saved. Names
+        # only, never values: a token belongs in the environment and nowhere
+        # a browser can see it.
+        'cloudflare_env_names_present': sorted(
+            k for k in os.environ
+            if 'CLOUDFLARE' in k.upper() or k.upper().startswith('CF_')),
+        'expected_names': ['CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN'],
     }
 
     client = eddie_providers._groq_client()
