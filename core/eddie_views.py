@@ -1068,4 +1068,69 @@ def eddie_diag(request):
             })
         out['test'] = decision
 
+    # ?probe=1 -- which ingredient is Groq actually refusing?
+    #
+    # Four rounds have gone on reasoning about a 413 whose message carries no
+    # numbers and no model name, which is not the wording Groq uses for a
+    # token-budget refusal. So instead of another theory: send the same call
+    # repeatedly, adding one thing at a time, and report which one it breaks
+    # on. The key lives here, so this is the only place the question can
+    # actually be answered.
+    if request.GET.get('probe') and client is not None and model:
+        import time as _t
+        short = [{'role': 'user', 'content': 'Say OK.'}]
+        long_system = [{'role': 'system', 'content': eddie_search.SEARCH_SYSTEM},
+                       {'role': 'user', 'content': 'Say OK.'}]
+        tools = eddie_providers._GROQ_COMPOUND_BODY
+        heads = eddie_providers._GROQ_COMPOUND_HEADERS
+
+        steps = [
+            ('1 plain chat model, nothing added',
+             {'model': 'openai/gpt-oss-120b', 'messages': short,
+              'max_completion_tokens': 500}),
+            ('2 compound, bare',
+             {'model': model, 'messages': short, 'max_completion_tokens': 500}),
+            ('3 compound + model-version header',
+             {'model': model, 'messages': short, 'max_completion_tokens': 500,
+              'extra_headers': heads}),
+            ('4 compound + compound_custom',
+             {'model': model, 'messages': short, 'max_completion_tokens': 500,
+              'extra_body': tools}),
+            ('5 compound + custom + header',
+             {'model': model, 'messages': short, 'max_completion_tokens': 500,
+              'extra_body': tools, 'extra_headers': heads}),
+            ('6 as 5 but 4000 tokens',
+             {'model': model, 'messages': short, 'max_completion_tokens': 4000,
+              'extra_body': tools, 'extra_headers': heads}),
+            ('7 as 6 with the real search prompt',
+             {'model': model, 'messages': long_system,
+              'max_completion_tokens': 4000,
+              'extra_body': tools, 'extra_headers': heads}),
+        ]
+        results = []
+        for label, kwargs in steps:
+            began = _t.time()
+            row = {'step': label, 'seconds': None}
+            try:
+                r = client.chat.completions.create(**kwargs)
+                choice = (getattr(r, 'choices', None) or [None])[0]
+                msg = getattr(choice, 'message', None)
+                row.update({
+                    'ok': True,
+                    'chars': len((getattr(msg, 'content', '') or '')),
+                    'tools_run': len(getattr(msg, 'executed_tools', None) or []),
+                })
+            except Exception as exc:
+                row.update({
+                    'ok': False,
+                    'error': str(exc)[:220],
+                    'limits': eddie_providers._groq_rate_headers(exc),
+                })
+            row['seconds'] = round(_t.time() - began, 2)
+            results.append(row)
+            if not row.get('ok'):
+                row['note'] = 'first failure -- the step above it is the last that worked'
+                break
+        out['probe'] = results
+
     return JsonResponse(out, json_dumps_params={'indent': 2})

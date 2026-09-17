@@ -56250,7 +56250,7 @@ async function _eddieRunDiagnostic(turn) {
     _eddieRender();
     try {
         var token = await _eddieToken();
-        var r = await fetch('/api/eddie/diag/?test=1', {
+        var r = await fetch('/api/eddie/diag/?test=1&probe=1', {
             headers: { 'Authorization': 'Bearer ' + token }
         });
         var body = await r.text();
