@@ -55868,6 +55868,8 @@ async function _eddieAsk(text, attachments) {
     _eddie.busy = true;
     _eddieRender();
 
+    if (/^\s*\/diag\b/i.test(text)) { return _eddieRunDiagnostic(turn); }
+
     if (_eddieWantsImage(text)) { return _eddieMakeImage(text, turn); }
 
     var history = _eddie.turns.slice(0, -2).filter(function (t) { return t.content; })
@@ -55945,6 +55947,41 @@ function _eddieEvent(turn, ev) {
     else if (ev.type === 'text') { turn.content += ev.text || ''; turn.status = 'writing'; }
     else if (ev.type === 'sources') { turn.sources = ev.sources || []; }
     else if (ev.type === 'error') { turn.error = ev.message || 'Something went wrong.'; }
+}
+
+// Typing /diag in the chat asks the server what Eddie can actually do, and
+// runs one real web search so the answer is what happened rather than what is
+// configured.
+//
+// It lives here because the endpoint needs an Authorization header and the
+// phone is where the token is. The obvious instruction -- "open /api/eddie/
+// diag/ in your browser" -- could never have worked: an address bar sends no
+// such header, so it would have answered 401 to the one person entitled to
+// read it. Admin-only, checked on the server against the users table.
+async function _eddieRunDiagnostic(turn) {
+    turn.status = 'thinking';
+    _eddieRender();
+    try {
+        var token = await _eddieToken();
+        var r = await fetch('/api/eddie/diag/?test=1', {
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        var body = await r.text();
+        var pretty = body;
+        try { pretty = JSON.stringify(JSON.parse(body), null, 2); } catch (e) {}
+        if (r.status === 403) {
+            turn.error = 'That one is admins only.';
+        } else if (!r.ok && r.status !== 200) {
+            turn.content = 'HTTP ' + r.status + '\n\n' + pretty;
+        } else {
+            turn.content = pretty;
+        }
+    } catch (e) {
+        turn.error = 'Could not reach the server: ' + ((e && e.message) || 'unknown');
+    }
+    turn.status = 'done';
+    _eddie.busy = false;
+    _eddieRender();
 }
 
 async function _eddieMakeImage(prompt, turn) {
