@@ -56149,7 +56149,13 @@ async function _eddieAsk(text, attachments) {
     _eddie.busy = true;
     _eddieRender();
 
-    if (/^\s*\/diag\b/i.test(text)) { return _eddieRunDiagnostic(turn); }
+    // Admins only. The server has always checked, but an ordinary user who
+    // typed /diag got a bare "admins only" error where they expected an
+    // answer. For them the word is not a command at all, so it falls
+    // through and Eddie replies to it like any other message.
+    if (isAdmin === true && /^\s*\/diag\b/i.test(text)) {
+        return _eddieRunDiagnostic(turn, /\bprobe\b/i.test(text));
+    }
 
     if (_eddieWantsImage(text)) { return _eddieMakeImage(text, turn); }
 
@@ -56245,12 +56251,15 @@ function _eddieEvent(turn, ev) {
 // diag/ in your browser" -- could never have worked: an address bar sends no
 // such header, so it would have answered 401 to the one person entitled to
 // read it. Admin-only, checked on the server against the users table.
-async function _eddieRunDiagnostic(turn) {
+async function _eddieRunDiagnostic(turn, probe) {
     turn.status = 'waiting';
     _eddieRender();
     try {
         var token = await _eddieToken();
-        var r = await fetch('/api/eddie/diag/?test=1&probe=1', {
+        // The probe spends the search budget seven times over, and that budget
+        // is small enough that running it leaves no room for the real search
+        // it was meant to explain. It is opt-in now: "/diag probe".
+        var r = await fetch('/api/eddie/diag/?test=1' + (probe ? '&probe=1' : ''), {
             headers: { 'Authorization': 'Bearer ' + token }
         });
         var body = await r.text();

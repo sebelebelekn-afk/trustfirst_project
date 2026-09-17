@@ -428,6 +428,7 @@ class GroqSearchModelTests(SimpleTestCase):
     def _reset(self):
         eddie_providers._GROQ_LIVE.update({'at': 0.0, 'names': [], 'search': []})
         eddie_providers._GROQ_WORKING = None
+        eddie_providers._GROQ_WORKING_AT = 0.0
         # A 413 in one test pauses search process-wide; do not leak that.
         eddie_providers._GROQ_SEARCH_OFF_UNTIL = 0.0
         eddie_providers._GROQ_LAST_SEARCH_ERROR = None
@@ -478,6 +479,7 @@ class GroqCallTests(SimpleTestCase):
     def setUp(self):
         eddie_providers._GROQ_LIVE.update({'at': 0.0, 'names': [], 'search': []})
         eddie_providers._GROQ_WORKING = None
+        eddie_providers._GROQ_WORKING_AT = 0.0
         # A 413 in one test pauses search process-wide; do not leak that.
         eddie_providers._GROQ_SEARCH_OFF_UNTIL = 0.0
         eddie_providers._GROQ_LAST_SEARCH_ERROR = None
@@ -505,6 +507,74 @@ class GroqCallTests(SimpleTestCase):
         eddie_providers._groq_call(client, messages=[])
         self.assertNotIn('compound', client.tried[0])
         self.assertEqual(eddie_providers._GROQ_WORKING, client.tried[0])
+
+
+class GroqStickyModelTests(SimpleTestCase):
+    """The model that answered last is a shortcut, not a life sentence.
+
+    A minute of rate limiting used to be enough to demote Eddie permanently:
+    every good model answered 413 while the token budget was spent, the walk
+    down the list reached whatever was left, that one answered, and the process
+    ran on it until it restarted. The diagnostic caught the result -- an Arabic
+    7b explaining, in English, that it could not browse the internet.
+    """
+
+    def setUp(self):
+        self._reset()
+        self.addCleanup(self._reset)
+
+    def _reset(self):
+        eddie_providers._GROQ_LIVE.update({'at': 0.0, 'names': [], 'search': []})
+        eddie_providers._GROQ_WORKING = None
+        eddie_providers._GROQ_WORKING_AT = 0.0
+        eddie_providers._GROQ_SEARCH_OFF_UNTIL = 0.0
+        eddie_providers._GROQ_LAST_SEARCH_ERROR = None
+
+    def test_a_fresh_sticky_model_is_tried_first(self):
+        eddie_providers._GROQ_WORKING = 'llama-3.1-8b-instant'
+        eddie_providers._GROQ_WORKING_AT = time.time()
+        client = _FakeGroq(SERVED)
+        eddie_providers._groq_call(client, messages=[])
+        self.assertEqual(client.tried[0], 'llama-3.1-8b-instant')
+
+    def test_a_stale_sticky_model_loses_its_place(self):
+        eddie_providers._GROQ_WORKING = 'llama-3.1-8b-instant'
+        eddie_providers._GROQ_WORKING_AT = (
+            time.time() - eddie_providers._GROQ_WORKING_TTL - 1)
+        client = _FakeGroq(SERVED)
+        eddie_providers._groq_call(client, messages=[])
+        # Back to the order of preference, which is not where it left off.
+        self.assertEqual(client.tried[0], 'llama-3.3-70b-versatile')
+
+    def test_a_model_reached_only_because_the_good_ones_were_rate_limited(self):
+        # The exact sequence that stranded Eddie: everything preferred answers
+        # 413, the last one standing answers, and fifteen minutes later the
+        # preferred models must get another turn.
+        served = SERVED + ['allam-2-7b']
+        too_large = RuntimeError('413 Request too large')
+        client = _FakeGroq(served, failures={'llama-3.3-70b-versatile': too_large,
+                                             'llama-3.1-8b-instant': too_large})
+        eddie_providers._groq_call(client, messages=[])
+        self.assertEqual(eddie_providers._GROQ_WORKING, 'allam-2-7b')
+
+        eddie_providers._GROQ_WORKING_AT -= eddie_providers._GROQ_WORKING_TTL + 1
+        client = _FakeGroq(served)
+        eddie_providers._groq_call(client, messages=[])
+        self.assertEqual(client.tried[0], 'llama-3.3-70b-versatile')
+
+    def test_a_language_specialised_model_is_never_the_first_unknown(self):
+        # Both are new to us, so both land in the unknown pile, where the sort
+        # used to be smallest-first alone and 7b beat 27b.
+        names = eddie_providers._groq_live_models(
+            _FakeGroq(['allam-2-7b', 'qwen/qwen3.8-27b']))
+        self.assertLess(names.index('qwen/qwen3.8-27b'), names.index('allam-2-7b'))
+
+    def test_the_written_fallback_list_holds_no_retired_names(self):
+        # It is also the answer when the network is down, so a dead name in it
+        # is a turn spent on a model that cannot reply.
+        for name in eddie_providers._GROQ_FALLBACKS:
+            self.assertNotIn('llama-4-scout', name)
+            self.assertNotIn('qwen3-32b', name)
 
 
 class GroqCitationTests(SimpleTestCase):
@@ -539,6 +609,7 @@ class RoutingTests(SimpleTestCase):
     def setUp(self):
         eddie_providers._GROQ_LIVE.update({'at': 0.0, 'names': [], 'search': []})
         eddie_providers._GROQ_WORKING = None
+        eddie_providers._GROQ_WORKING_AT = 0.0
         # A 413 in one test pauses search process-wide; do not leak that.
         eddie_providers._GROQ_SEARCH_OFF_UNTIL = 0.0
         eddie_providers._GROQ_LAST_SEARCH_ERROR = None
@@ -572,6 +643,7 @@ class SearchFallbackTests(SimpleTestCase):
     def setUp(self):
         eddie_providers._GROQ_LIVE.update({'at': 0.0, 'names': [], 'search': []})
         eddie_providers._GROQ_WORKING = None
+        eddie_providers._GROQ_WORKING_AT = 0.0
         # A 413 in one test pauses search process-wide; do not leak that.
         eddie_providers._GROQ_SEARCH_OFF_UNTIL = 0.0
         eddie_providers._GROQ_LAST_SEARCH_ERROR = None

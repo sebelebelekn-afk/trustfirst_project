@@ -499,9 +499,10 @@ def _groq_messages(spec, system, searching=False):
 # "Hi" came back 413.
 _GROQ_FALLBACKS = [
     'llama-3.3-70b-versatile',
-    'meta-llama/llama-4-scout-17b-16e-instruct',
+    'openai/gpt-oss-20b',
+    'qwen/qwen3.8-27b',
+    'minimaxai/minimax-m2.7',
     'llama-3.1-8b-instant',          # small, generous limits, always up
-    'qwen/qwen3-32b',
     'openai/gpt-oss-120b',           # largest, tightest budget, last resort
 ]
 
@@ -531,7 +532,30 @@ def _shares_search_budget(name):
     return (name or '') in _GROQ_COMPOUND_INNER
 
 
+# The model that answered last, tried first next time so a turn does not pay
+# again for models that have been retired.
+#
+# It expires, and that is the point. It used to be permanent, and a minute of
+# rate limiting was enough to make it permanently wrong: every model worth
+# using answered 413 while the token budget was spent, the walk down the list
+# reached a small model nothing else had wanted, that one answered, and Eddie
+# then ran on it for the life of the process. That is how an Arabic-language 7b
+# became the model answering English questions -- not chosen, just the last one
+# standing during a bad minute. Fifteen minutes later the list is worth
+# re-walking.
 _GROQ_WORKING = None
+_GROQ_WORKING_AT = 0.0
+_GROQ_WORKING_TTL = 900
+
+
+def _groq_sticky():
+    if not _GROQ_WORKING:
+        return None
+    if time.time() - _GROQ_WORKING_AT > _GROQ_WORKING_TTL:
+        return None
+    return _GROQ_WORKING
+
+
 _GROQ_LAST_TRIED = []
 
 # Why the searching model did not answer, kept for the diagnostic. Every round
@@ -545,7 +569,7 @@ def _groq_model():
     pinned = getattr(settings, 'EDDIE_GROQ_MODEL', '')
     if pinned:
         return pinned
-    return _GROQ_WORKING or _GROQ_FALLBACKS[0]
+    return _groq_sticky() or _GROQ_FALLBACKS[0]
 
 
 def _groq_is_missing_model(exc):
@@ -638,6 +662,19 @@ def _groq_param_size(name):
     return max(float(s) for s in sizes)
 
 
+# Models built for one language or one narrow job. They are chat models, so
+# nothing above filters them out, and being small they sorted to the front of
+# the unknown list -- which is how a question in English got answered by a model
+# trained for Arabic. Still usable when there is nothing else; just never first.
+_GROQ_SPECIALISED = ('allam', 'arabic', 'orpheus', 'safeguard', 'jais',
+                     'sabia', 'saba', 'medical', 'coder', 'code-')
+
+
+def _groq_is_specialised(name):
+    low = (name or '').lower()
+    return any(s in low for s in _GROQ_SPECIALISED)
+
+
 def _groq_live_models(client):
     """Model ids Groq will accept right now, best-first. Never raises."""
     if time.time() - _GROQ_LIVE['at'] < _GROQ_LIVE_TTL and _GROQ_LIVE['names']:
@@ -679,11 +716,11 @@ def _groq_live_models(client):
     known = [m for m in known if not _shares_search_budget(m)]
     rest = [m for m in rest if not _shares_search_budget(m)]
     shared = [m for m in names if _shares_search_budget(m)]
-    # Smallest first among the unknown. On a free tier the per-minute token
-    # budget shrinks as the model grows, so the big ones are the ones that
-    # refuse a short question for being too large. A name with no size in it
-    # sorts as mid-range rather than being pushed to either end.
-    rest.sort(key=lambda n: (_groq_param_size(n), n))
+    # General before specialised, then smallest first. On a free tier the
+    # per-minute token budget shrinks as the model grows, so the big ones are
+    # the ones that refuse a short question for being too large. A name with no
+    # size in it sorts as mid-range rather than being pushed to either end.
+    rest.sort(key=lambda n: (_groq_is_specialised(n), _groq_param_size(n), n))
     _GROQ_LIVE['names'] = known + rest + shared
     _GROQ_LIVE['at'] = time.time()
     return _GROQ_LIVE['names']
@@ -812,9 +849,10 @@ def _groq_call(client, prefer=None, only=False, **kwargs):
     """
     pinned = getattr(settings, 'EDDIE_GROQ_MODEL', '')
     available = _groq_live_models(client)
+    sticky = _groq_sticky()
     candidates = [pinned] if pinned else (
-        ([_GROQ_WORKING] if _GROQ_WORKING in available else []) +
-        [m for m in available if m != _GROQ_WORKING]
+        ([sticky] if sticky in available else []) +
+        [m for m in available if m != sticky]
     )
     if prefer:
         candidates = [prefer] + [m for m in candidates if m != prefer]
@@ -865,6 +903,7 @@ def _groq_call(client, prefer=None, only=False, **kwargs):
         # would quietly route every "hi" through a web search.
         if not _is_search_model(name):
             globals()['_GROQ_WORKING'] = name
+            globals()['_GROQ_WORKING_AT'] = time.time()
         return result
     raise last if last else RuntimeError('no Groq model available')
 
