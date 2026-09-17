@@ -417,7 +417,12 @@ def _groq_client():
         return None
     try:
         from openai import OpenAI
-        return OpenAI(api_key=key, base_url='https://api.groq.com/openai/v1')
+        # The SDK defaults to a ten-minute timeout and two silent retries.
+        # Behind gunicorn, which gives up at thirty seconds, that is a worker
+        # hanging on a call whose answer nobody will ever see -- and the caller
+        # gets a 500 rather than a slow reply. Bound both.
+        return OpenAI(api_key=key, base_url='https://api.groq.com/openai/v1',
+                      timeout=20.0, max_retries=1)
     except Exception:
         return None
 
@@ -440,6 +445,11 @@ _GROQ_SEARCH_TURN_CHARS = 700
 # -- eight seconds of real work and "" at the end of it. The room that buys is
 # paid for by the short search prompt, which is ~370 tokens rather than 2,400.
 _GROQ_SEARCH_MAX_TOKENS = 4000
+
+# Stop starting new searches after this many seconds. A compound call takes six
+# to ten, and there still has to be room for a plain model to answer afterwards
+# inside one web request.
+_GROQ_SEARCH_DEADLINE = 13.0
 
 # Groq deprecated max_tokens in favour of max_completion_tokens. Deprecated is
 # one release away from rejected, and it is the number the per-minute budget is
@@ -843,9 +853,16 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
     # Only before any text has been shown. Once words are on screen, starting
     # a second answer underneath the first is worse than the error.
     attempts = search_models + [None]
+    began = time.time()
     for index, attempt in enumerate(attempts):
         last_attempt = index == len(attempts) - 1
         searching = attempt is not None
+        # Another search model is only worth trying if there is time left for
+        # it and for the answer after it.
+        if searching and index > 0 and time.time() - began > _GROQ_SEARCH_DEADLINE:
+            globals()['_GROQ_LAST_SEARCH_ERROR'] = (
+                'ran out of time for %s after %.1fs' % (attempt, time.time() - began))
+            continue
         # Falling back means the promise in the system prompt is no longer
         # true, so it goes with the model. Telling it that it can search when
         # it cannot is the whole family of bugs this keeps producing.
@@ -878,37 +895,22 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
                 while queue:
                     yield queue.pop(0)
 
-                # Groq charges the tokens you *declare* against the
-                # per-minute budget, and the search results land in the same
-                # one. So a 413 is worth one more go at a smaller declared
-                # answer before giving up on this model: less room to write in
-                # beats not searching at all. Below about 2,000 the model
-                # spends the lot reasoning and returns nothing, which is what
-                # 1,500 did, so that is the floor.
-                # Only a genuinely smaller second go. Asked for less than
-                # the floor to begin with, there is nothing to retry with.
-                first = min(max_tokens, _GROQ_SEARCH_MAX_TOKENS)
-                budgets = [first] if first <= 2400 else [first, 2400]
-                result = None
-                for budget in budgets:
-                    try:
-                        result = _groq_call(
-                            client,
-                            prefer=attempt,
-                            only=True,
-                            messages=_groq_messages(spec, this_system,
-                                                    searching=True),
-                            max_completion_tokens=budget,
-                        )
-                        break
-                    except Exception as exc:
-                        if budget != budgets[-1] and _groq_is_too_large(exc):
-                            import logging
-                            logging.getLogger(__name__).warning(
-                                '%s refused %d tokens as too large, retrying '
-                                'smaller', attempt, budget)
-                            continue
-                        raise
+                # One call per search model, and no more.
+                #
+                # This briefly retried each model at a smaller declared answer
+                # after a 413, which turned a searching turn into four
+                # sequential calls to a model that takes six to ten seconds
+                # each. A web request cannot afford that: the last healthy run
+                # took 11s for two calls, and gunicorn gives up at thirty. The
+                # 413 it was hedging against came from visit_website dragging
+                # whole pages into the request, which is fixed at the source.
+                result = _groq_call(
+                    client,
+                    prefer=attempt,
+                    only=True,
+                    messages=_groq_messages(spec, this_system, searching=True),
+                    max_completion_tokens=min(max_tokens, _GROQ_SEARCH_MAX_TOKENS),
+                )
                 picked = (getattr(result, 'choices', None) or [None])[0]
                 message = getattr(picked, 'message', None)
                 for found in _groq_executed_sources(message):
