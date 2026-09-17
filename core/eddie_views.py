@@ -1006,14 +1006,42 @@ def eddie_diag(request):
         import time as _t
         started = _t.time()
         try:
-            text, sources = eddie_providers._groq_once(
-                spec, eddie_search.SEARCH_SYSTEM, 1500)
+            # A raw call rather than _groq_once, so an empty answer can be
+            # explained rather than just reported. "ok: true, answer: ''" cost
+            # a round of this: the call had succeeded and the model had spent
+            # its whole token budget reasoning, and nothing said so.
+            raw = eddie_providers._groq_call(
+                client,
+                prefer=model,
+                messages=eddie_providers._groq_messages(
+                    spec, eddie_search.SEARCH_SYSTEM, searching=True),
+                max_completion_tokens=eddie_providers._GROQ_SEARCH_MAX_TOKENS,
+            )
+            choice = (getattr(raw, 'choices', None) or [None])[0]
+            message = getattr(choice, 'message', None)
+            text = (getattr(message, 'content', '') or '').strip()
+            usage = getattr(raw, 'usage', None)
             out['test'] = {
                 'ok': True,
                 'seconds': round(_t.time() - started, 2),
-                'answer': (text or '')[:600],
-                'sources': [s.get('url') for s in (sources or [])][:6],
+                'model_used': getattr(raw, 'model', None),
+                'finish_reason': getattr(choice, 'finish_reason', None),
+                'answer_chars': len(text),
+                'answer': text[:600],
+                'max_completion_tokens_sent':
+                    eddie_providers._GROQ_SEARCH_MAX_TOKENS,
+                'usage': {k: getattr(usage, k, None) for k in
+                          ('prompt_tokens', 'completion_tokens', 'total_tokens')}
+                         if usage else None,
+                'executed_tools': len(getattr(message, 'executed_tools', None) or []),
+                'sources': [x.get('url') for x in
+                            eddie_providers._groq_executed_sources(message)][:6],
             }
+            if not text:
+                out['test']['why_empty'] = (
+                    'The call succeeded but the model returned no text. '
+                    'finish_reason "length" means the token budget was spent '
+                    'on reasoning and tool calls before it wrote anything.')
         except Exception as exc:
             out['test'] = {
                 'ok': False,

@@ -433,7 +433,13 @@ _GROQ_SEARCH_TURN_CHARS = 700
 # ones the model produces, and a compound model's search spends that same
 # budget on the pages it reads. Declaring 2,000 for the answer leaves too
 # little for the searching. Enough for any reply a chat bubble should hold.
-_GROQ_SEARCH_MAX_TOKENS = 1500
+# Groq's own guidance for a compound system with tools is 3,000-4,000, and
+# the reason is that this budget is not just the reply: the model reasons and
+# runs its searches inside it before it writes a word. Set to 1,500 to dodge a
+# 413, it spent the lot on thinking and searching and returned an empty answer
+# -- eight seconds of real work and "" at the end of it. The room that buys is
+# paid for by the short search prompt, which is ~370 tokens rather than 2,400.
+_GROQ_SEARCH_MAX_TOKENS = 4000
 
 # Groq deprecated max_tokens in favour of max_completion_tokens. Deprecated is
 # one release away from rejected, and it is the number the per-minute budget is
@@ -835,6 +841,15 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
                 'Groq search model failed mid-turn (%s), answering without it',
                 str(exc)[:120])
             continue
+
+        # Succeeding with nothing to show is a failure too. A searching model
+        # that spends its whole budget reasoning returns no content and no
+        # error, and without this the turn ends as a blank reply.
+        if not text_open and not last_attempt:
+            import logging
+            logging.getLogger(__name__).warning(
+                'Groq search model returned no text, answering without it')
+            continue
         if sources:
             emit('sources', {'sources': sources[:8]})
         while queue:
@@ -860,7 +875,19 @@ def _groq_once(spec, system, max_tokens):
         return '', []
     message = choices[0].message
     sources = _groq_executed_sources(message) if prefer else []
-    return ((getattr(message, 'content', '') or '').strip(), sources[:8])
+    text = (getattr(message, 'content', '') or '').strip()
+    if not text and prefer:
+        # The searching model answered with nothing. Ask a plain one rather
+        # than handing back an empty string.
+        result = _groq_call(
+            client,
+            messages=_groq_messages(spec, system),
+            max_completion_tokens=min(max_tokens, _GROQ_MAX_TOKENS),
+        )
+        choices = getattr(result, 'choices', None) or []
+        if choices:
+            text = (getattr(choices[0].message, 'content', '') or '').strip()
+    return (text, sources[:8])
 
 
 # ---- Anthropic ------------------------------------------------------------
