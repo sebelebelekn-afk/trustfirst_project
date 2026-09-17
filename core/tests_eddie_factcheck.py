@@ -577,8 +577,9 @@ class SearchFallbackTests(SimpleTestCase):
         # This is the one that reached a user: the search model failed partway
         # through, the exception came out of the iteration rather than the
         # call, and the turn died showing "Request Entity Too Large".
-        client = self._client(stream_fail={'groq/compound': RuntimeError(
-            'Request Entity Too Large')})
+        client = self._client(stream_fail={
+            'groq/compound': RuntimeError('Request Entity Too Large'),
+            'groq/compound-mini': RuntimeError('Request Entity Too Large')})
         events = self._run(client)
         kinds = [k for k, _ in events]
         self.assertIn('text', kinds, 'the turn produced no answer at all')
@@ -588,7 +589,9 @@ class SearchFallbackTests(SimpleTestCase):
     def test_the_fallback_is_told_it_can_no_longer_search(self):
         # Otherwise "YOU CAN SEARCH THE WEB" is still above it and it writes
         # as though it did.
-        client = self._client(stream_fail={'groq/compound': RuntimeError('413')})
+        client = self._client(stream_fail={
+            'groq/compound': RuntimeError('413'),
+            'groq/compound-mini': RuntimeError('413')})
         self._run(client)
         second = client.sent[-1]
         system = second['messages'][0]['content']
@@ -615,6 +618,7 @@ class SearchFallbackTests(SimpleTestCase):
         # has nothing left to fall back to.
         client = self._client(
             stream_fail={'groq/compound': RuntimeError('413'),
+                         'groq/compound-mini': RuntimeError('413'),
                          'llama-3.3-70b-versatile': RuntimeError('boom'),
                          'llama-3.1-8b-instant': RuntimeError('boom'),
                          'openai/gpt-oss-120b': RuntimeError('boom')},
@@ -668,6 +672,15 @@ class SearchFallbackTests(SimpleTestCase):
         # And it arrives before the answer, so it is a status and not a report.
         self.assertLess(kinds.index('searching'), kinds.index('text'))
 
+    def test_mini_gets_a_go_before_search_is_abandoned(self):
+        # compound coming back empty is not a reason to stop searching when
+        # compound-mini is sitting right there on the same key.
+        client = self._client(stream_fail={'groq/compound': RuntimeError('413')})
+        self._run(client)
+        self.assertEqual(client.tried[:2], ['groq/compound', 'groq/compound-mini'])
+        self.assertNotIn('openai/gpt-oss-120b', client.tried,
+                         'fell through to a plain model while mini could answer')
+
     def test_compound_is_told_to_actually_use_its_tools(self):
         # Left to itself it answered a question about today's news with
         # executed_tools: 0, no sources, and an invented headline. The tools
@@ -694,7 +707,9 @@ class SearchFallbackTests(SimpleTestCase):
         self.assertNotIn('extra_headers', client.sent[0])
 
     def test_the_fallback_after_a_search_failure_is_also_clean(self):
-        client = self._client(stream_fail={'groq/compound': RuntimeError('413')})
+        client = self._client(stream_fail={
+            'groq/compound': RuntimeError('413'),
+            'groq/compound-mini': RuntimeError('413')})
         self._run(client)
         self.assertIn('extra_body', client.sent[0])       # the compound attempt
         self.assertNotIn('extra_body', client.sent[-1])   # the plain fallback

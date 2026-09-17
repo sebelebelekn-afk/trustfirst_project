@@ -505,6 +505,12 @@ _GROQ_MAX_TOKENS = 2000
 _GROQ_WORKING = None
 _GROQ_LAST_TRIED = []
 
+# Why the searching model did not answer, kept for the diagnostic. Every round
+# of this has been lost to the same thing: the fallback works, so the turn
+# succeeds, and the reason the search failed is written to a log nobody on a
+# free Render plan can read.
+_GROQ_LAST_SEARCH_ERROR = None
+
 
 def _groq_model():
     pinned = getattr(settings, 'EDDIE_GROQ_MODEL', '')
@@ -803,7 +809,16 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
 
     # A question that needs the web gets the searching model when this key has
     # one. Everything else stays on the fast chat models it has always used.
-    prefer = _groq_search_model(client) if spec.get('wants_search') else None
+    # Every searching model this key can reach, best first, then the plain
+    # models. compound returning nothing is not a reason to give up on
+    # searching altogether when compound-mini is sitting right there.
+    search_models = []
+    if spec.get('wants_search'):
+        _groq_search_model(client)                 # fills _GROQ_LIVE['search']
+        have = _GROQ_LIVE.get('search') or []
+        search_models = ([m for m in _GROQ_SEARCH_PREF if m in have]
+                         or list(have)[:2])
+    prefer = search_models[0] if search_models else None
     # Nothing is announced here. "Searching the web" used to be emitted at this
     # point, on the strength of having *chosen* a searching model -- and the
     # model then answered with executed_tools: 0 and searched nothing. The
@@ -820,7 +835,7 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
     #
     # Only before any text has been shown. Once words are on screen, starting
     # a second answer underneath the first is worse than the error.
-    attempts = [prefer, None] if prefer else [None]
+    attempts = search_models + [None]
     for index, attempt in enumerate(attempts):
         last_attempt = index == len(attempts) - 1
         searching = attempt is not None
@@ -832,7 +847,7 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
         # is not available after all" on top of every ordinary message too --
         # so "hi" and "how do I post a clip" would have been answered by a
         # model apologising for a search it had never attempted.
-        fell_back = prefer is not None and attempt is None
+        fell_back = bool(search_models) and attempt is None
         if searching:
             this_system = spec.get('search_system') or system
         elif fell_back:
@@ -873,6 +888,11 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
                         yield queue.pop(0)
 
                 answer = (getattr(message, 'content', '') or '').strip()
+                globals()['_GROQ_LAST_SEARCH_ERROR'] = None if answer else (
+                    'the search model returned no text (finish_reason=%s, '
+                    'tools run=%d)' % (
+                        getattr(picked, 'finish_reason', '?'),
+                        len(getattr(message, 'executed_tools', None) or [])))
                 if answer:
                     text_open = True
                     emit('text_start', {})
@@ -932,12 +952,15 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
                 while queue:
                     yield queue.pop(0)
         except Exception as exc:
+            if searching:
+                globals()['_GROQ_LAST_SEARCH_ERROR'] = '%s: %s' % (
+                    type(exc).__name__, str(exc)[:600])
             if text_open or last_attempt:
                 raise
             import logging
             logging.getLogger(__name__).warning(
                 'Groq search model failed mid-turn (%s), answering without it',
-                str(exc)[:120])
+                str(exc)[:200])
             continue
 
         # Succeeding with nothing to show is a failure too. A searching model
@@ -959,7 +982,16 @@ def _groq_once(spec, system, max_tokens):
     client = _groq_client()
     if client is None:
         return '', []
-    prefer = _groq_search_model(client) if spec.get('wants_search') else None
+    # Every searching model this key can reach, best first, then the plain
+    # models. compound returning nothing is not a reason to give up on
+    # searching altogether when compound-mini is sitting right there.
+    search_models = []
+    if spec.get('wants_search'):
+        _groq_search_model(client)                 # fills _GROQ_LIVE['search']
+        have = _GROQ_LIVE.get('search') or []
+        search_models = ([m for m in _GROQ_SEARCH_PREF if m in have]
+                         or list(have)[:2])
+    prefer = search_models[0] if search_models else None
     result = _groq_call(
         client,
         prefer=prefer,

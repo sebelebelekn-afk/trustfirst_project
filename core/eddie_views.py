@@ -1026,6 +1026,8 @@ def eddie_diag(request):
 
         events, text, sources = [], [], []
         queue = []
+        eddie_providers._GROQ_LAST_TRIED = []
+        eddie_providers._GROQ_LAST_SEARCH_ERROR = None
         started = _t.time()
 
         def emit(kind, data):
@@ -1050,10 +1052,12 @@ def eddie_diag(request):
                 'sources': sources[:6],
             })
             if 'searching' not in events:
-                decision['note'] = ('No search ran on this turn. If wants_search '
-                                    'is true the search model was asked and '
-                                    'returned nothing, and the answer came from '
-                                    'the fallback.')
+                decision['search_failure'] = (
+                    getattr(eddie_providers, '_GROQ_LAST_SEARCH_ERROR', None)
+                    or 'no search was attempted')
+                decision['note'] = ('No search ran. search_failure says why the '
+                                    'search model did not answer; the reply '
+                                    'above came from the fallback model.')
         except Exception as exc:
             decision.update({
                 'ok': False,
