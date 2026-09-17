@@ -635,14 +635,21 @@ _GROQ_SEARCH_PREF = ('groq/compound', 'groq/compound-mini')
 #
 # Left to itself it answered a question about today's news in eight seconds
 # with executed_tools: 0, no sources, and an invented headline. The tools have
-# to be named: compound_custom.tools.enabled_tools. visit_website goes with
-# web_search so it can open a result rather than only read the snippets.
+# to be named: compound_custom.tools.enabled_tools.
+#
+# web_search and nothing else. visit_website was in here too, so it could open
+# a result rather than read the snippet -- and opening a result means the whole
+# page arrives in the request. One run that worked reported prompt_tokens of
+# 16,178 for a one-sentence question; the rest came back 413 request_too_large,
+# on compound and compound-mini alike. Search snippets answer "what happened
+# today" perfectly well and cost a fraction of that. If a page ever genuinely
+# needs opening, it needs a smaller budget somewhere else first.
 #
 # These ride in extra_body and extra_headers because this talks to Groq over
 # the OpenAI SDK, which drops any keyword it does not recognise.
 _GROQ_COMPOUND_BODY = {
     'compound_custom': {
-        'tools': {'enabled_tools': ['web_search', 'visit_website']},
+        'tools': {'enabled_tools': ['web_search']},
     },
 }
 _GROQ_COMPOUND_HEADERS = {'Groq-Model-Version': 'latest'}
@@ -871,13 +878,37 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
                 while queue:
                     yield queue.pop(0)
 
-                result = _groq_call(
-                    client,
-                    prefer=attempt,
-                    only=True,
-                    messages=_groq_messages(spec, this_system, searching=True),
-                    max_completion_tokens=min(max_tokens, _GROQ_SEARCH_MAX_TOKENS),
-                )
+                # Groq charges the tokens you *declare* against the
+                # per-minute budget, and the search results land in the same
+                # one. So a 413 is worth one more go at a smaller declared
+                # answer before giving up on this model: less room to write in
+                # beats not searching at all. Below about 2,000 the model
+                # spends the lot reasoning and returns nothing, which is what
+                # 1,500 did, so that is the floor.
+                # Only a genuinely smaller second go. Asked for less than
+                # the floor to begin with, there is nothing to retry with.
+                first = min(max_tokens, _GROQ_SEARCH_MAX_TOKENS)
+                budgets = [first] if first <= 2400 else [first, 2400]
+                result = None
+                for budget in budgets:
+                    try:
+                        result = _groq_call(
+                            client,
+                            prefer=attempt,
+                            only=True,
+                            messages=_groq_messages(spec, this_system,
+                                                    searching=True),
+                            max_completion_tokens=budget,
+                        )
+                        break
+                    except Exception as exc:
+                        if budget != budgets[-1] and _groq_is_too_large(exc):
+                            import logging
+                            logging.getLogger(__name__).warning(
+                                '%s refused %d tokens as too large, retrying '
+                                'smaller', attempt, budget)
+                            continue
+                        raise
                 picked = (getattr(result, 'choices', None) or [None])[0]
                 message = getattr(picked, 'message', None)
                 for found in _groq_executed_sources(message):

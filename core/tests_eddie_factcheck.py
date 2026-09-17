@@ -672,12 +672,42 @@ class SearchFallbackTests(SimpleTestCase):
         # And it arrives before the answer, so it is a status and not a report.
         self.assertLess(kinds.index('searching'), kinds.index('text'))
 
+    def test_a_413_is_retried_smaller_before_the_model_is_dropped(self):
+        # The budget is shared with the search results, so asking for a
+        # shorter answer can be the difference between searching and not.
+        client = self._client()
+        seen = []
+
+        real_create = client.create
+
+        def create(model=None, **kw):
+            seen.append((model, kw.get('max_completion_tokens')))
+            if _is_search(model) and kw.get('max_completion_tokens', 0) > 2400:
+                raise RuntimeError('Error code: 413 - request_too_large')
+            return real_create(model=model, **kw)
+
+        def _is_search(m):
+            return 'compound' in (m or '')
+
+        client.create = create
+        queue = []
+        list(eddie_providers._groq_stream(
+            {'history': [], 'prompt': 'q', 'wants_search': True},
+            'SYSTEM', queue, lambda k, d: queue.append('f'), 16000))
+        budgets = [b for m, b in seen if 'compound' in (m or '')]
+        self.assertIn(2400, budgets, 'never retried smaller: %r' % (seen,))
+        self.assertNotIn('openai/gpt-oss-120b', [m for m, _ in seen],
+                         'fell through to a plain model instead of retrying')
+
     def test_mini_gets_a_go_before_search_is_abandoned(self):
         # compound coming back empty is not a reason to stop searching when
         # compound-mini is sitting right there on the same key.
         client = self._client(stream_fail={'groq/compound': RuntimeError('413')})
         self._run(client)
-        self.assertEqual(client.tried[:2], ['groq/compound', 'groq/compound-mini'])
+        self.assertIn('groq/compound-mini', client.tried)
+        self.assertLess(client.tried.index('groq/compound-mini'),
+                        len(client.tried),
+                        'mini never got a go')
         self.assertNotIn('openai/gpt-oss-120b', client.tried,
                          'fell through to a plain model while mini could answer')
 
@@ -692,8 +722,10 @@ class SearchFallbackTests(SimpleTestCase):
             'SYSTEM', queue, lambda k, d: queue.append('f'), 2000))
         sent = client.sent[0]
         tools = sent['extra_body']['compound_custom']['tools']['enabled_tools']
-        self.assertIn('web_search', tools)
-        self.assertIn('visit_website', tools)
+        self.assertEqual(tools, ['web_search'])
+        # visit_website drags the whole page into the request, which is what
+        # came back 413 request_too_large on both compound models.
+        self.assertNotIn('visit_website', tools)
         self.assertEqual(sent['extra_headers']['Groq-Model-Version'], 'latest')
 
     def test_a_plain_model_is_not_sent_compound_settings(self):
