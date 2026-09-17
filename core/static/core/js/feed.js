@@ -55775,7 +55775,10 @@ function _eddieTurnHTML(t, i) {
     // is not. Each state says what is actually happening: "Searching the web"
     // on an image request was a small lie the old shared status told.
     var status = '';
-    if (t.status === 'thinking' && !t.thinking) {
+    if (t.status === 'waiting') {
+        status = '<div class="eddie-status"><i class="fa-regular fa-clock"></i>' +
+            '<span class="eddie-shimmer">Waiting for Eddie</span></div>';
+    } else if (t.status === 'thinking' && !t.thinking) {
         // Only until the thought summary itself starts arriving -- after that
         // the streaming thoughts above are the better progress indicator.
         status = '<div class="eddie-status"><i class="fa-regular fa-lightbulb"></i>' +
@@ -56138,7 +56141,10 @@ function _eddieWantsImage(text) {
 
 async function _eddieAsk(text, attachments) {
     _eddie.turns.push({ role: 'user', content: text, attachments: attachments });
-    var turn = { role: 'assistant', content: '', thinking: '', sources: [], status: 'thinking', showThinking: true };
+    // Waiting, not thinking. Nothing has reached the server yet, and on a
+    // host that sleeps that wait is real and sometimes long. Calling it
+    // thinking was the app inventing an activity to show.
+    var turn = { role: 'assistant', content: '', thinking: '', sources: [], status: 'waiting', showThinking: true };
     _eddie.turns.push(turn);
     _eddie.busy = true;
     _eddieRender();
@@ -56216,8 +56222,14 @@ async function _eddieAsk(text, attachments) {
 }
 
 function _eddieEvent(turn, ev) {
+    // Anything at all from the server means the wait is over.
+    if (turn.status === 'waiting' && ev.type !== 'conversation') turn.status = 'thinking';
+
     if (ev.type === 'conversation') { _eddie.convoId = ev.id || _eddie.convoId; }
+    else if (ev.type === 'working') { if (turn.status === 'waiting') turn.status = 'thinking'; }
     else if (ev.type === 'thinking') { turn.thinking += ev.text || ''; turn.status = 'thinking'; }
+    else if (ev.type === 'thinking_start') { turn.status = 'thinking'; }
+    // Only sent once a search has actually run, so this is never a guess.
     else if (ev.type === 'searching') { turn.status = 'searching'; }
     else if (ev.type === 'text') { turn.content += ev.text || ''; turn.status = 'writing'; }
     else if (ev.type === 'sources') { turn.sources = ev.sources || []; }
@@ -56234,7 +56246,7 @@ function _eddieEvent(turn, ev) {
 // such header, so it would have answered 401 to the one person entitled to
 // read it. Admin-only, checked on the server against the users table.
 async function _eddieRunDiagnostic(turn) {
-    turn.status = 'thinking';
+    turn.status = 'waiting';
     _eddieRender();
     try {
         var token = await _eddieToken();

@@ -789,10 +789,10 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
     # A question that needs the web gets the searching model when this key has
     # one. Everything else stays on the fast chat models it has always used.
     prefer = _groq_search_model(client) if spec.get('wants_search') else None
-    if prefer:
-        emit('searching', {'name': 'web_search'})
-        while queue:
-            yield queue.pop(0)
+    # Nothing is announced here. "Searching the web" used to be emitted at this
+    # point, on the strength of having *chosen* a searching model -- and the
+    # model then answered with executed_tools: 0 and searched nothing. The
+    # status now waits for evidence, below.
 
     # Two goes: the searching model, then a plain one.
     #
@@ -825,6 +825,7 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
         else:
             this_system = system
         text_open = False
+        said_searching = False
         sources, seen = [], set()
         try:
             stream = _groq_call(
@@ -836,6 +837,14 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
                                           else _GROQ_MAX_TOKENS),
                 stream=True,
             )
+            # The call was accepted and the model is producing. Until this
+            # point the browser was waiting on the server, which on a host that
+            # sleeps is a real and sometimes long thing to be doing, and worth
+            # saying rather than calling it thinking.
+            emit('working', {})
+            while queue:
+                yield queue.pop(0)
+
             for chunk in stream:
                 choices = getattr(chunk, 'choices', None) or []
                 if not choices:
@@ -853,6 +862,11 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
                     for holder in (delta, getattr(choices[0], 'message', None)):
                         for found in _groq_executed_sources(holder):
                             _add_source(found['url'], found['title'], sources, seen)
+                    # A tool result is proof a search actually happened, which
+                    # is the only thing that earns the words on screen.
+                    if sources and not said_searching:
+                        said_searching = True
+                        emit('searching', {'name': 'web_search'})
                 while queue:
                     yield queue.pop(0)
         except Exception as exc:

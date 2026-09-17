@@ -367,6 +367,8 @@ class _FakeGroq:
         # is made -- the case that reached a user.
         self.stream_fail = stream_fail or {}
         self.emit_before_fail = emit_before_fail
+        # executed_tools to hand back, so a real search can be simulated.
+        self.tool_results = None
         self.sent = []
         self.tried = []
         self.models = type('M', (), {'list': self._list})()
@@ -387,10 +389,14 @@ class _FakeGroq:
         return self._stream(model)
 
     def _stream(self, model):
-        def chunk(text):
-            delta = type('D', (), {'content': text, 'type': 'text'})()
+        def chunk(text, tools=None):
+            delta = type('D', (), {'content': text, 'type': 'text',
+                                   'executed_tools': tools})()
             choice = type('C', (), {'delta': delta, 'message': None})()
             return type('K', (), {'choices': [choice]})()
+
+        if self.tool_results and model in self.tool_results:
+            yield chunk(None, self.tool_results[model])
 
         boom = self.stream_fail.get(model)
         if boom and self.emit_before_fail:
@@ -567,7 +573,6 @@ class SearchFallbackTests(SimpleTestCase):
             'Request Entity Too Large')})
         events = self._run(client)
         kinds = [k for k, _ in events]
-        self.assertIn('searching', kinds)
         self.assertIn('text', kinds, 'the turn produced no answer at all')
         self.assertIn('groq/compound', client.tried)
         self.assertGreater(len(client.tried), 1, 'never fell back')
@@ -629,6 +634,25 @@ class SearchFallbackTests(SimpleTestCase):
             {'history': [], 'prompt': 'hi'}, 'FULL PROMPT',
             queue, lambda k, d: queue.append('f'), 2000))
         self.assertEqual(client.sent[0]['messages'][0]['content'], 'FULL PROMPT')
+
+    def test_searching_is_only_claimed_once_a_search_has_happened(self):
+        # It used to be announced on the strength of having *picked* a
+        # searching model. The model then answered with executed_tools: 0,
+        # having searched nothing, under a status line saying it had.
+        client = self._client()
+        kinds = [k for k, _ in self._run(client)]
+        self.assertIn('working', kinds)
+        self.assertNotIn('searching', kinds)
+
+    def test_searching_is_claimed_as_soon_as_a_search_has(self):
+        client = self._client()
+        client.tool_results = {'groq/compound': [
+            {'type': 'search', 'output': {'results': [
+                {'url': 'https://reuters.com/x', 'title': 'Reuters'}]}}]}
+        kinds = [k for k, _ in self._run(client)]
+        self.assertIn('searching', kinds)
+        # And it arrives before the answer, so it is a status and not a report.
+        self.assertLess(kinds.index('searching'), kinds.index('text'))
 
     def test_compound_is_told_to_actually_use_its_tools(self):
         # Left to itself it answered a question about today's news with
