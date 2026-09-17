@@ -624,6 +624,22 @@ def _groq_live_models(client):
 
 _GROQ_SEARCH_PREF = ('groq/compound', 'groq/compound-mini')
 
+# A compound model does not search unless you ask it to.
+#
+# Left to itself it answered a question about today's news in eight seconds
+# with executed_tools: 0, no sources, and an invented headline. The tools have
+# to be named: compound_custom.tools.enabled_tools. visit_website goes with
+# web_search so it can open a result rather than only read the snippets.
+#
+# These ride in extra_body and extra_headers because this talks to Groq over
+# the OpenAI SDK, which drops any keyword it does not recognise.
+_GROQ_COMPOUND_BODY = {
+    'compound_custom': {
+        'tools': {'enabled_tools': ['web_search', 'visit_website']},
+    },
+}
+_GROQ_COMPOUND_HEADERS = {'Groq-Model-Version': 'latest'}
+
 
 def _is_search_model(name):
     return 'compound' in (name or '').lower()
@@ -718,7 +734,13 @@ def _groq_call(client, prefer=None, **kwargs):
     last = None
     for name in candidates:
         try:
-            result = client.chat.completions.create(model=name, **kwargs)
+            call = dict(kwargs)
+            if _is_search_model(name):
+                call['extra_body'] = dict(call.get('extra_body') or {},
+                                          **_GROQ_COMPOUND_BODY)
+                call['extra_headers'] = dict(call.get('extra_headers') or {},
+                                             **_GROQ_COMPOUND_HEADERS)
+            result = client.chat.completions.create(model=name, **call)
         except Exception as exc:
             last = exc
             retry = _groq_is_missing_model(exc) or _groq_is_too_large(exc)

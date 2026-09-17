@@ -630,6 +630,37 @@ class SearchFallbackTests(SimpleTestCase):
             queue, lambda k, d: queue.append('f'), 2000))
         self.assertEqual(client.sent[0]['messages'][0]['content'], 'FULL PROMPT')
 
+    def test_compound_is_told_to_actually_use_its_tools(self):
+        # Left to itself it answered a question about today's news with
+        # executed_tools: 0, no sources, and an invented headline. The tools
+        # have to be named explicitly.
+        client = self._client()
+        queue = []
+        list(eddie_providers._groq_stream(
+            {'history': [], 'prompt': 'q', 'wants_search': True},
+            'SYSTEM', queue, lambda k, d: queue.append('f'), 2000))
+        sent = client.sent[0]
+        tools = sent['extra_body']['compound_custom']['tools']['enabled_tools']
+        self.assertIn('web_search', tools)
+        self.assertIn('visit_website', tools)
+        self.assertEqual(sent['extra_headers']['Groq-Model-Version'], 'latest')
+
+    def test_a_plain_model_is_not_sent_compound_settings(self):
+        # compound_custom on a model that has no such tools is a bad request.
+        client = self._client()
+        queue = []
+        list(eddie_providers._groq_stream(
+            {'history': [], 'prompt': 'hi'}, 'SYSTEM',
+            queue, lambda k, d: queue.append('f'), 2000))
+        self.assertNotIn('extra_body', client.sent[0])
+        self.assertNotIn('extra_headers', client.sent[0])
+
+    def test_the_fallback_after_a_search_failure_is_also_clean(self):
+        client = self._client(stream_fail={'groq/compound': RuntimeError('413')})
+        self._run(client)
+        self.assertIn('extra_body', client.sent[0])       # the compound attempt
+        self.assertNotIn('extra_body', client.sent[-1])   # the plain fallback
+
     def test_groq_wording_for_413_is_recognised(self):
         for text in ('Request Entity Too Large', 'Error code: 413',
                      'payload too large', 'request too large'):
