@@ -440,6 +440,19 @@ class GroqSearchModelTests(SimpleTestCase):
         self.assertEqual(eddie_providers._GROQ_LIVE['search'],
                          ['groq/compound', 'groq/compound-mini'])
 
+    def test_chat_stays_off_the_model_compound_runs_on(self):
+        # Groq's token budget is per model and compound has no budget of its
+        # own: it spends openai/gpt-oss-120b's, which is 8,000 a minute free.
+        # That model was also first for ordinary chat, so every plain answer --
+        # including every fallback from a failed search -- spent what the next
+        # search needed. Search fails, fall back, next search fails.
+        names = eddie_providers._groq_live_models(_FakeGroq([
+            'openai/gpt-oss-120b', 'allam-2-7b', 'openai/gpt-oss-20b',
+            'groq/compound']))
+        self.assertEqual(names[-1], 'openai/gpt-oss-120b',
+                         'chat would still be starving the search: %r' % (names,))
+        self.assertGreater(len(names), 1, 'nothing left to chat on')
+
     def test_the_best_available_search_model_is_chosen(self):
         self.assertEqual(
             eddie_providers._groq_search_model(_FakeGroq(SERVED)),

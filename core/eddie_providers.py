@@ -512,6 +512,25 @@ _GROQ_FALLBACKS = [
 # short question is never refused for being long.
 _GROQ_MAX_TOKENS = 2000
 
+# The models a compound system runs on internally.
+#
+# Groq's per-minute token budget is per model, and compound does not get its
+# own: it spends openai/gpt-oss-120b's, which on the free tier is 8,000 a
+# minute. A search reads whole result pages into that, so one search very
+# nearly fills it -- "Limit 8000, Used 7488" is what the probe caught.
+#
+# gpt-oss-120b was also first in the ordinary chat rotation, so every plain
+# answer, including every fallback from a failed search, spent the budget the
+# next search needed. That is the circle Eddie was stuck in: search fails ->
+# fall back to gpt-oss-120b -> which is why the next search fails. Ordinary
+# chat now uses anything else it can, and leaves that budget to the searching.
+_GROQ_COMPOUND_INNER = ('openai/gpt-oss-120b',)
+
+
+def _shares_search_budget(name):
+    return (name or '') in _GROQ_COMPOUND_INNER
+
+
 _GROQ_WORKING = None
 _GROQ_LAST_TRIED = []
 
@@ -655,12 +674,17 @@ def _groq_live_models(client):
     # added, so a replacement model is reachable without a code change.
     known = [m for m in _GROQ_FALLBACKS if m in names]
     rest = [m for m in names if m not in _GROQ_FALLBACKS]
+    # Whatever compound runs on goes last whatever else it is, because chatting
+    # on it is what starves the searching.
+    known = [m for m in known if not _shares_search_budget(m)]
+    rest = [m for m in rest if not _shares_search_budget(m)]
+    shared = [m for m in names if _shares_search_budget(m)]
     # Smallest first among the unknown. On a free tier the per-minute token
     # budget shrinks as the model grows, so the big ones are the ones that
     # refuse a short question for being too large. A name with no size in it
     # sorts as mid-range rather than being pushed to either end.
     rest.sort(key=lambda n: (_groq_param_size(n), n))
-    _GROQ_LIVE['names'] = known + rest
+    _GROQ_LIVE['names'] = known + rest + shared
     _GROQ_LIVE['at'] = time.time()
     return _GROQ_LIVE['names']
 
