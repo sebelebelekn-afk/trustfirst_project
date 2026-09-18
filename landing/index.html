@@ -6,7 +6,20 @@
 <title>TrustFirst · A social app that knows who is real</title>
 <meta name="description" content="A social app that knows who is real. Accounts can be verified against a real identity, messages are encrypted, and creators keep 80% of every gift. Free on Android and iPhone.">
 <meta name="theme-color" content="#000000">
+<!-- Four icons, not one, because Google is the fussiest reader of them.
+     The SVG alone was live and correct for days and Google kept showing the
+     previous mark in its results: it caches a favicon separately from the page
+     and re-fetches it on its own slow schedule, and /favicon.ico -- the address
+     it falls back to, and the only one some crawlers and older browsers ask
+     for -- was a 404 here, so there was nothing newer for it to find.
+     Google reads the icon at 48px and wants a multiple of that, hence 48 and
+     96; 192 is for a phone adding the site to a home screen. All four are
+     rasterised from the same mark as icon.svg. -->
+<link rel="icon" href="favicon.ico" sizes="any">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="icon" href="icon-48.png" type="image/png" sizes="48x48">
+<link rel="icon" href="icon-96.png" type="image/png" sizes="96x96">
+<link rel="apple-touch-icon" href="icon-192.png">
 <!-- Asked for while the HTML is still parsing, so the screenshot is
      already there by the time somebody scrolls to it. -->
 <link rel="preload" as="image" href="shot-clips.webp" type="image/webp">
@@ -28,6 +41,56 @@
 <meta name="twitter:title" content="A social app that knows who is real.">
 <meta name="twitter:description" content="Verified accounts, encrypted messages, and creators keep 80% of every gift.">
 <meta name="twitter:image" content="https://gettrustfirst.co.za/og.jpg">
+
+<!-- What the logo actually is, said in the one format Google reads as an
+     assertion rather than a hint. A <link rel="icon"> is a request; an
+     Organization with a logo is a statement, and it is what a search result,
+     a knowledge panel and an AI summary read when deciding what to show.
+     Worth having for a second reason: "TrustFirst" is a crowded name -- a
+     funeral-cost calculator owns trustfirst.co.za, and there are firms by that
+     name in architecture, finance, management and AI governance. This says
+     which one this is, in South Africa, making a social app. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://gettrustfirst.co.za/#org",
+      "name": "TrustFirst",
+      "url": "https://gettrustfirst.co.za/",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://gettrustfirst.co.za/icon-512.png",
+        "width": 512,
+        "height": 512
+      },
+      "image": "https://gettrustfirst.co.za/og.jpg",
+      "description": "A social app that knows who is real. Accounts can be verified against a real identity, messages are encrypted, and creators keep 80% of every gift.",
+      "areaServed": "ZA",
+      "sameAs": ["https://app.gettrustfirst.co.za/"]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://gettrustfirst.co.za/#site",
+      "url": "https://gettrustfirst.co.za/",
+      "name": "TrustFirst",
+      "inLanguage": "en-ZA",
+      "publisher": { "@id": "https://gettrustfirst.co.za/#org" }
+    },
+    {
+      "@type": "MobileApplication",
+      "name": "TrustFirst",
+      "operatingSystem": "Android, iOS",
+      "applicationCategory": "SocialNetworkingApplication",
+      "url": "https://app.gettrustfirst.co.za/",
+      "installUrl": "https://gettrustfirst.co.za/",
+      "publisher": { "@id": "https://gettrustfirst.co.za/#org" },
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "ZAR" }
+    }
+  ]
+}
+</script>
 
 <style>
 /* ---------------------------------------------------------------------------

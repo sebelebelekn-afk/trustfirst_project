@@ -1,0 +1,12 @@
+# Everything here is public and meant to be found.
+#
+# There was no robots.txt at all before this, which is not the same as an empty
+# one: every crawler asked for it, got a 404, and carried on guessing. The
+# sitemap line is the point of the file -- it is the only way to tell a crawler
+# where to look without waiting for it to wander in, and the only place to say
+# when a page last changed.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://gettrustfirst.co.za/sitemap.xml

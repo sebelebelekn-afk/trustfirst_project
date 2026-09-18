@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- One page, which is the whole marketing site. It is here for lastmod: that
+     is how Google is told the page changed and is worth re-crawling, which is
+     what a stale favicon and a stale description both need. Move the date when
+     the page changes; a date that never moves teaches Google to ignore it. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://gettrustfirst.co.za/</loc>
+    <lastmod>2026-09-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>
