@@ -23,7 +23,29 @@
 <!-- Home-screen (installed) icon. iOS uses one; light variant offered as a hint. -->
 <link rel="apple-touch-icon" href="/static/core/icon-dark-180.png?v=40">
 <link rel="apple-touch-icon" media="(prefers-color-scheme: light)" href="/static/core/icon-light-180.png?v=40">
-<title>TrustFirst</title>
+<title>{{ seo.title|default:"TrustFirst" }}</title>
+{% if seo %}
+<!-- What a shared link says about itself. Filled per URL by core/seo.py:
+     a post, a clip or a profile when the link points at one the app would
+     show a stranger, the app itself otherwise. Read by WhatsApp, X, iMessage
+     and Google, none of which run the script below; the app ignores it. -->
+<meta name="description" content="{{ seo.description }}">
+<link rel="canonical" href="{{ seo.url }}">
+{% if seo.noindex %}<meta name="robots" content="noindex">{% endif %}
+<meta property="og:site_name" content="TrustFirst">
+<meta property="og:type" content="{{ seo.type }}">
+<meta property="og:url" content="{{ seo.url }}">
+<meta property="og:title" content="{{ seo.title }}">
+<meta property="og:description" content="{{ seo.description }}">
+<meta property="og:image" content="{{ seo.image }}">
+{% if seo.video %}<meta property="og:video" content="{{ seo.video }}">
+<meta property="og:video:secure_url" content="{{ seo.video }}">{% endif %}
+<meta name="twitter:card" content="{{ seo.card }}">
+<meta name="twitter:title" content="{{ seo.title }}">
+<meta name="twitter:description" content="{{ seo.description }}">
+<meta name="twitter:image" content="{{ seo.image }}">
+{% if seo_ld %}<script type="application/ld+json">{{ seo_ld|safe }}</script>{% endif %}
+{% endif %}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -4435,7 +4457,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=300"></script>
+<script src="{% static 'core/js/feed.js' %}?v=301"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=76"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

@@ -6596,6 +6596,9 @@ function loadProfileReels(container) {
                 : '<video src="' + escapeHtml(videoUrl) + '#t=0.1" style="width:100%;height:100%;object-fit:cover;opacity:0.85;" muted playsinline preload="metadata" onloadedmetadata="try{this.currentTime=0.1;}catch(e){}"></video>') +
                             '<div style="position:absolute;bottom:6px;left:6px;color:white;font-size:10px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,0.9);"><i class="fa-solid fa-play"></i> ' + (clip.view_count || 0) + '</div></div>';
                     });
+                    // Older clips of mine with no thumbnail get one now, if
+                    // the bucket lets this origin read them. See the function.
+                    try { _tcBackfillThumbs(window._profileClips || r.data); } catch (e) { /* cosmetic */ }
                 } else if (!totalDraftCount) {
                     container.innerHTML += '<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#888;font-size:13px;"><i class="fa-solid fa-film" style="font-size:32px;color:#ccc;display:block;margin-bottom:12px;"></i>No clips yet</div>';
                 }
@@ -46769,6 +46772,119 @@ function openMoreOptionsScreen() {
     openPage('more-options-overlay');
 }
 
+// Shrink a big video before it leaves the phone, if this browser can.
+//
+// VideoCompressor sat in this file with nothing calling it, so every clip went
+// up at whatever size the camera made it -- on South African mobile data, a
+// reason not to post. It only re-encodes when the file is at least its
+// maxFileSize; a smaller file is returned untouched in one metadata read.
+//
+// Everything here is bounded and everything falls back to the original. The
+// re-encode runs at playback speed, so a minute of video takes a minute, and
+// a probe that never answers (a codec this browser cannot decode) must not
+// hold the upload hostage: five seconds for the probe, three minutes for the
+// encode, and the original file if either passes.
+async function _tcMaybeCompress(blob) {
+    try {
+        if (!window.VideoCompressor || !VideoCompressor.isSupported()) return blob;
+        if (!blob || blob.size < VideoCompressor.maxFileSize) return blob;
+        var timeout = function (ms) { return new Promise(function (res) { setTimeout(function () { res(null); }, ms); }); };
+        var info = await Promise.race([VideoCompressor.getVideoInfo(blob), timeout(5000)]);
+        if (!info) return blob;
+        showToast('Shrinking the video before upload…');
+        var out = await Promise.race([VideoCompressor.compress(blob), timeout(180000)]);
+        if (out && out.size > 0 && out.size < blob.size) {
+            console.debug('[TrustClip] compressed', Math.round(blob.size / 1048576) + 'MB ->', Math.round(out.size / 1048576) + 'MB');
+            return out;
+        }
+        return blob;
+    } catch (e) {
+        console.warn('[TrustClip] compression skipped:', e && e.message);
+        return blob;
+    }
+}
+
+// One JPEG frame from a local video, or null. The file is the person's own
+// blob, so the canvas is not tainted -- unlike a frame taken from the stored
+// URL, which R2 serves without CORS headers. generateThumbnail never rejects,
+// so it is raced against a clock.
+async function _tcFrameFromBlob(blob) {
+    try {
+        if (!blob || !window.VideoCompressor) return null;
+        var frame = await Promise.race([
+            VideoCompressor.generateThumbnail(blob, 1),
+            new Promise(function (res) { setTimeout(function () { res(null); }, 8000); })
+        ]);
+        if (frame && frame.size > 0) return frame;
+    } catch (e) { /* fall through to the editor's frame */ }
+    // The editor may still be showing a decoded frame.
+    try {
+        var dataUrl = _edCaptureThumb();
+        if (dataUrl) return await (await fetch(dataUrl)).blob();
+    } catch (e) { /* nothing to be had */ }
+    return null;
+}
+
+// Give the person's own older clips a thumbnail, from the profile grid.
+//
+// Every clip posted before today has thumbnail_url null, because the cover was
+// only uploaded when somebody used Edit cover. The stored video is the only
+// copy of those, and drawing it to a canvas needs the bucket to allow this
+// origin (a CORS rule on R2). Until that rule exists this silently does
+// nothing, which is the point: it can be shipped before the rule and starts
+// working the moment the rule is added, one profile visit at a time.
+var _tcBackfilled = {};
+async function _tcBackfillThumbs(clips) {
+    if (!window.sb || !currentUser || !Array.isArray(clips)) return;
+    var todo = clips.filter(function (c) {
+        return c && c.id && !c.thumbnail_url && (c.media_url || c.video_url || c.videoUrl) && !_tcBackfilled[c.id];
+    }).slice(0, 5);
+    for (var i = 0; i < todo.length; i++) {
+        var c = todo[i];
+        _tcBackfilled[c.id] = true;
+        try {
+            // Mine, and still without one -- cheap to ask, and it means an
+            // upload is never made for a clip that is not ours to update.
+            var own = await sb.from('trustclips').select('id,thumbnail_url').eq('id', c.id).eq('user_id', currentUser.id).maybeSingle();
+            if (!own || !own.data || own.data.thumbnail_url) continue;
+            var frame = await _tcFrameFromUrl(c.media_url || c.video_url || c.videoUrl);
+            if (!frame) continue;
+            var url = await tfUploadPublicMedia(frame, 'image', 'trustclips', currentUser.id + '/' + c.id + '_cover.jpg');
+            if (!url) continue;
+            await sb.from('trustclips').update({ thumbnail_url: url }).eq('id', c.id).eq('user_id', currentUser.id);
+            c.thumbnail_url = url;
+        } catch (e) {
+            console.debug('[TrustClip] backfill skipped for', c.id, e && e.message);
+        }
+    }
+}
+
+function _tcFrameFromUrl(src) {
+    return new Promise(function (resolve) {
+        var done = false;
+        var finish = function (v) { if (!done) { done = true; resolve(v || null); } };
+        try {
+            var v = document.createElement('video');
+            v.crossOrigin = 'anonymous';
+            v.muted = true; v.playsInline = true; v.preload = 'auto';
+            v.onerror = function () { finish(null); };
+            v.onloadeddata = function () { try { v.currentTime = Math.min(1, (v.duration || 10) * 0.1); } catch (e) { finish(null); } };
+            v.onseeked = function () {
+                try {
+                    var canvas = document.createElement('canvas');
+                    canvas.width = 320;
+                    canvas.height = Math.round(320 * (v.videoHeight / v.videoWidth)) || 568;
+                    canvas.getContext('2d').drawImage(v, 0, 0, canvas.width, canvas.height);
+                    // Throws SecurityError when the bucket sent no CORS header.
+                    canvas.toBlob(function (b) { finish(b); }, 'image/jpeg', 0.8);
+                } catch (e) { finish(null); }
+            };
+            v.src = src;
+            setTimeout(function () { finish(null); }, 10000);
+        } catch (e) { finish(null); }
+    });
+}
+
 async function submitTrustClip() {
     var caption = document.getElementById('tcCaption');
     var text = caption ? caption.value.trim() : '';
@@ -46837,6 +46953,11 @@ async function submitTrustClip() {
                 !!(window.edState && edState.clips && edState.clips[0]));
         }
 
+        // A big file is shrunk here first; a small one comes straight back.
+        if (blob && window.sb && currentUser) {
+            blob = await _tcMaybeCompress(blob);
+        }
+
         if (blob && window.sb && currentUser) {
             // Isolate the storage upload so a failure here does NOT skip the DB insert below.
             try {
@@ -46870,6 +46991,19 @@ async function submitTrustClip() {
                 var coverPath = currentUser.id + '/' + clipId + '_cover.jpg';
                 thumbnailUrl = await tfUploadPublicMedia(coverBlob, 'image', 'trustclips', coverPath);
             } catch (e) { console.warn('[TrustClip] cover upload failed:', e && e.message); }
+        }
+
+        // No cover chosen, so take a frame ourselves. This block is why every
+        // clip in the table had thumbnail_url null: the one above only ran
+        // when somebody had opened Edit cover, and nobody had.
+        if (!thumbnailUrl && blob && window.sb && currentUser) {
+            try {
+                var autoFrame = await _tcFrameFromBlob(blob);
+                if (autoFrame) {
+                    thumbnailUrl = await tfUploadPublicMedia(autoFrame, 'image', 'trustclips',
+                        currentUser.id + '/' + clipId + '_cover.jpg');
+                }
+            } catch (e) { console.warn('[TrustClip] auto thumbnail failed:', e && e.message); }
         }
 
         // The EDL was captured against blob: URLs, which mean nothing once the clip

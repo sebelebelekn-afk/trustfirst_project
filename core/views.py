@@ -1,16 +1,55 @@
 from django.conf import settings
-from django.http import FileResponse, JsonResponse
+from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import render
 
-def feed(request, **kwargs):
+from . import seo
+
+
+def feed(request, target_id=None, username=None):
     """The whole app is this one page.
 
     Shared links (/post/<id>, /clip/<id>, /profile/<name>) route here too and
-    capture an id in the path; the client reads location.pathname on boot to open
-    what was shared. The captures are swallowed here rather than being handed to
-    the template, which is why this takes **kwargs.
+    capture an id in the path; the client reads location.pathname on boot to
+    open what was shared.
+
+    The captures used to be swallowed. They are now the one thing this view
+    does with any care: a link pasted into WhatsApp or X is read by a crawler
+    that runs no JavaScript, and what it found here was <title>TrustFirst</title>
+    and nothing else, so every shared post arrived as a bare grey URL. The
+    <head> now describes what the link points at -- see core/seo.py for what
+    is shown and, as importantly, what is not.
     """
-    return render(request, 'core/feed.html')
+    name = getattr(getattr(request, 'resolver_match', None), 'url_name', '') or ''
+    kind = {'post_permalink': 'post', 'clip_permalink': 'clip',
+            'profile_permalink': 'profile'}.get(name)
+    if kind:
+        tags = seo.describe(kind, target_id or username)
+    else:
+        tags = seo.default('/')
+    return render(request, 'core/feed.html', {
+        'seo': tags,
+        'seo_ld': seo.ld_json(tags.get('ld')),
+    })
+
+
+def robots_txt(request):
+    """There was none, so every crawler asked, got a 404 and guessed."""
+    resp = HttpResponse(seo.robots_txt(), content_type='text/plain; charset=utf-8')
+    resp['Cache-Control'] = 'public, max-age=3600'
+    return resp
+
+
+def sitemap_xml(request):
+    """Only what the app would show a stranger. See core/seo.py."""
+    try:
+        body = seo.sitemap_xml()
+    except Exception:   # a sitemap that 500s teaches Google to stop asking
+        body = seo.last_sitemap() or (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>')
+    resp = HttpResponse(body, content_type='application/xml; charset=utf-8')
+    resp['Cache-Control'] = 'public, max-age=600'
+    return resp
 
 
 def _apk_url():

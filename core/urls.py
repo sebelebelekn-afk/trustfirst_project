@@ -25,6 +25,11 @@ urlpatterns = [
 
     # A permanent address for the Android build, so a shared link never rots and
     # the marketing site never needs editing when a new APK is uploaded.
+    # For crawlers. robots.txt says where the sitemap is; the sitemap lists
+    # only what the app shows a stranger. Both were 404 before this.
+    path('robots.txt', views.robots_txt, name='robots_txt'),
+    path('sitemap.xml', views.sitemap_xml, name='sitemap_xml'),
+
     path('download/android/', views.download_android, name='download_android'),
     path('download/status.json', views.download_status, name='download_status'),
 
