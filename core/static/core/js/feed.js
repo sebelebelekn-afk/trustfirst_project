@@ -649,6 +649,30 @@ function blockChildAction(actionName) {
     triggerHaptic(30);
 }
 
+// The one way into identity verification, for every door that asks for it.
+//
+// The block screen below used to offer only "OK", and the orange banner called
+// openGetVerified, which is the gold creator badge and answers anyone under
+// 500,000 followers with a toast. So the two places that told people to verify
+// both led nowhere. Already verified: say so. A request already waiting: say
+// it is with the team, so nobody uploads their ID twice. Otherwise: the
+// identity screen.
+async function tfStartVerification() {
+    if (isVerified()) { showToast('You are already verified.'); return; }
+    if (window.sb && currentUser) {
+        try {
+            var r = await sb.from('verification_applications').select('id')
+                .eq('user_id', currentUser.id).eq('badge_type', 'blue').eq('status', 'pending')
+                .limit(1);
+            if (r.data && r.data.length) {
+                showToast('Your verification is with our team. We review by hand, usually within 24 hours.');
+                return;
+            }
+        } catch (e) { /* could not tell: let them see the screen */ }
+    }
+    openIdentityVerification();
+}
+
 function requireVerification(actionName) {
     const overlay = document.createElement('div');
     overlay.className = 'child-blocked-overlay';
@@ -656,8 +680,9 @@ function requireVerification(actionName) {
         <i class="fa-solid fa-id-card" style="font-size:60px; color:#FF9500; margin-bottom:20px;"></i>
         <h2 style="margin-bottom:10px;">Verification Required</h2>
         <p style="color:#888; margin-bottom:5px;">You must verify your identity to <b>${escapeHtml(actionName)}</b>.</p>
-        <p style="color:#888; font-size:13px; margin-bottom:25px;">This protects our community from bots and scammers.</p>
-        <button onclick="this.parentElement.remove()" style="padding:12px 30px; background:#007AFF; color:white; border:none; border-radius:15px; font-weight:bold; font-size:15px; cursor:pointer;">OK</button>
+        <p style="color:#888; font-size:13px; margin-bottom:25px;">This protects our community from bots and scammers. We review requests by hand, usually within 24 hours.</p>
+        <button onclick="this.parentElement.remove(); tfStartVerification();" style="padding:12px 30px; background:#007AFF; color:white; border:none; border-radius:15px; font-weight:bold; font-size:15px; cursor:pointer;">Verify now</button>
+        <button onclick="this.parentElement.remove()" style="margin-top:12px; padding:8px 20px; background:none; color:#888; border:none; font-size:14px; font-weight:600; cursor:pointer;">Not now</button>
     `;
     document.getElementById('app').appendChild(overlay);
 }
@@ -1888,7 +1913,7 @@ function launchApp() {
         banner.style.cssText = 'background:#FF9500; color:white; ' + _bannerPad +
             ' font-size:12px; font-weight:700; text-align:center; cursor:pointer;';
         banner.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Unverified, verify to post, comment and start chats';
-        banner.onclick = function() { if (typeof openGetVerified === 'function') openGetVerified(); };
+        banner.onclick = function() { tfStartVerification(); };
         app.insertBefore(banner, app.querySelector('.header-container'));
     }
 
