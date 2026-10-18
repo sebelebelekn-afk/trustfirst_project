@@ -1292,7 +1292,7 @@ localStorage.setItem('tf_burst', JSON.stringify(burstAttempts));
                 // incoming mail. Compare and correct instead.
                 var _keyState = await E2E.reconcileKeys(userId);
                 if (_keyState === 'republished') {
-                    showToast('Encryption keys refreshed on this device. Messages sent before now cannot be opened here.');
+                    showToast('Encryption keys refreshed on this device. Encrypted messages sent before now cannot be opened here.');
                 } else if (_keyState === 'needs_restore') {
                     showToast('Enter your recovery PIN in Settings to read your encrypted messages.');
                 }
@@ -1430,7 +1430,7 @@ async function restoreSession() {
             await E2E.init(currentUser.id);
             var _ks = await E2E.reconcileKeys(currentUser.id);
             if (_ks === 'republished') {
-                showToast('Encryption keys refreshed on this device. Messages sent before now cannot be opened here.');
+                showToast('Encryption keys refreshed on this device. Encrypted messages sent before now cannot be opened here.');
             } else if (_ks === 'needs_restore') {
                 showToast('Enter your recovery PIN in Settings to read your encrypted messages.');
             }
@@ -18424,9 +18424,16 @@ EmailService.init();
 // So the key is wrapped on the device with AES-GCM, using a key stretched from
 // a recovery PIN with PBKDF2, and only the wrapped bytes go to the server. The
 // server never sees the PIN and never sees the key, so it still cannot read a
-// single message: without the PIN the stored row is noise. Same shape as
-// WhatsApp's encrypted backups.
+// single message: without the PIN the stored row is noise.
+//
+// Noise only as strong as the PIN, though. Unlike WhatsApp's backups there is
+// no secure hardware limiting guesses, so whoever holds the row, us included,
+// can try PINs offline as fast as PBKDF2 allows. Four digits is ten thousand
+// tries, which is minutes. Hence eight characters at least, on a normal
+// keyboard rather than a number pad. Restoring still accepts four, for any
+// backup made before that.
 // ==========================================================================
+var E2E_PIN_MIN = 8;
 function openMessageBackupSetup() {
     var existing = document.getElementById('e2eBackupSheet');
     if (existing) existing.remove();
@@ -18442,15 +18449,16 @@ function openMessageBackupSetup() {
             '<p style="margin:0 0 18px;font-size:14px;line-height:1.55;color:var(--text-secondary,#666);">' +
                 (restoring
                     ? 'This device has no key yet. Enter your recovery PIN to unlock the messages already on your account.'
-                    : 'Your messages are encrypted, so only your devices can read them. Set a recovery PIN and they will still be here on a new phone. Without one, reinstalling loses them for good.') +
+                    : 'Typed messages in your one-to-one chats are encrypted, so only your devices can read them. Set a recovery PIN and they will still open on a new phone. Without one, reinstalling loses them for good.') +
             '</p>' +
-            '<input id="e2ePin" type="password" inputmode="numeric" autocomplete="off" placeholder="Recovery PIN" ' +
+            '<input id="e2ePin" type="password" autocomplete="off" placeholder="Recovery PIN" ' +
                 'style="width:100%;box-sizing:border-box;padding:14px 16px;border-radius:12px;border:1px solid var(--border-color,#ddd);background:var(--input-bg,#f5f5f7);font-size:16px;color:var(--text-primary,#000);outline:none;margin-bottom:10px;">' +
             (restoring ? '' :
             '<input id="e2ePin2" type="password" autocomplete="off" placeholder="Confirm PIN" ' +
                 'style="width:100%;box-sizing:border-box;padding:14px 16px;border-radius:12px;border:1px solid var(--border-color,#ddd);background:var(--input-bg,#f5f5f7);font-size:16px;color:var(--text-primary,#000);outline:none;margin-bottom:10px;">') +
             '<p id="e2eErr" style="display:none;color:#FF3B30;font-size:13px;margin:0 0 10px;"></p>' +
             '<p style="font-size:12px;color:var(--text-tertiary,#999);margin:0 0 18px;line-height:1.5;">' +
+                (restoring ? '' : 'Use at least ' + E2E_PIN_MIN + ' characters. Longer is much harder to guess. ') +
                 'We never see this PIN, so we cannot reset it for you. Write it down somewhere safe.</p>' +
             '<button id="e2eGo" style="width:100%;padding:15px;border-radius:12px;border:none;background:#0A84FF;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">' +
                 (restoring ? 'Unlock' : 'Turn on backup') + '</button>' +
@@ -18463,7 +18471,8 @@ function openMessageBackupSetup() {
         var pin = (document.getElementById('e2ePin') || {}).value || '';
         function fail(msg) { err.textContent = msg; err.style.display = 'block'; }
         err.style.display = 'none';
-        if (pin.length < 4) return fail('Use at least 4 characters.');
+        var minLen = restoring ? 4 : E2E_PIN_MIN;
+        if (pin.length < minLen) return fail('Use at least ' + minLen + ' characters.');
         if (!restoring) {
             var pin2 = (document.getElementById('e2ePin2') || {}).value || '';
             if (pin !== pin2) return fail('Those PINs do not match.');
@@ -18510,7 +18519,7 @@ const E2EBackup = {
 
     // Wrap this device's identity key under `pin` and store it.
     async create(pin, hint) {
-        if (!pin || String(pin).length < 4) throw new Error('PIN must be at least 4 characters');
+        if (!pin || String(pin).length < E2E_PIN_MIN) throw new Error('PIN must be at least ' + E2E_PIN_MIN + ' characters');
         if (!E2E._keys) throw new Error('No keys on this device yet');
         var salt = crypto.getRandomValues(new Uint8Array(16));
         var iv = crypto.getRandomValues(new Uint8Array(12));
