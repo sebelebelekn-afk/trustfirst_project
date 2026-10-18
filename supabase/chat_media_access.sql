@@ -61,7 +61,9 @@
 -- Reviewed against pg_policies, storage.buckets and the messages columns on
 -- 2026-10-18: 2 files in chat_media, 5 in voice_messages, no group chats yet.
 --
--- Applied to production: NOT YET. (Fill the date on apply.)
+-- Applied to production: 2026-10-18, pasted into the Supabase SQL editor by the
+-- owner (paste_in_order_2026-10-18.sql) and checked the same day against
+-- pg_policies, pg_proc and storage.buckets.
 
 begin;
 

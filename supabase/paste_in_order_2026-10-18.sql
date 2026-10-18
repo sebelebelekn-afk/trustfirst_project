@@ -81,7 +81,9 @@
 -- Reviewed against pg_policies, storage.buckets and the messages columns on
 -- 2026-10-18: 2 files in chat_media, 5 in voice_messages, no group chats yet.
 --
--- Applied to production: NOT YET. (Fill the date on apply.)
+-- Applied to production: 2026-10-18, pasted into the Supabase SQL editor by the
+-- owner (paste_in_order_2026-10-18.sql) and checked the same day against
+-- pg_policies, pg_proc and storage.buckets.
 
 begin;
 
@@ -243,7 +245,9 @@ commit;
 -- Reviewed against every foreign key in the public schema on 2026-10-18 and
 -- tested on a local PostgreSQL 16 copy of that structure.
 --
--- Applied to production: NOT YET. (Fill the date on apply.)
+-- Applied to production: 2026-10-18, pasted into the Supabase SQL editor by the
+-- owner (paste_in_order_2026-10-18.sql) and checked the same day against
+-- pg_policies, pg_proc and storage.buckets.
 
 begin;
 
@@ -401,7 +405,9 @@ commit;
 --
 -- No report screenshots existed on 2026-10-18, so there is nothing to move.
 --
--- Applied to production: NOT YET. (Fill the date on apply.)
+-- Applied to production: 2026-10-18, pasted into the Supabase SQL editor by the
+-- owner (paste_in_order_2026-10-18.sql) and checked the same day against
+-- pg_policies, pg_proc and storage.buckets.
 
 begin;
 
@@ -479,7 +485,9 @@ commit;
 -- location (followers, close friends) has to exist in the database. "Anyone"
 -- must never come back.
 --
--- Applied to production: NOT YET. (Fill the date on apply.)
+-- Applied to production: 2026-10-18, pasted into the Supabase SQL editor by the
+-- owner (paste_in_order_2026-10-18.sql) and checked the same day against
+-- pg_policies, pg_proc and storage.buckets.
 
 begin;
 
@@ -542,7 +550,9 @@ commit;
 -- verified, and only the seller can edit or delete their listing, which is
 -- how "mark as sold" works. TrustFirst takes no part in payment.
 --
--- Applied to production: NOT YET. (Fill the date on apply.)
+-- Applied to production: 2026-10-18, pasted into the Supabase SQL editor by the
+-- owner (paste_in_order_2026-10-18.sql) and checked the same day against
+-- pg_policies, pg_proc and storage.buckets.
 
 begin;
 

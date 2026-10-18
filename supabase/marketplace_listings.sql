@@ -24,7 +24,9 @@
 -- verified, and only the seller can edit or delete their listing, which is
 -- how "mark as sold" works. TrustFirst takes no part in payment.
 --
--- Applied to production: NOT YET. (Fill the date on apply.)
+-- Applied to production: 2026-10-18, pasted into the Supabase SQL editor by the
+-- owner (paste_in_order_2026-10-18.sql) and checked the same day against
+-- pg_policies, pg_proc and storage.buckets.
 
 begin;
 
