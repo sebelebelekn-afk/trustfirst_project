@@ -99,11 +99,13 @@ CONTACT_EMAIL = (os.environ.get('CONTACT_EMAIL', '') or 'contacttrustfirst@gmail
 #
 #   TF_FEATURE_LIVE    live streams, and the viewer gifts that only exist in them
 #   TF_FEATURE_WALLET  adding money to a wallet
-#   TF_FEATURE_COINS   buying coins
+#   TF_FEATURE_COINS   coins: buying them, gifts, and cashing them out
 #   TF_FEATURE_KIDS    under-18 accounts linked to a parent; while off, sign-up is 18+
 #
-# Paused is not closed. Withdrawing a balance and cashing out coins people
-# already hold keep working, because the Terms promise exactly that.
+# Paused is not closed. Withdrawing money from a wallet keeps working, because
+# that money is the person's and the Terms promise they can take it out. Coins
+# are off completely, cash-out included: when they were switched off the only
+# account holding any was an admin's, so nobody else's value is held up.
 def _feature(name):
     return (os.environ.get('TF_FEATURE_' + name.upper(), '') or '').strip().lower() in (
         '1', 'true', 'yes', 'on')

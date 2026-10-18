@@ -7,8 +7,9 @@ The client hides the way into a paused feature, but hiding is not a lock, so
 these check the lock. Each endpoint that brings money in or opens a stream must
 answer 403 while its switch is off, and must reach its own code (which then
 fails for its own reasons, here a missing sign-in) once the switch is on. The
-ways out, withdrawing a balance and cashing out coins, must never be paused,
-because the Terms promise people can leave with what they hold.
+way out, withdrawing wallet money, must never be paused, because the Terms
+promise people can leave with what they hold. Coins are off completely,
+cash-out included.
 """
 
 import json
@@ -51,6 +52,12 @@ class PausedFeaturesAreRefused(SimpleTestCase):
         self.assertEqual(json.loads(r.content)['paused'], ['coins'])
 
     @override_settings(TF_FEATURES=ALL_OFF)
+    def test_cashing_out_coins_is_refused_while_coins_are_paused(self):
+        r = self._post('/api/wallet/cash-out-coins/')
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(json.loads(r.content)['paused'], ['coins'])
+
+    @override_settings(TF_FEATURES=ALL_OFF)
     def test_a_live_token_is_refused_while_live_is_paused(self):
         r = self.client.get('/api/live/token/')
         self.assertEqual(r.status_code, 403)
@@ -59,7 +66,7 @@ class PausedFeaturesAreRefused(SimpleTestCase):
     @override_settings(TF_FEATURES=ALL_ON)
     def test_switched_on_the_endpoints_reach_their_own_checks(self):
         # Past the switch, each endpoint's own sign-in check is what answers.
-        for path in ('/api/wallet/create-checkout/', '/api/wallet/buy-coins/'):
+        for path in ('/api/wallet/create-checkout/', '/api/wallet/buy-coins/', '/api/wallet/cash-out-coins/'):
             r = self._post(path)
             self.assertNotEqual(r.status_code, 403, path)
         self.assertNotEqual(self.client.get('/api/live/token/').status_code, 403)
@@ -68,8 +75,8 @@ class PausedFeaturesAreRefused(SimpleTestCase):
 class TheWayOutIsNeverPaused(SimpleTestCase):
 
     @override_settings(TF_FEATURES=ALL_OFF)
-    def test_withdrawing_and_cashing_out_are_not_switched_off(self):
-        for path in ('/api/wallet/withdraw/', '/api/wallet/cash-out-coins/'):
+    def test_withdrawing_is_not_switched_off(self):
+        for path in ('/api/wallet/withdraw/',):
             r = self.client.post(path, data='{}', content_type='application/json')
             if r.status_code == 403:
                 self.assertNotIn('paused', json.loads(r.content), path)

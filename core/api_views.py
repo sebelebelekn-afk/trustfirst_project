@@ -1973,8 +1973,13 @@ COIN_CASHOUT_MIN = 100      # coins, about R10
 @ratelimit(key='ip', rate='10/m', method='POST', block=True)
 @csrf_exempt
 @require_http_methods(["POST"])
+@_feature_on('coins')
 def wallet_cash_out_coins(request):
-    """Turn earned coins into wallet money that can be withdrawn."""
+    """Turn earned coins into wallet money that can be withdrawn.
+
+    Behind the coins switch with buying them: while coins are off they are off
+    completely. Only an admin account held any when this was switched off.
+    """
     try:
         claims = _verify_supabase_jwt(request)
     except ValueError:

@@ -2992,7 +2992,7 @@ function authenticateUser() {
                  it. Without a way to do that, a creator's earnings sit as coins
                  forever and the Withdraw button is useless to the people who
                  actually have something to withdraw. -->
-            <button onclick="tfCashOutCoins()" style="width:100%;padding:11px;border-radius:12px;background:none;color:#007AFF;border:1px solid var(--border-color,#eee);font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">
+            <button onclick="tfCashOutCoins()" data-tf-feature="coins-in" style="width:100%;padding:11px;border-radius:12px;background:none;color:#007AFF;border:1px solid var(--border-color,#eee);font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">
                 <i class="fa-solid fa-arrow-right-arrow-left" style="margin-right:6px;"></i>Cash out coins to your wallet
             </button>
             <div data-tf-feature="coins-in" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
@@ -4466,7 +4466,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=306"></script>
+<script src="{% static 'core/js/feed.js' %}?v=307"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=77"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

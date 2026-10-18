@@ -15805,13 +15805,13 @@ function _tfApplyFeatureClasses() {
 // withdrawn and coins cashed out. Everyone else simply does not see it.
 async function _tfMarkMoneyHeld() {
     if (tfFeature('wallet') || !window.sb || !currentUser) return;
-    var held = (currentUser.coins || 0) > 0;
-    if (!held) {
-        try {
-            var w = await sb.from('wallets').select('balance').eq('user_id', currentUser.id).maybeSingle();
-            held = !!(w && w.data && Number(w.data.balance) > 0);
-        } catch (e) { /* no wallet row: nothing held */ }
-    }
+    // Real money only. Coins cannot be used or cashed out while they are off,
+    // so holding some is no reason to show a wallet.
+    var held = false;
+    try {
+        var w = await sb.from('wallets').select('balance').eq('user_id', currentUser.id).maybeSingle();
+        held = !!(w && w.data && Number(w.data.balance) > 0);
+    } catch (e) { /* no wallet row: nothing held */ }
     document.documentElement.classList.toggle('tf-has-money', held);
 }
 
@@ -48514,6 +48514,7 @@ async function _tfFillWithdrawBalance() {
 // useless to exactly the people who need it. The rate is what coins were sold
 // at, so the only cut is the 20% already taken when the gift was sent.
 async function tfCashOutCoins() {
+    if (!tfFeatureGate('coins')) return;
     var coins = (currentUser && currentUser.coins) || 0;
     if (coins < 100) { showToast('You need at least 100 coins to cash out'); return; }
     if (!confirm('Turn ' + coins + ' coins into R' + (coins * 0.0999).toFixed(2) + ' in your wallet?')) return;
