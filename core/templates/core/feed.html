@@ -2176,6 +2176,10 @@ function authenticateUser() {
     <div class="settings-section-title" style="display:none;"></div>
     <div style="margin-top:20px;"><!-- account deletion row below -->
     <div class="settings-card">
+      <div class="settings-row" onclick="downloadMyData()" style="cursor:pointer;">
+        <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-download" style="color:#007AFF;"></i> <span>Download your data</span></div>
+        <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
+      </div>
       <div class="settings-row" onclick="showDeleteAccount()" style="cursor:pointer;">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-triangle-exclamation" style="color:#FF3B30;"></i> <span style="color:#FF3B30;font-weight:600;">Delete or Deactivate Account</span></div>
         <i class="fa-solid fa-chevron-right" style="color:#FF3B30;"></i>
@@ -4462,7 +4466,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=304"></script>
+<script src="{% static 'core/js/feed.js' %}?v=305"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=77"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

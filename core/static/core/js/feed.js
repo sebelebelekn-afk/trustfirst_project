@@ -16996,89 +16996,88 @@ async function compressImage(file, maxDimension, quality) {
 // ==========================================================================
 // LEGAL PAGE FUNCTIONS
 // ==========================================================================
+// Your own data, from the server, as one file.
+//
+// This used to save whatever happened to be cached on the phone: the feed
+// (other people's posts included) and a few local lists, while most of what an
+// account actually holds was missing. The Terms tell people to download their
+// data before deleting, so it has to be theirs and it has to be complete. Each
+// list is read with the person's own sign-in, so the database rules decide what
+// is theirs, and a list that cannot be read says so in the file instead of
+// quietly not being there.
 async function downloadMyData() {
+  if (!window.sb || !currentUser) { showToast('Sign in to download your data'); return; }
   const toast = document.createElement('div');
   toast.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,255,255,0.95);backdrop-filter:blur(20px);padding:30px;border-radius:25px;box-shadow:0 20px 60px rgba(0,0,0,0.2);z-index:99999;text-align:center;animation:popIn 0.3s;';
   toast.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="font-size:30px;color:#007AFF;margin-bottom:15px;"></i><p style="font-weight:700;">Preparing your data...</p><p style="color:#888;font-size:13px;margin-top:5px;">This may take a moment</p>';
   document.body.appendChild(toast);
 
+  const me = currentUser.id;
+  const missing = [];
+  async function list(name, query) {
+    try {
+      const { data, error } = await tfWithTimeout(query, 15000, name);
+      if (error) throw error;
+      return data || [];
+    } catch (e) {
+      missing.push(name);
+      return null;
+    }
+  }
+
   try {
-    // Gather all user data
+    let profile = null;
+    try { profile = (await sb.rpc('tf_my_profile')).data; } catch (e) {}
+    if (Array.isArray(profile)) profile = profile[0] || null;
+    if (!profile) missing.push('profile');
+
+    const sent = await list('messages you sent', sb.from('messages')
+      .select('id,conversation_id,message_type,ciphertext,nonce,media_url,media_urls,created_at,is_deleted')
+      .eq('sender_id', me).order('created_at'));
     const userData = {
-      profile: currentUser,
-      posts: await DB.getAll('posts'),
-      messages: await DB.getAll('messages'),
-      activity: await DB.getAll('activity'),
-      notifications: await DB.getAll('notifications'),
-      preferences: {
-        language: secureLoad('language'),
-        darkMode: secureLoad('dark_mode'),
-        privateAccount: secureLoad('private_account')
-      },
-      exportDate: new Date().toISOString(),
-      platform: 'TrustFirst v2.0'
+      about_this_file: 'Everything TrustFirst holds that belongs to your account, as of the date below. ' +
+        'Messages that were end-to-end encrypted are included as they are stored, scrambled: only the app ' +
+        'on your devices can read them. Photos and videos are listed by link; download any you want to keep ' +
+        'before you delete your account, because the links stop working once it is gone.',
+      exported_at: new Date().toISOString(),
+      profile: profile,
+      settings: await list('settings', sb.from('user_settings').select('*').eq('user_id', me)),
+      posts: await list('posts', sb.from('posts').select('*').eq('user_id', me).order('created_at')),
+      comments: await list('comments', sb.from('comments').select('*').eq('user_id', me).order('created_at')),
+      likes: await list('likes', sb.from('likes').select('post_id,created_at').eq('user_id', me)),
+      bookmarks: await list('bookmarks', sb.from('bookmarks').select('post_id,created_at').eq('user_id', me)),
+      reposts: await list('reposts', sb.from('reposts').select('post_id,created_at').eq('user_id', me)),
+      following: await list('following', sb.from('follows').select('following_id,created_at').eq('follower_id', me)),
+      followers: await list('followers', sb.from('follows').select('follower_id,created_at').eq('following_id', me)),
+      blocked: await list('blocked accounts', sb.from('user_blocks').select('blocked_id,created_at').eq('blocker_id', me)),
+      stories: await list('stories', sb.from('stories').select('*').eq('user_id', me).order('created_at')),
+      clips: await list('clips', sb.from('trustclips').select('*').eq('user_id', me).order('created_at')),
+      messages_you_sent: sent,
+      eddie_conversations: await list('Eddie conversations', sb.from('eddie_conversations').select('id,title,created_at').eq('user_id', me)),
+      eddie_messages: await list('Eddie messages', sb.from('eddie_messages').select('conversation_id,role,content,image_url,created_at').eq('user_id', me).order('created_at')),
+      notifications: await list('notifications', sb.from('notifications').select('type,message,post_id,created_at,read').eq('user_id', me).order('created_at')),
+      verification: await list('verification', sb.from('verification_applications').select('badge_type,status,provider,created_at,updated_at').eq('user_id', me)),
+      reports_you_made: await list('reports you made', sb.from('reports').select('target_type,target_id,reason,details,status,created_at').eq('reporter_id', me)),
+      sign_ins: await list('sign-ins', sb.from('login_activity').select('login_method,status,location_city,location_country,user_agent,created_at').eq('user_id', me).order('created_at')),
+      devices: await list('devices', sb.from('trusted_devices').select('device_name,device_type,browser,os,location_city,location_country,last_active,created_at').eq('user_id', me)),
+      could_not_read: missing
     };
 
-    // Remove sensitive fields
-    if (userData.profile) {
-      delete userData.profile.passwordHash;
-      delete userData.profile.token;
-      delete userData.profile.supabaseToken;
-    }
-
-    // Create downloadable file
     const blob = new Blob([JSON.stringify(userData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `trustfirst-data-${(currentUser?.handle || 'user').replace(/[^a-z0-9_-]/gi,'_')}-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `trustfirst-data-${(currentUser.username || 'account').replace(/[^a-z0-9_-]/gi,'_')}-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
 
-    toast.innerHTML = '<i class="fa-solid fa-check-circle" style="font-size:30px;color:#34C759;margin-bottom:15px;"></i><p style="font-weight:700;">Download started!</p>';
-    setTimeout(() => toast.remove(), 2000);
+    toast.innerHTML = missing.length
+      ? '<i class="fa-solid fa-circle-exclamation" style="font-size:30px;color:#FF9500;margin-bottom:15px;"></i><p style="font-weight:700;">Download started</p><p style="color:#888;font-size:13px;margin-top:5px;max-width:240px;">Some parts could not be read: ' + escapeHtml(missing.join(', ')) + '. Try again in a minute.</p>'
+      : '<i class="fa-solid fa-check-circle" style="font-size:30px;color:#34C759;margin-bottom:15px;"></i><p style="font-weight:700;">Download started</p>';
+    setTimeout(() => toast.remove(), missing.length ? 5000 : 2000);
   } catch (err) {
     toast.innerHTML = '<i class="fa-solid fa-xmark-circle" style="font-size:30px;color:#FF3B30;margin-bottom:15px;"></i><p style="font-weight:700;">Export failed</p>';
-    setTimeout(() => toast.remove(), 2000);
-  }
-}
-
-async function requestDataDeletion() {
-  if (!confirm('Are you absolutely sure? This will permanently delete all your data and cannot be undone.')) return;
-
-  try {
-    // Clear all IndexedDB stores
-    await DB.clear('posts');
-    await DB.clear('messages');
-    await DB.clear('conversations');
-    await DB.clear('notifications');
-    await DB.clear('activity');
-    await DB.clear('syncQueue');
-    await DB.clear('mediaCache');
-    await DB.clear('users');
-
-    // Clear all localStorage
-    localStorage.clear();
-
-    // Clear all sessionStorage
-    sessionStorage.clear();
-
-    // Clear caches
-    if ('caches' in window) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map(key => caches.delete(key)));
-    }
-
-    // Unregister service worker
-    if ('serviceWorker' in navigator) {
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(registrations.map(r => r.unregister()));
-    }
-
-
-    location.reload();
-  } catch (err) {
-    toast('Deletion failed. Please contact support.', 'error');
+    setTimeout(() => toast.remove(), 2500);
   }
 }
 
@@ -23517,7 +23516,9 @@ function showDeleteAccount() {
 
         '<h1 style="font-size:28px; font-weight:800; color:#FF3B30; text-align:center; margin-bottom:8px;">Delete Account</h1>' +
         '<p style="font-size:15px; color:var(--text-secondary,#888); text-align:center; margin-bottom:32px; line-height:1.5;">' +
-        'This action is permanent and cannot be undone. All your data will be erased.</p>' +
+        'This action is permanent and cannot be undone. Your profile, posts, the messages you sent and your files will be erased.</p>' +
+        '<p style="font-size:14px; color:var(--text-secondary,#888); text-align:center; margin:-20px 0 28px; line-height:1.5;">' +
+        'Want a copy first? <a href="#" onclick="event.preventDefault();downloadMyData()" style="color:#007AFF;font-weight:600;text-decoration:none;">Download your data</a></p>' +
 
         // What gets deleted
         '<div style="background:rgba(255,59,48,0.05); border:1px solid rgba(255,59,48,0.15);' +
@@ -23602,6 +23603,15 @@ async function executeDeleteAccount() {
     btn.innerHTML = '<div style="width:20px; height:20px; border:2px solid rgba(255,255,255,0.3); border-top-color:white; border-radius:50%; animation:spin 0.8s linear infinite; margin:0 auto;"></div>';
     btn.disabled = true;
 
+    // Without a connection nothing can be deleted, and saying "deleted" anyway
+    // is exactly the kind of message this screen must never show.
+    if (!window.sb || !currentUser) {
+        showToast('Sign in again to delete your account');
+        btn.innerHTML = 'Permanently Delete My Account';
+        btn.disabled = false;
+        return;
+    }
+
     try {
         // Verify password first by re-authenticating
         if (window.sb && currentUser) {
@@ -23617,25 +23627,31 @@ async function executeDeleteAccount() {
                 return;
             }
 
-            // Delete user data from all tables
-            var userId = currentUser.id;
+            // The server does the deleting (api_views.account_delete): the
+            // profile and everything under it in one transaction, then the
+            // files in storage and on R2, then the sign-in record. A browser
+            // key can do none of the last three, which is why this used to
+            // leave them behind. The sign-in just above is what the server
+            // checks for: a deletion needs a password typed minutes ago.
+            var token = signInResult.data && signInResult.data.session && signInResult.data.session.access_token;
+            var res = await fetch('/api/account/delete/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: '{}'
+            });
+            var out = {};
+            try { out = await res.json(); } catch (e) {}
+            if (!res.ok || !out.ok) {
+                // Nothing was removed, so the account is still there to use.
+                showToast(out.error || 'Your account could not be deleted just now. Nothing was removed.');
+                btn.innerHTML = 'Permanently Delete My Account';
+                btn.disabled = false;
+                return;
+            }
+            var filesLeft = out.files_left || 0;
 
-            // Delete in order (respecting foreign keys)
-            await sb.from('screenshot_events').delete().eq('user_id', userId);
-            await sb.from('harassment_flags').delete().eq('reporter_id', userId);
-            await sb.from('shared_media').delete().eq('sender_id', userId);
-            await sb.from('messages').delete().eq('sender_id', userId);
-            await sb.from('conversation_participants').delete().eq('user_id', userId);
-            await sb.from('profile_views').delete().eq('profile_user_id', userId);
-            await sb.from('profile_views').delete().eq('viewer_user_id', userId);
-            await sb.from('account_lock_events').delete().eq('user_id', userId);
-            await sb.from('login_activity').delete().eq('user_id', userId);
-            await sb.from('encryption_keys').delete().eq('user_id', userId);
-            await sb.from('trusted_devices').delete().eq('user_id', userId);
-            await sb.from('users').delete().eq('id', userId);
-
-            // Sign out
-            await sb.auth.signOut();
+            // The sign-in record is gone on the server; this clears it here.
+            try { await sb.auth.signOut(); } catch (e) {}
         }
 
         // Clear all local data
@@ -23661,7 +23677,10 @@ async function executeDeleteAccount() {
             '<div style="font-size:60px; margin-bottom:20px;">👋</div>' +
             '<h2 style="font-size:24px; font-weight:800; color:var(--text-primary,#000); margin-bottom:12px;">Account Deleted</h2>' +
             '<p style="font-size:15px; color:var(--text-secondary,#888); line-height:1.5; margin-bottom:30px; max-width:300px;">' +
-            'Your account and all associated data have been permanently deleted. We\'re sorry to see you go.</p>' +
+            'Your account, your posts, the messages you sent and your files have been permanently deleted. We\'re sorry to see you go.' +
+            (typeof filesLeft !== 'undefined' && filesLeft > 0
+                ? ' A few files could not be removed automatically. Write to us and we will remove them by hand.'
+                : '') + '</p>' +
             '<button onclick="location.reload()" style="padding:14px 32px; border-radius:14px; border:none;' +
             'background:#007AFF; color:white; font-size:16px; font-weight:600; cursor:pointer;">OK</button></div>';
 

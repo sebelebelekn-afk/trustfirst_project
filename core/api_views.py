@@ -2430,3 +2430,154 @@ def _device_make_grant(user_id):
     except Exception as exc:
         print('[DeviceLogin] grant failed: %s' % exc)
         return None
+
+
+# ---------------------------------------------------------------------------
+# 10. CLOSING AN ACCOUNT
+#
+# This used to happen in the browser, table by table, with the person's own
+# key. It removed the profile and the messages they sent, then signed out,
+# leaving the sign-in record (email and password hash) and every uploaded file
+# behind, while the Terms said the data goes. A browser key cannot delete a
+# sign-in record or someone's files on R2, so the work moves here.
+#
+# Order matters. The database goes first, in one transaction
+# (tf_delete_account, supabase/account_deletion.sql): if it refuses or fails,
+# nothing has been removed and the person can try again. Files go next, then
+# the sign-in record last, because once that is gone the person cannot sign in
+# to retry anything.
+# ---------------------------------------------------------------------------
+# Where R2 keeps a person's uploads: '<prefix>/<user id>/...' (r2_sign_upload).
+R2_ACCOUNT_PREFIXES = tuple(prefix for prefix, _, _ in R2_KINDS.values())
+
+# Deleting an account needs a sign-in from the last few minutes, not a session
+# left open on a borrowed phone. The app signs in again with the password just
+# before calling this.
+ACCOUNT_DELETE_FRESH_SECONDS = 10 * 60
+
+
+def _delete_storage_files(files):
+    """Remove files through the storage API, bucket by bucket. Returns how many
+    could not be removed, so a partial failure is reported, not hidden."""
+    by_bucket = {}
+    for f in files or []:
+        if f.get('bucket') and f.get('name'):
+            by_bucket.setdefault(f['bucket'], []).append(f['name'])
+    left = 0
+    for bucket, names in by_bucket.items():
+        for i in range(0, len(names), 100):
+            batch = names[i:i + 100]
+            try:
+                r = httpx.request(
+                    'DELETE',
+                    settings.SUPABASE_URL + '/storage/v1/object/' + bucket,
+                    headers=_service_headers(),
+                    json={'prefixes': batch},
+                    timeout=30,
+                )
+                if r.status_code >= 300:
+                    print('[AccountDelete] storage %s refused %s: %s' % (bucket, r.status_code, r.text[:200]))
+                    left += len(batch)
+            except Exception as exc:
+                print('[AccountDelete] storage %s failed: %s' % (bucket, exc))
+                left += len(batch)
+    return left
+
+
+def _delete_r2_files(user_id):
+    """Remove everything under the person's folders on R2. Returns how many
+    keys could not be removed."""
+    if not _r2_ready():
+        return 0
+    left = 0
+    client = _r2_client()
+    for prefix in R2_ACCOUNT_PREFIXES:
+        token = None
+        while True:
+            kwargs = {'Bucket': settings.R2_BUCKET, 'Prefix': '%s/%s/' % (prefix, user_id)}
+            if token:
+                kwargs['ContinuationToken'] = token
+            try:
+                page = client.list_objects_v2(**kwargs)
+            except Exception as exc:
+                print('[AccountDelete] R2 list %s failed: %s' % (prefix, exc))
+                left += 1
+                break
+            keys = [{'Key': o['Key']} for o in page.get('Contents', [])]
+            if keys:
+                try:
+                    out = client.delete_objects(Bucket=settings.R2_BUCKET,
+                                                Delete={'Objects': keys, 'Quiet': True})
+                    left += len(out.get('Errors', []))
+                except Exception as exc:
+                    print('[AccountDelete] R2 delete %s failed: %s' % (prefix, exc))
+                    left += len(keys)
+            if not page.get('IsTruncated'):
+                break
+            token = page.get('NextContinuationToken')
+    return left
+
+
+@ratelimit(key='ip', rate='5/m', method='POST', block=True)
+@csrf_exempt
+@require_http_methods(["POST"])
+def account_delete(request):
+    """Close the signed-in account and remove what the Terms say goes with it."""
+    import time
+    try:
+        claims = _verify_supabase_jwt(request)
+    except ValueError:
+        return JsonResponse({'error': 'Sign in again to delete your account.', 'reauth': True}, status=401)
+    user_id = claims.get('sub')
+    if not _is_valid_uuid(user_id):
+        return JsonResponse({'error': 'Sign in again to delete your account.', 'reauth': True}, status=401)
+    try:
+        signed_in_at = int(claims.get('iat') or 0)
+    except (TypeError, ValueError):
+        signed_in_at = 0
+    if time.time() - signed_in_at > ACCOUNT_DELETE_FRESH_SECONDS:
+        return JsonResponse({'error': 'Enter your password again to delete your account.', 'reauth': True}, status=401)
+
+    try:
+        r = _yoco_rpc('tf_delete_account', {'p_user': str(user_id)})
+    except Exception as exc:
+        print('[AccountDelete] database call failed: %s' % exc)
+        r = None
+    if r is None or r.status_code >= 300:
+        if r is not None:
+            print('[AccountDelete] database refused %s: %s' % (r.status_code, r.text[:300]))
+        return JsonResponse({'error': 'Your account could not be deleted just now. Nothing was removed. Try again in a minute.'}, status=502)
+
+    out = r.json() or {}
+    if not out.get('ok'):
+        if out.get('reason') == 'payment_records':
+            return JsonResponse({
+                'error': ('Your account has payment records we are required by law to keep, so it '
+                          'cannot be deleted from the app. Write to %s and we will close it for you.'
+                          % settings.CONTACT_EMAIL),
+                'reason': 'payment_records',
+            }, status=409)
+        return JsonResponse({'error': 'That account cannot be deleted here.', 'reason': out.get('reason')}, status=409)
+
+    files_left = _delete_storage_files(out.get('files'))
+    files_left += _delete_r2_files(user_id)
+
+    signin_removed = False
+    try:
+        a = httpx.delete(
+            settings.SUPABASE_URL + '/auth/v1/admin/users/' + str(user_id),
+            headers=_service_headers(),
+            timeout=15,
+        )
+        signin_removed = a.status_code < 300 or a.status_code == 404
+        if not signin_removed:
+            print('[AccountDelete] sign-in record refused %s: %s' % (a.status_code, a.text[:200]))
+    except Exception as exc:
+        print('[AccountDelete] sign-in record failed: %s' % exc)
+
+    if files_left or not signin_removed:
+        # The profile is already gone, so the person cannot retry from the app.
+        # Say what is left; the log line above has the detail for us.
+        print('[AccountDelete] %s left behind: %d files, sign-in record removed=%s'
+              % (user_id, files_left, signin_removed))
+    return JsonResponse({'ok': True, 'files_left': files_left, 'signin_removed': signin_removed})

@@ -83,6 +83,11 @@ if _render_host:
 # look", and a notice that cries wolf is worse than none.
 TERMS_VERSION = (os.environ.get('TERMS_VERSION', '') or '2026-10-18').strip()
 
+# Where people write to us. Used in messages the server sends back, such as the
+# answer to an account that cannot be deleted from the app. One variable to
+# change when the company address exists.
+CONTACT_EMAIL = (os.environ.get('CONTACT_EMAIL', '') or 'contacttrustfirst@gmail.com').strip()
+
 # Parts of the app that are paused rather than deleted.
 #
 # Each is off unless its environment variable turns it on, so a deploy that
