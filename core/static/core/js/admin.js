@@ -314,8 +314,13 @@ async function adminLoadReports(body) {
         body.innerHTML = rows.map(function(r) {
             var who = names[r.reporter_id] || 'unknown';
             var when = r.created_at ? new Date(r.created_at).toLocaleString('en-ZA') : '';
+            // Screenshots now sit in a private bucket. _mediaSrcAttr renders a
+            // placeholder the signer fills with a short-lived link, and a tap
+            // opens that signed link (this.src), not the bare bucket URL, which
+            // a private bucket refuses. Older ones in the public bucket still load.
             var shots = (r.attachments || []).map(function (u) {
-                return '<img src="' + escapeHtml(u) + '" onclick="window.open(\'' + escapeHtml(u) + '\',\'_blank\')" ' +
+                var src = (typeof _mediaSrcAttr === 'function') ? _mediaSrcAttr(u, false) : 'src="' + escapeHtml(u) + '"';
+                return '<img ' + src + ' onclick="window.open(this.src,\'_blank\')" ' +
                     'style="width:64px;height:64px;border-radius:8px;object-fit:cover;cursor:pointer;border:1px solid var(--border-color,#eee);">';
             }).join('');
             return _adminCard(

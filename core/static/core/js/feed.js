@@ -3008,11 +3008,16 @@ function applyInboxFilter(filterId) {
     });
 }
 
-// Render attribute for chat media: private chat_media / voice_messages assets
-// get a placeholder + data-tfmedia (the signer swaps in a signed URL, so the
-// dead public URL is never fetched). Public assets keep a normal src.
+// The private buckets: their files open only through a short-lived signed
+// link, which tfSignMediaUrl asks for. Report screenshots joined them because
+// a screenshot attached to a report can show anything, a private chat included.
+var TF_PRIVATE_MEDIA_RE = /\/(chat_media|voice_messages|report_attachments)\//;
+
+// Render attribute for private media (chat files, voice notes, report
+// screenshots): a placeholder + data-tfmedia, so the signer swaps in a signed
+// URL and the dead bucket URL is never fetched. Public assets keep a normal src.
 function _mediaSrcAttr(url, isVideo) {
-    if (url && /\/(chat_media|voice_messages)\//.test(url)) {
+    if (url && TF_PRIVATE_MEDIA_RE.test(url)) {
         return 'data-tfmedia="' + escapeHtml(url) + '"' +
             (isVideo ? '' : ' src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="');
     }
@@ -4000,7 +4005,7 @@ function openDocumentViewer(url, fileName) {
         '</div>' +
         // Content area
         '<div style="flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:20px;background:#f9f9f9;">' +
-            '<iframe ' + (/\/(chat_media|voice_messages)\//.test(url || '') ? 'data-tfmedia="' + escapeHtml(url) + '" src="about:blank"' : 'src="' + escapeHtml(url || '') + '"') + ' style="width:100%;min-height:500px;border:none;border-radius:12px;background:white;box-shadow:0 2px 16px rgba(0,0,0,0.08);" title="' + escapeHtml(fileName || 'Document') + '"></iframe>' +
+            '<iframe ' + (TF_PRIVATE_MEDIA_RE.test(url || '') ? 'data-tfmedia="' + escapeHtml(url) + '" src="about:blank"' : 'src="' + escapeHtml(url || '') + '"') + ' style="width:100%;min-height:500px;border:none;border-radius:12px;background:white;box-shadow:0 2px 16px rgba(0,0,0,0.08);" title="' + escapeHtml(fileName || 'Document') + '"></iframe>' +
         '</div>' +
         // Bottom toolbar
         '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px max(24px,env(safe-area-inset-bottom,24px));border-top:0.5px solid #eee;background:white;flex-shrink:0;">' +
@@ -5521,7 +5526,7 @@ function playVoiceNote(bubble, audioUrl) {
         };
         _vnAudio.play().catch(function() {});
     };
-    if (typeof tfSignMediaUrl === 'function' && /\/(chat_media|voice_messages)\//.test(audioUrl || '')) {
+    if (typeof tfSignMediaUrl === 'function' && TF_PRIVATE_MEDIA_RE.test(audioUrl || '')) {
         tfSignMediaUrl(audioUrl).then(_vnStart);
     } else {
         _vnStart(audioUrl);
@@ -5530,7 +5535,7 @@ function playVoiceNote(bubble, audioUrl) {
 }
 
 function playVoiceMessage(audioUrl) {
-    if (typeof tfSignMediaUrl === 'function' && /\/(chat_media|voice_messages)\//.test(audioUrl || '')) {
+    if (typeof tfSignMediaUrl === 'function' && TF_PRIVATE_MEDIA_RE.test(audioUrl || '')) {
         tfSignMediaUrl(audioUrl).then(function(u) {
             var audio = new Audio(u);
             audio.play().catch(function(e){ console.error('[AudioPlay]', e); });
@@ -5551,7 +5556,7 @@ function playVoiceMessage(audioUrl) {
 window._tfSignedCache = window._tfSignedCache || {};
 async function tfSignMediaUrl(url) {
     if (!url || !window.sb) return url;
-    var m = String(url).match(/\/object\/(?:public|sign|authenticated)\/(chat_media|voice_messages)\/([^?]+)/);
+    var m = String(url).match(/\/object\/(?:public|sign|authenticated)\/(chat_media|voice_messages|report_attachments)\/([^?]+)/);
     if (!m) return url;                       // not a private chat asset
     if (/\/object\/sign\//.test(url)) return url; // already signed
     var bucket = m[1], path = decodeURIComponent(m[2]);
@@ -5576,7 +5581,7 @@ async function tfSignMediaUrl(url) {
         // Prefer the data-tfmedia placeholder (dead public URL never fetched);
         // fall back to a live src that happens to point at a private bucket.
         var src = (el.getAttribute && el.getAttribute('data-tfmedia')) || (el.getAttribute && el.getAttribute('src'));
-        if (!src || !/\/(chat_media|voice_messages)\//.test(src) || /\/object\/sign\//.test(src)) return;
+        if (!src || !TF_PRIVATE_MEDIA_RE.test(src) || /\/object\/sign\//.test(src)) return;
         el._tfSigned = true;
         tfSignMediaUrl(src).then(function(u) { if (u) el.src = u; });
     }
@@ -24169,9 +24174,12 @@ async function submitReportProblem() {
             var f = files[i].file;
             var ext = (f.name.split('.').pop() || 'jpg').toLowerCase();
             var path = currentUser.id + '/report_' + Date.now() + '_' + i + '.' + ext;
-            var up = await sb.storage.from('images').upload(path, f, { contentType: f.type, upsert: false });
+            // Private: only the person reporting and our admins can open these
+            // (supabase/report_attachments.sql). They used to go to the public
+            // images bucket, where the link alone was enough.
+            var up = await sb.storage.from('report_attachments').upload(path, f, { contentType: f.type, upsert: false });
             if (up.error) throw up.error;
-            var pub = sb.storage.from('images').getPublicUrl(path);
+            var pub = sb.storage.from('report_attachments').getPublicUrl(path);
             if (pub && pub.data && pub.data.publicUrl) attachments.push(pub.data.publicUrl);
         }
     } catch (e) {
