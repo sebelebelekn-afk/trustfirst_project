@@ -36,7 +36,70 @@ window.applyForBadge = function(type) {
     }
 })();
 
+// ID consent. Shown once per session before an ID document leaves the phone,
+// whichever route got here, and recorded on the application itself. Every
+// promise in it is what the app actually does: the reviewer deletes the
+// document when deciding (admin.js), and purge_expired_verification_docs
+// removes anything older than 7 days, every night at 03:00.
+var TF_ID_CONSENT_VERSION = 'id-verify-2026-10-18';
+
+function _tfWithIdConsent(next, provider) {
+    if (window._tfIdConsent) return next();
+    openIdConsent(next, provider);
+}
+
+function _tfConsentRecord() {
+    var c = window._tfIdConsent;
+    return c ? { consent_version: c.version, consent_at: c.at } : {};
+}
+
+function openIdConsent(onAgree, provider) {
+    var old = document.getElementById('idConsentOverlay'); if (old) old.remove();
+    var didit = provider === 'didit';
+    var row = function (icon, title, body) {
+        return '<div style="display:flex;gap:12px;margin-bottom:16px;">' +
+            '<i class="fa-solid ' + icon + '" style="color:#007AFF;font-size:16px;width:20px;text-align:center;margin-top:2px;flex-shrink:0;"></i>' +
+            '<div><b style="font-size:14px;color:var(--text-primary,#000);">' + title + '</b>' +
+            '<p style="margin:3px 0 0;font-size:13px;line-height:1.5;color:#888;">' + body + '</p></div></div>';
+    };
+    var ov = document.createElement('div');
+    ov.id = 'idConsentOverlay';
+    ov.className = 'white-overlay';
+    ov.style.cssText = 'position:absolute;inset:0;z-index:9800;display:flex;flex-direction:column;background:var(--bg-primary,#fff);overflow-y:auto;animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
+    ov.innerHTML =
+        '<div class="header-container"><div class="liquid-glass-btn" onclick="document.getElementById(\'idConsentOverlay\').remove()"><i class="fa-solid fa-chevron-left"></i></div><b>Before you verify</b><div style="width:42px;"></div></div>' +
+        '<div style="padding:16px 20px 40px;">' +
+            (didit
+                ? row('fa-id-card', 'What we ask for', 'A photo of your ID document and a short face scan, checked by Didit, our verification provider, on our behalf.')
+                : row('fa-id-card', 'What we ask for', 'A photo of your ID document with the ID number covered, your full name as it appears on it, and the country that issued it.')) +
+            row('fa-circle-check', 'Why', 'To confirm you are a real person. Only verified people can post, comment, follow and start chats.') +
+            (didit
+                ? row('fa-user-shield', 'Who sees it', 'Didit, to run the check, and the TrustFirst team. We keep only the result, never your face scan.')
+                : row('fa-user-shield', 'Who sees it', 'Only the TrustFirst review team. It is kept in private storage that no other user can open.') +
+                  row('fa-trash-can', 'How long we keep it', 'Your document is deleted as soon as your application is decided, and automatically after 7 days at most. We keep only the result, never your ID.')) +
+            row('fa-hand', 'It is your choice', 'Verifying is optional. Without it you can still browse and reply to chats that someone starts with you.') +
+            row('fa-scale-balanced', 'Your rights', 'You can ask us to delete your information, and you can complain to the Information Regulator. ' +
+                '<a href="#" onclick="event.preventDefault();openInAppBrowser(\'Privacy Policy\',\'privacy\')" style="color:#007AFF;font-weight:600;">Read the Privacy Policy</a>') +
+            '<label style="display:flex;gap:10px;align-items:flex-start;margin:22px 0 18px;cursor:pointer;font-size:14px;line-height:1.45;color:var(--text-primary,#000);">' +
+                '<input type="checkbox" id="idConsentBox" style="width:20px;height:20px;margin-top:1px;flex-shrink:0;"> ' +
+                'I agree to TrustFirst using my ID document to verify me, as described above.</label>' +
+            '<button id="idConsentGo" disabled style="width:100%;padding:15px;border:none;border-radius:14px;background:#007AFF;color:#fff;font-size:15px;font-weight:700;cursor:pointer;opacity:0.45;">Agree and continue</button>' +
+            '<button onclick="document.getElementById(\'idConsentOverlay\').remove()" style="width:100%;margin-top:10px;padding:12px;border:none;background:none;color:#888;font-size:14px;font-weight:600;cursor:pointer;">Not now</button>' +
+        '</div>';
+    (document.getElementById('app') || document.body).appendChild(ov);
+    var box = document.getElementById('idConsentBox');
+    var go = document.getElementById('idConsentGo');
+    box.onchange = function () { go.disabled = !box.checked; go.style.opacity = box.checked ? 1 : 0.45; };
+    go.onclick = function () {
+        if (!box.checked) return;
+        window._tfIdConsent = { version: TF_ID_CONSENT_VERSION, at: new Date().toISOString() };
+        ov.remove();
+        if (typeof onAgree === 'function') onAgree();
+    };
+}
+
 async function startIdVerification() {
+    if (!window._tfIdConsent) return _tfWithIdConsent(startIdVerification, 'didit');
     showToast('Starting ID verification...');
     try {
         var token = '';
@@ -49,7 +112,7 @@ async function startIdVerification() {
         });
         var data = await resp.json();
         if (resp.ok && data.session_url) {
-            try { await sb.from('verification_applications').insert({ user_id: currentUser.id, badge_type: 'blue', provider: 'didit', provider_ref: data.session_id, status: 'pending' }); } catch (e) {}
+            try { await sb.from('verification_applications').insert({ user_id: currentUser.id, badge_type: 'blue', provider: 'didit', provider_ref: data.session_id, status: 'pending', data: _tfConsentRecord() }); } catch (e) {}
             window.open(data.session_url, '_blank');
         } else {
             // Don't leak server config hints (e.g. "set DIDIT_WORKFLOW_ID") to users.
@@ -62,6 +125,8 @@ async function startIdVerification() {
 }
 
 function openBadgeForm(type) {
+    // An ID document is about to be asked for: consent comes first.
+    if (type === 'blue' && !window._tfIdConsent) return _tfWithIdConsent(function () { openBadgeForm(type); });
     var cfg = {
         blue: { title: 'Identity verification', fields: [
             { id: 'legal_name', label: 'Full name (as it appears on your ID)', type: 'text', ph: 'e.g. Naledi Mokoena' },
@@ -118,6 +183,8 @@ window.submitBadgeApplication = async function(type, docRequired) {
     });
     var empties = Object.keys(data).filter(function(k) { return !data[k]; });
     if (empties.length) { showToast('Please fill all fields'); return; }
+    // Record the consent with the application it covers.
+    if (type === 'blue') Object.assign(data, _tfConsentRecord());
 
     var fileInp = document.getElementById('bf_doc');
     var hasFile = fileInp && fileInp.files && fileInp.files[0];
