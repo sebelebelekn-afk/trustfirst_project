@@ -40658,15 +40658,12 @@ async function sendCVR() {
     try {
         var ext = (_cvrMime.indexOf('mp4') >= 0 || !_cvrMime) ? 'mp4' : 'webm';
         var ctype = _cvrMime ? _cvrMime.split(';')[0] : 'video/mp4';
-        // The media bucket is public, so the URL stored on the message resolves.
+        // Private, like every other chat file: see tfUploadChatMedia. It used to
+        // go to the public media bucket so the stored link would simply load.
         var path = currentUser.id + '/vn_' + Date.now() + '.' + ext;
-        var up = await tfWithTimeout(
-            sb.storage.from('media').upload(path, blob, { contentType: ctype, upsert: false }),
+        var publicUrl = await tfWithTimeout(
+            tfUploadChatMedia(blob, path, null, ctype),
             30000, 'Sending the video note');
-        if (up.error) throw up.error;
-
-        var pub = sb.storage.from('media').getPublicUrl(path);
-        var publicUrl = pub && pub.data && pub.data.publicUrl;
         if (!publicUrl) throw new Error('Could not build a link for that clip');
 
         var ins = await sb.from('messages').insert({
@@ -52606,6 +52603,56 @@ async function tfUploadPublicMedia(file, kind, bucket, path, onProgress) {
     return pub.data && pub.data.publicUrl;
 }
 
+// Photos, videos and video notes sent in a conversation.
+//
+// These used to go through tfUploadPublicMedia into the public images, videos
+// and media buckets, or R2, where anyone holding the link could open them. The
+// Terms say chat media is private, so it goes to chat_media instead: a private
+// bucket whose read rule lets in only the sender and the people in the chat it
+// was sent to (supabase/chat_media_access.sql). The message keeps the usual
+// bucket URL and the app swaps in a short-lived signed one to show it
+// (tfSignMediaUrl). Never R2, which is public by design.
+//
+// A plain XHR rather than storage.upload() because only XHR reports upload
+// progress, and a long video with no number looks like it has stalled.
+async function tfUploadChatMedia(file, path, onProgress, contentType) {
+    var token = await _tfAccessToken();
+    // Codec parameters ("video/webm;codecs=vp9") are not on the bucket's list.
+    var type = String(contentType || file.type || 'application/octet-stream').split(';')[0].trim();
+    var url = SUPABASE_URL + '/storage/v1/object/chat_media/' +
+        path.split('/').map(encodeURIComponent).join('/');
+    await new Promise(function (resolve, reject) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', url);
+        xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+        xhr.setRequestHeader('apikey', SUPABASE_ANON_KEY);
+        xhr.setRequestHeader('Content-Type', type);
+        xhr.setRequestHeader('x-upsert', 'false');
+        xhr.setRequestHeader('cache-control', 'max-age=' + TF_MEDIA_CACHE_SECONDS);
+        if (onProgress && xhr.upload) {
+            xhr.upload.onprogress = function (e) { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+        }
+        xhr.onload = function () {
+            if (xhr.status >= 200 && xhr.status < 300) return resolve();
+            var msg = '';
+            try { msg = (JSON.parse(xhr.responseText) || {}).message || ''; } catch (e) {}
+            if (xhr.status === 413 || /maximum allowed size|too large/i.test(msg)) {
+                return reject(new Error('That file is too big to send in a chat.'));
+            }
+            if (xhr.status === 401 || /row-level security|JWT|not authenticated/i.test(msg)) {
+                var out = new Error('You have been signed out. Sign in again and retry.');
+                out.needsSignIn = true;
+                return reject(out);
+            }
+            reject(new Error((msg || 'storage refused it') + ' [' + type + ', HTTP ' + xhr.status + ']'));
+        };
+        xhr.onerror = function () { reject(new Error('The upload could not reach the server.')); };
+        xhr.send(file);
+    });
+    var client = window._sb || window.sb;
+    return client.storage.from('chat_media').getPublicUrl(path).data.publicUrl;
+}
+
 function tfNormaliseImageFile(file) {
     return new Promise(function(resolve) {
         if (!file || !file.type || file.type.indexOf('image/') !== 0) return resolve(file);
@@ -52896,9 +52943,7 @@ async function sendAlbumInChat(files) {
             var f = files[i];
             var ext = (f.name.split('.').pop() || 'jpg');
             var path = currentUser.id + '/chat/' + Date.now() + '_' + i + '.' + ext;
-            var up = await sb.storage.from('images').upload(path, f, { upsert: false });
-            if (up.error) throw up.error;
-            urls.push(sb.storage.from('images').getPublicUrl(path).data.publicUrl);
+            urls.push(await tfUploadChatMedia(f, path));
         }
         // Swap the optimistic bubble for the uploaded one.
         var bubble = chatBody.querySelector('[data-msg-id="' + msgId + '"]');
@@ -53412,10 +53457,10 @@ async function sendMediaInChat(file, caption) {
         try { file = await tfShrinkForUpload(file); } catch (e) {}
         var ext = file.name.split('.').pop() || (isVideo ? 'mp4' : 'jpg');
         var path = currentUser.id + '/chat/' + Date.now() + '.' + ext;
-        var bucket = isVideo ? 'videos' : 'images';
         var progEl = document.getElementById('upload-prog-' + msgId);
 
-        var publicUrl = await tfUploadPublicMedia(file, isVideo ? 'video' : 'image', bucket, path, function (p) {
+        // Private bucket, not the public post buckets: see tfUploadChatMedia.
+        var publicUrl = await tfUploadChatMedia(file, path, function (p) {
             // The label says "Uploading…" until there is something truthful to
             // put there. A long video with no number looks like it has stalled.
             if (progEl) progEl.textContent = 'Uploading ' + Math.round(p * 100) + '%';

@@ -48,7 +48,9 @@
 -- copied verbatim from the live policies; the only addition is the trailing
 -- AND public.tf_is_verified().
 --
--- Applied to production: NOT YET — pending review. (Fill the date on apply.)
+-- Applied to production: 2026-10-18, pasted into the Supabase SQL editor by the
+-- owner. Checked the same day against pg_policies: all eight INSERT policies
+-- carry tf_is_verified(), posts has a single INSERT policy, messages unchanged.
 
 begin;
 
