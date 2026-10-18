@@ -447,15 +447,18 @@ var currentConversationId = null;
 var SUPABASE_CONFIG = { enabled: true };
 // SupabaseAPI wrapper removed — use DB directly
 
-const USERS = [
-    { name: "Edmond Smith", handle: "@edmond_s", tier: "verify-gold", type: "celebrity", pic: "1", verified: true },
-    { name: "Sizwe Dlamini", handle: "@sizwe_d", tier: "verify-blue", type: "personal", pic: "2", verified: true },
-    { name: "Lucia Tjie", handle: "@lucia_t", tier: "verify-silver", type: "business", pic: "3", verified: true },
-    { name: "Tech SA", handle: "@tech_hub", tier: "verify-silver", type: "business", pic: "4", verified: true },
-    { name: "Kid Wonder", handle: "@kid_star", tier: "verify-green", type: "child", pic: "5", verified: true, parentId: "official_kgothi" }
-];
-
 let parentRequests = []; // Loaded from Supabase family_link_requests table on Family Center open
+
+// Neutral stand-ins for missing artwork. These used to be random stock photos
+// from picsum.photos, which put a stranger's picture where a song's cover or a
+// person's own archived post should be, and told a third party every time one
+// of those screens opened.
+var TF_ART_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#2c2c2e"/>' +
+    '<circle cx="42" cy="66" r="9" fill="#8e8e93"/><rect x="48" y="28" width="5" height="39" fill="#8e8e93"/>' +
+    '<path d="M53 28 L70 33 L70 41 L53 36 Z" fill="#8e8e93"/></svg>');
+var TF_MEDIA_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#2c2c2e"/></svg>');
 
 // --- SECURITY CORE ---
 function escapeHtml(text) {
@@ -2186,15 +2189,9 @@ async function searchUsersForMessage(query) {
             users = r.data || [];
         } catch(e) { if (e) console.warn('[Suppressed error]', e); }
     }
-    if (!users.length) {
-        // Fallback to local USERS array
-        users = (typeof USERS !== 'undefined' ? USERS : [])
-            .filter(function(u) {
-                return (u.name || '').toLowerCase().includes(query.toLowerCase()) ||
-                       (u.handle || '').toLowerCase().includes(query.toLowerCase());
-            })
-            .map(function(u) { return { id: u.id || null, full_name: u.name, username: u.handle.replace('@',''), badge_tier: u.tier, verified: true }; });
-    }
+    // No fallback. This used to fill an empty result with a hard-coded list of
+    // invented "verified" people, which on a small network was most searches:
+    // a trust app showing accounts that do not exist. Nobody found is the answer.
     if (!users.length) {
         results.innerHTML = '<p style="text-align:center; color:#aaa; font-size:13px; padding:30px 0;">No users found for "' + escapeHtml(query) + '"</p>';
         return;
@@ -8509,10 +8506,9 @@ function openSoundtrackSheet(track) {
     var existing = document.getElementById('soundtrackSheet');
     if (existing) existing.remove();
 
-    track = track || thoughtSelectedMusic || {
-        name: 'Afrobeats Vibes', artist: 'Artist Name',
-        artUrl: 'https://picsum.photos/seed/album/200/200', previewUrl: null
-    };
+    // No invented song when there is nothing to show; the sheet just does not open.
+    track = track || thoughtSelectedMusic;
+    if (!track) return;
 
     var sheet = document.createElement('div');
     sheet.id = 'soundtrackSheet';
@@ -8529,8 +8525,8 @@ function openSoundtrackSheet(track) {
         // Album art + track info
         '<div style="display:flex;flex-direction:column;align-items:center;padding:24px 20px 16px;">' +
             '<img src="' + escapeHtml(track.artUrl || '') + '" onerror="this.style.display=\'none\'" style="width:88px;height:88px;border-radius:18px;object-fit:cover;box-shadow:0 8px 32px rgba(0,0,0,0.5);margin-bottom:14px;">' +
-            '<b style="color:white;font-size:17px;font-weight:800;margin-bottom:4px;">' + escapeHtml(track.name || 'Song Title') + '</b>' +
-            '<small style="color:rgba(255,255,255,0.5);font-size:13px;">' + escapeHtml(track.artist || 'Artist') + '</small>' +
+            '<b style="color:white;font-size:17px;font-weight:800;margin-bottom:4px;">' + escapeHtml(track.name || 'Unknown track') + '</b>' +
+            '<small style="color:rgba(255,255,255,0.5);font-size:13px;">' + escapeHtml(track.artist || '') + '</small>' +
         '</div>' +
 
         // Progress controls row
@@ -8772,19 +8768,23 @@ function removeThought() {
     triggerHaptic(20);
 }
 
-function openThoughtViewer(thought, userName) {
+function openThoughtViewer(thought, userName, music) {
     thought = thought || 'Thinking...';
     userName = userName || 'You';
     var existing = document.getElementById('thoughtViewerOverlay');
     if (existing) { existing.remove(); stopThoughtViewerAudio(); return; }
 
-
-
-    // Pick music from thoughtSelectedMusic if on profile, or fake data for feed posts
-    var musicName   = (typeof thoughtSelectedMusic !== 'undefined' && thoughtSelectedMusic) ? thoughtSelectedMusic.name   : 'Afrobeats Vibes';
-    var musicArtist = (typeof thoughtSelectedMusic !== 'undefined' && thoughtSelectedMusic) ? thoughtSelectedMusic.artist : '@music_sa';
-    var musicArt    = (typeof thoughtSelectedMusic !== 'undefined' && thoughtSelectedMusic) ? thoughtSelectedMusic.artUrl  : 'https://picsum.photos/seed/musicart/80/80';
-    var previewUrl  = (typeof thoughtSelectedMusic !== 'undefined' && thoughtSelectedMusic) ? thoughtSelectedMusic.previewUrl : null;
+    // The thought's own music when the caller passes it (a feed thought does);
+    // otherwise your own selection, which is right for your own thought. This
+    // used to ignore what the caller passed and, with nothing selected, show an
+    // invented song ("Afrobeats Vibes", "@music_sa") and play a synthesised
+    // tune as if it were real. No music now means no music row.
+    var m = music || ((typeof thoughtSelectedMusic !== 'undefined' && thoughtSelectedMusic) ? thoughtSelectedMusic : null);
+    var hasMusic    = !!(m && m.name);
+    var musicName   = hasMusic ? m.name : '';
+    var musicArtist = hasMusic ? (m.artist || '') : '';
+    var musicArt    = hasMusic ? (m.artUrl || TF_ART_PLACEHOLDER) : '';
+    var previewUrl  = hasMusic ? (m.previewUrl || null) : null;
 
     var lyricsHTML = '';
 
@@ -8803,11 +8803,10 @@ function openThoughtViewer(thought, userName) {
             '<div style="text-align:center;padding:12px 20px 0;">' +
                 '<div style="width:36px;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;margin:0 auto 16px;"></div>' +
                 '<p style="color:rgba(255,255,255,0.9);font-size:16px;font-weight:800;margin:0 0 2px;">' + escapeHtml(userName) + '</p>' +
-                '<small style="color:rgba(255,255,255,0.4);font-size:11px;">Just now</small>' +
             '</div>' +
 
-            // Music bubble
-            '<div class="tv-music-bubble">' +
+            // Music bubble, only for a real song
+            (hasMusic ? '<div class="tv-music-bubble">' +
                 '<div class="tv-vinyl" id="tvVinyl">' +
                     '<div style="width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,0.88);box-shadow:0 2px 6px rgba(0,0,0,0.4);"></div>' +
                 '</div>' +
@@ -8821,7 +8820,7 @@ function openThoughtViewer(thought, userName) {
                         return '<div style="width:3px;height:' + h + 'px;background:#007AFF;border-radius:2px;transition:height 0.25s ease;"></div>';
                     }).join('') +
                 '</div>' +
-            '</div>' +
+            '</div>' : '') +
 
             // Thought text
             '<div style="padding:16px 22px 10px;">' +
@@ -8852,31 +8851,18 @@ function openThoughtViewer(thought, userName) {
 
     (document.getElementById('app') || document.body).appendChild(overlay);
 
-    // Auto-play music
-    autoPlayThoughtViewerMusic(previewUrl, musicName);
-
-    // Animate sound bars
-    startTVSoundBars();
+    // Real music only: nothing plays and nothing animates without a song.
+    if (hasMusic) {
+        autoPlayThoughtViewerMusic(previewUrl, musicName);
+        startTVSoundBars();
+    }
 }
 
 function autoPlayThoughtViewerMusic(previewUrl, trackName) {
     stopThoughtViewerAudio();
-    if (!previewUrl) {
-        // Play a soft tone as placeholder
-        try {
-            var ctx = new (window.AudioContext || window.webkitAudioContext)();
-            var osc = ctx.createOscillator();
-            var gain = ctx.createGain();
-            osc.connect(gain); gain.connect(ctx.destination);
-            osc.type = 'sine';
-            var freqs = [261,294,329,349,392,440,494,523];
-            freqs.forEach(function(f,i){ osc.frequency.setValueAtTime(f, ctx.currentTime + i*0.35); });
-            gain.gain.setValueAtTime(0.08, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 3.2);
-            osc.start(); osc.stop(ctx.currentTime + 3.2);
-        } catch(e) { if (e) console.warn('[Suppressed error]', e); }
-        return;
-    }
+    // No preview, no sound. This used to synthesise a little tune here so it
+    // sounded as if the song was playing when it was not.
+    if (!previewUrl) return;
     var audio = document.createElement('audio');
     audio.id = 'tvAudioEl';
     audio.src = previewUrl;
@@ -15494,100 +15480,6 @@ function toggleReelBookmark(el) {
 // ==========================================================================
 // FIX: Clickable Usernames in Feed + Follow Buttons
 // ==========================================================================
-function createPost(i) {
-    const user = USERS[i % USERS.length];
-    const isFlagged = i === 2;
-    const isAdultPost = i === 4;
-
-    if (isChildAccount() && (isAdultPost || (user.type !== 'child' && isFlagged))) {
-        const safeCard = document.createElement('div');
-        safeCard.className = 'post-card';
-        safeCard.id = `post-${i}`;
-        safeCard.innerHTML = `
-            <div class="post-header">
-                <img src="${tfAvatarFor("User", "34C759", 100)}" class="post-avatar">
-                <div style="flex:1;">
-                    <div class="post-info"><b>TrustFirst Kids <i class="fa-solid fa-circle-check verify-green"></i></b></div>
-                    <div class="post-info"><small>@trustfirst_kids • Safe Content</small></div>
-                </div>
-            </div>
-            <div class="post-content">Here's something fun and safe for everyone</div>
-            <div class="post-media-box">
-
-            </div>
-            <div class="post-icons">
-                <div onclick="realToggleLike(this,'${post.id}')" data-liked="${post._liked ? 'true' : 'false'}"><i class="${post._liked ? 'fa-solid' : 'fa-regular'} fa-heart" style="color:${post._liked ? '#FF3B30' : ''}"></i> <span style="font-size:13px;color:#888;">${post.likes_count || 0}</span></div>
-               <div onclick="openComments()"><i class="fa-regular fa-comment"></i></div>
-                <div onclick="toggleBookmark(this)"><i class="fa-regular fa-bookmark"></i> <span style="font-size:13px;color:#888;">0</span></div>
-            </div>`;
-        return safeCard;
-    }
-
-    const card = document.createElement('div');
-    card.className = 'post-card';
-    card.id = `post-${i}`;
-
-    // Content moderation
-    const postText = 'TrustFirst architecture test post. Building the ultimate social OS. #Liquid';
-    const modResult = moderateContent(postText);
-
-    let contentHtml = '';
-    if (modResult.blocked) {
-        contentHtml = `<div class="content-warning"><i class="fa-solid fa-ban" style="font-size:30px; margin-bottom:10px;"></i><b>Content Removed</b><p style="font-size:13px; margin-top:5px;">This post was removed by our AI moderator.</p></div>`;
-    } else if (modResult.blurred) {
-        contentHtml = `<div class="post-content" style="filter:blur(5px); cursor:pointer;" onclick="this.style.filter='none'">${escapeHtml(postText)}</div>
-                       <small style="color:#FF9500; padding:0 5px;"><i class="fa-solid fa-triangle-exclamation"></i> Content warning: May contain sensitive language. Tap to reveal.</small>`;
-    } else {
-        contentHtml = `<div class="post-content">${escapeHtml(postText)}</div>`;
-    }
-
-    const modLayer = isFlagged ? `
-        <div class="mod-overlay" id="mod-${i}">
-            <i class="fa-solid fa-triangle-exclamation" style="font-size:30px; color:#FF3B30; margin-bottom:10px;"></i>
-            <b>Sensitive Content</b>
-            <small style="color:#666; margin-bottom:10px;">Flagged for potential policy violation.</small>
-            <button style="padding:8px 16px; border-radius:20px; border:1px solid #ccc; background:none; cursor:pointer;" onclick="document.getElementById('mod-${i}').remove(); document.getElementById('media-${i}').classList.remove('banned-content')">View Anyway</button>
-        </div>` : '';
-
-    const blurClass = isFlagged ? 'banned-content' : '';
-
-    card.innerHTML = `
-        <div class="post-header">
-            <img src="https://picsum.photos/seed/${user.name}/100/100" class="post-avatar" onclick="openPage('profile-overlay'); loadMyProfile();" style="cursor:pointer;">
-            <div style="flex:1;">
-                <div class="post-info">
-                    <b>
-                        <span class="clickable-user" onclick="openPage('profile-overlay'); loadMyProfile();" style="cursor:pointer;">${escapeHtml(user.name)}</span>
-                        <i class="fa-solid fa-circle-check ${user.tier}"></i>
-                    </b>
-                </div>
-                <div class="post-info"><small>${escapeHtml(user.handle)} • 2h</small></div>
-            </div>
-            <button class="feed-follow-btn" data-user-id="{{post.author_id}}" onclick="toggleFeedFollow(this)">Follow</button>
-            <i class="fa-solid fa-ellipsis" style="margin-left:8px;" onclick="togglePostMenu(${i})"></i>
-        </div>
-
-        <div id="menu-${i}" class="post-menu-dropdown">
-            <div class="pm-item"><i class="fa-regular fa-eye-slash"></i> Not Interested</div>
-            <div class="pm-item"><i class="fa-regular fa-flag"></i> Report</div>
-            ${isAdmin ? `<div class="pm-item" style="color:red;" onclick="this.parentElement.parentElement.remove()"><i class="fa-solid fa-trash"></i> Admin Delete</div>` : ''}
-        </div>
-
-        ${contentHtml}
-        <div class="post-media-box">
-            ${modLayer}
-
-        </div>
-        <div class="post-icons">
-            <div onclick="realToggleLike(this, 'local_${i}')"><i class="fa-regular fa-heart"></i> <span style="font-size:13px;color:#888;">0</span></div>
-            <div onclick="openComments('local_${i}')"><i class="fa-regular fa-comment"></i> <span style="font-size:13px;color:#888;">0</span></div>
-            <div onclick="handleRepost()"><i class="fa-solid fa-retweet"></i></div>
-            <div onclick="toggleBookmark(this)"><i class="fa-regular fa-bookmark"></i> <span style="font-size:13px;color:#888;">0</span></div>
-            <div onclick="openShare()"><i class="fa-solid fa-share-nodes"></i></div>
-        </div>`;
-    return card;
-}
-
 function toggleReelFollow(btn) {
     if (btn.classList.contains('following')) {
         btn.classList.remove('following');
@@ -26540,7 +26432,7 @@ async function loadArchiveContent(type) {
         div.style.cssText = 'position:relative;' + (isLive ? 'aspect-ratio:16/9;' : 'aspect-ratio:9/16;') + 'background:#111;overflow:hidden;cursor:pointer;border-radius:1px;';
 
         var img = document.createElement('img');
-        img.src = item.media_url || ('https://picsum.photos/seed/arc' + type + item.id + '/300/' + (isLive ? '169' : '534'));
+        img.src = item.media_url || TF_MEDIA_PLACEHOLDER;
         img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
         div.appendChild(img);
 
@@ -30160,16 +30052,10 @@ async function getChildSafeFeed() {
 }
 
 function buildLocalChildFeed() {
-    // Safe placeholder posts for offline/fallback
-    return [{
-        id: 'safe_1',
-        text_content: 'Welcome to TrustFirst Kids',
-        post_type: 'text',
-        created_at: new Date().toISOString(),
-        like_count: 12, comment_count: 3, repost_count: 0,
-        _liked: false, _bookmarked: false,
-        users: { full_name: 'TrustFirst Kids', username: 'trustfirst_kids', verified: true, badge_tier: 'verify-green', avatar_url: null }
-    }];
+    // Nothing, honestly. This used to return an invented post from an invented
+    // "TrustFirst Kids" account with invented likes, shown whenever the real
+    // feed could not load. An empty feed tells the truth; a fake one does not.
+    return [];
 }
 
 // Enhanced parent notification system
@@ -34833,45 +34719,6 @@ function deleteCoverPhoto() {
     // ============================================================
 // CHANNEL BROADCAST INTERFACE
 // ============================================================
-var CH_DATA = [
-    {
-        id: 'tf_official', name: 'TrustFirst Official', emoji: '📢',
-        color: '#007AFF', followers: '12.5K', verified: true, isAdmin: true,
-        posts: [
-            { text: 'TrustFirst v2.0 is now live! Liquid Glass navigation, real E2E encryption, and so much more. Thank you for building with us. 🙏', time: '2h', reactions: {'🔥': 842, '❤️': 1203, '🎉': 590} },
-            { text: 'Server maintenance scheduled for Sunday 2:00 AM SAST. Expect ~15 min downtime. We appreciate your patience.', time: '5h', reactions: {'👍': 234, '🙏': 89} }
-        ]
-    },
-    {
-        id: 'tech_hub', name: 'SA Tech Hub', emoji: '💡',
-        color: '#34C759', followers: '8.2K', verified: true, isAdmin: false,
-        posts: [
-            { text: 'Cape Town named the top African city for tech talent in 2026! 🇿🇦 The local startup ecosystem is growing faster than ever.', time: '1h', reactions: {'🚀': 412, '🔥': 288, '❤️': 190} }
-        ]
-    },
-    {
-        id: 'creator_studio', name: 'Creator Studio', emoji: '🎬',
-        color: '#FF9500', followers: '5.1K', verified: true, isAdmin: false,
-        posts: [
-            { text: 'Pro tip: Post your TrustClips between 7–9 PM for 3× more views. Your audience is most active in the evening!', time: '3h', reactions: {'💡': 671, '👏': 344, '🙌': 201} }
-        ]
-    },
-    {
-        id: 'safety_updates', name: 'Safety Updates', emoji: '🛡️',
-        color: '#FF3B30', followers: '22K', verified: true, isAdmin: false,
-        posts: [
-            { text: 'Reminder: TrustFirst will NEVER ask for your password via message. Report any suspicious activity immediately.', time: '6h', reactions: {'👍': 1821, '🙏': 982} }
-        ]
-    },
-    {
-        id: 'music_sa', name: 'Music SA', emoji: '🎵',
-        color: '#AF52DE', followers: '15K', verified: true, isAdmin: false,
-        posts: [
-            { text: 'Amapiano is officially the most-streamed genre in Africa for 2026. The culture continues to rise! 🎶', time: '30m', reactions: {'🎶': 1821, '🔥': 982, '❤️': 743} }
-        ]
-    }
-];
-
 async function openChannelBroadcast(channelId) {
     var overlay = document.getElementById('ch-broadcast');
     if (!overlay) {
@@ -54191,7 +54038,7 @@ function openSpMusicEditorSheet(track, screen) {
     sheet.style.cssText = 'position:absolute;bottom:0;left:0;right:0;z-index:9850;display:flex;flex-direction:column;overflow:hidden;border-radius:24px 24px 0 0;max-height:72%;';
 
     // Blurred album art background
-    var bgUrl = track.artUrl || 'https://picsum.photos/seed/music/400/400';
+    var bgUrl = track.artUrl || TF_ART_PLACEHOLDER;
     sheet.innerHTML =
         // Blurred background
         '<div style="position:absolute;inset:0;z-index:0;">' +
