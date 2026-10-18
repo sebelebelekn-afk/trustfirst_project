@@ -37674,62 +37674,16 @@ requires_approval: (document.getElementById('groupApprovalToggle')?.classList.co
             } catch(dbErr) { console.warn('[Post DB]', dbErr); }
         }
 
-        // Local fallback — always succeeds
+        // This used to fall back to a post that existed only on this screen,
+        // add it to the feed and say "Posted!", so a post that never reached
+        // the server looked exactly like one that had. Say it did not save,
+        // and leave everything in the composer for another try.
         if (!saved) {
-            var localPost = {
-                id: 'local_' + Date.now(),
-                user_id: currentUser?.id || 'local',
-                text_content: postText,
-                post_type: postType,
-                created_at: new Date().toISOString(),
-                like_count: 0, comment_count: 0, repost_count: 0,
-                _liked: false, _bookmarked: false,
-                users: {
-                    full_name: currentUser?.name || 'You',
-                    username: currentUser?.username || 'user',
-                    avatar_url: currentUser?.avatar_url || null,
-                    badge_tier: currentUser?.tier || 'verify-blue',
-                    verified: currentUser?.verified || false
-                }
-            };
-            cancelComposer();
-            showToast('Posted! 🎉');
-            triggerHaptic(50);
-            var feedEl = document.getElementById('feed-posts') || document.getElementById('feed-panels');
-if (feedEl) {
-    var newCard = renderRealPostCard(localPost);
-    feedEl.insertBefore(newCard, feedEl.firstChild);
-    newCard.scrollIntoView({ behavior:'smooth', block:'start' });
-}
-var profileGrid = document.getElementById('profile-grid');
-if (profileGrid && profileGrid.offsetParent !== null &&
-    (profileGrid.dataset.tab || 'posts') === 'posts') {
-    loadProfilePosts(profileGrid);
-}
-        } // closes if (!saved)
+            showToast('Your post was not saved. Check your connection and try again.');
+        }
     } catch(e) {
         console.error('[Post]', e);
-        // Still try local fallback
-        var fallbackPost = {
-            id: 'local_' + Date.now(),
-            user_id: currentUser?.id || 'local',
-            text_content: postText,
-            post_type: postType,
-            created_at: new Date().toISOString(),
-            like_count: 0, comment_count: 0, repost_count: 0,
-            _liked: false, _bookmarked: false,
-            users: {
-                full_name: currentUser?.name || 'You',
-                username: currentUser?.username || 'user',
-                avatar_url: currentUser?.avatar_url || null,
-                badge_tier: currentUser?.tier || 'verify-blue',
-                verified: currentUser?.verified || false
-            }
-        };
-        cancelComposer();
-        showToast('Posted! 🎉');
-        var feedFb = document.getElementById('feed-posts');
-        if (feedFb) feedFb.insertBefore(renderRealPostCard(fallbackPost), feedFb.firstChild);
+        showToast('Your post was not saved. Check your connection and try again.');
     }
 
     if (btn) { btn.textContent = 'Post'; btn.disabled = false; }
