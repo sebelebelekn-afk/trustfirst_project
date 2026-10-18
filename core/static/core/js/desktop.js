@@ -263,9 +263,10 @@ async function tfDeskLoadRail() {
         }
     }
 
-    // --- who is live ---
+    // --- who is live --- (not asked at all while Live is paused; the card is
+    // hidden by the stylesheet in that case)
     var live = document.getElementById('tfRailLive');
-    if (live) {
+    if (live && (typeof tfFeature !== 'function' || tfFeature('live'))) {
         try {
             var l = await sb.from('live_sessions')
                 .select('id,room,username,avatar_url,title,viewer_count')

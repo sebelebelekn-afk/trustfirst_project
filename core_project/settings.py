@@ -81,7 +81,39 @@ if _render_host:
 #
 # Do not bump it for a typo fix. The notice means "this changed and you should
 # look", and a notice that cries wolf is worse than none.
-TERMS_VERSION = (os.environ.get('TERMS_VERSION', '') or '2026-09-14').strip()
+TERMS_VERSION = (os.environ.get('TERMS_VERSION', '') or '2026-10-18').strip()
+
+# Where people write to us. Used in messages the server sends back, such as the
+# answer to an account that cannot be deleted from the app. One variable to
+# change when the company address exists.
+CONTACT_EMAIL = (os.environ.get('CONTACT_EMAIL', '') or 'contacttrustfirst@gmail.com').strip()
+
+# Parts of the app that are paused rather than deleted.
+#
+# Each is off unless its environment variable turns it on, so a deploy that
+# forgets to set anything lands on the safe answer, and bringing one back is a
+# single variable on the host: no code change and no app update, because the
+# Android app loads this site. The client hides every way in; the endpoints
+# that move money or open a stream refuse anyway, because a hidden button is
+# not a lock.
+#
+#   TF_FEATURE_LIVE    live streams, and the viewer gifts that only exist in them
+#   TF_FEATURE_WALLET  adding money to a wallet
+#   TF_FEATURE_COINS   coins: buying them, gifts, and cashing them out
+#   TF_FEATURE_KIDS    under-18 accounts linked to a parent; while off, sign-up is 18+
+#   TF_FEATURE_NEARBY  the people map and the Nearby list, and with them the
+#                      upload of anyone's live location
+#
+# Paused is not closed. Withdrawing money from a wallet keeps working, because
+# that money is the person's and the Terms promise they can take it out. Coins
+# are off completely, cash-out included: when they were switched off the only
+# account holding any was an admin's, so nobody else's value is held up.
+def _feature(name):
+    return (os.environ.get('TF_FEATURE_' + name.upper(), '') or '').strip().lower() in (
+        '1', 'true', 'yes', 'on')
+
+
+TF_FEATURES = {name: _feature(name) for name in ('live', 'wallet', 'coins', 'kids', 'nearby')}
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

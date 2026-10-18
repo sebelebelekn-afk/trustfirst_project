@@ -49,7 +49,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=109">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=111">
     <!-- The laptop layout. Every rule inside is behind a min-width query,
          so a phone downloads it and applies none of it. -->
     <link rel="stylesheet" href="{% static 'core/css/desktop.css' %}?v=13">
@@ -352,7 +352,7 @@ function authenticateUser() {
     <div class="auth-step" id="step-signup-dob">
         <div class="auth-topbar"><div class="auth-back" onclick="nextAuthStep('step-signup-name')"><i class="fa-solid fa-arrow-left"></i></div></div>
         <h2 class="auth-x-title">Your date of birth</h2>
-        <p class="auth-sub-left">Not shown publicly. Under-18s get a protected Kids account.</p>
+        <p class="auth-sub-left">Not shown publicly. <span data-tf-feature="kids">Under-18s get a protected Kids account.</span><span class="tf-paused-note" data-tf-note="kids">You need to be 18 or older to join for now.</span></p>
         <div class="auth-x-field-row">
             <input class="auth-x-field" id="signup-dob-in" type="date" oninput="_signupDobToggle()">
         </div>
@@ -486,12 +486,14 @@ function authenticateUser() {
     <div class="tf-nav-item" data-tab="messages" role="button" tabindex="0"
          onclick="tfDeskGo('messages')"><i class="fa-solid fa-paper-plane"></i><span>Messages</span>
          <span class="tf-nav-dot" id="tf-dot-messages"></span></div>
-    <div class="tf-nav-item" data-tab="live" role="button" tabindex="0"
+    <div class="tf-nav-item" data-tab="live" data-tf-feature="live" role="button" tabindex="0"
          onclick="tfDeskGo('live')"><i class="fa-solid fa-tower-broadcast"></i><span>Live</span></div>
     <div class="tf-nav-item" data-tab="channels" role="button" tabindex="0"
          onclick="tfDeskGo('channels')"><i class="fa-solid fa-satellite-dish"></i><span>Channels</span></div>
     <div class="tf-nav-item" data-tab="groups" role="button" tabindex="0"
          onclick="tfDeskGo('groups')"><i class="fa-solid fa-users"></i><span>Groups</span></div>
+    <div class="tf-nav-item" data-tab="marketplace" role="button" tabindex="0"
+         onclick="openMarketplace()"><i class="fa-solid fa-store"></i><span>Marketplace</span></div>
     <div class="tf-nav-item" data-tab="saved" role="button" tabindex="0"
          onclick="tfDeskGo('saved')"><i class="fa-solid fa-bookmark"></i><span>Saved</span></div>
     <div class="tf-nav-item" data-tab="analytics" role="button" tabindex="0"
@@ -527,7 +529,7 @@ function authenticateUser() {
         <h2 class="tf-rail-title">Trending</h2>
         <div id="tfRailTags"><div class="tf-rail-empty">Loadingâ€¦</div></div>
     </div>
-    <div class="tf-rail-card">
+    <div class="tf-rail-card" data-tf-feature="live">
         <h2 class="tf-rail-title">Live now</h2>
         <div id="tfRailLive"><div class="tf-rail-empty">Loadingâ€¦</div></div>
     </div>
@@ -580,7 +582,7 @@ function authenticateUser() {
         <p class="tf-create-sub">What would you like to make?</p>
         <div class="tf-create-opt" onclick="tfDeskCreate('post')">
             <i class="fa-solid fa-pen-nib"></i> Write a post</div>
-        <div class="tf-create-opt" onclick="tfDeskCreate('live')">
+        <div class="tf-create-opt" data-tf-feature="live" onclick="tfDeskCreate('live')">
             <i class="fa-solid fa-tower-broadcast"></i> Go live</div>
         <div class="tf-create-opt" onclick="tfDeskCreate('eddie')">
             <i class="fa-solid fa-wand-magic-sparkles"></i> Ask Eddie</div>
@@ -613,15 +615,19 @@ function authenticateUser() {
                    oninput="tfDeskSearchInput(this.value)"
                    onkeydown="if(event.key==='Enter')tfDeskSearchGo()">
         </div>
-        <div class="plus-wrapper tf-no-desktop">
+        <div class="plus-wrapper tf-no-desktop" style="display:flex; align-items:center; gap:10px;">
+            <div class="liquid-glass-btn" role="button" aria-label="Marketplace" onclick="openMarketplace()">
+                <i class="fa-solid fa-store"></i>
+            </div>
             <div class="liquid-glass-btn" onclick="togglePlusMenu()">
                 <i class="fa-solid fa-plus" id="plus-icon-anim"></i>
             </div>
             <div class="add-menu" id="add-menu">
                 <div class="add-option" onclick="togglePlusMenu(); openClipSelectorGallery();"><i class="fa-solid fa-play"></i> New Trust Clip</div>
                 <div class="add-option" onclick="togglePlusMenu(); openPage('composer-overlay'); hideNavBar();"><i class="fa-solid fa-pen-nib"></i> Create Post</div>
+                <div class="add-option" onclick="togglePlusMenu(); openListingComposer();"><i class="fa-solid fa-tag"></i> Sell something</div>
                 <div class="add-option" onclick="togglePlusMenu(); setTimeout(openStoryPicker,50);"><i class="fa-solid fa-camera"></i> Story</div>
-                <div class="add-option" onclick="togglePlusMenu(); openLiveStreamFeed();"><i class="fa-solid fa-tower-broadcast"></i> Go Live</div>
+                <div class="add-option" data-tf-feature="live" onclick="togglePlusMenu(); openLiveStreamFeed();"><i class="fa-solid fa-tower-broadcast"></i> Go Live</div>
                 <div class="add-option" onclick="triggerThought()"><i class="fa-regular fa-lightbulb"></i> Thoughts</div>
                 <div class="add-option" onclick="togglePlusMenu(); openEddieChat();"><i class="fa-solid fa-wand-magic-sparkles"></i> Ask Eddie</div>
             </div>
@@ -1220,7 +1226,7 @@ function authenticateUser() {
                 </div>
             </div>
 
-            <div onclick="openKidsCreatorApplication()" style="background:linear-gradient(135deg,rgba(52,199,89,0.1),rgba(52,199,89,0.04));border:1px solid rgba(52,199,89,0.2);border-radius:16px;padding:16px;margin:0 0 18px;cursor:pointer;display:flex;align-items:center;gap:14px;">
+            <div data-tf-feature="kids" onclick="openKidsCreatorApplication()" style="background:linear-gradient(135deg,rgba(52,199,89,0.1),rgba(52,199,89,0.04));border:1px solid rgba(52,199,89,0.2);border-radius:16px;padding:16px;margin:0 0 18px;cursor:pointer;display:flex;align-items:center;gap:14px;">
                 <div style="width:44px;height:44px;border-radius:12px;background:rgba(52,199,89,0.18);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-child-reaching" style="color:#34C759;font-size:19px;"></i></div>
                 <div style="flex:1;"><div style="font-size:15px;font-weight:700;color:var(--text-primary,#000);">Create for Kids</div><div style="font-size:12px;color:#888;margin-top:2px;">Apply to make child-safe content (white badge)</div></div>
                 <i class="fa-solid fa-chevron-right" style="color:#ccc;font-size:13px;"></i>
@@ -1655,7 +1661,7 @@ function authenticateUser() {
                 <div style="display:flex; gap:10px; align-items:center;"><i class="fa-solid fa-qrcode"></i> My QR Code</div>
                 <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
             </div>
-<div class="settings-row" onclick="openPage('wallet-overlay'); refreshWalletBalance();">
+<div class="settings-row" data-tf-feature="wallet" onclick="openPage('wallet-overlay'); refreshWalletBalance();">
     <div style="display:flex; gap:10px; align-items:center;">
         <div style="width:30px;height:30px;border-radius:8px;background:#007AFF;display:flex;align-items:center;justify-content:center;"><i class="fa-solid fa-wallet" style="color:white;font-size:13px;"></i></div>
         Balance & Wallet
@@ -1712,7 +1718,7 @@ function authenticateUser() {
                 <div style="display:flex; gap:10px; align-items:center;"><i class="fa-solid fa-shield-halved"></i> Security</div>
                 <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
             </div>
-            <div class="settings-row" onclick="openPage('parent-hub')">
+            <div class="settings-row" data-tf-feature="kids" onclick="openPage('parent-hub')">
                 <div style="display:flex; gap:10px; align-items:center;"><i class="fa-solid fa-users"></i> Family Center</div>
                 <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
             </div>
@@ -1786,7 +1792,7 @@ function authenticateUser() {
 
         <div class="settings-section-title">EXPLORE</div>
         <div class="settings-card">
-            <div class="settings-row" onclick="openPage('local-circles-overlay'); renderLocalCircles();">
+            <div class="settings-row" data-tf-feature="nearby" onclick="openPage('local-circles-overlay'); renderLocalCircles();">
                 <div style="display:flex; gap:10px; align-items:center;"><i class="fa-solid fa-location-dot" style="color:#007AFF;"></i> Local Circles</div>
                 <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
             </div>
@@ -1903,7 +1909,7 @@ function authenticateUser() {
     <h2 style="font-size:24px;font-weight:900;line-height:1.3;margin-bottom:24px;">To check in, allow access to your device location</h2>
     <div style="display:flex;flex-direction:column;gap:18px;text-align:left;">
       <div style="display:flex;gap:14px;align-items:flex-start;"><i class="fa-solid fa-location-dot" style="color:#888;font-size:18px;flex-shrink:0;margin-top:2px;"></i><p style="font-size:14px;color:#555;line-height:1.5;"><b>Add your location when you want</b><br>Choose when to share, checking into places or adding it to a story.</p></div>
-      <div style="display:flex;gap:14px;align-items:flex-start;"><i class="fa-regular fa-comment" style="color:#888;font-size:18px;flex-shrink:0;margin-top:2px;"></i><p style="font-size:14px;color:#555;line-height:1.5;"><b>We use location to show things nearby</b><br>Location data helps show relevant local content, ads, and events.</p></div>
+      <div style="display:flex;gap:14px;align-items:flex-start;"><i class="fa-regular fa-comment" style="color:#888;font-size:18px;flex-shrink:0;margin-top:2px;"></i><p style="font-size:14px;color:#555;line-height:1.5;"><b>We use it to find the place you pick</b><br>When you check in, that place goes on your post. There are no adverts, and your location is not used for anything else.</p></div>
       <div style="display:flex;gap:14px;align-items:flex-start;"><i class="fa-solid fa-gear" style="color:#888;font-size:18px;flex-shrink:0;margin-top:2px;"></i><p style="font-size:14px;color:#555;line-height:1.5;"><b>Update your settings at any time</b><br>Even if disabled, we may use your IP address to estimate your location.</p></div>
     </div>
   </div>
@@ -1919,6 +1925,7 @@ function authenticateUser() {
         <button id="ptype-poll" class="post-type-btn" onclick="setPostType('poll')" style="padding:7px 16px; border-radius:20px; border:none; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; background:transparent; color:#888; display:flex; align-items:center; gap:5px;"><i class="fa-solid fa-chart-bar"></i> Poll</button>
         <button id="ptype-quiz" class="post-type-btn" onclick="setPostType('quiz')" style="padding:7px 16px; border-radius:20px; border:none; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; background:transparent; color:#888; display:flex; align-items:center; gap:5px;"><i class="fa-solid fa-circle-question"></i> Quiz</button>
         <button id="ptype-question" class="post-type-btn" onclick="setPostType('question')" style="padding:7px 16px; border-radius:20px; border:none; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; background:transparent; color:#888; display:flex; align-items:center; gap:5px;"><i class="fa-solid fa-question"></i> Question</button>
+        <button id="ptype-listing" class="post-type-btn" onclick="setPostType('listing')" style="padding:7px 16px; border-radius:20px; border:none; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; background:transparent; color:#888; display:flex; align-items:center; gap:5px;"><i class="fa-solid fa-tag"></i> Listing</button>
     </div>
 
     <!-- Scrollable content area -->
@@ -1934,6 +1941,22 @@ function authenticateUser() {
     <div style="padding:16px 20px 0;">
         <textarea id="composer-text" placeholder="What's on your mind?" oninput="updateComposerState()" style="width:100%; min-height:140px; border:none; outline:none; font-size:17px; resize:none; background:transparent; color:var(--text-primary,#000); line-height:1.5;"></textarea>
         <div style="text-align:right;"><small id="composer-char-count" style="color:#ccc; font-size:12px;">0/500</small></div>
+    </div>
+
+    <!-- Listing builder: the fixed facts of a marketplace listing. The
+         description goes in the box above and photos come from the composer. -->
+    <div id="listing-builder" style="display:none; padding:0 20px 12px;">
+        <div style="background:rgba(52,199,89,0.05); border:1px solid rgba(52,199,89,0.2); border-radius:16px; padding:16px;">
+            <p style="font-size:13px; font-weight:700; color:#248A3D; margin-bottom:10px;"><i class="fa-solid fa-tag" style="margin-right:6px;"></i>Listing</p>
+            <div id="listing-cats" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px;"></div>
+            <input id="listing-title" type="text" maxlength="80" placeholder="Title, e.g. Room to rent in Braamfontein" style="width:100%; box-sizing:border-box; padding:12px; border-radius:12px; border:1px solid #eee; font-size:14px; outline:none; background:var(--input-bg,#f5f5f5); color:var(--text-primary,#000);">
+            <div style="position:relative; margin-top:8px;">
+                <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:#888; font-weight:700; font-size:14px;">R</span>
+                <input id="listing-price" type="text" inputmode="decimal" maxlength="12" placeholder="Price (leave empty to talk about it)" style="width:100%; box-sizing:border-box; padding:12px 12px 12px 28px; border-radius:12px; border:1px solid #eee; font-size:14px; outline:none; background:var(--input-bg,#f5f5f5); color:var(--text-primary,#000);">
+            </div>
+            <input id="listing-area" type="text" maxlength="60" placeholder="Area, e.g. Hatfield or UCT upper campus (optional)" style="width:100%; box-sizing:border-box; margin-top:8px; padding:12px; border-radius:12px; border:1px solid #eee; font-size:14px; outline:none; background:var(--input-bg,#f5f5f5); color:var(--text-primary,#000);">
+            <p style="font-size:12px; color:#888; margin:10px 0 0; line-height:1.45;">Describe it in the box above and add photos. TrustFirst does not handle payment: you and the buyer deal directly. Nobody should pay before seeing it.</p>
+        </div>
     </div>
 
     <!-- Poll builder -->
@@ -2070,11 +2093,11 @@ function authenticateUser() {
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-circle-play" style="color:#007AFF;"></i> Story</div>
         <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
       </div>
-      <div class="settings-row" onclick="showLiveSettings()">
+      <div class="settings-row" data-tf-feature="live" onclick="showLiveSettings()">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-tower-broadcast" style="color:#FF3B30;"></i> Live</div>
         <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
       </div>
-      <div class="settings-row" onclick="openLocationSettings()">
+      <div class="settings-row" data-tf-feature="nearby" onclick="openLocationSettings()">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-location-dot" style="color:#34C759;"></i> Location</div>
         <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
       </div>
@@ -2176,6 +2199,10 @@ function authenticateUser() {
     <div class="settings-section-title" style="display:none;"></div>
     <div style="margin-top:20px;"><!-- account deletion row below -->
     <div class="settings-card">
+      <div class="settings-row" onclick="downloadMyData()" style="cursor:pointer;">
+        <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-download" style="color:#007AFF;"></i> <span>Download your data</span></div>
+        <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
+      </div>
       <div class="settings-row" onclick="showDeleteAccount()" style="cursor:pointer;">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-triangle-exclamation" style="color:#FF3B30;"></i> <span style="color:#FF3B30;font-weight:600;">Delete or Deactivate Account</span></div>
         <i class="fa-solid fa-chevron-right" style="color:#FF3B30;"></i>
@@ -2742,7 +2769,7 @@ function authenticateUser() {
         <div id="archive-dropdown" style="display:none;position:absolute;top:88px;left:50%;transform:translateX(-50%);width:220px;background:var(--card-bg,#fff);border-radius:18px;box-shadow:0 10px 40px rgba(0,0,0,0.18);border:1px solid var(--border-color,#eee);overflow:hidden;z-index:30;animation:jellyPop 0.25s cubic-bezier(0.68,-0.55,0.27,1.55);">
             <div onclick="selectArchiveType('stories')" style="padding:15px 20px;cursor:pointer;font-size:15px;font-weight:600;color:var(--text-primary,#000);border-bottom:1px solid var(--border-color,#f0f0f0);display:flex;align-items:center;gap:10px;" onmouseover="this.style.background='var(--bg-secondary,#f9f9f9)'" onmouseout="this.style.background=''"><i class="fa-solid fa-circle-play" style="color:#007AFF;font-size:17px;width:20px;text-align:center;"></i> Stories archive</div>
             <div onclick="selectArchiveType('posts')" style="padding:15px 20px;cursor:pointer;font-size:15px;font-weight:600;color:var(--text-primary,#000);border-bottom:1px solid var(--border-color,#f0f0f0);display:flex;align-items:center;gap:10px;" onmouseover="this.style.background='var(--bg-secondary,#f9f9f9)'" onmouseout="this.style.background=''"><i class="fa-solid fa-file-lines" style="color:#34C759;font-size:17px;width:20px;text-align:center;"></i> Posts archive</div>
-            <div onclick="selectArchiveType('live')" style="padding:15px 20px;cursor:pointer;font-size:15px;font-weight:600;color:var(--text-primary,#000);display:flex;align-items:center;gap:10px;" onmouseover="this.style.background='var(--bg-secondary,#f9f9f9)'" onmouseout="this.style.background=''"><i class="fa-solid fa-tower-broadcast" style="color:#FF3B30;font-size:17px;width:20px;text-align:center;"></i> Live archive</div>
+            <div data-tf-feature="live" onclick="selectArchiveType('live')" style="padding:15px 20px;cursor:pointer;font-size:15px;font-weight:600;color:var(--text-primary,#000);display:flex;align-items:center;gap:10px;" onmouseover="this.style.background='var(--bg-secondary,#f9f9f9)'" onmouseout="this.style.background=''"><i class="fa-solid fa-tower-broadcast" style="color:#FF3B30;font-size:17px;width:20px;text-align:center;"></i> Live archive</div>
         </div>
     </div>
     <div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:80px;">
@@ -2969,8 +2996,13 @@ function authenticateUser() {
             <div style="font-size:38px;font-weight:900;letter-spacing:-1px;">R <span id="wallet-balance">0.00</span></div>
             <div style="display:flex;gap:10px;margin-top:20px;">
                 <button onclick="openWalletSheet('withdraw')" style="flex:1;padding:12px;border-radius:14px;background:rgba(255,255,255,0.18);color:white;border:0.5px solid rgba(255,255,255,0.3);font-size:13px;font-weight:700;cursor:pointer;backdrop-filter:blur(10px);">Withdraw</button>
-                <button onclick="openWalletSheet('addmoney')" style="flex:1;padding:12px;border-radius:14px;background:white;color:#007AFF;border:none;font-size:13px;font-weight:700;cursor:pointer;">Add Money</button>
+                <button data-tf-feature="wallet-in" onclick="openWalletSheet('addmoney')" style="flex:1;padding:12px;border-radius:14px;background:white;color:#007AFF;border:none;font-size:13px;font-weight:700;cursor:pointer;">Add Money</button>
             </div>
+        </div>
+
+        <!-- Shown only while the wallet is paused (see .tf-paused-note in feed.css). -->
+        <div class="tf-paused-note" data-tf-note="wallet" style="background:var(--card-bg,#f9f9f9);border:1px solid var(--border-color,#eee);border-radius:14px;padding:12px 14px;margin-bottom:16px;font-size:13px;line-height:1.5;color:var(--text-primary,#000);">
+            <b>Adding money and buying coins are paused for now.</b> You can still withdraw your balance and cash out coins you already have.
         </div>
 
         <!-- Coins section -->
@@ -2983,10 +3015,10 @@ function authenticateUser() {
                  it. Without a way to do that, a creator's earnings sit as coins
                  forever and the Withdraw button is useless to the people who
                  actually have something to withdraw. -->
-            <button onclick="tfCashOutCoins()" style="width:100%;padding:11px;border-radius:12px;background:none;color:#007AFF;border:1px solid var(--border-color,#eee);font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">
+            <button onclick="tfCashOutCoins()" data-tf-feature="coins-in" style="width:100%;padding:11px;border-radius:12px;background:none;color:#007AFF;border:1px solid var(--border-color,#eee);font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">
                 <i class="fa-solid fa-arrow-right-arrow-left" style="margin-right:6px;"></i>Cash out coins to your wallet
             </button>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+            <div data-tf-feature="coins-in" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
                 <div onclick="openWalletSheet('buycoins',100)" style="background:var(--bg-primary,#fff);border-radius:12px;padding:12px 8px;text-align:center;cursor:pointer;border:1px solid var(--border-color,#eee);transition:all 0.2s;" onmousedown="this.style.transform='scale(0.96)'" onmouseup="this.style.transform=''">
                     <div style="font-size:22px;"><i class="fa-solid fa-coins" style="color:#FFB800;"></i></div>
                     <div style="font-size:13px;font-weight:700;color:var(--text-primary,#000);margin-top:4px;">100</div>
@@ -3032,8 +3064,8 @@ function authenticateUser() {
         <div style="border-radius:14px;padding:14px;background:rgba(52,199,89,0.08);border:1px solid rgba(52,199,89,0.2);display:flex;gap:12px;align-items:flex-start;">
             <i class="fa-solid fa-shield-halved" style="color:#34C759;font-size:18px;margin-top:2px;flex-shrink:0;"></i>
             <div>
-                <b style="font-size:13px;color:var(--text-primary,#000);">Your money is protected</b>
-                <p style="font-size:12px;color:#888;margin-top:3px;line-height:1.5;">All transactions are encrypted. Withdrawals require PIN or biometric verification. Unusual activity is flagged automatically.</p>
+                <b style="font-size:13px;color:var(--text-primary,#000);">How withdrawals work</b>
+                <p style="font-size:12px;color:#888;margin-top:3px;line-height:1.5;">A person on our team checks every withdrawal before it is paid, and we only pay into a bank account in your own name. Card payments go through Yoco, so we never see your card number.</p>
             </div>
         </div>
     </div>
@@ -4457,14 +4489,14 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=301"></script>
+<script src="{% static 'core/js/feed.js' %}?v=309"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
-<script src="{% static 'core/js/verify.js' %}?v=76"></script>
+<script src="{% static 'core/js/verify.js' %}?v=77"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
-<script src="{% static 'core/js/admin.js' %}?v=80"></script>
+<script src="{% static 'core/js/admin.js' %}?v=81"></script>
     <!-- Loaded after feed.js because it calls navHome and navGoTo from it.
          Everything inside is gated on the window being at least 1000px. -->
-    <script src="{% static 'core/js/desktop.js' %}?v=14"></script>
+    <script src="{% static 'core/js/desktop.js' %}?v=15"></script>
     <!-- Approving a sign-in from the phone. After feed.js, because it wraps
          showAuthError and calls _tfAccessToken from it. -->
     <script src="{% static 'core/js/device-login.js' %}?v=1"></script>

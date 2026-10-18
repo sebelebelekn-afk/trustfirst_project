@@ -61,6 +61,7 @@ urlpatterns = [
     path('api/push/test/', api_views.push_test, name='api_push_test'),
     path('api/live/token/', api_views.livekit_token, name='api_live_token'),
     path('api/eddie/post/', api_views.eddie_post, name='api_eddie_post'),
+    path('api/account/delete/', api_views.account_delete, name='api_account_delete'),
     path('api/auth/username-login/', api_views.username_login, name='api_username_login'),
 
     # Approving a sign-in from the phone. The laptop shows a number, the

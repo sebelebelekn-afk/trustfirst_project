@@ -447,15 +447,18 @@ var currentConversationId = null;
 var SUPABASE_CONFIG = { enabled: true };
 // SupabaseAPI wrapper removed — use DB directly
 
-const USERS = [
-    { name: "Edmond Smith", handle: "@edmond_s", tier: "verify-gold", type: "celebrity", pic: "1", verified: true },
-    { name: "Sizwe Dlamini", handle: "@sizwe_d", tier: "verify-blue", type: "personal", pic: "2", verified: true },
-    { name: "Lucia Tjie", handle: "@lucia_t", tier: "verify-silver", type: "business", pic: "3", verified: true },
-    { name: "Tech SA", handle: "@tech_hub", tier: "verify-silver", type: "business", pic: "4", verified: true },
-    { name: "Kid Wonder", handle: "@kid_star", tier: "verify-green", type: "child", pic: "5", verified: true, parentId: "official_kgothi" }
-];
-
 let parentRequests = []; // Loaded from Supabase family_link_requests table on Family Center open
+
+// Neutral stand-ins for missing artwork. These used to be random stock photos
+// from picsum.photos, which put a stranger's picture where a song's cover or a
+// person's own archived post should be, and told a third party every time one
+// of those screens opened.
+var TF_ART_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#2c2c2e"/>' +
+    '<circle cx="42" cy="66" r="9" fill="#8e8e93"/><rect x="48" y="28" width="5" height="39" fill="#8e8e93"/>' +
+    '<path d="M53 28 L70 33 L70 41 L53 36 Z" fill="#8e8e93"/></svg>');
+var TF_MEDIA_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#2c2c2e"/></svg>');
 
 // --- SECURITY CORE ---
 function escapeHtml(text) {
@@ -649,6 +652,30 @@ function blockChildAction(actionName) {
     triggerHaptic(30);
 }
 
+// The one way into identity verification, for every door that asks for it.
+//
+// The block screen below used to offer only "OK", and the orange banner called
+// openGetVerified, which is the gold creator badge and answers anyone under
+// 500,000 followers with a toast. So the two places that told people to verify
+// both led nowhere. Already verified: say so. A request already waiting: say
+// it is with the team, so nobody uploads their ID twice. Otherwise: the
+// identity screen.
+async function tfStartVerification() {
+    if (isVerified()) { showToast('You are already verified.'); return; }
+    if (window.sb && currentUser) {
+        try {
+            var r = await sb.from('verification_applications').select('id')
+                .eq('user_id', currentUser.id).eq('badge_type', 'blue').eq('status', 'pending')
+                .limit(1);
+            if (r.data && r.data.length) {
+                showToast('Your verification is with our team. We review by hand, usually within 24 hours.');
+                return;
+            }
+        } catch (e) { /* could not tell: let them see the screen */ }
+    }
+    openIdentityVerification();
+}
+
 function requireVerification(actionName) {
     const overlay = document.createElement('div');
     overlay.className = 'child-blocked-overlay';
@@ -656,8 +683,9 @@ function requireVerification(actionName) {
         <i class="fa-solid fa-id-card" style="font-size:60px; color:#FF9500; margin-bottom:20px;"></i>
         <h2 style="margin-bottom:10px;">Verification Required</h2>
         <p style="color:#888; margin-bottom:5px;">You must verify your identity to <b>${escapeHtml(actionName)}</b>.</p>
-        <p style="color:#888; font-size:13px; margin-bottom:25px;">This protects our community from bots and scammers.</p>
-        <button onclick="this.parentElement.remove()" style="padding:12px 30px; background:#007AFF; color:white; border:none; border-radius:15px; font-weight:bold; font-size:15px; cursor:pointer;">OK</button>
+        <p style="color:#888; font-size:13px; margin-bottom:25px;">This protects our community from bots and scammers. We review requests by hand, usually within 24 hours.</p>
+        <button onclick="this.parentElement.remove(); tfStartVerification();" style="padding:12px 30px; background:#007AFF; color:white; border:none; border-radius:15px; font-weight:bold; font-size:15px; cursor:pointer;">Verify now</button>
+        <button onclick="this.parentElement.remove()" style="margin-top:12px; padding:8px 20px; background:none; color:#888; border:none; font-size:14px; font-weight:600; cursor:pointer;">Not now</button>
     `;
     document.getElementById('app').appendChild(overlay);
 }
@@ -786,6 +814,11 @@ function handleBirthDateChange() {
         status.textContent = 'Enter a valid birth date.';
         return;
     }
+    if (age < 18 && !tfFeature('kids')) {
+        status.style.color = '#FF3B30';
+        status.textContent = TF_PAUSED_COPY.kids;
+        return;
+    }
     if (age < 18) {
         status.style.color = '#34C759';
         status.textContent = 'TrustFirst Kids account will be created. Parent link required next.';
@@ -807,6 +840,7 @@ function proceedFromRegistrationDetails() {
         showToast('Please enter a valid birth date.');
         return;
     }
+    if (age < 18 && !tfFeatureGate('kids')) return;
     if (age < 18) {
         selectedAccountType = 'child';
         secureSave('pending_account_type', 'child');
@@ -940,6 +974,7 @@ async function completeRegistration(verified) {
     if (!email || !isValidEmail(email)) return showAuthError('Enter a valid email', 'step-register');
     if (!username || !isValidUsername(username)) return showAuthError('Username: 3-20 chars, letters/numbers/underscore only', 'step-register');
     if (registrationAge === null || registrationAge < 13 || registrationAge > 120) return showAuthError('Please enter a valid birth date', 'step-register');
+    if (registrationAge < 18 && !tfFeature('kids')) return showAuthError(TF_PAUSED_COPY.kids, 'step-register');
     if (registrationAge < 18 && !parentLink.parent_id && !parentLink.parent_username) return showAuthError('A parent or guardian Trust-ID is required for under-18 accounts', 'step-parent-link');
 
     if (password !== confirmPass) return showAuthError('Passwords do not match.', 'step-register');
@@ -1257,7 +1292,7 @@ localStorage.setItem('tf_burst', JSON.stringify(burstAttempts));
                 // incoming mail. Compare and correct instead.
                 var _keyState = await E2E.reconcileKeys(userId);
                 if (_keyState === 'republished') {
-                    showToast('Encryption keys refreshed on this device. Messages sent before now cannot be opened here.');
+                    showToast('Encryption keys refreshed on this device. Encrypted messages sent before now cannot be opened here.');
                 } else if (_keyState === 'needs_restore') {
                     showToast('Enter your recovery PIN in Settings to read your encrypted messages.');
                 }
@@ -1395,7 +1430,7 @@ async function restoreSession() {
             await E2E.init(currentUser.id);
             var _ks = await E2E.reconcileKeys(currentUser.id);
             if (_ks === 'republished') {
-                showToast('Encryption keys refreshed on this device. Messages sent before now cannot be opened here.');
+                showToast('Encryption keys refreshed on this device. Encrypted messages sent before now cannot be opened here.');
             } else if (_ks === 'needs_restore') {
                 showToast('Enter your recovery PIN in Settings to read your encrypted messages.');
             }
@@ -1854,6 +1889,7 @@ function launchApp() {
     app.classList.add('authenticated');
 
     isAdmin = currentUser && currentUser.is_admin === true;
+    _tfMarkMoneyHeld();
 
     // Both banners sit above the sticky header, so they are what the status bar
     // overlaps. They had no safe-area padding, which is why the orange strip ran
@@ -1880,7 +1916,7 @@ function launchApp() {
         banner.style.cssText = 'background:#FF9500; color:white; ' + _bannerPad +
             ' font-size:12px; font-weight:700; text-align:center; cursor:pointer;';
         banner.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Unverified, verify to post, comment and start chats';
-        banner.onclick = function() { if (typeof openGetVerified === 'function') openGetVerified(); };
+        banner.onclick = function() { tfStartVerification(); };
         app.insertBefore(banner, app.querySelector('.header-container'));
     }
 
@@ -2153,15 +2189,9 @@ async function searchUsersForMessage(query) {
             users = r.data || [];
         } catch(e) { if (e) console.warn('[Suppressed error]', e); }
     }
-    if (!users.length) {
-        // Fallback to local USERS array
-        users = (typeof USERS !== 'undefined' ? USERS : [])
-            .filter(function(u) {
-                return (u.name || '').toLowerCase().includes(query.toLowerCase()) ||
-                       (u.handle || '').toLowerCase().includes(query.toLowerCase());
-            })
-            .map(function(u) { return { id: u.id || null, full_name: u.name, username: u.handle.replace('@',''), badge_tier: u.tier, verified: true }; });
-    }
+    // No fallback. This used to fill an empty result with a hard-coded list of
+    // invented "verified" people, which on a small network was most searches:
+    // a trust app showing accounts that do not exist. Nobody found is the answer.
     if (!users.length) {
         results.innerHTML = '<p style="text-align:center; color:#aaa; font-size:13px; padding:30px 0;">No users found for "' + escapeHtml(query) + '"</p>';
         return;
@@ -2978,11 +3008,16 @@ function applyInboxFilter(filterId) {
     });
 }
 
-// Render attribute for chat media: private chat_media / voice_messages assets
-// get a placeholder + data-tfmedia (the signer swaps in a signed URL, so the
-// dead public URL is never fetched). Public assets keep a normal src.
+// The private buckets: their files open only through a short-lived signed
+// link, which tfSignMediaUrl asks for. Report screenshots joined them because
+// a screenshot attached to a report can show anything, a private chat included.
+var TF_PRIVATE_MEDIA_RE = /\/(chat_media|voice_messages|report_attachments)\//;
+
+// Render attribute for private media (chat files, voice notes, report
+// screenshots): a placeholder + data-tfmedia, so the signer swaps in a signed
+// URL and the dead bucket URL is never fetched. Public assets keep a normal src.
 function _mediaSrcAttr(url, isVideo) {
-    if (url && /\/(chat_media|voice_messages)\//.test(url)) {
+    if (url && TF_PRIVATE_MEDIA_RE.test(url)) {
         return 'data-tfmedia="' + escapeHtml(url) + '"' +
             (isVideo ? '' : ' src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="');
     }
@@ -3728,6 +3763,8 @@ function _formatFileSize(bytes) {
 }
 
 function openChat(userName) {
+    var _ls = document.getElementById('tfListingSafety');
+    if (_ls) _ls.remove();
     var nav = document.querySelector('.nav-container');
     if (nav) nav.style.display = 'none';
     openPage('chat-interface');
@@ -3970,7 +4007,7 @@ function openDocumentViewer(url, fileName) {
         '</div>' +
         // Content area
         '<div style="flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:20px;background:#f9f9f9;">' +
-            '<iframe ' + (/\/(chat_media|voice_messages)\//.test(url || '') ? 'data-tfmedia="' + escapeHtml(url) + '" src="about:blank"' : 'src="' + escapeHtml(url || '') + '"') + ' style="width:100%;min-height:500px;border:none;border-radius:12px;background:white;box-shadow:0 2px 16px rgba(0,0,0,0.08);" title="' + escapeHtml(fileName || 'Document') + '"></iframe>' +
+            '<iframe ' + (TF_PRIVATE_MEDIA_RE.test(url || '') ? 'data-tfmedia="' + escapeHtml(url) + '" src="about:blank"' : 'src="' + escapeHtml(url || '') + '"') + ' style="width:100%;min-height:500px;border:none;border-radius:12px;background:white;box-shadow:0 2px 16px rgba(0,0,0,0.08);" title="' + escapeHtml(fileName || 'Document') + '"></iframe>' +
         '</div>' +
         // Bottom toolbar
         '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px max(24px,env(safe-area-inset-bottom,24px));border-top:0.5px solid #eee;background:white;flex-shrink:0;">' +
@@ -5491,7 +5528,7 @@ function playVoiceNote(bubble, audioUrl) {
         };
         _vnAudio.play().catch(function() {});
     };
-    if (typeof tfSignMediaUrl === 'function' && /\/(chat_media|voice_messages)\//.test(audioUrl || '')) {
+    if (typeof tfSignMediaUrl === 'function' && TF_PRIVATE_MEDIA_RE.test(audioUrl || '')) {
         tfSignMediaUrl(audioUrl).then(_vnStart);
     } else {
         _vnStart(audioUrl);
@@ -5500,7 +5537,7 @@ function playVoiceNote(bubble, audioUrl) {
 }
 
 function playVoiceMessage(audioUrl) {
-    if (typeof tfSignMediaUrl === 'function' && /\/(chat_media|voice_messages)\//.test(audioUrl || '')) {
+    if (typeof tfSignMediaUrl === 'function' && TF_PRIVATE_MEDIA_RE.test(audioUrl || '')) {
         tfSignMediaUrl(audioUrl).then(function(u) {
             var audio = new Audio(u);
             audio.play().catch(function(e){ console.error('[AudioPlay]', e); });
@@ -5521,7 +5558,7 @@ function playVoiceMessage(audioUrl) {
 window._tfSignedCache = window._tfSignedCache || {};
 async function tfSignMediaUrl(url) {
     if (!url || !window.sb) return url;
-    var m = String(url).match(/\/object\/(?:public|sign|authenticated)\/(chat_media|voice_messages)\/([^?]+)/);
+    var m = String(url).match(/\/object\/(?:public|sign|authenticated)\/(chat_media|voice_messages|report_attachments)\/([^?]+)/);
     if (!m) return url;                       // not a private chat asset
     if (/\/object\/sign\//.test(url)) return url; // already signed
     var bucket = m[1], path = decodeURIComponent(m[2]);
@@ -5546,7 +5583,7 @@ async function tfSignMediaUrl(url) {
         // Prefer the data-tfmedia placeholder (dead public URL never fetched);
         // fall back to a live src that happens to point at a private bucket.
         var src = (el.getAttribute && el.getAttribute('data-tfmedia')) || (el.getAttribute && el.getAttribute('src'));
-        if (!src || !/\/(chat_media|voice_messages)\//.test(src) || /\/object\/sign\//.test(src)) return;
+        if (!src || !TF_PRIVATE_MEDIA_RE.test(src) || /\/object\/sign\//.test(src)) return;
         el._tfSigned = true;
         tfSignMediaUrl(src).then(function(u) { if (u) el.src = u; });
     }
@@ -8476,10 +8513,9 @@ function openSoundtrackSheet(track) {
     var existing = document.getElementById('soundtrackSheet');
     if (existing) existing.remove();
 
-    track = track || thoughtSelectedMusic || {
-        name: 'Afrobeats Vibes', artist: 'Artist Name',
-        artUrl: 'https://picsum.photos/seed/album/200/200', previewUrl: null
-    };
+    // No invented song when there is nothing to show; the sheet just does not open.
+    track = track || thoughtSelectedMusic;
+    if (!track) return;
 
     var sheet = document.createElement('div');
     sheet.id = 'soundtrackSheet';
@@ -8496,8 +8532,8 @@ function openSoundtrackSheet(track) {
         // Album art + track info
         '<div style="display:flex;flex-direction:column;align-items:center;padding:24px 20px 16px;">' +
             '<img src="' + escapeHtml(track.artUrl || '') + '" onerror="this.style.display=\'none\'" style="width:88px;height:88px;border-radius:18px;object-fit:cover;box-shadow:0 8px 32px rgba(0,0,0,0.5);margin-bottom:14px;">' +
-            '<b style="color:white;font-size:17px;font-weight:800;margin-bottom:4px;">' + escapeHtml(track.name || 'Song Title') + '</b>' +
-            '<small style="color:rgba(255,255,255,0.5);font-size:13px;">' + escapeHtml(track.artist || 'Artist') + '</small>' +
+            '<b style="color:white;font-size:17px;font-weight:800;margin-bottom:4px;">' + escapeHtml(track.name || 'Unknown track') + '</b>' +
+            '<small style="color:rgba(255,255,255,0.5);font-size:13px;">' + escapeHtml(track.artist || '') + '</small>' +
         '</div>' +
 
         // Progress controls row
@@ -8739,19 +8775,23 @@ function removeThought() {
     triggerHaptic(20);
 }
 
-function openThoughtViewer(thought, userName) {
+function openThoughtViewer(thought, userName, music) {
     thought = thought || 'Thinking...';
     userName = userName || 'You';
     var existing = document.getElementById('thoughtViewerOverlay');
     if (existing) { existing.remove(); stopThoughtViewerAudio(); return; }
 
-
-
-    // Pick music from thoughtSelectedMusic if on profile, or fake data for feed posts
-    var musicName   = (typeof thoughtSelectedMusic !== 'undefined' && thoughtSelectedMusic) ? thoughtSelectedMusic.name   : 'Afrobeats Vibes';
-    var musicArtist = (typeof thoughtSelectedMusic !== 'undefined' && thoughtSelectedMusic) ? thoughtSelectedMusic.artist : '@music_sa';
-    var musicArt    = (typeof thoughtSelectedMusic !== 'undefined' && thoughtSelectedMusic) ? thoughtSelectedMusic.artUrl  : 'https://picsum.photos/seed/musicart/80/80';
-    var previewUrl  = (typeof thoughtSelectedMusic !== 'undefined' && thoughtSelectedMusic) ? thoughtSelectedMusic.previewUrl : null;
+    // The thought's own music when the caller passes it (a feed thought does);
+    // otherwise your own selection, which is right for your own thought. This
+    // used to ignore what the caller passed and, with nothing selected, show an
+    // invented song ("Afrobeats Vibes", "@music_sa") and play a synthesised
+    // tune as if it were real. No music now means no music row.
+    var m = music || ((typeof thoughtSelectedMusic !== 'undefined' && thoughtSelectedMusic) ? thoughtSelectedMusic : null);
+    var hasMusic    = !!(m && m.name);
+    var musicName   = hasMusic ? m.name : '';
+    var musicArtist = hasMusic ? (m.artist || '') : '';
+    var musicArt    = hasMusic ? (m.artUrl || TF_ART_PLACEHOLDER) : '';
+    var previewUrl  = hasMusic ? (m.previewUrl || null) : null;
 
     var lyricsHTML = '';
 
@@ -8770,11 +8810,10 @@ function openThoughtViewer(thought, userName) {
             '<div style="text-align:center;padding:12px 20px 0;">' +
                 '<div style="width:36px;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;margin:0 auto 16px;"></div>' +
                 '<p style="color:rgba(255,255,255,0.9);font-size:16px;font-weight:800;margin:0 0 2px;">' + escapeHtml(userName) + '</p>' +
-                '<small style="color:rgba(255,255,255,0.4);font-size:11px;">Just now</small>' +
             '</div>' +
 
-            // Music bubble
-            '<div class="tv-music-bubble">' +
+            // Music bubble, only for a real song
+            (hasMusic ? '<div class="tv-music-bubble">' +
                 '<div class="tv-vinyl" id="tvVinyl">' +
                     '<div style="width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,0.88);box-shadow:0 2px 6px rgba(0,0,0,0.4);"></div>' +
                 '</div>' +
@@ -8788,7 +8827,7 @@ function openThoughtViewer(thought, userName) {
                         return '<div style="width:3px;height:' + h + 'px;background:#007AFF;border-radius:2px;transition:height 0.25s ease;"></div>';
                     }).join('') +
                 '</div>' +
-            '</div>' +
+            '</div>' : '') +
 
             // Thought text
             '<div style="padding:16px 22px 10px;">' +
@@ -8819,31 +8858,18 @@ function openThoughtViewer(thought, userName) {
 
     (document.getElementById('app') || document.body).appendChild(overlay);
 
-    // Auto-play music
-    autoPlayThoughtViewerMusic(previewUrl, musicName);
-
-    // Animate sound bars
-    startTVSoundBars();
+    // Real music only: nothing plays and nothing animates without a song.
+    if (hasMusic) {
+        autoPlayThoughtViewerMusic(previewUrl, musicName);
+        startTVSoundBars();
+    }
 }
 
 function autoPlayThoughtViewerMusic(previewUrl, trackName) {
     stopThoughtViewerAudio();
-    if (!previewUrl) {
-        // Play a soft tone as placeholder
-        try {
-            var ctx = new (window.AudioContext || window.webkitAudioContext)();
-            var osc = ctx.createOscillator();
-            var gain = ctx.createGain();
-            osc.connect(gain); gain.connect(ctx.destination);
-            osc.type = 'sine';
-            var freqs = [261,294,329,349,392,440,494,523];
-            freqs.forEach(function(f,i){ osc.frequency.setValueAtTime(f, ctx.currentTime + i*0.35); });
-            gain.gain.setValueAtTime(0.08, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 3.2);
-            osc.start(); osc.stop(ctx.currentTime + 3.2);
-        } catch(e) { if (e) console.warn('[Suppressed error]', e); }
-        return;
-    }
+    // No preview, no sound. This used to synthesise a little tune here so it
+    // sounded as if the song was playing when it was not.
+    if (!previewUrl) return;
     var audio = document.createElement('audio');
     audio.id = 'tvAudioEl';
     audio.src = previewUrl;
@@ -10054,6 +10080,7 @@ function _tfSetTranslateObserver(on) {
 // LOCAL CIRCLES
 // ==========================================================================
 async function renderLocalCircles() {
+    if (!tfFeatureGate('nearby')) return;
     const content = document.getElementById('local-circles-content');
     if (!content) return;
 
@@ -12679,6 +12706,7 @@ var _liveDurationSecs = 0;
 var _liveHearts = 0;
 
 async function startLive() {
+    if (!tfFeatureGate('live')) return;
     if (typeof _tfCallIsRunning === 'function' && _tfCallIsRunning()) {
         showToast('End your call before going live'); return;
     }
@@ -13015,6 +13043,7 @@ function sendViewerHeart() {
 }
 
 async function openViewerGiftSheet() {
+    if (!tfFeatureGate('live')) return;
     var sheet = document.getElementById('viewer-gift-sheet');
     if (!sheet) return;
     sheet.style.display = 'block';
@@ -13027,6 +13056,7 @@ async function openViewerGiftSheet() {
 // atomic, cannot overdraw, and writes a ledger row — the client can't fake it.
 // Only once the charge succeeds do we send the reaction.
 async function sendViewerGift(emoji, name, cost) {
+    if (!tfFeatureGate('live')) return;
     cost = parseInt(cost, 10) || 0;
     if (!window.sb || !currentUser) return;
     var sheet = document.getElementById('viewer-gift-sheet');
@@ -13370,6 +13400,7 @@ var _liveJoinReqChan = null;    // viewer's status channel
 var _liveHostReqChan = null;    // host's incoming-requests channel
 
 function openLiveJoinModal() {
+    if (!tfFeatureGate('live')) return;
     if (!currentUser) { showToast('Sign in to request'); return; }
     var m = document.getElementById('live-join-modal');
     if (m) m.style.display = 'flex';
@@ -13693,6 +13724,7 @@ function closeMiniLive(e) {
 // LIVE STREAM FEED PAGE (Viewer Mode — Reference Image 1)
 // =====================================================
 async function openLiveStreamFeed() {
+    if (!tfFeatureGate('live')) return;
     var existing = document.getElementById('liveStreamFeedPage');
     if (existing) existing.remove();
 
@@ -14468,7 +14500,7 @@ async function fillMsgContent() {
         '<i class="fa-solid fa-plus" style="color:white;font-size:10px;"></i></div></div>' +
         '<small style="font-size:11px;">Your Story</small></div>';
     var _locOn = (localStorage.getItem('tf-location-vis') || 'none') !== 'none';
-    stories.innerHTML += '<div class="story-item" onclick="openTrustMap()" style="margin-left:4px;display:flex;flex-direction:column;align-items:center;">' +
+    if (tfFeature('nearby')) stories.innerHTML += '<div class="story-item" data-tf-feature="nearby" onclick="openTrustMap()" style="margin-left:4px;display:flex;flex-direction:column;align-items:center;">' +
         '<div style="width:68px;height:68px;border-radius:50%;background:rgba(0,122,255,0.1);border:2px solid rgba(0,122,255,0.25);display:flex;align-items:center;justify-content:center;">' +
         '<i class="fa-solid fa-earth-americas" style="font-size:26px;color:#007AFF;"></i></div>' +
         '<small style="font-size:11px;line-height:1.2;">Map</small>' +
@@ -15456,100 +15488,6 @@ function toggleReelBookmark(el) {
 // ==========================================================================
 // FIX: Clickable Usernames in Feed + Follow Buttons
 // ==========================================================================
-function createPost(i) {
-    const user = USERS[i % USERS.length];
-    const isFlagged = i === 2;
-    const isAdultPost = i === 4;
-
-    if (isChildAccount() && (isAdultPost || (user.type !== 'child' && isFlagged))) {
-        const safeCard = document.createElement('div');
-        safeCard.className = 'post-card';
-        safeCard.id = `post-${i}`;
-        safeCard.innerHTML = `
-            <div class="post-header">
-                <img src="${tfAvatarFor("User", "34C759", 100)}" class="post-avatar">
-                <div style="flex:1;">
-                    <div class="post-info"><b>TrustFirst Kids <i class="fa-solid fa-circle-check verify-green"></i></b></div>
-                    <div class="post-info"><small>@trustfirst_kids • Safe Content</small></div>
-                </div>
-            </div>
-            <div class="post-content">Here's something fun and safe for everyone</div>
-            <div class="post-media-box">
-
-            </div>
-            <div class="post-icons">
-                <div onclick="realToggleLike(this,'${post.id}')" data-liked="${post._liked ? 'true' : 'false'}"><i class="${post._liked ? 'fa-solid' : 'fa-regular'} fa-heart" style="color:${post._liked ? '#FF3B30' : ''}"></i> <span style="font-size:13px;color:#888;">${post.likes_count || 0}</span></div>
-               <div onclick="openComments()"><i class="fa-regular fa-comment"></i></div>
-                <div onclick="toggleBookmark(this)"><i class="fa-regular fa-bookmark"></i> <span style="font-size:13px;color:#888;">0</span></div>
-            </div>`;
-        return safeCard;
-    }
-
-    const card = document.createElement('div');
-    card.className = 'post-card';
-    card.id = `post-${i}`;
-
-    // Content moderation
-    const postText = 'TrustFirst architecture test post. Building the ultimate social OS. #Liquid';
-    const modResult = moderateContent(postText);
-
-    let contentHtml = '';
-    if (modResult.blocked) {
-        contentHtml = `<div class="content-warning"><i class="fa-solid fa-ban" style="font-size:30px; margin-bottom:10px;"></i><b>Content Removed</b><p style="font-size:13px; margin-top:5px;">This post was removed by our AI moderator.</p></div>`;
-    } else if (modResult.blurred) {
-        contentHtml = `<div class="post-content" style="filter:blur(5px); cursor:pointer;" onclick="this.style.filter='none'">${escapeHtml(postText)}</div>
-                       <small style="color:#FF9500; padding:0 5px;"><i class="fa-solid fa-triangle-exclamation"></i> Content warning: May contain sensitive language. Tap to reveal.</small>`;
-    } else {
-        contentHtml = `<div class="post-content">${escapeHtml(postText)}</div>`;
-    }
-
-    const modLayer = isFlagged ? `
-        <div class="mod-overlay" id="mod-${i}">
-            <i class="fa-solid fa-triangle-exclamation" style="font-size:30px; color:#FF3B30; margin-bottom:10px;"></i>
-            <b>Sensitive Content</b>
-            <small style="color:#666; margin-bottom:10px;">Flagged for potential policy violation.</small>
-            <button style="padding:8px 16px; border-radius:20px; border:1px solid #ccc; background:none; cursor:pointer;" onclick="document.getElementById('mod-${i}').remove(); document.getElementById('media-${i}').classList.remove('banned-content')">View Anyway</button>
-        </div>` : '';
-
-    const blurClass = isFlagged ? 'banned-content' : '';
-
-    card.innerHTML = `
-        <div class="post-header">
-            <img src="https://picsum.photos/seed/${user.name}/100/100" class="post-avatar" onclick="openPage('profile-overlay'); loadMyProfile();" style="cursor:pointer;">
-            <div style="flex:1;">
-                <div class="post-info">
-                    <b>
-                        <span class="clickable-user" onclick="openPage('profile-overlay'); loadMyProfile();" style="cursor:pointer;">${escapeHtml(user.name)}</span>
-                        <i class="fa-solid fa-circle-check ${user.tier}"></i>
-                    </b>
-                </div>
-                <div class="post-info"><small>${escapeHtml(user.handle)} • 2h</small></div>
-            </div>
-            <button class="feed-follow-btn" data-user-id="{{post.author_id}}" onclick="toggleFeedFollow(this)">Follow</button>
-            <i class="fa-solid fa-ellipsis" style="margin-left:8px;" onclick="togglePostMenu(${i})"></i>
-        </div>
-
-        <div id="menu-${i}" class="post-menu-dropdown">
-            <div class="pm-item"><i class="fa-regular fa-eye-slash"></i> Not Interested</div>
-            <div class="pm-item"><i class="fa-regular fa-flag"></i> Report</div>
-            ${isAdmin ? `<div class="pm-item" style="color:red;" onclick="this.parentElement.parentElement.remove()"><i class="fa-solid fa-trash"></i> Admin Delete</div>` : ''}
-        </div>
-
-        ${contentHtml}
-        <div class="post-media-box">
-            ${modLayer}
-
-        </div>
-        <div class="post-icons">
-            <div onclick="realToggleLike(this, 'local_${i}')"><i class="fa-regular fa-heart"></i> <span style="font-size:13px;color:#888;">0</span></div>
-            <div onclick="openComments('local_${i}')"><i class="fa-regular fa-comment"></i> <span style="font-size:13px;color:#888;">0</span></div>
-            <div onclick="handleRepost()"><i class="fa-solid fa-retweet"></i></div>
-            <div onclick="toggleBookmark(this)"><i class="fa-regular fa-bookmark"></i> <span style="font-size:13px;color:#888;">0</span></div>
-            <div onclick="openShare()"><i class="fa-solid fa-share-nodes"></i></div>
-        </div>`;
-    return card;
-}
-
 function toggleReelFollow(btn) {
     if (btn.classList.contains('following')) {
         btn.classList.remove('following');
@@ -15838,6 +15776,49 @@ let STRIPE_PUBLISHABLE_KEY = '';
 let GIPHY_KEY_FROM_SERVER = '';
 var sb = null; // alias for window._sb, assigned in initSupabase()
 
+// Parts of the app that are paused rather than removed (TF_FEATURE_* on the
+// host, sent in /api/config as `features`). Anything the server does not
+// mention stays on. A class on <html> lets the stylesheet hide every door to a
+// paused feature; the openers check again, because some doors are built at
+// runtime and a missed one should explain itself rather than half-work. The
+// server refuses paused actions on its own, so none of this is the lock.
+function tfFeature(name) {
+    var f = window._tfConfig && window._tfConfig.features;
+    return !(f && f[name] === false);
+}
+var TF_PAUSED_COPY = {
+    live:   'Live is paused for now.',
+    wallet: 'Adding money is paused for now.',
+    coins:  'Coins are paused for now.',
+    kids:   'TrustFirst is for people 18 and over for now.',
+    nearby: 'The map and Nearby are switched off for now.'
+};
+function tfFeatureGate(name) {
+    if (tfFeature(name)) return true;
+    showToast(TF_PAUSED_COPY[name] || 'This is paused for now.');
+    return false;
+}
+function _tfApplyFeatureClasses() {
+    var f = (window._tfConfig && window._tfConfig.features) || {};
+    Object.keys(f).forEach(function (k) {
+        document.documentElement.classList.toggle('tf-off-' + k, f[k] === false);
+    });
+}
+// The wallet's way out stays reachable for anyone who still holds money,
+// because paused is not closed: the Terms promise a balance can always be
+// withdrawn. Everyone else simply does not see it.
+async function _tfMarkMoneyHeld() {
+    if (tfFeature('wallet') || !window.sb || !currentUser) return;
+    // Real money only. Coins cannot be used or cashed out while they are off,
+    // so holding some is no reason to show a wallet.
+    var held = false;
+    try {
+        var w = await sb.from('wallets').select('balance').eq('user_id', currentUser.id).maybeSingle();
+        held = !!(w && w.data && Number(w.data.balance) > 0);
+    } catch (e) { /* no wallet row: nothing held */ }
+    document.documentElement.classList.toggle('tf-has-money', held);
+}
+
 (async function loadConfig() {
     try {
         const res = await fetch('/api/config/');
@@ -15857,6 +15838,7 @@ var sb = null; // alias for window._sb, assigned in initSupabase()
         // connected and which mode they are in. Nothing secret is in here:
         // the server only ever sends the public key.
         window._tfConfig = cfg;
+        _tfApplyFeatureClasses();
         if (cfg.yoco_misconfigured) console.warn('[Yoco]', cfg.yoco_misconfigured);
         initSupabase();
         if (cfg.sentry_dsn) tfInitSentry(cfg.sentry_dsn, cfg.sentry_environment);
@@ -17023,89 +17005,88 @@ async function compressImage(file, maxDimension, quality) {
 // ==========================================================================
 // LEGAL PAGE FUNCTIONS
 // ==========================================================================
+// Your own data, from the server, as one file.
+//
+// This used to save whatever happened to be cached on the phone: the feed
+// (other people's posts included) and a few local lists, while most of what an
+// account actually holds was missing. The Terms tell people to download their
+// data before deleting, so it has to be theirs and it has to be complete. Each
+// list is read with the person's own sign-in, so the database rules decide what
+// is theirs, and a list that cannot be read says so in the file instead of
+// quietly not being there.
 async function downloadMyData() {
+  if (!window.sb || !currentUser) { showToast('Sign in to download your data'); return; }
   const toast = document.createElement('div');
   toast.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,255,255,0.95);backdrop-filter:blur(20px);padding:30px;border-radius:25px;box-shadow:0 20px 60px rgba(0,0,0,0.2);z-index:99999;text-align:center;animation:popIn 0.3s;';
   toast.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="font-size:30px;color:#007AFF;margin-bottom:15px;"></i><p style="font-weight:700;">Preparing your data...</p><p style="color:#888;font-size:13px;margin-top:5px;">This may take a moment</p>';
   document.body.appendChild(toast);
 
+  const me = currentUser.id;
+  const missing = [];
+  async function list(name, query) {
+    try {
+      const { data, error } = await tfWithTimeout(query, 15000, name);
+      if (error) throw error;
+      return data || [];
+    } catch (e) {
+      missing.push(name);
+      return null;
+    }
+  }
+
   try {
-    // Gather all user data
+    let profile = null;
+    try { profile = (await sb.rpc('tf_my_profile')).data; } catch (e) {}
+    if (Array.isArray(profile)) profile = profile[0] || null;
+    if (!profile) missing.push('profile');
+
+    const sent = await list('messages you sent', sb.from('messages')
+      .select('id,conversation_id,message_type,ciphertext,nonce,media_url,media_urls,created_at,is_deleted')
+      .eq('sender_id', me).order('created_at'));
     const userData = {
-      profile: currentUser,
-      posts: await DB.getAll('posts'),
-      messages: await DB.getAll('messages'),
-      activity: await DB.getAll('activity'),
-      notifications: await DB.getAll('notifications'),
-      preferences: {
-        language: secureLoad('language'),
-        darkMode: secureLoad('dark_mode'),
-        privateAccount: secureLoad('private_account')
-      },
-      exportDate: new Date().toISOString(),
-      platform: 'TrustFirst v2.0'
+      about_this_file: 'Everything TrustFirst holds that belongs to your account, as of the date below. ' +
+        'Messages that were end-to-end encrypted are included as they are stored, scrambled: only the app ' +
+        'on your devices can read them. Photos and videos are listed by link; download any you want to keep ' +
+        'before you delete your account, because the links stop working once it is gone.',
+      exported_at: new Date().toISOString(),
+      profile: profile,
+      settings: await list('settings', sb.from('user_settings').select('*').eq('user_id', me)),
+      posts: await list('posts', sb.from('posts').select('*').eq('user_id', me).order('created_at')),
+      comments: await list('comments', sb.from('comments').select('*').eq('user_id', me).order('created_at')),
+      likes: await list('likes', sb.from('likes').select('post_id,created_at').eq('user_id', me)),
+      bookmarks: await list('bookmarks', sb.from('bookmarks').select('post_id,created_at').eq('user_id', me)),
+      reposts: await list('reposts', sb.from('reposts').select('post_id,created_at').eq('user_id', me)),
+      following: await list('following', sb.from('follows').select('following_id,created_at').eq('follower_id', me)),
+      followers: await list('followers', sb.from('follows').select('follower_id,created_at').eq('following_id', me)),
+      blocked: await list('blocked accounts', sb.from('user_blocks').select('blocked_id,created_at').eq('blocker_id', me)),
+      stories: await list('stories', sb.from('stories').select('*').eq('user_id', me).order('created_at')),
+      clips: await list('clips', sb.from('trustclips').select('*').eq('user_id', me).order('created_at')),
+      messages_you_sent: sent,
+      eddie_conversations: await list('Eddie conversations', sb.from('eddie_conversations').select('id,title,created_at').eq('user_id', me)),
+      eddie_messages: await list('Eddie messages', sb.from('eddie_messages').select('conversation_id,role,content,image_url,created_at').eq('user_id', me).order('created_at')),
+      notifications: await list('notifications', sb.from('notifications').select('type,message,post_id,created_at,read').eq('user_id', me).order('created_at')),
+      verification: await list('verification', sb.from('verification_applications').select('badge_type,status,provider,created_at,updated_at').eq('user_id', me)),
+      reports_you_made: await list('reports you made', sb.from('reports').select('target_type,target_id,reason,details,status,created_at').eq('reporter_id', me)),
+      sign_ins: await list('sign-ins', sb.from('login_activity').select('login_method,status,location_city,location_country,user_agent,created_at').eq('user_id', me).order('created_at')),
+      devices: await list('devices', sb.from('trusted_devices').select('device_name,device_type,browser,os,location_city,location_country,last_active,created_at').eq('user_id', me)),
+      could_not_read: missing
     };
 
-    // Remove sensitive fields
-    if (userData.profile) {
-      delete userData.profile.passwordHash;
-      delete userData.profile.token;
-      delete userData.profile.supabaseToken;
-    }
-
-    // Create downloadable file
     const blob = new Blob([JSON.stringify(userData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `trustfirst-data-${(currentUser?.handle || 'user').replace(/[^a-z0-9_-]/gi,'_')}-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `trustfirst-data-${(currentUser.username || 'account').replace(/[^a-z0-9_-]/gi,'_')}-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
 
-    toast.innerHTML = '<i class="fa-solid fa-check-circle" style="font-size:30px;color:#34C759;margin-bottom:15px;"></i><p style="font-weight:700;">Download started!</p>';
-    setTimeout(() => toast.remove(), 2000);
+    toast.innerHTML = missing.length
+      ? '<i class="fa-solid fa-circle-exclamation" style="font-size:30px;color:#FF9500;margin-bottom:15px;"></i><p style="font-weight:700;">Download started</p><p style="color:#888;font-size:13px;margin-top:5px;max-width:240px;">Some parts could not be read: ' + escapeHtml(missing.join(', ')) + '. Try again in a minute.</p>'
+      : '<i class="fa-solid fa-check-circle" style="font-size:30px;color:#34C759;margin-bottom:15px;"></i><p style="font-weight:700;">Download started</p>';
+    setTimeout(() => toast.remove(), missing.length ? 5000 : 2000);
   } catch (err) {
     toast.innerHTML = '<i class="fa-solid fa-xmark-circle" style="font-size:30px;color:#FF3B30;margin-bottom:15px;"></i><p style="font-weight:700;">Export failed</p>';
-    setTimeout(() => toast.remove(), 2000);
-  }
-}
-
-async function requestDataDeletion() {
-  if (!confirm('Are you absolutely sure? This will permanently delete all your data and cannot be undone.')) return;
-
-  try {
-    // Clear all IndexedDB stores
-    await DB.clear('posts');
-    await DB.clear('messages');
-    await DB.clear('conversations');
-    await DB.clear('notifications');
-    await DB.clear('activity');
-    await DB.clear('syncQueue');
-    await DB.clear('mediaCache');
-    await DB.clear('users');
-
-    // Clear all localStorage
-    localStorage.clear();
-
-    // Clear all sessionStorage
-    sessionStorage.clear();
-
-    // Clear caches
-    if ('caches' in window) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map(key => caches.delete(key)));
-    }
-
-    // Unregister service worker
-    if ('serviceWorker' in navigator) {
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(registrations.map(r => r.unregister()));
-    }
-
-
-    location.reload();
-  } catch (err) {
-    toast('Deletion failed. Please contact support.', 'error');
+    setTimeout(() => toast.remove(), 2500);
   }
 }
 
@@ -18451,9 +18432,16 @@ EmailService.init();
 // So the key is wrapped on the device with AES-GCM, using a key stretched from
 // a recovery PIN with PBKDF2, and only the wrapped bytes go to the server. The
 // server never sees the PIN and never sees the key, so it still cannot read a
-// single message: without the PIN the stored row is noise. Same shape as
-// WhatsApp's encrypted backups.
+// single message: without the PIN the stored row is noise.
+//
+// Noise only as strong as the PIN, though. Unlike WhatsApp's backups there is
+// no secure hardware limiting guesses, so whoever holds the row, us included,
+// can try PINs offline as fast as PBKDF2 allows. Four digits is ten thousand
+// tries, which is minutes. Hence eight characters at least, on a normal
+// keyboard rather than a number pad. Restoring still accepts four, for any
+// backup made before that.
 // ==========================================================================
+var E2E_PIN_MIN = 8;
 function openMessageBackupSetup() {
     var existing = document.getElementById('e2eBackupSheet');
     if (existing) existing.remove();
@@ -18469,15 +18457,16 @@ function openMessageBackupSetup() {
             '<p style="margin:0 0 18px;font-size:14px;line-height:1.55;color:var(--text-secondary,#666);">' +
                 (restoring
                     ? 'This device has no key yet. Enter your recovery PIN to unlock the messages already on your account.'
-                    : 'Your messages are encrypted, so only your devices can read them. Set a recovery PIN and they will still be here on a new phone. Without one, reinstalling loses them for good.') +
+                    : 'Typed messages in your one-to-one chats are encrypted, so only your devices can read them. Set a recovery PIN and they will still open on a new phone. Without one, reinstalling loses them for good.') +
             '</p>' +
-            '<input id="e2ePin" type="password" inputmode="numeric" autocomplete="off" placeholder="Recovery PIN" ' +
+            '<input id="e2ePin" type="password" autocomplete="off" placeholder="Recovery PIN" ' +
                 'style="width:100%;box-sizing:border-box;padding:14px 16px;border-radius:12px;border:1px solid var(--border-color,#ddd);background:var(--input-bg,#f5f5f7);font-size:16px;color:var(--text-primary,#000);outline:none;margin-bottom:10px;">' +
             (restoring ? '' :
             '<input id="e2ePin2" type="password" autocomplete="off" placeholder="Confirm PIN" ' +
                 'style="width:100%;box-sizing:border-box;padding:14px 16px;border-radius:12px;border:1px solid var(--border-color,#ddd);background:var(--input-bg,#f5f5f7);font-size:16px;color:var(--text-primary,#000);outline:none;margin-bottom:10px;">') +
             '<p id="e2eErr" style="display:none;color:#FF3B30;font-size:13px;margin:0 0 10px;"></p>' +
             '<p style="font-size:12px;color:var(--text-tertiary,#999);margin:0 0 18px;line-height:1.5;">' +
+                (restoring ? '' : 'Use at least ' + E2E_PIN_MIN + ' characters. Longer is much harder to guess. ') +
                 'We never see this PIN, so we cannot reset it for you. Write it down somewhere safe.</p>' +
             '<button id="e2eGo" style="width:100%;padding:15px;border-radius:12px;border:none;background:#0A84FF;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">' +
                 (restoring ? 'Unlock' : 'Turn on backup') + '</button>' +
@@ -18490,7 +18479,8 @@ function openMessageBackupSetup() {
         var pin = (document.getElementById('e2ePin') || {}).value || '';
         function fail(msg) { err.textContent = msg; err.style.display = 'block'; }
         err.style.display = 'none';
-        if (pin.length < 4) return fail('Use at least 4 characters.');
+        var minLen = restoring ? 4 : E2E_PIN_MIN;
+        if (pin.length < minLen) return fail('Use at least ' + minLen + ' characters.');
         if (!restoring) {
             var pin2 = (document.getElementById('e2ePin2') || {}).value || '';
             if (pin !== pin2) return fail('Those PINs do not match.');
@@ -18537,7 +18527,7 @@ const E2EBackup = {
 
     // Wrap this device's identity key under `pin` and store it.
     async create(pin, hint) {
-        if (!pin || String(pin).length < 4) throw new Error('PIN must be at least 4 characters');
+        if (!pin || String(pin).length < E2E_PIN_MIN) throw new Error('PIN must be at least ' + E2E_PIN_MIN + ' characters');
         if (!E2E._keys) throw new Error('No keys on this device yet');
         var salt = crypto.getRandomValues(new Uint8Array(16));
         var iv = crypto.getRandomValues(new Uint8Array(12));
@@ -22781,6 +22771,7 @@ SecurityScanner.init();
 // LIVE SETTINGS - Schedule & Recorded Lives
 // ============================================
 function showLiveSettings() {
+    if (!tfFeatureGate('live')) return;
     const scheduledLives = JSON.parse(localStorage.getItem('trustfirst-scheduled-lives') || '[]');
     const recordedLives = JSON.parse(localStorage.getItem('trustfirst-recorded-lives') || '[]');
 
@@ -22965,6 +22956,7 @@ function cancelScheduledLive(index) {
 }
 
 function startLiveNow() {
+    if (!tfFeatureGate('live')) return;
     showToast('Starting live...');
     document.getElementById('liveSettingsPage').remove();
     openLiquidGlassCamera();
@@ -23533,7 +23525,9 @@ function showDeleteAccount() {
 
         '<h1 style="font-size:28px; font-weight:800; color:#FF3B30; text-align:center; margin-bottom:8px;">Delete Account</h1>' +
         '<p style="font-size:15px; color:var(--text-secondary,#888); text-align:center; margin-bottom:32px; line-height:1.5;">' +
-        'This action is permanent and cannot be undone. All your data will be erased.</p>' +
+        'This action is permanent and cannot be undone. Your profile, posts, the messages you sent and your files will be erased.</p>' +
+        '<p style="font-size:14px; color:var(--text-secondary,#888); text-align:center; margin:-20px 0 28px; line-height:1.5;">' +
+        'Want a copy first? <a href="#" onclick="event.preventDefault();downloadMyData()" style="color:#007AFF;font-weight:600;text-decoration:none;">Download your data</a></p>' +
 
         // What gets deleted
         '<div style="background:rgba(255,59,48,0.05); border:1px solid rgba(255,59,48,0.15);' +
@@ -23618,6 +23612,15 @@ async function executeDeleteAccount() {
     btn.innerHTML = '<div style="width:20px; height:20px; border:2px solid rgba(255,255,255,0.3); border-top-color:white; border-radius:50%; animation:spin 0.8s linear infinite; margin:0 auto;"></div>';
     btn.disabled = true;
 
+    // Without a connection nothing can be deleted, and saying "deleted" anyway
+    // is exactly the kind of message this screen must never show.
+    if (!window.sb || !currentUser) {
+        showToast('Sign in again to delete your account');
+        btn.innerHTML = 'Permanently Delete My Account';
+        btn.disabled = false;
+        return;
+    }
+
     try {
         // Verify password first by re-authenticating
         if (window.sb && currentUser) {
@@ -23633,25 +23636,31 @@ async function executeDeleteAccount() {
                 return;
             }
 
-            // Delete user data from all tables
-            var userId = currentUser.id;
+            // The server does the deleting (api_views.account_delete): the
+            // profile and everything under it in one transaction, then the
+            // files in storage and on R2, then the sign-in record. A browser
+            // key can do none of the last three, which is why this used to
+            // leave them behind. The sign-in just above is what the server
+            // checks for: a deletion needs a password typed minutes ago.
+            var token = signInResult.data && signInResult.data.session && signInResult.data.session.access_token;
+            var res = await fetch('/api/account/delete/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: '{}'
+            });
+            var out = {};
+            try { out = await res.json(); } catch (e) {}
+            if (!res.ok || !out.ok) {
+                // Nothing was removed, so the account is still there to use.
+                showToast(out.error || 'Your account could not be deleted just now. Nothing was removed.');
+                btn.innerHTML = 'Permanently Delete My Account';
+                btn.disabled = false;
+                return;
+            }
+            var filesLeft = out.files_left || 0;
 
-            // Delete in order (respecting foreign keys)
-            await sb.from('screenshot_events').delete().eq('user_id', userId);
-            await sb.from('harassment_flags').delete().eq('reporter_id', userId);
-            await sb.from('shared_media').delete().eq('sender_id', userId);
-            await sb.from('messages').delete().eq('sender_id', userId);
-            await sb.from('conversation_participants').delete().eq('user_id', userId);
-            await sb.from('profile_views').delete().eq('profile_user_id', userId);
-            await sb.from('profile_views').delete().eq('viewer_user_id', userId);
-            await sb.from('account_lock_events').delete().eq('user_id', userId);
-            await sb.from('login_activity').delete().eq('user_id', userId);
-            await sb.from('encryption_keys').delete().eq('user_id', userId);
-            await sb.from('trusted_devices').delete().eq('user_id', userId);
-            await sb.from('users').delete().eq('id', userId);
-
-            // Sign out
-            await sb.auth.signOut();
+            // The sign-in record is gone on the server; this clears it here.
+            try { await sb.auth.signOut(); } catch (e) {}
         }
 
         // Clear all local data
@@ -23677,7 +23686,10 @@ async function executeDeleteAccount() {
             '<div style="font-size:60px; margin-bottom:20px;">👋</div>' +
             '<h2 style="font-size:24px; font-weight:800; color:var(--text-primary,#000); margin-bottom:12px;">Account Deleted</h2>' +
             '<p style="font-size:15px; color:var(--text-secondary,#888); line-height:1.5; margin-bottom:30px; max-width:300px;">' +
-            'Your account and all associated data have been permanently deleted. We\'re sorry to see you go.</p>' +
+            'Your account, your posts, the messages you sent and your files have been permanently deleted. We\'re sorry to see you go.' +
+            (typeof filesLeft !== 'undefined' && filesLeft > 0
+                ? ' A few files could not be removed automatically. Write to us and we will remove them by hand.'
+                : '') + '</p>' +
             '<button onclick="location.reload()" style="padding:14px 32px; border-radius:14px; border:none;' +
             'background:#007AFF; color:white; font-size:16px; font-weight:600; cursor:pointer;">OK</button></div>';
 
@@ -24166,9 +24178,12 @@ async function submitReportProblem() {
             var f = files[i].file;
             var ext = (f.name.split('.').pop() || 'jpg').toLowerCase();
             var path = currentUser.id + '/report_' + Date.now() + '_' + i + '.' + ext;
-            var up = await sb.storage.from('images').upload(path, f, { contentType: f.type, upsert: false });
+            // Private: only the person reporting and our admins can open these
+            // (supabase/report_attachments.sql). They used to go to the public
+            // images bucket, where the link alone was enough.
+            var up = await sb.storage.from('report_attachments').upload(path, f, { contentType: f.type, upsert: false });
             if (up.error) throw up.error;
-            var pub = sb.storage.from('images').getPublicUrl(path);
+            var pub = sb.storage.from('report_attachments').getPublicUrl(path);
             if (pub && pub.data && pub.data.publicUrl) attachments.push(pub.data.publicUrl);
         }
     } catch (e) {
@@ -25244,6 +25259,7 @@ function _signupDobToggle() {
     if (age === null) { if (status) status.textContent = ''; if (btn) btn.disabled = true; return; }
     if (age < 13) { if (status) status.innerHTML = '<span style="color:#FF3B30;">You must be at least 13 to join.</span>'; if (btn) btn.disabled = true; return; }
     if (age > 120) { if (status) status.innerHTML = '<span style="color:#FF3B30;">Enter a valid date.</span>'; if (btn) btn.disabled = true; return; }
+    if (age < 18 && !tfFeature('kids')) { if (status) status.innerHTML = '<span style="color:#FF3B30;">' + TF_PAUSED_COPY.kids + '</span>'; if (btn) btn.disabled = true; return; }
     if (age < 18) { if (status) status.innerHTML = '<span style="color:#007AFF;">You\'ll get a protected Kids account (needs a parent).</span>'; }
     else { if (status) status.textContent = ''; }
     if (btn) btn.disabled = false;
@@ -25252,6 +25268,7 @@ function _signupDob() {
     var v = (document.getElementById('signup-dob-in').value || '').trim();
     var age = calculateAgeFromBirthDate(v);
     if (age === null || age < 13 || age > 120) { showToast('Enter a valid date of birth'); return; }
+    if (age < 18 && !tfFeatureGate('kids')) return;
     window._signup.birthDate = v;
     window._signup.isKid = age < 18;
     if (window._signup.isKid) { nextAuthStep('step-signup-parent'); }
@@ -26455,7 +26472,7 @@ async function loadArchiveContent(type) {
         div.style.cssText = 'position:relative;' + (isLive ? 'aspect-ratio:16/9;' : 'aspect-ratio:9/16;') + 'background:#111;overflow:hidden;cursor:pointer;border-radius:1px;';
 
         var img = document.createElement('img');
-        img.src = item.media_url || ('https://picsum.photos/seed/arc' + type + item.id + '/300/' + (isLive ? '169' : '534'));
+        img.src = item.media_url || TF_MEDIA_PLACEHOLDER;
         img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
         div.appendChild(img);
 
@@ -27502,6 +27519,7 @@ function adminRevokeGoldBadge(userId) {
 // ============================================
 
 function linkParentAccount() {
+    if (!tfFeatureGate('kids')) return;
     var parentId = (document.getElementById('parent-link-id') || {}).value || '';
     if (!parentId.trim()) {
         showToast('Enter your parent\'s Trust-ID');
@@ -30074,16 +30092,10 @@ async function getChildSafeFeed() {
 }
 
 function buildLocalChildFeed() {
-    // Safe placeholder posts for offline/fallback
-    return [{
-        id: 'safe_1',
-        text_content: 'Welcome to TrustFirst Kids',
-        post_type: 'text',
-        created_at: new Date().toISOString(),
-        like_count: 12, comment_count: 3, repost_count: 0,
-        _liked: false, _bookmarked: false,
-        users: { full_name: 'TrustFirst Kids', username: 'trustfirst_kids', verified: true, badge_tier: 'verify-green', avatar_url: null }
-    }];
+    // Nothing, honestly. This used to return an invented post from an invented
+    // "TrustFirst Kids" account with invented likes, shown whenever the real
+    // feed could not load. An empty feed tells the truth; a fake one does not.
+    return [];
 }
 
 // Enhanced parent notification system
@@ -31609,6 +31621,226 @@ launchApp = async function() {
 console.debug('[TrustFirst] Real data layer loaded ✅');
 
 // ==========================================================================
+// MARKETPLACE LISTINGS
+//
+// A listing is a post with a few fixed facts: what kind of thing it is, a
+// title, a price in rand or none ("talk to me"), and an area. The database
+// checks that shape (supabase/marketplace_listings.sql) and already lets only
+// verified accounts post, so every seller is verified. TrustFirst takes no part
+// in payment: the buyer and seller deal directly, and everything here says so.
+// ==========================================================================
+var TF_LISTING_CATS = [
+    { id: 'housing',  label: 'Housing & rooms', icon: 'fa-house-chimney' },
+    { id: 'for_sale', label: 'For sale',        icon: 'fa-bag-shopping' },
+    { id: 'services', label: 'Services',        icon: 'fa-screwdriver-wrench' },
+    { id: 'wanted',   label: 'Wanted',          icon: 'fa-magnifying-glass' }
+];
+var _tfListingCat = null;
+var _tfMarketCat = 'all';
+
+function renderListingBuilder() {
+    var box = document.getElementById('listing-cats');
+    if (!box) return;
+    box.innerHTML = TF_LISTING_CATS.map(function (c) {
+        var on = _tfListingCat === c.id;
+        return '<button type="button" onclick="_tfListingCat=\'' + c.id + '\';renderListingBuilder()" aria-pressed="' + on + '" ' +
+            'style="padding:7px 12px;border-radius:18px;border:1px solid ' + (on ? '#34C759' : 'var(--border-color,#e5e5e5)') + ';' +
+            'background:' + (on ? '#34C759' : 'transparent') + ';color:' + (on ? '#fff' : 'var(--text-primary,#000)') + ';' +
+            'font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;">' +
+            '<i class="fa-solid ' + c.icon + '"></i>' + c.label + '</button>';
+    }).join('');
+}
+
+// The listing facts from the form, or null after saying what is missing.
+function tfReadListingForm() {
+    var title = ((document.getElementById('listing-title') || {}).value || '').trim();
+    var priceRaw = ((document.getElementById('listing-price') || {}).value || '').trim();
+    var area = ((document.getElementById('listing-area') || {}).value || '').trim();
+    if (!_tfListingCat) { showToast('Pick what kind of listing this is'); return null; }
+    if (!title) { showToast('Give your listing a title'); return null; }
+    if (title.length > 80) { showToast('Keep the title under 80 characters'); return null; }
+    if (area.length > 60) { showToast('Keep the area under 60 characters'); return null; }
+    if (containsBannedWords(title + ' ' + area)) { showToast('Content violates our guidelines.'); return null; }
+    var price = null;
+    if (priceRaw) {
+        price = Number(priceRaw.replace(/[\s,]/g, ''));
+        if (!isFinite(price) || price < 0 || price > 10000000) { showToast('Enter a price in rand, or leave it empty'); return null; }
+        price = Math.round(price * 100) / 100;
+    }
+    return { category: _tfListingCat, title: title, price: price, currency: 'ZAR', area: area, status: 'available' };
+}
+
+function openListingComposer() {
+    if (!canPerformAction('create a post')) return;
+    openPage('composer-overlay');
+    if (typeof hideNavBar === 'function') hideNavBar();
+    setPostType('listing');
+}
+
+function tfListingPrice(l) {
+    if (l.price === null || l.price === undefined || l.price === '') return 'Price on request';
+    var n = Number(l.price);
+    if (n === 0) return 'Free';
+    return 'R ' + n.toLocaleString('en-ZA', { maximumFractionDigits: 2 });
+}
+
+function tfListingBlock(post) {
+    var l = post.listing || {};
+    var cat = TF_LISTING_CATS.filter(function (c) { return c.id === l.category; })[0] || { label: 'Listing', icon: 'fa-tag' };
+    var sold = l.status === 'sold';
+    var mine = !!(currentUser && post.user_id === currentUser.id);
+    var pid = escapeHtml(String(post.id));
+    window._tfListings = window._tfListings || {};
+    window._tfListings[post.id] = {
+        user_id: post.user_id, title: l.title || '', listing: l,
+        seller: (post.users && (post.users.full_name || post.users.username)) || 'the seller'
+    };
+    var el = document.createElement('div');
+    el.className = 'tf-listing';
+    el.setAttribute('data-listing-id', String(post.id));
+    el.style.cssText = 'margin:2px 16px 10px;padding:12px 14px;border-radius:16px;background:var(--bg-secondary,rgba(0,0,0,0.04));border:1px solid var(--border-color,rgba(128,128,128,0.18));';
+    el.innerHTML =
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">' +
+            '<span style="font-size:12px;font-weight:700;color:#248A3D;background:rgba(52,199,89,0.12);padding:3px 9px;border-radius:12px;">' +
+                '<i class="fa-solid ' + cat.icon + '" style="margin-right:5px;"></i>' + escapeHtml(cat.label) + '</span>' +
+            (sold ? '<span style="font-size:12px;font-weight:800;color:#fff;background:#8E8E93;padding:3px 9px;border-radius:12px;">Sold</span>' : '') +
+        '</div>' +
+        '<div style="font-size:17px;font-weight:800;color:var(--text-primary,#000);line-height:1.3;word-break:break-word;">' + escapeHtml(l.title || '') + '</div>' +
+        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px;font-size:14px;">' +
+            '<b style="color:' + (sold ? '#8E8E93' : '#007AFF') + ';' + (sold ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(tfListingPrice(l)) + '</b>' +
+            (l.area ? '<span style="color:var(--text-secondary,#666);"><i class="fa-solid fa-location-dot" style="margin-right:4px;"></i>' + escapeHtml(l.area) + '</span>' : '') +
+        '</div>' +
+        (mine
+            ? '<button onclick="event.stopPropagation();tfToggleListingSold(\'' + pid + '\')" style="margin-top:10px;width:100%;padding:10px;border-radius:12px;border:1px solid var(--border-color,#ddd);background:transparent;color:var(--text-primary,#000);font-size:14px;font-weight:700;cursor:pointer;">' +
+                (sold ? 'Mark as available' : 'Mark as sold') + '</button>'
+            : (sold ? '' :
+              '<button onclick="event.stopPropagation();tfMessageSeller(\'' + pid + '\')" style="margin-top:10px;width:100%;padding:10px;border-radius:12px;border:none;background:#007AFF;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">' +
+                '<i class="fa-solid fa-paper-plane" style="margin-right:6px;"></i>Message seller</button>'));
+    return el;
+}
+
+async function tfToggleListingSold(postId) {
+    var info = (window._tfListings || {})[postId];
+    if (!info || !window.sb || !currentUser || info.user_id !== currentUser.id) return;
+    var next = Object.assign({}, info.listing, { status: info.listing.status === 'sold' ? 'available' : 'sold' });
+    var res;
+    try { res = await sb.from('posts').update({ listing: next }).eq('id', postId).eq('user_id', currentUser.id).select('id'); }
+    catch (e) { res = { error: e }; }
+    if (!res || res.error || !(res.data && res.data.length)) { showToast('That did not save. Try again.'); return; }
+    info.listing = next;
+    document.querySelectorAll('.tf-listing[data-listing-id="' + postId + '"]').forEach(function (old) {
+        old.replaceWith(tfListingBlock({ id: postId, user_id: info.user_id, listing: next, users: { full_name: info.seller } }));
+    });
+    showToast(next.status === 'sold' ? 'Marked as sold' : 'Marked as available');
+}
+
+// Open a chat with the seller, with a first message ready to send and the
+// safety note above it. Starting a conversation needs a verified account, as
+// it does everywhere else.
+function tfMessageSeller(postId) {
+    var info = (window._tfListings || {})[postId];
+    if (!info || (currentUser && info.user_id === currentUser.id)) return;
+    if (!_canStartDM()) return;
+    var mk = document.getElementById('tfMarketOverlay');
+    if (mk) mk.remove();
+    window._currentChatUserId = info.user_id;
+    currentConversationId = null;
+    var row = document.querySelector('.msg-row[data-uid="' + info.user_id + '"]');
+    if (row && typeof _openMsgRow === 'function') _openMsgRow(row);
+    else openChat(info.seller || 'Seller');
+    setTimeout(function () {
+        tfShowListingSafety();
+        var inp = document.getElementById('chat-msg-input');
+        if (inp && !inp.value) {
+            inp.value = 'Hi, is "' + info.title + '" still available?';
+            try { inp.dispatchEvent(new Event('input')); } catch (e) {}
+            inp.focus();
+        }
+    }, 420);
+}
+
+function tfShowListingSafety() {
+    var body = document.getElementById('chat-body');
+    if (!body || !body.parentElement || document.getElementById('tfListingSafety')) return;
+    var note = document.createElement('div');
+    note.id = 'tfListingSafety';
+    note.setAttribute('role', 'note');
+    note.style.cssText = 'margin:8px 12px;padding:10px 12px;border-radius:12px;background:rgba(255,149,0,0.12);border:1px solid rgba(255,149,0,0.35);color:var(--text-primary,#000);font-size:13px;line-height:1.45;display:flex;gap:10px;align-items:flex-start;flex-shrink:0;';
+    note.innerHTML = '<i class="fa-solid fa-shield-halved" style="color:#FF9500;margin-top:2px;"></i>' +
+        '<div style="flex:1;"><b>Before you pay anything:</b> see it in person first, meet somewhere public, and never share a one-time PIN or your banking details. TrustFirst does not handle payment.</div>' +
+        '<i class="fa-solid fa-xmark" role="button" aria-label="Dismiss" onclick="this.parentElement.remove()" style="cursor:pointer;color:#888;padding:2px;"></i>';
+    body.parentElement.insertBefore(note, body);
+}
+
+function openMarketplace() {
+    var existing = document.getElementById('tfMarketOverlay');
+    if (existing) existing.remove();
+    var ov = document.createElement('div');
+    ov.id = 'tfMarketOverlay';
+    ov.style.cssText = 'position:absolute;inset:0;z-index:7000;display:flex;flex-direction:column;background:var(--bg-primary,#fff);animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
+    ov.innerHTML =
+        '<div class="header-container" style="flex-shrink:0;">' +
+            '<div class="liquid-glass-btn" role="button" aria-label="Back" onclick="document.getElementById(\'tfMarketOverlay\').remove()" style="cursor:pointer;"><i class="fa-solid fa-chevron-left"></i></div>' +
+            '<b style="font-size:18px;color:var(--text-primary,#000);">Marketplace</b>' +
+            '<button onclick="openListingComposer()" style="padding:8px 14px;border-radius:18px;border:none;background:#34C759;color:#fff;font-size:14px;font-weight:700;cursor:pointer;"><i class="fa-solid fa-tag" style="margin-right:6px;"></i>Sell</button>' +
+        '</div>' +
+        '<div id="tfMarketCats" style="display:flex;gap:6px;overflow-x:auto;padding:4px 16px 10px;flex-shrink:0;"></div>' +
+        '<div style="padding:0 16px 8px;font-size:12px;color:var(--text-secondary,#888);line-height:1.45;flex-shrink:0;">Every seller here is verified. TrustFirst does not handle payment: see it in person before you pay.</div>' +
+        '<div id="tfMarketList" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:120px;"></div>';
+    (document.getElementById('app') || document.body).appendChild(ov);
+    tfRenderMarketCats();
+    tfLoadMarketplace();
+}
+
+function tfRenderMarketCats() {
+    var box = document.getElementById('tfMarketCats');
+    if (!box) return;
+    var cats = [{ id: 'all', label: 'All', icon: 'fa-store' }].concat(TF_LISTING_CATS);
+    box.innerHTML = cats.map(function (c) {
+        var on = _tfMarketCat === c.id;
+        return '<button onclick="_tfMarketCat=\'' + c.id + '\';tfRenderMarketCats();tfLoadMarketplace()" aria-pressed="' + on + '" ' +
+            'style="flex-shrink:0;padding:7px 12px;border-radius:18px;border:1px solid ' + (on ? '#007AFF' : 'var(--border-color,#e5e5e5)') + ';' +
+            'background:' + (on ? '#007AFF' : 'transparent') + ';color:' + (on ? '#fff' : 'var(--text-primary,#000)') + ';' +
+            'font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;"><i class="fa-solid ' + c.icon + '" style="margin-right:6px;"></i>' + c.label + '</button>';
+    }).join('');
+}
+
+async function tfLoadMarketplace() {
+    var list = document.getElementById('tfMarketList');
+    if (!list) return;
+    list.innerHTML = '<div style="padding:40px;text-align:center;color:#888;"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+    var cat = _tfMarketCat;
+    try {
+        if (!window.sb) throw new Error('offline');
+        var q = sb.from('posts').select('*, users:user_id (id, full_name, username, avatar_url, badge_tier, verified)')
+            .eq('post_type', 'listing').eq('is_hidden', false)
+            .order('created_at', { ascending: false }).limit(60);
+        if (cat !== 'all') q = q.eq('listing->>category', cat);
+        var res = await tfWithTimeout(q, 12000, 'Loading listings');
+        if (res.error) throw res.error;
+        if (cat !== _tfMarketCat) return;     // a newer tap has taken over
+        var rows = (res.data || []).filter(function (p) { return p && p.listing; });
+        // Still for sale first; sold ones stay visible underneath, newest first.
+        rows.sort(function (a, b) {
+            var sa = a.listing.status === 'sold' ? 1 : 0, sb2 = b.listing.status === 'sold' ? 1 : 0;
+            return sa - sb2 || String(b.created_at).localeCompare(String(a.created_at));
+        });
+        list.innerHTML = '';
+        if (!rows.length) {
+            list.innerHTML = '<div style="padding:48px 28px;text-align:center;color:var(--text-secondary,#888);line-height:1.5;">' +
+                '<i class="fa-solid fa-store" style="font-size:34px;margin-bottom:12px;display:block;color:#34C759;"></i>' +
+                '<b style="color:var(--text-primary,#000);">Nothing listed here yet</b><br>' +
+                'Selling something, renting out a room, or offering a service? Tap Sell.</div>';
+            return;
+        }
+        rows.forEach(function (p) { list.appendChild(renderRealPostCard(p)); });
+    } catch (e) {
+        list.innerHTML = '<div style="padding:40px 24px;text-align:center;color:var(--text-secondary,#888);">Listings could not be loaded.' +
+            '<br><button onclick="tfLoadMarketplace()" style="margin-top:14px;padding:10px 22px;border-radius:20px;border:none;background:#007AFF;color:#fff;font-weight:700;cursor:pointer;">Try again</button></div>';
+    }
+}
+
+// ==========================================================================
 // POLLS, QUIZZES & QUESTION STICKERS
 // ==========================================================================
 
@@ -31631,9 +31863,17 @@ function setPostType(type) {
     document.getElementById('poll-builder').style.display = type === 'poll' ? 'block' : 'none';
     document.getElementById('quiz-builder').style.display = type === 'quiz' ? 'block' : 'none';
     document.getElementById('question-builder').style.display = type === 'question' ? 'block' : 'none';
+    var lb = document.getElementById('listing-builder');
+    if (lb) lb.style.display = type === 'listing' ? 'block' : 'none';
+    var ta = document.getElementById('composer-text');
+    if (ta) {
+        if (!ta.dataset.tfPh) ta.dataset.tfPh = ta.placeholder;
+        ta.placeholder = type === 'listing' ? 'Describe it: condition, size, what is included, how to view it' : ta.dataset.tfPh;
+    }
 
     if (type === 'poll') renderPollBuilder();
     if (type === 'quiz') renderQuizBuilder();
+    if (type === 'listing') renderListingBuilder();
 }
 
 function addPollOption() {
@@ -31917,6 +32157,10 @@ function cancelComposer() {
     quizOptions = ['', ''];
     quizCorrectAnswer = 0;
     scheduleMode = false;
+    _tfListingCat = null;
+    ['listing-title', 'listing-price', 'listing-area'].forEach(function (id) {
+        var el = document.getElementById(id); if (el) el.value = '';
+    });
     const banner = document.getElementById('composer-group-banner');
     if (banner) banner.style.display = 'none';
     setPostType('text');
@@ -31999,6 +32243,14 @@ async function openPostDetail(postId) {
 // Render interactive posts in feed (polls, quizzes, questions)
 var _origRenderRealPostCard = renderRealPostCard;
 renderRealPostCard = function(post) {
+    // A listing is a normal post card with its facts (title, price, area,
+    // Message seller) laid in under the header.
+    if (post.post_type === 'listing' && post.listing) {
+        var lcard = _origRenderRealPostCard(post);
+        var head = lcard && lcard.querySelector('.post-header');
+        if (head) head.insertAdjacentElement('afterend', tfListingBlock(post));
+        return lcard;
+    }
     // poll / quiz / question are fully rendered by the original (ixblock +
     // renderPollQuizBlock, with real like/comment counts and saved state) — only
     // 'quote' needs the extra quoted-post block layered on top.
@@ -34747,45 +34999,6 @@ function deleteCoverPhoto() {
     // ============================================================
 // CHANNEL BROADCAST INTERFACE
 // ============================================================
-var CH_DATA = [
-    {
-        id: 'tf_official', name: 'TrustFirst Official', emoji: '📢',
-        color: '#007AFF', followers: '12.5K', verified: true, isAdmin: true,
-        posts: [
-            { text: 'TrustFirst v2.0 is now live! Liquid Glass navigation, real E2E encryption, and so much more. Thank you for building with us. 🙏', time: '2h', reactions: {'🔥': 842, '❤️': 1203, '🎉': 590} },
-            { text: 'Server maintenance scheduled for Sunday 2:00 AM SAST. Expect ~15 min downtime. We appreciate your patience.', time: '5h', reactions: {'👍': 234, '🙏': 89} }
-        ]
-    },
-    {
-        id: 'tech_hub', name: 'SA Tech Hub', emoji: '💡',
-        color: '#34C759', followers: '8.2K', verified: true, isAdmin: false,
-        posts: [
-            { text: 'Cape Town named the top African city for tech talent in 2026! 🇿🇦 The local startup ecosystem is growing faster than ever.', time: '1h', reactions: {'🚀': 412, '🔥': 288, '❤️': 190} }
-        ]
-    },
-    {
-        id: 'creator_studio', name: 'Creator Studio', emoji: '🎬',
-        color: '#FF9500', followers: '5.1K', verified: true, isAdmin: false,
-        posts: [
-            { text: 'Pro tip: Post your TrustClips between 7–9 PM for 3× more views. Your audience is most active in the evening!', time: '3h', reactions: {'💡': 671, '👏': 344, '🙌': 201} }
-        ]
-    },
-    {
-        id: 'safety_updates', name: 'Safety Updates', emoji: '🛡️',
-        color: '#FF3B30', followers: '22K', verified: true, isAdmin: false,
-        posts: [
-            { text: 'Reminder: TrustFirst will NEVER ask for your password via message. Report any suspicious activity immediately.', time: '6h', reactions: {'👍': 1821, '🙏': 982} }
-        ]
-    },
-    {
-        id: 'music_sa', name: 'Music SA', emoji: '🎵',
-        color: '#AF52DE', followers: '15K', verified: true, isAdmin: false,
-        posts: [
-            { text: 'Amapiano is officially the most-streamed genre in Africa for 2026. The culture continues to rise! 🎶', time: '30m', reactions: {'🎶': 1821, '🔥': 982, '❤️': 743} }
-        ]
-    }
-];
-
 async function openChannelBroadcast(channelId) {
     var overlay = document.getElementById('ch-broadcast');
     if (!overlay) {
@@ -37630,6 +37843,13 @@ createPostFromComposer = async function() {
     if (postType === 'poll' && pollOptions.filter(function(o){ return o.trim(); }).length < 2) { showToast('Add at least 2 poll options'); return; }
     if (postType === 'quiz' && quizOptions.filter(function(o){ return o.trim(); }).length < 2) { showToast('Add at least 2 quiz options'); return; }
     if (containsBannedWords(postText)) { showToast('Content violates our guidelines.'); return; }
+    var listing = null;
+    if (postType === 'listing') {
+        // Scheduling saves its own copy of a post and would drop these facts.
+        if (scheduleMode) { showToast('Listings go up straight away. Turn off scheduling to post one.'); return; }
+        listing = tfReadListingForm();
+        if (!listing) return;          // the form has already said what is missing
+    }
     if (scheduleMode) { await schedulePost(); return; }
 
     var btn = document.getElementById('composer-post-btn');
@@ -37655,6 +37875,9 @@ createPostFromComposer = async function() {
             group_id: typeof currentGroupId !== 'undefined' ? currentGroupId : null,
 requires_approval: (document.getElementById('groupApprovalToggle')?.classList.contains('active')) || false,
         };
+        // Only on a listing: before the column exists, sending the key at all,
+        // even as null, would make every post fail.
+        if (listing) insertData.listing = listing;
 
         // Attach location + music from the composer (Facebook-style location, music sticker).
         if (window._composerLocation) {
@@ -37698,67 +37921,22 @@ requires_approval: (document.getElementById('groupApprovalToggle')?.classList.co
                     }
                     _eddieAnswerMention('post', result.data.id, postText, result.data.id);
                     tfNotifyMentions(postText, { post_id: result.data.id });
+                    if (postType === 'listing' && document.getElementById('tfMarketOverlay')) tfLoadMarketplace();
                     return;
                 }
             } catch(dbErr) { console.warn('[Post DB]', dbErr); }
         }
 
-        // Local fallback — always succeeds
+        // This used to fall back to a post that existed only on this screen,
+        // add it to the feed and say "Posted!", so a post that never reached
+        // the server looked exactly like one that had. Say it did not save,
+        // and leave everything in the composer for another try.
         if (!saved) {
-            var localPost = {
-                id: 'local_' + Date.now(),
-                user_id: currentUser?.id || 'local',
-                text_content: postText,
-                post_type: postType,
-                created_at: new Date().toISOString(),
-                like_count: 0, comment_count: 0, repost_count: 0,
-                _liked: false, _bookmarked: false,
-                users: {
-                    full_name: currentUser?.name || 'You',
-                    username: currentUser?.username || 'user',
-                    avatar_url: currentUser?.avatar_url || null,
-                    badge_tier: currentUser?.tier || 'verify-blue',
-                    verified: currentUser?.verified || false
-                }
-            };
-            cancelComposer();
-            showToast('Posted! 🎉');
-            triggerHaptic(50);
-            var feedEl = document.getElementById('feed-posts') || document.getElementById('feed-panels');
-if (feedEl) {
-    var newCard = renderRealPostCard(localPost);
-    feedEl.insertBefore(newCard, feedEl.firstChild);
-    newCard.scrollIntoView({ behavior:'smooth', block:'start' });
-}
-var profileGrid = document.getElementById('profile-grid');
-if (profileGrid && profileGrid.offsetParent !== null &&
-    (profileGrid.dataset.tab || 'posts') === 'posts') {
-    loadProfilePosts(profileGrid);
-}
-        } // closes if (!saved)
+            showToast('Your post was not saved. Check your connection and try again.');
+        }
     } catch(e) {
         console.error('[Post]', e);
-        // Still try local fallback
-        var fallbackPost = {
-            id: 'local_' + Date.now(),
-            user_id: currentUser?.id || 'local',
-            text_content: postText,
-            post_type: postType,
-            created_at: new Date().toISOString(),
-            like_count: 0, comment_count: 0, repost_count: 0,
-            _liked: false, _bookmarked: false,
-            users: {
-                full_name: currentUser?.name || 'You',
-                username: currentUser?.username || 'user',
-                avatar_url: currentUser?.avatar_url || null,
-                badge_tier: currentUser?.tier || 'verify-blue',
-                verified: currentUser?.verified || false
-            }
-        };
-        cancelComposer();
-        showToast('Posted! 🎉');
-        var feedFb = document.getElementById('feed-posts');
-        if (feedFb) feedFb.insertBefore(renderRealPostCard(fallbackPost), feedFb.firstChild);
+        showToast('Your post was not saved. Check your connection and try again.');
     }
 
     if (btn) { btn.textContent = 'Post'; btn.disabled = false; }
@@ -37883,6 +38061,7 @@ function openAboutYourAccount() {
 // Legal content moved to feed-legal.js (feed-legal.js loaded after feed.js in HTML)
 
 function openLocationSettings() {
+    if (!tfFeatureGate('nearby')) return;
     var existing = document.getElementById('locationPrivacySheet');
     if (existing) { existing.remove(); return; }
 
@@ -40232,6 +40411,7 @@ function _tfWireMapSheet() {
 }
 
     function openTrustMap(contactName) {
+        if (!tfFeatureGate('nearby')) return;
     var existing = document.getElementById('trustMapOverlay');
     if (existing) { existing.remove(); return; }
 
@@ -40410,6 +40590,7 @@ function _addFriendPin(map, lat, lng, profile, type, createdAt) {
 }
 
 function toggleMapSharing(pill) {
+    if (!tfFeatureGate('nearby')) return;
     var current = localStorage.getItem('tf-location-sharing') === 'true';
     var next = !current;
     localStorage.setItem('tf-location-sharing', next);
@@ -40716,15 +40897,12 @@ async function sendCVR() {
     try {
         var ext = (_cvrMime.indexOf('mp4') >= 0 || !_cvrMime) ? 'mp4' : 'webm';
         var ctype = _cvrMime ? _cvrMime.split(';')[0] : 'video/mp4';
-        // The media bucket is public, so the URL stored on the message resolves.
+        // Private, like every other chat file: see tfUploadChatMedia. It used to
+        // go to the public media bucket so the stored link would simply load.
         var path = currentUser.id + '/vn_' + Date.now() + '.' + ext;
-        var up = await tfWithTimeout(
-            sb.storage.from('media').upload(path, blob, { contentType: ctype, upsert: false }),
+        var publicUrl = await tfWithTimeout(
+            tfUploadChatMedia(blob, path, null, ctype),
             30000, 'Sending the video note');
-        if (up.error) throw up.error;
-
-        var pub = sb.storage.from('media').getPublicUrl(path);
-        var publicUrl = pub && pub.data && pub.data.publicUrl;
         if (!publicUrl) throw new Error('Could not build a link for that clip');
 
         var ins = await sb.from('messages').insert({
@@ -47937,6 +48115,9 @@ if (videoBtn) videoBtn.style.display = isSelf ? 'none' : '';
     }
 
     function openWalletSheet(type, amount) {
+        // Paused is not closed: only money coming in stops. Withdrawing stays.
+        if (type === 'addmoney' && !tfFeatureGate('wallet')) return;
+        if (type === 'buycoins' && !tfFeatureGate('coins')) return;
         // Withdraw needs the balance to decide what to show. If it is not known
         // yet, fetch it and open again rather than guessing.
         if (type === 'withdraw' && window._tfWalletBalance == null) {
@@ -48545,6 +48726,7 @@ async function _tfFillWithdrawBalance() {
 // useless to exactly the people who need it. The rate is what coins were sold
 // at, so the only cut is the 20% already taken when the gift was sent.
 async function tfCashOutCoins() {
+    if (!tfFeatureGate('coins')) return;
     var coins = (currentUser && currentUser.coins) || 0;
     if (coins < 100) { showToast('You need at least 100 coins to cash out'); return; }
     if (!confirm('Turn ' + coins + ' coins into R' + (coins * 0.0999).toFixed(2) + ' in your wallet?')) return;
@@ -52661,6 +52843,56 @@ async function tfUploadPublicMedia(file, kind, bucket, path, onProgress) {
     return pub.data && pub.data.publicUrl;
 }
 
+// Photos, videos and video notes sent in a conversation.
+//
+// These used to go through tfUploadPublicMedia into the public images, videos
+// and media buckets, or R2, where anyone holding the link could open them. The
+// Terms say chat media is private, so it goes to chat_media instead: a private
+// bucket whose read rule lets in only the sender and the people in the chat it
+// was sent to (supabase/chat_media_access.sql). The message keeps the usual
+// bucket URL and the app swaps in a short-lived signed one to show it
+// (tfSignMediaUrl). Never R2, which is public by design.
+//
+// A plain XHR rather than storage.upload() because only XHR reports upload
+// progress, and a long video with no number looks like it has stalled.
+async function tfUploadChatMedia(file, path, onProgress, contentType) {
+    var token = await _tfAccessToken();
+    // Codec parameters ("video/webm;codecs=vp9") are not on the bucket's list.
+    var type = String(contentType || file.type || 'application/octet-stream').split(';')[0].trim();
+    var url = SUPABASE_URL + '/storage/v1/object/chat_media/' +
+        path.split('/').map(encodeURIComponent).join('/');
+    await new Promise(function (resolve, reject) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', url);
+        xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+        xhr.setRequestHeader('apikey', SUPABASE_ANON_KEY);
+        xhr.setRequestHeader('Content-Type', type);
+        xhr.setRequestHeader('x-upsert', 'false');
+        xhr.setRequestHeader('cache-control', 'max-age=' + TF_MEDIA_CACHE_SECONDS);
+        if (onProgress && xhr.upload) {
+            xhr.upload.onprogress = function (e) { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+        }
+        xhr.onload = function () {
+            if (xhr.status >= 200 && xhr.status < 300) return resolve();
+            var msg = '';
+            try { msg = (JSON.parse(xhr.responseText) || {}).message || ''; } catch (e) {}
+            if (xhr.status === 413 || /maximum allowed size|too large/i.test(msg)) {
+                return reject(new Error('That file is too big to send in a chat.'));
+            }
+            if (xhr.status === 401 || /row-level security|JWT|not authenticated/i.test(msg)) {
+                var out = new Error('You have been signed out. Sign in again and retry.');
+                out.needsSignIn = true;
+                return reject(out);
+            }
+            reject(new Error((msg || 'storage refused it') + ' [' + type + ', HTTP ' + xhr.status + ']'));
+        };
+        xhr.onerror = function () { reject(new Error('The upload could not reach the server.')); };
+        xhr.send(file);
+    });
+    var client = window._sb || window.sb;
+    return client.storage.from('chat_media').getPublicUrl(path).data.publicUrl;
+}
+
 function tfNormaliseImageFile(file) {
     return new Promise(function(resolve) {
         if (!file || !file.type || file.type.indexOf('image/') !== 0) return resolve(file);
@@ -52951,9 +53183,7 @@ async function sendAlbumInChat(files) {
             var f = files[i];
             var ext = (f.name.split('.').pop() || 'jpg');
             var path = currentUser.id + '/chat/' + Date.now() + '_' + i + '.' + ext;
-            var up = await sb.storage.from('images').upload(path, f, { upsert: false });
-            if (up.error) throw up.error;
-            urls.push(sb.storage.from('images').getPublicUrl(path).data.publicUrl);
+            urls.push(await tfUploadChatMedia(f, path));
         }
         // Swap the optimistic bubble for the uploaded one.
         var bubble = chatBody.querySelector('[data-msg-id="' + msgId + '"]');
@@ -53467,10 +53697,10 @@ async function sendMediaInChat(file, caption) {
         try { file = await tfShrinkForUpload(file); } catch (e) {}
         var ext = file.name.split('.').pop() || (isVideo ? 'mp4' : 'jpg');
         var path = currentUser.id + '/chat/' + Date.now() + '.' + ext;
-        var bucket = isVideo ? 'videos' : 'images';
         var progEl = document.getElementById('upload-prog-' + msgId);
 
-        var publicUrl = await tfUploadPublicMedia(file, isVideo ? 'video' : 'image', bucket, path, function (p) {
+        // Private bucket, not the public post buckets: see tfUploadChatMedia.
+        var publicUrl = await tfUploadChatMedia(file, path, function (p) {
             // The label says "Uploading…" until there is something truthful to
             // put there. A long video with no number looks like it has stalled.
             if (progEl) progEl.textContent = 'Uploading ' + Math.round(p * 100) + '%';
@@ -54102,7 +54332,7 @@ function openSpMusicEditorSheet(track, screen) {
     sheet.style.cssText = 'position:absolute;bottom:0;left:0;right:0;z-index:9850;display:flex;flex-direction:column;overflow:hidden;border-radius:24px 24px 0 0;max-height:72%;';
 
     // Blurred album art background
-    var bgUrl = track.artUrl || 'https://picsum.photos/seed/music/400/400';
+    var bgUrl = track.artUrl || TF_ART_PLACEHOLDER;
     sheet.innerHTML =
         // Blurred background
         '<div style="position:absolute;inset:0;z-index:0;">' +
