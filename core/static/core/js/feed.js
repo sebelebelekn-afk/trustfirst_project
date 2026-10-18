@@ -3763,6 +3763,8 @@ function _formatFileSize(bytes) {
 }
 
 function openChat(userName) {
+    var _ls = document.getElementById('tfListingSafety');
+    if (_ls) _ls.remove();
     var nav = document.querySelector('.nav-container');
     if (nav) nav.style.display = 'none';
     openPage('chat-interface');
@@ -31619,6 +31621,226 @@ launchApp = async function() {
 console.debug('[TrustFirst] Real data layer loaded ✅');
 
 // ==========================================================================
+// MARKETPLACE LISTINGS
+//
+// A listing is a post with a few fixed facts: what kind of thing it is, a
+// title, a price in rand or none ("talk to me"), and an area. The database
+// checks that shape (supabase/marketplace_listings.sql) and already lets only
+// verified accounts post, so every seller is verified. TrustFirst takes no part
+// in payment: the buyer and seller deal directly, and everything here says so.
+// ==========================================================================
+var TF_LISTING_CATS = [
+    { id: 'housing',  label: 'Housing & rooms', icon: 'fa-house-chimney' },
+    { id: 'for_sale', label: 'For sale',        icon: 'fa-bag-shopping' },
+    { id: 'services', label: 'Services',        icon: 'fa-screwdriver-wrench' },
+    { id: 'wanted',   label: 'Wanted',          icon: 'fa-magnifying-glass' }
+];
+var _tfListingCat = null;
+var _tfMarketCat = 'all';
+
+function renderListingBuilder() {
+    var box = document.getElementById('listing-cats');
+    if (!box) return;
+    box.innerHTML = TF_LISTING_CATS.map(function (c) {
+        var on = _tfListingCat === c.id;
+        return '<button type="button" onclick="_tfListingCat=\'' + c.id + '\';renderListingBuilder()" aria-pressed="' + on + '" ' +
+            'style="padding:7px 12px;border-radius:18px;border:1px solid ' + (on ? '#34C759' : 'var(--border-color,#e5e5e5)') + ';' +
+            'background:' + (on ? '#34C759' : 'transparent') + ';color:' + (on ? '#fff' : 'var(--text-primary,#000)') + ';' +
+            'font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;">' +
+            '<i class="fa-solid ' + c.icon + '"></i>' + c.label + '</button>';
+    }).join('');
+}
+
+// The listing facts from the form, or null after saying what is missing.
+function tfReadListingForm() {
+    var title = ((document.getElementById('listing-title') || {}).value || '').trim();
+    var priceRaw = ((document.getElementById('listing-price') || {}).value || '').trim();
+    var area = ((document.getElementById('listing-area') || {}).value || '').trim();
+    if (!_tfListingCat) { showToast('Pick what kind of listing this is'); return null; }
+    if (!title) { showToast('Give your listing a title'); return null; }
+    if (title.length > 80) { showToast('Keep the title under 80 characters'); return null; }
+    if (area.length > 60) { showToast('Keep the area under 60 characters'); return null; }
+    if (containsBannedWords(title + ' ' + area)) { showToast('Content violates our guidelines.'); return null; }
+    var price = null;
+    if (priceRaw) {
+        price = Number(priceRaw.replace(/[\s,]/g, ''));
+        if (!isFinite(price) || price < 0 || price > 10000000) { showToast('Enter a price in rand, or leave it empty'); return null; }
+        price = Math.round(price * 100) / 100;
+    }
+    return { category: _tfListingCat, title: title, price: price, currency: 'ZAR', area: area, status: 'available' };
+}
+
+function openListingComposer() {
+    if (!canPerformAction('create a post')) return;
+    openPage('composer-overlay');
+    if (typeof hideNavBar === 'function') hideNavBar();
+    setPostType('listing');
+}
+
+function tfListingPrice(l) {
+    if (l.price === null || l.price === undefined || l.price === '') return 'Price on request';
+    var n = Number(l.price);
+    if (n === 0) return 'Free';
+    return 'R ' + n.toLocaleString('en-ZA', { maximumFractionDigits: 2 });
+}
+
+function tfListingBlock(post) {
+    var l = post.listing || {};
+    var cat = TF_LISTING_CATS.filter(function (c) { return c.id === l.category; })[0] || { label: 'Listing', icon: 'fa-tag' };
+    var sold = l.status === 'sold';
+    var mine = !!(currentUser && post.user_id === currentUser.id);
+    var pid = escapeHtml(String(post.id));
+    window._tfListings = window._tfListings || {};
+    window._tfListings[post.id] = {
+        user_id: post.user_id, title: l.title || '', listing: l,
+        seller: (post.users && (post.users.full_name || post.users.username)) || 'the seller'
+    };
+    var el = document.createElement('div');
+    el.className = 'tf-listing';
+    el.setAttribute('data-listing-id', String(post.id));
+    el.style.cssText = 'margin:2px 16px 10px;padding:12px 14px;border-radius:16px;background:var(--bg-secondary,rgba(0,0,0,0.04));border:1px solid var(--border-color,rgba(128,128,128,0.18));';
+    el.innerHTML =
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">' +
+            '<span style="font-size:12px;font-weight:700;color:#248A3D;background:rgba(52,199,89,0.12);padding:3px 9px;border-radius:12px;">' +
+                '<i class="fa-solid ' + cat.icon + '" style="margin-right:5px;"></i>' + escapeHtml(cat.label) + '</span>' +
+            (sold ? '<span style="font-size:12px;font-weight:800;color:#fff;background:#8E8E93;padding:3px 9px;border-radius:12px;">Sold</span>' : '') +
+        '</div>' +
+        '<div style="font-size:17px;font-weight:800;color:var(--text-primary,#000);line-height:1.3;word-break:break-word;">' + escapeHtml(l.title || '') + '</div>' +
+        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px;font-size:14px;">' +
+            '<b style="color:' + (sold ? '#8E8E93' : '#007AFF') + ';' + (sold ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(tfListingPrice(l)) + '</b>' +
+            (l.area ? '<span style="color:var(--text-secondary,#666);"><i class="fa-solid fa-location-dot" style="margin-right:4px;"></i>' + escapeHtml(l.area) + '</span>' : '') +
+        '</div>' +
+        (mine
+            ? '<button onclick="event.stopPropagation();tfToggleListingSold(\'' + pid + '\')" style="margin-top:10px;width:100%;padding:10px;border-radius:12px;border:1px solid var(--border-color,#ddd);background:transparent;color:var(--text-primary,#000);font-size:14px;font-weight:700;cursor:pointer;">' +
+                (sold ? 'Mark as available' : 'Mark as sold') + '</button>'
+            : (sold ? '' :
+              '<button onclick="event.stopPropagation();tfMessageSeller(\'' + pid + '\')" style="margin-top:10px;width:100%;padding:10px;border-radius:12px;border:none;background:#007AFF;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">' +
+                '<i class="fa-solid fa-paper-plane" style="margin-right:6px;"></i>Message seller</button>'));
+    return el;
+}
+
+async function tfToggleListingSold(postId) {
+    var info = (window._tfListings || {})[postId];
+    if (!info || !window.sb || !currentUser || info.user_id !== currentUser.id) return;
+    var next = Object.assign({}, info.listing, { status: info.listing.status === 'sold' ? 'available' : 'sold' });
+    var res;
+    try { res = await sb.from('posts').update({ listing: next }).eq('id', postId).eq('user_id', currentUser.id).select('id'); }
+    catch (e) { res = { error: e }; }
+    if (!res || res.error || !(res.data && res.data.length)) { showToast('That did not save. Try again.'); return; }
+    info.listing = next;
+    document.querySelectorAll('.tf-listing[data-listing-id="' + postId + '"]').forEach(function (old) {
+        old.replaceWith(tfListingBlock({ id: postId, user_id: info.user_id, listing: next, users: { full_name: info.seller } }));
+    });
+    showToast(next.status === 'sold' ? 'Marked as sold' : 'Marked as available');
+}
+
+// Open a chat with the seller, with a first message ready to send and the
+// safety note above it. Starting a conversation needs a verified account, as
+// it does everywhere else.
+function tfMessageSeller(postId) {
+    var info = (window._tfListings || {})[postId];
+    if (!info || (currentUser && info.user_id === currentUser.id)) return;
+    if (!_canStartDM()) return;
+    var mk = document.getElementById('tfMarketOverlay');
+    if (mk) mk.remove();
+    window._currentChatUserId = info.user_id;
+    currentConversationId = null;
+    var row = document.querySelector('.msg-row[data-uid="' + info.user_id + '"]');
+    if (row && typeof _openMsgRow === 'function') _openMsgRow(row);
+    else openChat(info.seller || 'Seller');
+    setTimeout(function () {
+        tfShowListingSafety();
+        var inp = document.getElementById('chat-msg-input');
+        if (inp && !inp.value) {
+            inp.value = 'Hi, is "' + info.title + '" still available?';
+            try { inp.dispatchEvent(new Event('input')); } catch (e) {}
+            inp.focus();
+        }
+    }, 420);
+}
+
+function tfShowListingSafety() {
+    var body = document.getElementById('chat-body');
+    if (!body || !body.parentElement || document.getElementById('tfListingSafety')) return;
+    var note = document.createElement('div');
+    note.id = 'tfListingSafety';
+    note.setAttribute('role', 'note');
+    note.style.cssText = 'margin:8px 12px;padding:10px 12px;border-radius:12px;background:rgba(255,149,0,0.12);border:1px solid rgba(255,149,0,0.35);color:var(--text-primary,#000);font-size:13px;line-height:1.45;display:flex;gap:10px;align-items:flex-start;flex-shrink:0;';
+    note.innerHTML = '<i class="fa-solid fa-shield-halved" style="color:#FF9500;margin-top:2px;"></i>' +
+        '<div style="flex:1;"><b>Before you pay anything:</b> see it in person first, meet somewhere public, and never share a one-time PIN or your banking details. TrustFirst does not handle payment.</div>' +
+        '<i class="fa-solid fa-xmark" role="button" aria-label="Dismiss" onclick="this.parentElement.remove()" style="cursor:pointer;color:#888;padding:2px;"></i>';
+    body.parentElement.insertBefore(note, body);
+}
+
+function openMarketplace() {
+    var existing = document.getElementById('tfMarketOverlay');
+    if (existing) existing.remove();
+    var ov = document.createElement('div');
+    ov.id = 'tfMarketOverlay';
+    ov.style.cssText = 'position:absolute;inset:0;z-index:7000;display:flex;flex-direction:column;background:var(--bg-primary,#fff);animation:slideUpOverlay 0.3s cubic-bezier(0.32,0.72,0,1);';
+    ov.innerHTML =
+        '<div class="header-container" style="flex-shrink:0;">' +
+            '<div class="liquid-glass-btn" role="button" aria-label="Back" onclick="document.getElementById(\'tfMarketOverlay\').remove()" style="cursor:pointer;"><i class="fa-solid fa-chevron-left"></i></div>' +
+            '<b style="font-size:18px;color:var(--text-primary,#000);">Marketplace</b>' +
+            '<button onclick="openListingComposer()" style="padding:8px 14px;border-radius:18px;border:none;background:#34C759;color:#fff;font-size:14px;font-weight:700;cursor:pointer;"><i class="fa-solid fa-tag" style="margin-right:6px;"></i>Sell</button>' +
+        '</div>' +
+        '<div id="tfMarketCats" style="display:flex;gap:6px;overflow-x:auto;padding:4px 16px 10px;flex-shrink:0;"></div>' +
+        '<div style="padding:0 16px 8px;font-size:12px;color:var(--text-secondary,#888);line-height:1.45;flex-shrink:0;">Every seller here is verified. TrustFirst does not handle payment: see it in person before you pay.</div>' +
+        '<div id="tfMarketList" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:120px;"></div>';
+    (document.getElementById('app') || document.body).appendChild(ov);
+    tfRenderMarketCats();
+    tfLoadMarketplace();
+}
+
+function tfRenderMarketCats() {
+    var box = document.getElementById('tfMarketCats');
+    if (!box) return;
+    var cats = [{ id: 'all', label: 'All', icon: 'fa-store' }].concat(TF_LISTING_CATS);
+    box.innerHTML = cats.map(function (c) {
+        var on = _tfMarketCat === c.id;
+        return '<button onclick="_tfMarketCat=\'' + c.id + '\';tfRenderMarketCats();tfLoadMarketplace()" aria-pressed="' + on + '" ' +
+            'style="flex-shrink:0;padding:7px 12px;border-radius:18px;border:1px solid ' + (on ? '#007AFF' : 'var(--border-color,#e5e5e5)') + ';' +
+            'background:' + (on ? '#007AFF' : 'transparent') + ';color:' + (on ? '#fff' : 'var(--text-primary,#000)') + ';' +
+            'font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;"><i class="fa-solid ' + c.icon + '" style="margin-right:6px;"></i>' + c.label + '</button>';
+    }).join('');
+}
+
+async function tfLoadMarketplace() {
+    var list = document.getElementById('tfMarketList');
+    if (!list) return;
+    list.innerHTML = '<div style="padding:40px;text-align:center;color:#888;"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+    var cat = _tfMarketCat;
+    try {
+        if (!window.sb) throw new Error('offline');
+        var q = sb.from('posts').select('*, users:user_id (id, full_name, username, avatar_url, badge_tier, verified)')
+            .eq('post_type', 'listing').eq('is_hidden', false)
+            .order('created_at', { ascending: false }).limit(60);
+        if (cat !== 'all') q = q.eq('listing->>category', cat);
+        var res = await tfWithTimeout(q, 12000, 'Loading listings');
+        if (res.error) throw res.error;
+        if (cat !== _tfMarketCat) return;     // a newer tap has taken over
+        var rows = (res.data || []).filter(function (p) { return p && p.listing; });
+        // Still for sale first; sold ones stay visible underneath, newest first.
+        rows.sort(function (a, b) {
+            var sa = a.listing.status === 'sold' ? 1 : 0, sb2 = b.listing.status === 'sold' ? 1 : 0;
+            return sa - sb2 || String(b.created_at).localeCompare(String(a.created_at));
+        });
+        list.innerHTML = '';
+        if (!rows.length) {
+            list.innerHTML = '<div style="padding:48px 28px;text-align:center;color:var(--text-secondary,#888);line-height:1.5;">' +
+                '<i class="fa-solid fa-store" style="font-size:34px;margin-bottom:12px;display:block;color:#34C759;"></i>' +
+                '<b style="color:var(--text-primary,#000);">Nothing listed here yet</b><br>' +
+                'Selling something, renting out a room, or offering a service? Tap Sell.</div>';
+            return;
+        }
+        rows.forEach(function (p) { list.appendChild(renderRealPostCard(p)); });
+    } catch (e) {
+        list.innerHTML = '<div style="padding:40px 24px;text-align:center;color:var(--text-secondary,#888);">Listings could not be loaded.' +
+            '<br><button onclick="tfLoadMarketplace()" style="margin-top:14px;padding:10px 22px;border-radius:20px;border:none;background:#007AFF;color:#fff;font-weight:700;cursor:pointer;">Try again</button></div>';
+    }
+}
+
+// ==========================================================================
 // POLLS, QUIZZES & QUESTION STICKERS
 // ==========================================================================
 
@@ -31641,9 +31863,17 @@ function setPostType(type) {
     document.getElementById('poll-builder').style.display = type === 'poll' ? 'block' : 'none';
     document.getElementById('quiz-builder').style.display = type === 'quiz' ? 'block' : 'none';
     document.getElementById('question-builder').style.display = type === 'question' ? 'block' : 'none';
+    var lb = document.getElementById('listing-builder');
+    if (lb) lb.style.display = type === 'listing' ? 'block' : 'none';
+    var ta = document.getElementById('composer-text');
+    if (ta) {
+        if (!ta.dataset.tfPh) ta.dataset.tfPh = ta.placeholder;
+        ta.placeholder = type === 'listing' ? 'Describe it: condition, size, what is included, how to view it' : ta.dataset.tfPh;
+    }
 
     if (type === 'poll') renderPollBuilder();
     if (type === 'quiz') renderQuizBuilder();
+    if (type === 'listing') renderListingBuilder();
 }
 
 function addPollOption() {
@@ -31927,6 +32157,10 @@ function cancelComposer() {
     quizOptions = ['', ''];
     quizCorrectAnswer = 0;
     scheduleMode = false;
+    _tfListingCat = null;
+    ['listing-title', 'listing-price', 'listing-area'].forEach(function (id) {
+        var el = document.getElementById(id); if (el) el.value = '';
+    });
     const banner = document.getElementById('composer-group-banner');
     if (banner) banner.style.display = 'none';
     setPostType('text');
@@ -32009,6 +32243,14 @@ async function openPostDetail(postId) {
 // Render interactive posts in feed (polls, quizzes, questions)
 var _origRenderRealPostCard = renderRealPostCard;
 renderRealPostCard = function(post) {
+    // A listing is a normal post card with its facts (title, price, area,
+    // Message seller) laid in under the header.
+    if (post.post_type === 'listing' && post.listing) {
+        var lcard = _origRenderRealPostCard(post);
+        var head = lcard && lcard.querySelector('.post-header');
+        if (head) head.insertAdjacentElement('afterend', tfListingBlock(post));
+        return lcard;
+    }
     // poll / quiz / question are fully rendered by the original (ixblock +
     // renderPollQuizBlock, with real like/comment counts and saved state) — only
     // 'quote' needs the extra quoted-post block layered on top.
@@ -37601,6 +37843,13 @@ createPostFromComposer = async function() {
     if (postType === 'poll' && pollOptions.filter(function(o){ return o.trim(); }).length < 2) { showToast('Add at least 2 poll options'); return; }
     if (postType === 'quiz' && quizOptions.filter(function(o){ return o.trim(); }).length < 2) { showToast('Add at least 2 quiz options'); return; }
     if (containsBannedWords(postText)) { showToast('Content violates our guidelines.'); return; }
+    var listing = null;
+    if (postType === 'listing') {
+        // Scheduling saves its own copy of a post and would drop these facts.
+        if (scheduleMode) { showToast('Listings go up straight away. Turn off scheduling to post one.'); return; }
+        listing = tfReadListingForm();
+        if (!listing) return;          // the form has already said what is missing
+    }
     if (scheduleMode) { await schedulePost(); return; }
 
     var btn = document.getElementById('composer-post-btn');
@@ -37626,6 +37875,9 @@ createPostFromComposer = async function() {
             group_id: typeof currentGroupId !== 'undefined' ? currentGroupId : null,
 requires_approval: (document.getElementById('groupApprovalToggle')?.classList.contains('active')) || false,
         };
+        // Only on a listing: before the column exists, sending the key at all,
+        // even as null, would make every post fail.
+        if (listing) insertData.listing = listing;
 
         // Attach location + music from the composer (Facebook-style location, music sticker).
         if (window._composerLocation) {
@@ -37669,6 +37921,7 @@ requires_approval: (document.getElementById('groupApprovalToggle')?.classList.co
                     }
                     _eddieAnswerMention('post', result.data.id, postText, result.data.id);
                     tfNotifyMentions(postText, { post_id: result.data.id });
+                    if (postType === 'listing' && document.getElementById('tfMarketOverlay')) tfLoadMarketplace();
                     return;
                 }
             } catch(dbErr) { console.warn('[Post DB]', dbErr); }

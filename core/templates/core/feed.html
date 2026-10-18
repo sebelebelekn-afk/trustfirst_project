@@ -492,6 +492,8 @@ function authenticateUser() {
          onclick="tfDeskGo('channels')"><i class="fa-solid fa-satellite-dish"></i><span>Channels</span></div>
     <div class="tf-nav-item" data-tab="groups" role="button" tabindex="0"
          onclick="tfDeskGo('groups')"><i class="fa-solid fa-users"></i><span>Groups</span></div>
+    <div class="tf-nav-item" data-tab="marketplace" role="button" tabindex="0"
+         onclick="openMarketplace()"><i class="fa-solid fa-store"></i><span>Marketplace</span></div>
     <div class="tf-nav-item" data-tab="saved" role="button" tabindex="0"
          onclick="tfDeskGo('saved')"><i class="fa-solid fa-bookmark"></i><span>Saved</span></div>
     <div class="tf-nav-item" data-tab="analytics" role="button" tabindex="0"
@@ -613,13 +615,17 @@ function authenticateUser() {
                    oninput="tfDeskSearchInput(this.value)"
                    onkeydown="if(event.key==='Enter')tfDeskSearchGo()">
         </div>
-        <div class="plus-wrapper tf-no-desktop">
+        <div class="plus-wrapper tf-no-desktop" style="display:flex; align-items:center; gap:10px;">
+            <div class="liquid-glass-btn" role="button" aria-label="Marketplace" onclick="openMarketplace()">
+                <i class="fa-solid fa-store"></i>
+            </div>
             <div class="liquid-glass-btn" onclick="togglePlusMenu()">
                 <i class="fa-solid fa-plus" id="plus-icon-anim"></i>
             </div>
             <div class="add-menu" id="add-menu">
                 <div class="add-option" onclick="togglePlusMenu(); openClipSelectorGallery();"><i class="fa-solid fa-play"></i> New Trust Clip</div>
                 <div class="add-option" onclick="togglePlusMenu(); openPage('composer-overlay'); hideNavBar();"><i class="fa-solid fa-pen-nib"></i> Create Post</div>
+                <div class="add-option" onclick="togglePlusMenu(); openListingComposer();"><i class="fa-solid fa-tag"></i> Sell something</div>
                 <div class="add-option" onclick="togglePlusMenu(); setTimeout(openStoryPicker,50);"><i class="fa-solid fa-camera"></i> Story</div>
                 <div class="add-option" data-tf-feature="live" onclick="togglePlusMenu(); openLiveStreamFeed();"><i class="fa-solid fa-tower-broadcast"></i> Go Live</div>
                 <div class="add-option" onclick="triggerThought()"><i class="fa-regular fa-lightbulb"></i> Thoughts</div>
@@ -1919,6 +1925,7 @@ function authenticateUser() {
         <button id="ptype-poll" class="post-type-btn" onclick="setPostType('poll')" style="padding:7px 16px; border-radius:20px; border:none; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; background:transparent; color:#888; display:flex; align-items:center; gap:5px;"><i class="fa-solid fa-chart-bar"></i> Poll</button>
         <button id="ptype-quiz" class="post-type-btn" onclick="setPostType('quiz')" style="padding:7px 16px; border-radius:20px; border:none; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; background:transparent; color:#888; display:flex; align-items:center; gap:5px;"><i class="fa-solid fa-circle-question"></i> Quiz</button>
         <button id="ptype-question" class="post-type-btn" onclick="setPostType('question')" style="padding:7px 16px; border-radius:20px; border:none; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; background:transparent; color:#888; display:flex; align-items:center; gap:5px;"><i class="fa-solid fa-question"></i> Question</button>
+        <button id="ptype-listing" class="post-type-btn" onclick="setPostType('listing')" style="padding:7px 16px; border-radius:20px; border:none; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; background:transparent; color:#888; display:flex; align-items:center; gap:5px;"><i class="fa-solid fa-tag"></i> Listing</button>
     </div>
 
     <!-- Scrollable content area -->
@@ -1934,6 +1941,22 @@ function authenticateUser() {
     <div style="padding:16px 20px 0;">
         <textarea id="composer-text" placeholder="What's on your mind?" oninput="updateComposerState()" style="width:100%; min-height:140px; border:none; outline:none; font-size:17px; resize:none; background:transparent; color:var(--text-primary,#000); line-height:1.5;"></textarea>
         <div style="text-align:right;"><small id="composer-char-count" style="color:#ccc; font-size:12px;">0/500</small></div>
+    </div>
+
+    <!-- Listing builder: the fixed facts of a marketplace listing. The
+         description goes in the box above and photos come from the composer. -->
+    <div id="listing-builder" style="display:none; padding:0 20px 12px;">
+        <div style="background:rgba(52,199,89,0.05); border:1px solid rgba(52,199,89,0.2); border-radius:16px; padding:16px;">
+            <p style="font-size:13px; font-weight:700; color:#248A3D; margin-bottom:10px;"><i class="fa-solid fa-tag" style="margin-right:6px;"></i>Listing</p>
+            <div id="listing-cats" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px;"></div>
+            <input id="listing-title" type="text" maxlength="80" placeholder="Title, e.g. Room to rent in Braamfontein" style="width:100%; box-sizing:border-box; padding:12px; border-radius:12px; border:1px solid #eee; font-size:14px; outline:none; background:var(--input-bg,#f5f5f5); color:var(--text-primary,#000);">
+            <div style="position:relative; margin-top:8px;">
+                <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:#888; font-weight:700; font-size:14px;">R</span>
+                <input id="listing-price" type="text" inputmode="decimal" maxlength="12" placeholder="Price (leave empty to talk about it)" style="width:100%; box-sizing:border-box; padding:12px 12px 12px 28px; border-radius:12px; border:1px solid #eee; font-size:14px; outline:none; background:var(--input-bg,#f5f5f5); color:var(--text-primary,#000);">
+            </div>
+            <input id="listing-area" type="text" maxlength="60" placeholder="Area, e.g. Hatfield or UCT upper campus (optional)" style="width:100%; box-sizing:border-box; margin-top:8px; padding:12px; border-radius:12px; border:1px solid #eee; font-size:14px; outline:none; background:var(--input-bg,#f5f5f5); color:var(--text-primary,#000);">
+            <p style="font-size:12px; color:#888; margin:10px 0 0; line-height:1.45;">Describe it in the box above and add photos. TrustFirst does not handle payment: you and the buyer deal directly. Nobody should pay before seeing it.</p>
+        </div>
     </div>
 
     <!-- Poll builder -->
@@ -4466,7 +4489,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=308"></script>
+<script src="{% static 'core/js/feed.js' %}?v=309"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=77"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
