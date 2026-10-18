@@ -101,6 +101,8 @@ CONTACT_EMAIL = (os.environ.get('CONTACT_EMAIL', '') or 'contacttrustfirst@gmail
 #   TF_FEATURE_WALLET  adding money to a wallet
 #   TF_FEATURE_COINS   coins: buying them, gifts, and cashing them out
 #   TF_FEATURE_KIDS    under-18 accounts linked to a parent; while off, sign-up is 18+
+#   TF_FEATURE_NEARBY  the people map and the Nearby list, and with them the
+#                      upload of anyone's live location
 #
 # Paused is not closed. Withdrawing money from a wallet keeps working, because
 # that money is the person's and the Terms promise they can take it out. Coins
@@ -111,7 +113,7 @@ def _feature(name):
         '1', 'true', 'yes', 'on')
 
 
-TF_FEATURES = {name: _feature(name) for name in ('live', 'wallet', 'coins', 'kids')}
+TF_FEATURES = {name: _feature(name) for name in ('live', 'wallet', 'coins', 'kids', 'nearby')}
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

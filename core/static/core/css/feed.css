@@ -4544,6 +4544,7 @@ textarea:focus-visible,
    hidden from the people the Terms promise it to; only the ways in go. */
 .tf-off-live [data-tf-feature~="live"],
 .tf-off-kids [data-tf-feature~="kids"],
+.tf-off-nearby [data-tf-feature~="nearby"],
 .tf-off-wallet [data-tf-feature~="wallet-in"],
 .tf-off-coins [data-tf-feature~="coins-in"],
 .tf-off-wallet:not(.tf-has-money) [data-tf-feature~="wallet"] {

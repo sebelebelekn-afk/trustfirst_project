@@ -49,7 +49,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=110">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=111">
     <!-- The laptop layout. Every rule inside is behind a min-width query,
          so a phone downloads it and applies none of it. -->
     <link rel="stylesheet" href="{% static 'core/css/desktop.css' %}?v=13">
@@ -1786,7 +1786,7 @@ function authenticateUser() {
 
         <div class="settings-section-title">EXPLORE</div>
         <div class="settings-card">
-            <div class="settings-row" onclick="openPage('local-circles-overlay'); renderLocalCircles();">
+            <div class="settings-row" data-tf-feature="nearby" onclick="openPage('local-circles-overlay'); renderLocalCircles();">
                 <div style="display:flex; gap:10px; align-items:center;"><i class="fa-solid fa-location-dot" style="color:#007AFF;"></i> Local Circles</div>
                 <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
             </div>
@@ -1903,7 +1903,7 @@ function authenticateUser() {
     <h2 style="font-size:24px;font-weight:900;line-height:1.3;margin-bottom:24px;">To check in, allow access to your device location</h2>
     <div style="display:flex;flex-direction:column;gap:18px;text-align:left;">
       <div style="display:flex;gap:14px;align-items:flex-start;"><i class="fa-solid fa-location-dot" style="color:#888;font-size:18px;flex-shrink:0;margin-top:2px;"></i><p style="font-size:14px;color:#555;line-height:1.5;"><b>Add your location when you want</b><br>Choose when to share, checking into places or adding it to a story.</p></div>
-      <div style="display:flex;gap:14px;align-items:flex-start;"><i class="fa-regular fa-comment" style="color:#888;font-size:18px;flex-shrink:0;margin-top:2px;"></i><p style="font-size:14px;color:#555;line-height:1.5;"><b>We use location to show things nearby</b><br>Location data helps show relevant local content, ads, and events.</p></div>
+      <div style="display:flex;gap:14px;align-items:flex-start;"><i class="fa-regular fa-comment" style="color:#888;font-size:18px;flex-shrink:0;margin-top:2px;"></i><p style="font-size:14px;color:#555;line-height:1.5;"><b>We use it to find the place you pick</b><br>When you check in, that place goes on your post. There are no adverts, and your location is not used for anything else.</p></div>
       <div style="display:flex;gap:14px;align-items:flex-start;"><i class="fa-solid fa-gear" style="color:#888;font-size:18px;flex-shrink:0;margin-top:2px;"></i><p style="font-size:14px;color:#555;line-height:1.5;"><b>Update your settings at any time</b><br>Even if disabled, we may use your IP address to estimate your location.</p></div>
     </div>
   </div>
@@ -2074,7 +2074,7 @@ function authenticateUser() {
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-tower-broadcast" style="color:#FF3B30;"></i> Live</div>
         <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
       </div>
-      <div class="settings-row" onclick="openLocationSettings()">
+      <div class="settings-row" data-tf-feature="nearby" onclick="openLocationSettings()">
         <div style="display:flex;gap:10px;align-items:center;"><i class="fa-solid fa-location-dot" style="color:#34C759;"></i> Location</div>
         <i class="fa-solid fa-chevron-right" style="color:#ccc;"></i>
       </div>
@@ -4466,7 +4466,7 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=307"></script>
+<script src="{% static 'core/js/feed.js' %}?v=308"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=77"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>

@@ -10078,6 +10078,7 @@ function _tfSetTranslateObserver(on) {
 // LOCAL CIRCLES
 // ==========================================================================
 async function renderLocalCircles() {
+    if (!tfFeatureGate('nearby')) return;
     const content = document.getElementById('local-circles-content');
     if (!content) return;
 
@@ -14497,7 +14498,7 @@ async function fillMsgContent() {
         '<i class="fa-solid fa-plus" style="color:white;font-size:10px;"></i></div></div>' +
         '<small style="font-size:11px;">Your Story</small></div>';
     var _locOn = (localStorage.getItem('tf-location-vis') || 'none') !== 'none';
-    stories.innerHTML += '<div class="story-item" onclick="openTrustMap()" style="margin-left:4px;display:flex;flex-direction:column;align-items:center;">' +
+    if (tfFeature('nearby')) stories.innerHTML += '<div class="story-item" data-tf-feature="nearby" onclick="openTrustMap()" style="margin-left:4px;display:flex;flex-direction:column;align-items:center;">' +
         '<div style="width:68px;height:68px;border-radius:50%;background:rgba(0,122,255,0.1);border:2px solid rgba(0,122,255,0.25);display:flex;align-items:center;justify-content:center;">' +
         '<i class="fa-solid fa-earth-americas" style="font-size:26px;color:#007AFF;"></i></div>' +
         '<small style="font-size:11px;line-height:1.2;">Map</small>' +
@@ -15787,7 +15788,8 @@ var TF_PAUSED_COPY = {
     live:   'Live is paused for now.',
     wallet: 'Adding money is paused for now.',
     coins:  'Coins are paused for now.',
-    kids:   'TrustFirst is for people 18 and over for now.'
+    kids:   'TrustFirst is for people 18 and over for now.',
+    nearby: 'The map and Nearby are switched off for now.'
 };
 function tfFeatureGate(name) {
     if (tfFeature(name)) return true;
@@ -15800,9 +15802,9 @@ function _tfApplyFeatureClasses() {
         document.documentElement.classList.toggle('tf-off-' + k, f[k] === false);
     });
 }
-// The wallet's way out stays reachable for anyone who still holds something,
+// The wallet's way out stays reachable for anyone who still holds money,
 // because paused is not closed: the Terms promise a balance can always be
-// withdrawn and coins cashed out. Everyone else simply does not see it.
+// withdrawn. Everyone else simply does not see it.
 async function _tfMarkMoneyHeld() {
     if (tfFeature('wallet') || !window.sb || !currentUser) return;
     // Real money only. Coins cannot be used or cashed out while they are off,
@@ -37852,6 +37854,7 @@ function openAboutYourAccount() {
 // Legal content moved to feed-legal.js (feed-legal.js loaded after feed.js in HTML)
 
 function openLocationSettings() {
+    if (!tfFeatureGate('nearby')) return;
     var existing = document.getElementById('locationPrivacySheet');
     if (existing) { existing.remove(); return; }
 
@@ -40201,6 +40204,7 @@ function _tfWireMapSheet() {
 }
 
     function openTrustMap(contactName) {
+        if (!tfFeatureGate('nearby')) return;
     var existing = document.getElementById('trustMapOverlay');
     if (existing) { existing.remove(); return; }
 
@@ -40379,6 +40383,7 @@ function _addFriendPin(map, lat, lng, profile, type, createdAt) {
 }
 
 function toggleMapSharing(pill) {
+    if (!tfFeatureGate('nearby')) return;
     var current = localStorage.getItem('tf-location-sharing') === 'true';
     var next = !current;
     localStorage.setItem('tf-location-sharing', next);

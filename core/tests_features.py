@@ -16,8 +16,8 @@ import json
 
 from django.test import SimpleTestCase, override_settings
 
-ALL_OFF = {'live': False, 'wallet': False, 'coins': False, 'kids': False}
-ALL_ON = {'live': True, 'wallet': True, 'coins': True, 'kids': True}
+ALL_OFF = {'live': False, 'wallet': False, 'coins': False, 'kids': False, 'nearby': False}
+ALL_ON = {'live': True, 'wallet': True, 'coins': True, 'kids': True, 'nearby': True}
 
 
 class ConfigTellsTheClient(SimpleTestCase):
@@ -27,7 +27,7 @@ class ConfigTellsTheClient(SimpleTestCase):
         body = json.loads(self.client.get('/api/config/').content)
         self.assertEqual(body['features'], ALL_OFF)
 
-    @override_settings(TF_FEATURES={'live': True, 'wallet': False, 'coins': False, 'kids': False})
+    @override_settings(TF_FEATURES={'live': True, 'wallet': False, 'coins': False, 'kids': False, 'nearby': False})
     def test_config_reflects_a_switch_turned_on(self):
         body = json.loads(self.client.get('/api/config/').content)
         self.assertIs(body['features']['live'], True)
