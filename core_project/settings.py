@@ -81,7 +81,7 @@ if _render_host:
 #
 # Do not bump it for a typo fix. The notice means "this changed and you should
 # look", and a notice that cries wolf is worse than none.
-TERMS_VERSION = (os.environ.get('TERMS_VERSION', '') or '2026-09-14').strip()
+TERMS_VERSION = (os.environ.get('TERMS_VERSION', '') or '2026-10-18').strip()
 
 # Parts of the app that are paused rather than deleted.
 #
