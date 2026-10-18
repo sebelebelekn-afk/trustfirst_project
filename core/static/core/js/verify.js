@@ -192,6 +192,7 @@ window.translateClipToEnglish = async function(videoUrl) {
 // Only verified (blue badge) adults; on approval -> white badge, posts to kids feed.
 // ============================================================
 window.openKidsCreatorApplication = function() {
+    if (typeof tfFeatureGate === 'function' && !tfFeatureGate('kids')) return;
     if (!currentUser) { showToast('Please sign in'); return; }
     var tier = currentUser.badge_tier || '';
     if (tier !== 'verify-blue' && !currentUser.verified) {

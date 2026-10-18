@@ -83,6 +83,29 @@ if _render_host:
 # look", and a notice that cries wolf is worse than none.
 TERMS_VERSION = (os.environ.get('TERMS_VERSION', '') or '2026-09-14').strip()
 
+# Parts of the app that are paused rather than deleted.
+#
+# Each is off unless its environment variable turns it on, so a deploy that
+# forgets to set anything lands on the safe answer, and bringing one back is a
+# single variable on the host: no code change and no app update, because the
+# Android app loads this site. The client hides every way in; the endpoints
+# that move money or open a stream refuse anyway, because a hidden button is
+# not a lock.
+#
+#   TF_FEATURE_LIVE    live streams, and the viewer gifts that only exist in them
+#   TF_FEATURE_WALLET  adding money to a wallet
+#   TF_FEATURE_COINS   buying coins
+#   TF_FEATURE_KIDS    under-18 accounts linked to a parent; while off, sign-up is 18+
+#
+# Paused is not closed. Withdrawing a balance and cashing out coins people
+# already hold keep working, because the Terms promise exactly that.
+def _feature(name):
+    return (os.environ.get('TF_FEATURE_' + name.upper(), '') or '').strip().lower() in (
+        '1', 'true', 'yes', 'on')
+
+
+TF_FEATURES = {name: _feature(name) for name in ('live', 'wallet', 'coins', 'kids')}
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # ------------------------------------------------------------------

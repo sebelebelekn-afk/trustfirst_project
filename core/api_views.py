@@ -2,6 +2,7 @@
 core/api_views.py
 """
 
+import functools
 import json
 import os
 import re
@@ -260,7 +261,30 @@ def get_config(request):
         # Which keys are on the server at all, as booleans. Confirms a key was
         # saved under the right name without switching payments on to find out.
         "yoco_keys_present": getattr(settings, "YOCO_KEYS_PRESENT", {}),
+        # Which paused parts of the app are switched on. The client uses it to
+        # hide the way in; _feature_on below is what actually refuses.
+        "features": dict(getattr(settings, "TF_FEATURES", {})),
     })
+
+
+def _feature_on(*names):
+    """Refuse the request while any of these features is paused.
+
+    The client hides the doors; this is the lock behind them. A paused feature
+    answers 403 with a plain reason instead of failing somewhere deeper with a
+    payment half made or a stream half open.
+    """
+    def wrap(view):
+        @functools.wraps(view)
+        def inner(request, *args, **kwargs):
+            features = getattr(settings, "TF_FEATURES", {})
+            paused = [n for n in names if not features.get(n)]
+            if paused:
+                return JsonResponse({"error": "This part of TrustFirst is paused for now.",
+                                     "paused": paused}, status=403)
+            return view(request, *args, **kwargs)
+        return inner
+    return wrap
 
 
 # ---------------------------------------------------------------------------
@@ -1226,6 +1250,7 @@ def translate_text(request):
 @ratelimit(key='ip', rate='30/m', method='GET', block=True)
 @csrf_exempt
 @require_http_methods(["GET"])
+@_feature_on('live')
 def livekit_token(request):
     """Mint a LiveKit access token for the signed-in user.
 
@@ -1546,6 +1571,7 @@ def _yoco_rpc(fn, payload):
 @ratelimit(key='ip', rate='10/m', method='POST', block=True)
 @csrf_exempt
 @require_http_methods(["POST"])
+@_feature_on('wallet')
 def wallet_create_checkout(request):
     """Open a Yoco checkout for a top-up and hand back the URL to send them to."""
     if not getattr(settings, 'YOCO_ENABLED', False):
@@ -1875,6 +1901,7 @@ COIN_BUNDLES = {
 @ratelimit(key='ip', rate='20/m', method='POST', block=True)
 @csrf_exempt
 @require_http_methods(["POST"])
+@_feature_on('coins')
 def wallet_buy_coins(request):
     try:
         claims = _verify_supabase_jwt(request)

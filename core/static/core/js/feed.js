@@ -786,6 +786,11 @@ function handleBirthDateChange() {
         status.textContent = 'Enter a valid birth date.';
         return;
     }
+    if (age < 18 && !tfFeature('kids')) {
+        status.style.color = '#FF3B30';
+        status.textContent = TF_PAUSED_COPY.kids;
+        return;
+    }
     if (age < 18) {
         status.style.color = '#34C759';
         status.textContent = 'TrustFirst Kids account will be created. Parent link required next.';
@@ -807,6 +812,7 @@ function proceedFromRegistrationDetails() {
         showToast('Please enter a valid birth date.');
         return;
     }
+    if (age < 18 && !tfFeatureGate('kids')) return;
     if (age < 18) {
         selectedAccountType = 'child';
         secureSave('pending_account_type', 'child');
@@ -940,6 +946,7 @@ async function completeRegistration(verified) {
     if (!email || !isValidEmail(email)) return showAuthError('Enter a valid email', 'step-register');
     if (!username || !isValidUsername(username)) return showAuthError('Username: 3-20 chars, letters/numbers/underscore only', 'step-register');
     if (registrationAge === null || registrationAge < 13 || registrationAge > 120) return showAuthError('Please enter a valid birth date', 'step-register');
+    if (registrationAge < 18 && !tfFeature('kids')) return showAuthError(TF_PAUSED_COPY.kids, 'step-register');
     if (registrationAge < 18 && !parentLink.parent_id && !parentLink.parent_username) return showAuthError('A parent or guardian Trust-ID is required for under-18 accounts', 'step-parent-link');
 
     if (password !== confirmPass) return showAuthError('Passwords do not match.', 'step-register');
@@ -1854,6 +1861,7 @@ function launchApp() {
     app.classList.add('authenticated');
 
     isAdmin = currentUser && currentUser.is_admin === true;
+    _tfMarkMoneyHeld();
 
     // Both banners sit above the sticky header, so they are what the status bar
     // overlaps. They had no safe-area padding, which is why the orange strip ran
@@ -12679,6 +12687,7 @@ var _liveDurationSecs = 0;
 var _liveHearts = 0;
 
 async function startLive() {
+    if (!tfFeatureGate('live')) return;
     if (typeof _tfCallIsRunning === 'function' && _tfCallIsRunning()) {
         showToast('End your call before going live'); return;
     }
@@ -13015,6 +13024,7 @@ function sendViewerHeart() {
 }
 
 async function openViewerGiftSheet() {
+    if (!tfFeatureGate('live')) return;
     var sheet = document.getElementById('viewer-gift-sheet');
     if (!sheet) return;
     sheet.style.display = 'block';
@@ -13027,6 +13037,7 @@ async function openViewerGiftSheet() {
 // atomic, cannot overdraw, and writes a ledger row — the client can't fake it.
 // Only once the charge succeeds do we send the reaction.
 async function sendViewerGift(emoji, name, cost) {
+    if (!tfFeatureGate('live')) return;
     cost = parseInt(cost, 10) || 0;
     if (!window.sb || !currentUser) return;
     var sheet = document.getElementById('viewer-gift-sheet');
@@ -13370,6 +13381,7 @@ var _liveJoinReqChan = null;    // viewer's status channel
 var _liveHostReqChan = null;    // host's incoming-requests channel
 
 function openLiveJoinModal() {
+    if (!tfFeatureGate('live')) return;
     if (!currentUser) { showToast('Sign in to request'); return; }
     var m = document.getElementById('live-join-modal');
     if (m) m.style.display = 'flex';
@@ -13693,6 +13705,7 @@ function closeMiniLive(e) {
 // LIVE STREAM FEED PAGE (Viewer Mode — Reference Image 1)
 // =====================================================
 async function openLiveStreamFeed() {
+    if (!tfFeatureGate('live')) return;
     var existing = document.getElementById('liveStreamFeedPage');
     if (existing) existing.remove();
 
@@ -15838,6 +15851,48 @@ let STRIPE_PUBLISHABLE_KEY = '';
 let GIPHY_KEY_FROM_SERVER = '';
 var sb = null; // alias for window._sb, assigned in initSupabase()
 
+// Parts of the app that are paused rather than removed (TF_FEATURE_* on the
+// host, sent in /api/config as `features`). Anything the server does not
+// mention stays on. A class on <html> lets the stylesheet hide every door to a
+// paused feature; the openers check again, because some doors are built at
+// runtime and a missed one should explain itself rather than half-work. The
+// server refuses paused actions on its own, so none of this is the lock.
+function tfFeature(name) {
+    var f = window._tfConfig && window._tfConfig.features;
+    return !(f && f[name] === false);
+}
+var TF_PAUSED_COPY = {
+    live:   'Live is paused for now.',
+    wallet: 'Adding money is paused for now.',
+    coins:  'Coins are paused for now.',
+    kids:   'TrustFirst is for people 18 and over for now.'
+};
+function tfFeatureGate(name) {
+    if (tfFeature(name)) return true;
+    showToast(TF_PAUSED_COPY[name] || 'This is paused for now.');
+    return false;
+}
+function _tfApplyFeatureClasses() {
+    var f = (window._tfConfig && window._tfConfig.features) || {};
+    Object.keys(f).forEach(function (k) {
+        document.documentElement.classList.toggle('tf-off-' + k, f[k] === false);
+    });
+}
+// The wallet's way out stays reachable for anyone who still holds something,
+// because paused is not closed: the Terms promise a balance can always be
+// withdrawn and coins cashed out. Everyone else simply does not see it.
+async function _tfMarkMoneyHeld() {
+    if (tfFeature('wallet') || !window.sb || !currentUser) return;
+    var held = (currentUser.coins || 0) > 0;
+    if (!held) {
+        try {
+            var w = await sb.from('wallets').select('balance').eq('user_id', currentUser.id).maybeSingle();
+            held = !!(w && w.data && Number(w.data.balance) > 0);
+        } catch (e) { /* no wallet row: nothing held */ }
+    }
+    document.documentElement.classList.toggle('tf-has-money', held);
+}
+
 (async function loadConfig() {
     try {
         const res = await fetch('/api/config/');
@@ -15857,6 +15912,7 @@ var sb = null; // alias for window._sb, assigned in initSupabase()
         // connected and which mode they are in. Nothing secret is in here:
         // the server only ever sends the public key.
         window._tfConfig = cfg;
+        _tfApplyFeatureClasses();
         if (cfg.yoco_misconfigured) console.warn('[Yoco]', cfg.yoco_misconfigured);
         initSupabase();
         if (cfg.sentry_dsn) tfInitSentry(cfg.sentry_dsn, cfg.sentry_environment);
@@ -22781,6 +22837,7 @@ SecurityScanner.init();
 // LIVE SETTINGS - Schedule & Recorded Lives
 // ============================================
 function showLiveSettings() {
+    if (!tfFeatureGate('live')) return;
     const scheduledLives = JSON.parse(localStorage.getItem('trustfirst-scheduled-lives') || '[]');
     const recordedLives = JSON.parse(localStorage.getItem('trustfirst-recorded-lives') || '[]');
 
@@ -22965,6 +23022,7 @@ function cancelScheduledLive(index) {
 }
 
 function startLiveNow() {
+    if (!tfFeatureGate('live')) return;
     showToast('Starting live...');
     document.getElementById('liveSettingsPage').remove();
     openLiquidGlassCamera();
@@ -25244,6 +25302,7 @@ function _signupDobToggle() {
     if (age === null) { if (status) status.textContent = ''; if (btn) btn.disabled = true; return; }
     if (age < 13) { if (status) status.innerHTML = '<span style="color:#FF3B30;">You must be at least 13 to join.</span>'; if (btn) btn.disabled = true; return; }
     if (age > 120) { if (status) status.innerHTML = '<span style="color:#FF3B30;">Enter a valid date.</span>'; if (btn) btn.disabled = true; return; }
+    if (age < 18 && !tfFeature('kids')) { if (status) status.innerHTML = '<span style="color:#FF3B30;">' + TF_PAUSED_COPY.kids + '</span>'; if (btn) btn.disabled = true; return; }
     if (age < 18) { if (status) status.innerHTML = '<span style="color:#007AFF;">You\'ll get a protected Kids account (needs a parent).</span>'; }
     else { if (status) status.textContent = ''; }
     if (btn) btn.disabled = false;
@@ -25252,6 +25311,7 @@ function _signupDob() {
     var v = (document.getElementById('signup-dob-in').value || '').trim();
     var age = calculateAgeFromBirthDate(v);
     if (age === null || age < 13 || age > 120) { showToast('Enter a valid date of birth'); return; }
+    if (age < 18 && !tfFeatureGate('kids')) return;
     window._signup.birthDate = v;
     window._signup.isKid = age < 18;
     if (window._signup.isKid) { nextAuthStep('step-signup-parent'); }
@@ -27502,6 +27562,7 @@ function adminRevokeGoldBadge(userId) {
 // ============================================
 
 function linkParentAccount() {
+    if (!tfFeatureGate('kids')) return;
     var parentId = (document.getElementById('parent-link-id') || {}).value || '';
     if (!parentId.trim()) {
         showToast('Enter your parent\'s Trust-ID');
@@ -47937,6 +47998,9 @@ if (videoBtn) videoBtn.style.display = isSelf ? 'none' : '';
     }
 
     function openWalletSheet(type, amount) {
+        // Paused is not closed: only money coming in stops. Withdrawing stays.
+        if (type === 'addmoney' && !tfFeatureGate('wallet')) return;
+        if (type === 'buycoins' && !tfFeatureGate('coins')) return;
         // Withdraw needs the balance to decide what to show. If it is not known
         // yet, fetch it and open again rather than guessing.
         if (type === 'withdraw' && window._tfWalletBalance == null) {
