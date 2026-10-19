@@ -46,13 +46,14 @@ function tfDeskSetActive(key) {
 // The rest call the same functions the burger menu and settings rows call.
 // Every one was checked to exist before it was put here.
 var TF_DESK_ROUTES = {
-    explore:   'tfDeskExplore',
-    live:      'openLiveStreamFeed',
-    channels:  'openChannels',
-    groups:    'loadGroups',
-    saved:     'openSavedLibrary',
-    analytics: 'openCreatorAnalytics',
-    settings:  'tfDeskOpenSettings',
+    explore:     'tfDeskExplore',
+    live:        'openLiveStreamFeed',
+    channels:    'openChannels',
+    groups:      'loadGroups',
+    marketplace: 'openMarketplace',
+    saved:       'openSavedLibrary',
+    analytics:   'openCreatorAnalytics',
+    settings:    'tfDeskOpenSettings',
 };
 
 // Opens the real settings screen, then splits it. Wrapping rather than
@@ -81,8 +82,18 @@ var TF_DESK_LOOSE_OVERLAYS = [
     // because the search results element hides and rebuilds itself as you
     // type and would take Explore with it.
     'tfExplorePage',
-    'tfMsgEmpty',
+    // Sheets and pages opened from inside a page. Left showing, each one sat
+    // over whatever the sidebar opened next.
+    'contact-profile-overlay', 'cp-privacy-overlay', 'comment-overlay',
+    'share-sheet', 'wallet-sheet', 'wallet-sheet-dim', 'live-viewer-overlay',
 ];
+
+// Pages that are built when opened and thrown away by their own back buttons.
+// Closing one means removing it, exactly as that button does. Marketplace is
+// the one that mattered: at z-index 7000 it sat over Groups, Notifications,
+// Profile and every other page the sidebar opened after it, Home included.
+var TF_DESK_BUILT_PAGES = '#tfMarketOverlay, #aboutMenuOverlay, #aboutAccountOverlay, ' +
+    '#gsCoverPage, #gsDescPage, #gsInvitePage, #app > .mg-page';
 
 // Close whatever is open before opening the next thing.
 //
@@ -99,12 +110,25 @@ function tfDeskCloseAll() {
         var el = document.getElementById(id);
         if (el) el.style.display = 'none';
     });
+    document.querySelectorAll(TF_DESK_BUILT_PAGES).forEach(function (el) {
+        el.remove();
+    });
+    // The Messages placeholder is shown and hidden by its class alone. It used
+    // to be in the list above, and the display:none written on it there
+    // outranked the stylesheet rule that shows it, so from the second visit on
+    // Messages opened with the feed showing through where it should be.
+    var empty = document.getElementById('tfMsgEmpty');
+    if (empty) {
+        empty.classList.remove('on');
+        empty.style.removeProperty('display');
+    }
 }
 
 function tfDeskGo(key) {
     tfDeskSetActive(key);
-    // home goes through navHome, which closes things itself.
-    if (key !== 'home') tfDeskCloseAll();
+    // Home as well: navHome closes the phone's pages, and knows nothing about
+    // Explore or Marketplace, which stayed on screen over the feed.
+    tfDeskCloseAll();
     try {
         if (key === 'home') {
             if (typeof navHome === 'function') navHome();
@@ -122,7 +146,87 @@ function tfDeskGo(key) {
         if (typeof navGoTo === 'function') navGoTo(key);
     } catch (e) {
         console.warn('[desktop] nav', key, e && e.message);
+    } finally {
+        // Settle the layout and the lit row now rather than on the next timer
+        // tick, so Messages does not draw narrow and then jump.
+        tfDeskSyncPage();
     }
+}
+
+// Which sidebar row each page belongs to. A page that is not listed here
+// (somebody's profile, a post, a dialog) belongs to whatever is open beneath
+// it, and with nothing beneath it, to Home.
+var TF_DESK_PAGE_TABS = {
+    'tfExplorePage': 'explore', 'discovery-page': 'explore',
+    'reel-overlay': 'reels',
+    'notif-overlay': 'notifications',
+    'msg-overlay': 'messages', 'chat-interface': 'messages',
+    'liveStreamFeedPage': 'live', 'live-overlay': 'live', 'live-viewer-overlay': 'live',
+    'channels-overlay': 'channels',
+    'groups-overlay': 'groups', 'group-page-overlay': 'groups',
+    'gsCoverPage': 'groups', 'gsDescPage': 'groups', 'gsInvitePage': 'groups',
+    'tfMarketOverlay': 'marketplace',
+    'saved-overlay': 'saved',
+    'trustAnalyticsOverlay': 'analytics',
+    'settings-overlay': 'settings',
+    'profile-overlay': 'account',
+};
+
+function tfDeskTabFor(el) {
+    if (TF_DESK_PAGE_TABS[el.id]) return TF_DESK_PAGE_TABS[el.id];
+    if (el.classList.contains('settings-sub-overlay')) return 'settings';
+    if (el.classList.contains('mg-page')) return 'groups';
+    return null;
+}
+
+// The row that matches what is actually on screen.
+//
+// The sidebar used to be lit by the click alone, so anything that changed the
+// page without a click on it left the wrong row bold: a back button, the
+// Messages button in the dock, a link inside a page, a page that refused to
+// open. This reads the topmost page instead, the same way the eye does.
+function tfDeskCurrentTab() {
+    var app = document.getElementById('app');
+    if (!app) return 'home';
+    var best = 'home', bestZ = -Infinity;
+    for (var i = 0; i < app.children.length; i++) {
+        var el = app.children[i];
+        var tab = tfDeskTabFor(el);
+        if (!tab) continue;
+        var cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+        var z = parseInt(cs.zIndex, 10);
+        if (!isFinite(z)) z = 0;
+        // >= because a later sibling with the same z-index paints on top.
+        if (z >= bestZ) { bestZ = z; best = tab; }
+    }
+    return best;
+}
+
+function tfDeskSyncPage() {
+    tfDeskWideSync();   // also takes the wide layout off when the window narrows
+    if (tfIsDesktop()) tfDeskSetActive(tfDeskCurrentTab());
+}
+
+// Pages open and close by having their style or class changed, or by being
+// added and removed, all directly under #app. Watching for exactly that keeps
+// the sidebar and the layout in step with no delay, and once per frame at most.
+function tfDeskWatchPages() {
+    var app = document.getElementById('app');
+    if (!app || !window.MutationObserver || app._tfDeskWatched) return;
+    app._tfDeskWatched = true;
+    var queued = false;
+    new MutationObserver(function (records) {
+        if (queued) return;
+        for (var i = 0; i < records.length; i++) {
+            var r = records[i];
+            if (r.type === 'childList' ? r.target === app : r.target.parentElement === app) {
+                queued = true;
+                requestAnimationFrame(function () { queued = false; tfDeskSyncPage(); });
+                return;
+            }
+        }
+    }).observe(app, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
 }
 
 // The badges the pill already maintains, mirrored onto the sidebar. Read from
@@ -492,6 +596,8 @@ function tfDeskInit() {
     tfDeskFillMe();
     tfDeskSyncBadges();
     tfDeskLoadRail();
+    tfDeskWatchPages();
+    tfDeskSyncPage();
 }
 
 // The pill updates its badges whenever counts change, and there is no event to
@@ -502,7 +608,8 @@ if (typeof window !== 'undefined') {
         tfDeskInit();
         setInterval(tfDeskSyncBadges, 4000);
         setInterval(tfReelNavSync, 700);
-        setInterval(tfDeskWideSync, 500);
+        // A backstop only: tfDeskWatchPages does this the moment a page changes.
+        setInterval(tfDeskSyncPage, 500);
         // Signing in removes a class rather than reloading the page, so the
         // chrome has to be told. Watching the attribute costs nothing and
         // cannot drift the way a timer would.

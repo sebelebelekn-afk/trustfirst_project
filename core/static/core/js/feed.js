@@ -6767,8 +6767,10 @@ function openShare(postId, kind) {
     // the clip viewer a profile opens is at 9400, so sharing from a clip put the
     // sheet behind the video. Lifted only while something is above it, and never
     // past #call-overlay at 9500.
+    // Marketplace is at 7000, so a listing shared from it needs the same lift.
     var _sLift = document.querySelector('.post-detail-overlay') ? '9950'
-               : (_tfClipViewerOpen() ? '9450' : '');
+               : (_tfClipViewerOpen() ? '9450'
+               : (document.getElementById('tfMarketOverlay') ? '7100' : ''));
     if (_sLift) sheet.style.setProperty('z-index', _sLift, 'important');
     else sheet.style.removeProperty('z-index');
     triggerHaptic(10);
@@ -31741,8 +31743,7 @@ function tfMessageSeller(postId) {
     var info = (window._tfListings || {})[postId];
     if (!info || (currentUser && info.user_id === currentUser.id)) return;
     if (!_canStartDM()) return;
-    var mk = document.getElementById('tfMarketOverlay');
-    if (mk) mk.remove();
+    tfCloseMarketplace();
     window._currentChatUserId = info.user_id;
     currentConversationId = null;
     var row = document.querySelector('.msg-row[data-uid="' + info.user_id + '"]');
@@ -31770,6 +31771,13 @@ function tfShowListingSafety() {
         '<div style="flex:1;"><b>Before you pay anything:</b> see it in person first, meet somewhere public, and never share a one-time PIN or your banking details. TrustFirst does not handle payment.</div>' +
         '<i class="fa-solid fa-xmark" role="button" aria-label="Dismiss" onclick="this.parentElement.remove()" style="cursor:pointer;color:#888;padding:2px;"></i>';
     body.parentElement.insertBefore(note, body);
+}
+
+// Marketplace is built when opened and removed when left, like its back button
+// does. Anything that navigates away from it calls this.
+function tfCloseMarketplace() {
+    var mk = document.getElementById('tfMarketOverlay');
+    if (mk) mk.remove();
 }
 
 function openMarketplace() {
@@ -32488,6 +32496,24 @@ async function loadGroups() {
         } catch(e) { if (e) console.warn('[Suppressed error]', e); }
     }
 
+    // Every row here is most of a group page's header, so it is kept for the
+    // group page to draw from the moment one is opened. Membership comes from
+    // which list a group came back in; the exact member count from a visit is
+    // kept over the column's.
+    if (myGroups.length || allGroups.length) {
+        var mineIds = {};
+        myGroups.forEach(function (g) { mineIds[g.id] = true; });
+        myGroups.concat(allGroups).forEach(function (g) {
+            var prev = _tfGroupCacheGet(g.id);
+            _tfGroupCachePut(g.id, {
+                group: g,
+                isMember: mineIds[g.id] ? true : !!(prev && prev.isMember),
+                memberCount: (prev && prev.memberCount) || g.member_count || 0
+            }, true);
+        });
+        _tfGroupCacheSave();
+    }
+
     function buildGroupCard(g, joined) {
         var emoji = g.emoji || '👥';
         var color = g.color || '#007AFF';
@@ -32564,36 +32590,172 @@ function renderGroupCard(group, isMember) {
         </div>`;
 }
 
+// --------------------------------------------------------------------------
+// What a group page needs before it can draw anything: the group, whether you
+// are in it, and how many people are. Kept from the last visit, and filled in
+// ahead of time by the groups list, so a group's header is simply there when
+// it opens and is refreshed behind it. Manage group keeps its counts here too.
+//
+// The key starts with tf_, so it is account-scoped: signing out or switching
+// accounts wipes it with everything else (tfWipeAccountScopedCache).
+// --------------------------------------------------------------------------
+var TF_GROUP_CACHE_KEY = 'tf_groups_cache';
+var TF_GROUP_CACHE_MAX = 40;
+var _tfGroupCacheMap = null;
+var _tfGroupCacheOwner = null;
+
+function _tfGroupCacheAll() {
+    var me = (currentUser && currentUser.id) || null;
+    if (!_tfGroupCacheMap || _tfGroupCacheOwner !== me) {
+        _tfGroupCacheOwner = me;
+        try { _tfGroupCacheMap = JSON.parse(localStorage.getItem(TF_GROUP_CACHE_KEY) || '{}') || {}; }
+        catch (e) { _tfGroupCacheMap = {}; }
+    }
+    return _tfGroupCacheMap;
+}
+
+function _tfGroupCacheGet(groupId) {
+    return (groupId && _tfGroupCacheAll()[groupId]) || null;
+}
+
+// Merges, so the list can refresh a group without losing what a visit found.
+function _tfGroupCachePut(groupId, patch, skipSave) {
+    if (!groupId) return;
+    var all = _tfGroupCacheAll();
+    all[groupId] = Object.assign({}, all[groupId], patch, { at: Date.now() });
+    if (!skipSave) _tfGroupCacheSave();
+}
+
+function _tfGroupCacheDrop(groupId) {
+    var all = _tfGroupCacheAll();
+    if (all[groupId]) { delete all[groupId]; _tfGroupCacheSave(); }
+}
+
+function _tfGroupCacheSave() {
+    var all = _tfGroupCacheAll();
+    var ids = Object.keys(all);
+    if (ids.length > TF_GROUP_CACHE_MAX) {
+        ids.sort(function (a, b) { return (all[a].at || 0) - (all[b].at || 0); });
+        ids.slice(0, ids.length - TF_GROUP_CACHE_MAX).forEach(function (id) { delete all[id]; });
+    }
+    try { localStorage.setItem(TF_GROUP_CACHE_KEY, JSON.stringify(all)); } catch (e) {}
+}
+
 async function openGroup(groupId) {
     currentGroupId = groupId;
     const overlay = document.getElementById('group-page-overlay');
     if (!overlay) return;
     overlay.style.display = 'flex';
 
-    const header = document.getElementById('group-page-header');
-    if (header) header.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="color:#fff;font-size:24px;"></i></div>';
+    // Drawn at once from the last visit, or from the row the groups list
+    // already fetched. A group never seen before gets a skeleton in the shape
+    // of the header, never a spinner.
+    const cached = _tfGroupCacheGet(groupId);
+    if (cached && cached.group) _renderGroupHeader(groupId, cached);
+    else _renderGroupHeaderSkeleton();
+    // The posts used to wait for the header to finish. They start now.
+    switchGroupTab('posts');
 
     if (!window.sb) return;
-
-    const { data: group } = await sb.from('groups').select('*').eq('id', groupId).single();
-    if (!group) return;
-
-    let isMember = false;
-    let memberCount = group.member_count || 0;
-    if (currentUser) {
-        const { data: m } = await sb.from('group_members').select('id').eq('group_id', groupId).eq('user_id', currentUser.id).maybeSingle();
-        isMember = !!m;
-        const { count } = await sb.from('group_members').select('id', { count: 'exact', head: true }).eq('group_id', groupId);
-        memberCount = count || memberCount;
+    let fresh;
+    try {
+        fresh = await _fetchGroupHeader(groupId);
+    } catch (e) {
+        if (!(cached && cached.group) && currentGroupId === groupId) {
+            _renderGroupHeaderProblem(groupId, 'This group could not be loaded.');
+        }
+        return;
     }
+    if (!fresh) {
+        _tfGroupCacheDrop(groupId);
+        if (currentGroupId === groupId) _renderGroupHeaderProblem(groupId, 'This group is no longer available.');
+        return;
+    }
+    _tfGroupCachePut(groupId, fresh);
+    // Another group may have been opened, or this one closed, while it loaded.
+    if (currentGroupId !== groupId || overlay.style.display === 'none') return;
+    if (!cached || !cached.group || _groupHeaderSig(cached) !== _groupHeaderSig(fresh)) {
+        _renderGroupHeader(groupId, fresh);
+    }
+}
 
+// One round trip instead of four in a row: the group, your membership and the
+// member count are asked for together.
+async function _fetchGroupHeader(groupId) {
+    const me = currentUser && currentUser.id;
+    const res = await Promise.all([
+        sb.from('groups').select('*').eq('id', groupId).maybeSingle(),
+        me ? sb.from('group_members').select('id').eq('group_id', groupId).eq('user_id', me).maybeSingle()
+           : Promise.resolve({ data: null }),
+        me ? sb.from('group_members').select('id', { count: 'exact', head: true }).eq('group_id', groupId)
+           : Promise.resolve({ count: null }),
+    ]);
+    if (res[0].error) throw res[0].error;
+    const group = res[0].data;
+    if (!group) return null;
+    const isAdmin = !!(me && group.admin_id === me);
+    return {
+        group: group,
+        isMember: !!(res[1] && res[1].data),
+        memberCount: (res[2] && res[2].count) || group.member_count || 0,
+        // Only the admin sees the setup checklist, so only the admin pays for
+        // the two counts it is judged on.
+        setupProgress: (isAdmin && !group.setup_dismissed) ? await _groupSetupProgress(groupId) : null,
+    };
+}
+
+function _groupHeaderSig(s) {
+    return JSON.stringify([s.group, !!s.isMember, s.memberCount || 0, s.setupProgress || null]);
+}
+
+function _groupBackButton() {
+    return '<div onclick="closePage(\'group-page-overlay\');showNavBar&&showNavBar()" style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+        '<i class="fa-solid fa-chevron-left" style="color:#fff;font-size:16px;"></i></div>';
+}
+
+// The header's shape, for the one visit with nothing to show yet. The back
+// button works from the first frame, so a slow network never traps anyone.
+function _renderGroupHeaderSkeleton() {
+    const header = document.getElementById('group-page-header');
+    if (!header) return;
+    const block = function (style) {
+        return '<div style="background:var(--skeleton-bg,#e8e8e8);' + style + '"></div>';
+    };
+    header.innerHTML =
+        '<div style="position:relative;">' +
+            '<div style="animation:skeletonPulse 1.4s ease-in-out infinite;">' + block('width:100%;aspect-ratio:15/8;') + '</div>' +
+            '<div style="position:absolute;top:0;left:0;padding:calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px;">' + _groupBackButton() + '</div>' +
+        '</div>' +
+        '<div style="padding:16px 18px 12px;animation:skeletonPulse 1.4s ease-in-out infinite;">' +
+            block('height:27px;width:58%;border-radius:8px;') +
+            block('height:16px;width:42%;border-radius:7px;margin-top:10px;') +
+            '<div style="display:flex;gap:10px;margin-top:14px;">' +
+                block('flex:1;height:42px;border-radius:9px;') + block('flex:1;height:42px;border-radius:9px;') +
+            '</div>' +
+        '</div>';
+}
+
+function _renderGroupHeaderProblem(groupId, message) {
+    const header = document.getElementById('group-page-header');
+    if (!header) return;
+    header.innerHTML =
+        '<div style="padding:calc(env(safe-area-inset-top, 0px) + 14px) 16px 0;">' + _groupBackButton() + '</div>' +
+        '<div style="text-align:center;padding:36px 24px 28px;color:var(--text-secondary,#888);font-size:15px;">' +
+            escapeHtml(message) +
+            '<div><button onclick="openGroup(\'' + groupId + '\')" style="margin-top:14px;padding:9px 20px;border-radius:18px;border:none;background:#0A84FF;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">Try again</button></div>' +
+        '</div>';
+}
+
+function _renderGroupHeader(groupId, state) {
+    const header = document.getElementById('group-page-header');
+    const group = state.group;
+    const isMember = !!state.isMember;
+    const memberCount = state.memberCount || group.member_count || 0;
+    const setupProgress = state.setupProgress || null;
     window._currentGroup = group;
     const isAdmin = currentUser && group.admin_id === currentUser.id;
     const cover = group.cover_url || _gsPresetCover(0);
     const privacyLabel = (group.privacy || 'Public') + ' group';
-    // Only the admin sees the setup checklist, so only the admin pays for the
-    // two counts it is judged on.
-    const setupProgress = (isAdmin && !group.setup_dismissed) ? await _groupSetupProgress(groupId) : null;
 
     if (header) {
         header.innerHTML =
@@ -32638,8 +32800,6 @@ async function openGroup(groupId) {
             '</div>' +
             (setupProgress ? _groupSetupCard(group, memberCount, setupProgress) : '');
     }
-
-    switchGroupTab('posts');
 }
 
 // The two things the checklist cannot read off the group row: how many people
@@ -32706,6 +32866,10 @@ function _groupSetupCard(group, memberCount, progress) {
 
 async function gsDismissSetup(groupId) {
     try { await sb.from('groups').update({ setup_dismissed: true }).eq('id', groupId); } catch (e) {}
+    var c = _tfGroupCacheGet(groupId);
+    if (c && c.group) {
+        _tfGroupCachePut(groupId, { group: Object.assign({}, c.group, { setup_dismissed: true }), setupProgress: null });
+    }
     openGroup(groupId);
 }
 
@@ -32782,21 +32946,59 @@ function switchGroupTab(tab) {
     else if (tab === 'about') loadGroupAbout(currentGroupId);
 }
 
+// Posts already seen in a group this session, shown the moment it opens again
+// while the fresh list loads. Memory only: posts change too often to be worth
+// keeping on the device.
+var _tfGroupPosts = {};
+// The posts, members and about tabs share one list element. Each load takes a
+// ticket, and a reply that arrives after another tab or group has taken the
+// list over is dropped instead of drawn over it.
+var _tfGroupFeedGen = 0;
+
 async function loadGroupPosts(groupId) {
     const feedEl = document.getElementById('group-feed');
     if (!feedEl || !groupId) return;
-    feedEl.innerHTML = '<div style="text-align:center;padding:30px;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;font-size:20px;"></i></div>';
+    const gen = ++_tfGroupFeedGen;
+    const seen = _tfGroupPosts[groupId];
+    if (seen) _renderGroupPostList(feedEl, seen.posts);
+    else feedEl.innerHTML = renderSkeletonHTML('post', 3);
 
-    if (!window.sb) { feedEl.innerHTML = '<div style="text-align:center;padding:30px;color:#888;">Connect to load posts</div>'; return; }
+    if (!window.sb) {
+        if (!seen) feedEl.innerHTML = '<div style="text-align:center;padding:30px;color:#888;">Connect to load posts</div>';
+        return;
+    }
 
-    const { data: posts } = await sb.from('posts')
-        .select('*, users:user_id (id, full_name, username, avatar_url, badge_tier, verified)')
-        .eq('group_id', groupId)
-        .eq('is_hidden', false)
-        .eq('status', 'published')
-        .order('created_at', { ascending: false })
-        .limit(30);
+    let res;
+    try {
+        res = await sb.from('posts')
+            .select('*, users:user_id (id, full_name, username, avatar_url, badge_tier, verified)')
+            .eq('group_id', groupId)
+            .eq('is_hidden', false)
+            .eq('status', 'published')
+            .order('created_at', { ascending: false })
+            .limit(30);
+    } catch (e) { res = { error: e }; }
+    if (gen !== _tfGroupFeedGen) return;
 
+    if (res.error) {
+        // A failed load used to read "No posts yet. Be the first!", which is
+        // not true. Whatever was already on screen stays.
+        if (!seen) {
+            feedEl.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#888;font-size:15px;">The posts could not be loaded.' +
+                '<div><button onclick="loadGroupPosts(\'' + groupId + '\')" style="margin-top:12px;padding:9px 20px;border-radius:18px;border:none;background:#0A84FF;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">Try again</button></div></div>';
+        }
+        return;
+    }
+    const posts = res.data || [];
+    const sig = posts.map(function (p) {
+        return [p.id, p.like_count || 0, p.comment_count || 0, p.repost_count || 0, p.text_content || '', p.updated_at || ''].join(':');
+    }).join('|');
+    _tfGroupPosts[groupId] = { posts: posts, sig: sig };
+    // Redrawn only when something changed, so a revisit does not flash.
+    if (!seen || seen.sig !== sig) _renderGroupPostList(feedEl, posts);
+}
+
+function _renderGroupPostList(feedEl, posts) {
     feedEl.innerHTML = '';
     if (!posts || posts.length === 0) {
         feedEl.innerHTML = `<div style="text-align:center;padding:60px 20px;color:#888;">
@@ -32811,12 +33013,14 @@ async function loadGroupPosts(groupId) {
 async function loadGroupMembers(groupId) {
     const feedEl = document.getElementById('group-feed');
     if (!feedEl) return;
-    feedEl.innerHTML = '<div style="text-align:center;padding:30px;"><i class="fa-solid fa-spinner fa-spin" style="color:#007AFF;"></i></div>';
+    const gen = ++_tfGroupFeedGen;
+    feedEl.innerHTML = renderSkeletonHTML('message', 5);
 
     const { data: members } = await sb.from('group_members')
         .select('*, users:user_id (id, full_name, username, avatar_url, badge_tier, verified, account_type)')
         .eq('group_id', groupId)
         .limit(50);
+    if (gen !== _tfGroupFeedGen) return;
 
     feedEl.innerHTML = (members || []).map(m => {
         const u = m.users || {};
@@ -32836,7 +33040,16 @@ async function loadGroupMembers(groupId) {
 async function loadGroupAbout(groupId) {
     const feedEl = document.getElementById('group-feed');
     if (!feedEl) return;
-    const { data: group } = await sb.from('groups').select('*').eq('id', groupId).single();
+    const gen = ++_tfGroupFeedGen;
+    // The header has already fetched this row and keeps it fresh, so About
+    // draws from it instead of asking again.
+    const cached = _tfGroupCacheGet(groupId);
+    let group = cached && cached.group;
+    if (!group) {
+        feedEl.innerHTML = renderSkeletonHTML('message', 2);
+        group = (await sb.from('groups').select('*').eq('id', groupId).single()).data;
+        if (gen !== _tfGroupFeedGen) return;
+    }
     if (!group) return;
     const color = group.color || '#007AFF';
     feedEl.innerHTML = `<div style="padding:20px;">
@@ -32869,6 +33082,15 @@ async function toggleGroupMembership(groupId, isMember) {
         await sb.from('groups').update({ member_count: (await sb.from('group_members').select('id', {count:'exact',head:true}).eq('group_id', groupId)).count || 0 }).eq('id', groupId);
         showToast('Joined!');
         triggerHaptic(30);
+    }
+    // The page redraws from the cache first, so the cache learns the new
+    // membership before it does; otherwise the old button flashes back.
+    var _mc = _tfGroupCacheGet(groupId);
+    if (_mc) {
+        _tfGroupCachePut(groupId, {
+            isMember: !isMember,
+            memberCount: Math.max(0, (_mc.memberCount || 0) + (isMember ? -1 : 1))
+        });
     }
     openGroup(groupId);
 }
@@ -33989,7 +34211,13 @@ async function markAllNotifsRead() {
 }
 
 // Wire up notifications to open properly
+//
+// This is the navGoTo that runs: it replaces both the function declaration
+// further down and the groups wrapper above it.
 navGoTo = function(destination) {
+    // Marketplace sits above every page this opens, so going anywhere from it
+    // has to close it or the new page opens underneath.
+    tfCloseMarketplace();
     var layerMap = {
         'notifications': ['msg-overlay','profile-overlay','reel-overlay'],
         'messages':      ['notif-overlay','profile-overlay','reel-overlay'],
@@ -34177,6 +34405,7 @@ function navHome() {
         if (el) el.style.display = 'none';
     });
     document.querySelectorAll('.settings-sub-overlay').forEach(function(el){ el.style.display='none'; });
+    tfCloseMarketplace();
 
     var nav = document.querySelector('.nav-container');
     if (nav) nav.style.display = 'flex';
@@ -57041,29 +57270,91 @@ function _mgSectionTitle(t) {
     return '<div style="font-size:20px;font-weight:800;color:var(--text-primary,#000);padding:14px 16px 8px;">' + escapeHtml(t) + '</div>';
 }
 
+function _mgEmptyCounts() {
+    return { reported: 0, pending: 0, alerts: 0, spam: 0, members: 0, rules: 0, scheduled: 0 };
+}
+
+// Opens at once, from what is already known: this page's own state if it was
+// open a moment ago, the group cache, or the group page the Manage button is
+// on. It used to show a spinner through six requests made one after another.
+// Counts never fetched before show as placeholders until they arrive.
 async function openManageGroup(groupId) {
-    _mg = { groupId: groupId, group: null, counts: {} };
-    _mgPage('mgPage', 'Manage group',
-        '<div style="text-align:center;padding:40px;color:#999;"><i class="fa-solid fa-spinner fa-spin"></i></div>');
+    var cached = _tfGroupCacheGet(groupId) || {};
+    var same = _mg && _mg.groupId === groupId;
+    var group = (same && _mg.group) || cached.group ||
+        (window._currentGroup && window._currentGroup.id === groupId ? window._currentGroup : null);
+    var counts = (same && _mg.countsKnown && _mg.counts) || cached.mg || null;
+    _mg = {
+        groupId: groupId, group: group,
+        counts: counts || _mgEmptyCounts(), countsKnown: !!counts, countsFailed: false,
+        memberHint: cached.memberCount || (group && group.member_count) || 0
+    };
+    _mgPage('mgPage', 'Manage group', group ? '' : _mgSkeleton());
+    if (group) _mgRender();
     if (!window.sb) return;
+    _mg.countsPromise = _mgRefresh(groupId);
+}
 
-    var g = (await sb.from('groups').select('*').eq('id', groupId).single()).data;
-    if (!g) { showToast('Group not found'); return; }
-    _mg.group = g;
-
-    var counts = await _mgLoadCounts(groupId);
-    _mg.counts = counts;
-    _mgRender();
+// The group and its counts, fetched together and redrawn only if they changed.
+async function _mgRefresh(groupId) {
+    var res = await Promise.all([
+        sb.from('groups').select('*').eq('id', groupId).maybeSingle(),
+        _mgLoadCounts(groupId)
+    ]);
+    if (_mg.groupId !== groupId) return;   // another group's page is open now
+    var g = res[0] && res[0].data;
+    var failed = !!(res[0] && res[0].error);
+    var counts = res[1];
+    var page = document.getElementById('mgPage');
+    if (!g && !failed) {
+        // Deleted, or no longer visible to this account.
+        _tfGroupCacheDrop(groupId);
+        if (page) page.remove();
+        showToast('Group not found');
+        return;
+    }
+    if (!g && !_mg.group) {
+        var body = document.querySelector('#mgPage > div:last-child');
+        if (body) body.innerHTML = '<div style="text-align:center;padding:40px 24px;color:var(--text-secondary,#888);font-size:15px;">This group could not be loaded.' +
+            '<div><button onclick="openManageGroup(\'' + groupId + '\')" style="margin-top:14px;padding:9px 20px;border-radius:18px;border:none;background:#0A84FF;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">Try again</button></div></div>';
+        return;
+    }
+    // From here there is a group to show, fresh or from the cache, and the
+    // counts are either fresh, kept from before, or marked as unreadable.
+    var before = JSON.stringify([_mg.group, _mg.countsKnown ? _mg.counts : null, _mg.countsFailed]);
+    if (g) _mg.group = g;
+    if (counts) { _mg.counts = counts; _mg.countsKnown = true; _mg.countsFailed = false; }
+    else if (!_mg.countsKnown) { _mg.countsFailed = true; }
+    var patch = {};
+    if (g) patch.group = g;
+    if (counts) patch.mg = counts;
+    if (g || counts) _tfGroupCachePut(groupId, patch);
+    if (page && before !== JSON.stringify([_mg.group, _mg.countsKnown ? _mg.counts : null, _mg.countsFailed])) _mgRender();
 }
 
 // Real counts. Reports are stored generically, so group content is resolved
-// first and the reports are matched against those ids.
+// first and the reports are matched against those ids. Everything else is
+// asked for at the same time. Null when they could not be read, so a failed
+// refresh keeps the last good numbers rather than replacing them with zeros.
 async function _mgLoadCounts(groupId) {
-    var out = { reported: 0, pending: 0, alerts: 0, spam: 0, members: 0, rules: 0, scheduled: 0 };
+    var out = _mgEmptyCounts();
     try {
-        var posts = (await sb.from('posts').select('id,approved').eq('group_id', groupId)).data || [];
+        var r = await Promise.all([
+            sb.from('posts').select('id,approved').eq('group_id', groupId),
+            sb.from('group_members').select('id', { count: 'exact', head: true }).eq('group_id', groupId),
+            sb.from('group_admin_rules').select('id', { count: 'exact', head: true })
+                .eq('group_id', groupId).eq('enabled', true),
+            // Anything Admin Assist acted on automatically.
+            sb.from('group_activity_log').select('id', { count: 'exact', head: true })
+                .eq('group_id', groupId).like('action', 'auto_%')
+        ]);
+        if (r[0].error) return null;
+        var posts = r[0].data || [];
         var ids = posts.map(function (p) { return p.id; });
         out.pending = posts.filter(function (p) { return p.approved === false; }).length;
+        out.members = r[1].count || 0;
+        out.rules = r[2].count || 0;
+        out.alerts = r[3].count || 0;
 
         if (ids.length) {
             var reps = (await sb.from('reports')
@@ -57074,34 +57365,46 @@ async function _mgLoadCounts(groupId) {
             out.reported = open.length;
             out.spam = open.filter(function (r) { return /spam/i.test(r.reason || ''); }).length;
         }
-
-        var mem = await sb.from('group_members').select('id', { count: 'exact', head: true }).eq('group_id', groupId);
-        out.members = mem.count || 0;
-
-        var rules = await sb.from('group_admin_rules').select('id', { count: 'exact', head: true })
-            .eq('group_id', groupId).eq('enabled', true);
-        out.rules = rules.count || 0;
-
-        // Anything Admin Assist acted on automatically.
-        var alerts = await sb.from('group_activity_log').select('id', { count: 'exact', head: true })
-            .eq('group_id', groupId).like('action', 'auto_%');
-        out.alerts = alerts.count || 0;
-    } catch (e) { /* counts stay at zero rather than showing a wrong number */ }
+    } catch (e) { return null; }
     return out;
 }
 
+// A count, a placeholder while it is on its way, or a dash if it could not be
+// read. Never a zero that was not counted.
 function _mgCountRight(n) {
+    if (n === null || n === undefined) {
+        if (_mg.countsFailed) return '<span style="font-size:17px;color:var(--text-secondary,#666);flex-shrink:0;">–</span>';
+        return '<span style="width:24px;height:14px;border-radius:7px;background:var(--skeleton-bg,#e8e8e8);animation:skeletonPulse 1.4s ease-in-out infinite;flex-shrink:0;"></span>';
+    }
     return '<span style="font-size:17px;color:var(--text-secondary,#666);flex-shrink:0;">' + n + '</span>';
 }
 
+// The page's shape, for the one visit with no group to draw yet.
+function _mgSkeleton() {
+    var bar = function (w) {
+        return '<div style="height:16px;width:' + w + ';border-radius:7px;background:var(--skeleton-bg,#e8e8e8);margin:16px;"></div>';
+    };
+    return '<div style="animation:skeletonPulse 1.4s ease-in-out infinite;">' +
+        '<div class="mg-card" style="display:flex;align-items:center;gap:13px;margin:10px 10px 0;padding:14px 16px;">' +
+            '<div style="width:52px;height:52px;border-radius:10px;background:var(--skeleton-bg,#e8e8e8);flex-shrink:0;"></div>' +
+            '<div style="flex:1;">' + bar('60%').replace('margin:16px', 'margin:0 0 9px') + bar('40%').replace('margin:16px', 'margin:0') + '</div>' +
+        '</div>' +
+        _mgCard(bar('40%') + bar('70%') + bar('62%') + bar('66%')) +
+        _mgCard(bar('45%') + bar('72%') + bar('55%')) +
+    '</div>';
+}
+
 function _mgRender() {
-    var g = _mg.group, c = _mg.counts;
+    var g = _mg.group, known = _mg.countsKnown, c = _mg.counts;
     var body = document.querySelector('#mgPage > div:last-child');
     if (!body || !g) return;
+    // Each count, or null while it is not known yet.
+    var n = function (k) { return known ? c[k] : null; };
+    var members = known ? c.members : _mg.memberHint;
 
     var cover = g.cover_url || (typeof _gsPresetCover === 'function' ? _gsPresetCover(0) : '');
     var privacyLabel = (g.privacy || 'Public') + ' group';
-    var rulesSub = c.rules ? (c.rules + (c.rules === 1 ? ' rule active' : ' rules active')) : 'No rules yet';
+    var rulesSub = !known ? '' : (c.rules ? (c.rules + (c.rules === 1 ? ' rule active' : ' rules active')) : 'No rules yet');
 
     body.innerHTML =
         // Group header row
@@ -57109,13 +57412,14 @@ function _mgRender() {
             '<img src="' + escapeHtml(cover) + '" style="width:52px;height:52px;border-radius:10px;object-fit:cover;flex-shrink:0;">' +
             '<div style="flex:1;min-width:0;">' +
                 '<div style="font-size:19px;font-weight:800;color:var(--text-primary,#000);">' + escapeHtml(g.name) + '</div>' +
-                '<div style="font-size:15px;color:var(--text-secondary,#666);">' + escapeHtml(privacyLabel) + ' · ' + c.members + ' member' + (c.members !== 1 ? 's' : '') + '</div>' +
+                '<div style="font-size:15px;color:var(--text-secondary,#666);">' + escapeHtml(privacyLabel) + ' · ' + members + ' member' + (members !== 1 ? 's' : '') + '</div>' +
             '</div>' +
             '<i class="fa-solid fa-chevron-right" style="color:var(--text-secondary,#666);font-size:15px;"></i>' +
         '</div>' +
 
-        // Admin Assist suggestion (only while no rule exists)
-        (c.rules ? '' :
+        // Admin Assist suggestion (only once it is known that no rule exists,
+        // so it never shows for a moment and then disappears)
+        ((!known || c.rules) ? '' :
         _mgCard(
             '<div style="display:flex;align-items:flex-start;gap:12px;padding:14px 14px 0;">' +
                 '<i class="fa-solid fa-user-gear" style="color:#0A84FF;font-size:22px;margin-top:2px;"></i>' +
@@ -57133,10 +57437,10 @@ function _mgRender() {
         // Action items
         _mgCard(
             _mgSectionTitle('Action items') +
-            _mgItem('fa-comment-slash', 'Reported content', '', _mgCountRight(c.reported), 'mgOpenReported()') +
-            _mgItem('fa-clock-rotate-left', 'Pending posts', '', _mgCountRight(c.pending), 'mgOpenPending()') +
-            _mgItem('fa-comment-dots', 'Moderation alerts', '', _mgCountRight(c.alerts), 'mgOpenAlerts()') +
-            _mgItem('fa-triangle-exclamation', 'Potential spam', '', _mgCountRight(c.spam), 'mgOpenSpam()')
+            _mgItem('fa-comment-slash', 'Reported content', '', _mgCountRight(n('reported')), 'mgOpenReported()') +
+            _mgItem('fa-clock-rotate-left', 'Pending posts', '', _mgCountRight(n('pending')), 'mgOpenPending()') +
+            _mgItem('fa-comment-dots', 'Moderation alerts', '', _mgCountRight(n('alerts')), 'mgOpenAlerts()') +
+            _mgItem('fa-triangle-exclamation', 'Potential spam', '', _mgCountRight(n('spam')), 'mgOpenSpam()')
         ) +
 
         // Tool shortcuts
@@ -57374,7 +57678,7 @@ function _mgLogRow(r) {
 
 // ---- Tools ----
 async function mgOpenInsights() {
-    var s = { members: _mg.counts.members || 0, posts: 0, week: 0, joinedWeek: 0 };
+    var s = { members: (_mg.countsKnown ? _mg.counts.members : _mg.memberHint) || 0, posts: 0, week: 0, joinedWeek: 0 };
     try {
         var since = new Date(Date.now() - 7 * 864e5).toISOString();
         var pc = await sb.from('posts').select('id', { count: 'exact', head: true }).eq('group_id', _mg.groupId);
@@ -57517,6 +57821,14 @@ async function mgOpenScheduled() {
 }
 
 function mgOpenStatus() {
+    // "In good standing" from counts not yet read would be a guess.
+    if (!_mg.countsKnown) {
+        if (_mg.countsPromise) _mg.countsPromise.then(function () {
+            if (_mg.countsKnown) mgOpenStatus();
+            else showToast('Could not check the group right now');
+        });
+        return;
+    }
     var g = _mg.group, c = _mg.counts;
     var healthy = (c.reported === 0 && c.spam === 0);
     _mgPage('mgStatus', 'Group status',
@@ -57567,6 +57879,7 @@ async function _mgUpdateGroup(patch, message) {
     try {
         await sb.from('groups').update(patch).eq('id', _mg.groupId);
         Object.assign(_mg.group, patch);
+        _tfGroupCachePut(_mg.groupId, { group: _mg.group });
         await _mgLog('settings_changed', Object.keys(patch).join(', '));
         if (message) showToast(message);
         return true;
@@ -57700,6 +58013,8 @@ async function mgDelete() {
     if ((typed || '').trim() !== name) { showToast('That did not match the group name'); return; }
     try {
         await sb.from('groups').delete().eq('id', _mg.groupId);
+        _tfGroupCacheDrop(_mg.groupId);
+        delete _tfGroupPosts[_mg.groupId];
         var p = document.getElementById('mgPage'); if (p) p.remove();
         closePage('group-page-overlay');
         showNavBar && showNavBar();

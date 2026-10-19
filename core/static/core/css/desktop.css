@@ -764,3 +764,29 @@
        back to when the list is already beside you. */
     .tf-msgs #chat-interface .chat-back { display: none !important; }
 }
+
+/* --------------------------------------------------------------------------
+   Pages appear in place.
+
+   Every page used to rise from the bottom of the window over 0.4s. On a phone
+   that echoes a sheet coming up under your thumb; on a laptop nothing comes
+   from the bottom of the window, and X, Instagram and Facebook all swap the
+   middle column instantly. So pages here simply appear.
+
+   Sheets and dialogs share the same keyframes, by name, from about eighty
+   places in feed.js. Redefining the keyframes here, for this width only,
+   turns all of them into a quick fade at once. The animation still runs and
+   ends as before, so nothing that waits on it is affected.
+   -------------------------------------------------------------------------- */
+@media (min-width: 1000px) {
+    .white-overlay, .black-overlay, .settings-sub-overlay, .page-overlay, .mg-page,
+    #tfMarketOverlay, #trustAnalyticsOverlay, #liveStreamFeedPage,
+    #aboutMenuOverlay, #aboutAccountOverlay {
+        animation: none !important;
+    }
+
+    @keyframes slideUpOverlay {
+        0%        { opacity: 0; }
+        35%, 100% { opacity: 1; }
+    }
+}
