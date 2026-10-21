@@ -497,12 +497,15 @@ def _groq_messages(spec, system, searching=False):
 # The biggest model has the smallest per-minute token budget, so gpt-oss-120b
 # sits last: falling off the retired 70b landed straight on it and a one-word
 # "Hi" came back 413.
+#
+# llama-3.3-70b-versatile and llama-3.1-8b-instant were shut down on 16 August
+# 2026; Groq names gpt-oss-20b and gpt-oss-120b as their replacements. The live
+# model list already skipped them, but this list is what is used when that one
+# cannot be read, and it should not start with two dead names.
 _GROQ_FALLBACKS = [
-    'llama-3.3-70b-versatile',
     'openai/gpt-oss-20b',
     'qwen/qwen3.8-27b',
     'minimaxai/minimax-m2.7',
-    'llama-3.1-8b-instant',          # small, generous limits, always up
     'openai/gpt-oss-120b',           # largest, tightest budget, last resort
 ]
 
@@ -769,6 +772,58 @@ def _is_search_model(name):
     return 'compound' in (name or '').lower()
 
 
+# ---- Browser Search, since compound went away -----------------------------
+#
+# groq/compound and groq/compound-mini were decommissioned on 21 September 2026
+# (console.groq.com/docs/deprecations), with no replacement named. Eddie found
+# its search model by looking for "compound" in Groq's model list, so from that
+# day the list had none, can_search_live() said no, and the web quietly went
+# away: no error anywhere, just answers from memory.
+#
+# What Groq offers now is a tool rather than a model: the GPT-OSS models run a
+# browser_search tool on Groq's side when the request names it. 120b first,
+# because ordinary chat already keeps off its budget (_GROQ_COMPOUND_INNER), so
+# a search is not competing with every "hi"; 20b is the second go.
+#
+# Groq bills the tool per search on a paid plan ($5 per 1,000 when this was
+# written). Whether a free key may use it is Groq's decision; if it refuses,
+# search pauses for an hour and Eddie says plainly that it cannot look things
+# up, exactly as it did while no search model existed at all.
+_GROQ_BROWSER_SEARCH_MODELS = ('openai/gpt-oss-120b', 'openai/gpt-oss-20b')
+_GROQ_BROWSER_SEARCH_CALL = {
+    'tools': [{'type': 'browser_search'}],
+    # Named, not offered: left to choose, a model answers from memory, which is
+    # what compound did too until its tools were named.
+    'tool_choice': 'required',
+    # Groq's own advice for this tool. The searching happens inside the same
+    # declared budget as the answer, so less reasoning leaves room for both.
+    'reasoning_effort': 'low',
+}
+
+# A refusal of the tool itself (not on this plan, not enabled) will not change
+# in a minute, unlike a spent per-minute budget, so it pauses search for longer.
+_GROQ_TOOL_REFUSED_PAUSE = 3600
+
+
+def _is_browser_search(name, search):
+    """A searching call on a GPT-OSS model: one that carries the tool."""
+    return (bool(search) and not _is_search_model(name)
+            and name in _GROQ_BROWSER_SEARCH_MODELS)
+
+
+def _groq_tool_refused(exc):
+    """Groq turning the search tool down, rather than the model or the budget."""
+    if _groq_is_too_large(exc) or _groq_is_missing_model(exc):
+        return False
+    status = getattr(exc, 'status_code', None)
+    text = str(exc).lower()
+    if status not in (400, 403) and not any(c in text for c in ('400', '403')):
+        return False
+    return any(s in text for s in ('not available', 'not enabled', 'billing',
+                                   'upgrade', 'permission', 'not supported',
+                                   'unsupported', 'forbidden'))
+
+
 def _groq_search_model(client):
     """A Groq model that can search the web, or None if this key has none."""
     try:
@@ -779,7 +834,28 @@ def _groq_search_model(client):
     for name in _GROQ_SEARCH_PREF:
         if name in have:
             return name
-    return have[0] if have else None
+    if have:
+        return have[0]
+    # No compound model: Browser Search on a GPT-OSS model, but only one Groq
+    # actually listed. The written fallback list is not evidence it is served.
+    live = _GROQ_LIVE.get('names') or []
+    for name in _GROQ_BROWSER_SEARCH_MODELS:
+        if name in live:
+            return name
+    return None
+
+
+def _groq_search_candidates(client):
+    """Every model worth trying a search on, best first."""
+    if _groq_search_model(client) is None:
+        return []
+    have = _GROQ_LIVE.get('search') or []
+    if have:
+        # compound returning nothing is not a reason to give up on searching
+        # when compound-mini is sitting right there.
+        return [m for m in _GROQ_SEARCH_PREF if m in have] or list(have)[:2]
+    live = _GROQ_LIVE.get('names') or []
+    return [m for m in _GROQ_BROWSER_SEARCH_MODELS if m in live]
 
 
 def can_search_live():
@@ -787,12 +863,33 @@ def can_search_live():
 
     Answered from the hourly model-list cache, so asking costs nothing on the
     hot path. False is not a failure: it means fact-checks use the Wikipedia
-    lookup instead, and the prompt is written to match.
+    lookup instead, and the prompt is written to match. A paused search counts
+    as none, so a turn is not promised a search that will not be tried.
     """
     client = _groq_client()
     if client is None:
         return False
+    if _groq_search_paused():
+        return False
     return _groq_search_model(client) is not None
+
+
+# Browser Search answers carry marks like 【2†L6-L10】: an index into results the
+# model read, which means nothing to somebody reading a chat. The sources are
+# listed under the answer, so the marks come out. Links in the same brackets
+# (【https://...】) are a different thing that the app renders, and stay.
+_GROQ_CITE_MARK = None
+
+
+def _groq_strip_citation_marks(text):
+    """The text without index marks, and whether there were any."""
+    global _GROQ_CITE_MARK
+    if _GROQ_CITE_MARK is None:
+        import re
+        _GROQ_CITE_MARK = re.compile(r'[ \t]?【\d+(?:†[^】]*)?】')
+    text = text or ''
+    stripped = _GROQ_CITE_MARK.sub('', text)
+    return stripped, stripped != text
 
 
 _URL_RE = None
@@ -817,6 +914,8 @@ def _groq_executed_sources(message):
                 block = _attr(tool, key)
                 if isinstance(block, dict):
                     block = block.get('results') or block.get('sources')
+                elif block is not None and not isinstance(block, (list, str)):
+                    block = _attr(block, 'results') or _attr(block, 'sources')
                 if isinstance(block, list):
                     for item in block:
                         _add_source(_attr(item, 'url') or _attr(item, 'link'),
@@ -834,7 +933,7 @@ def _groq_executed_sources(message):
     return sources
 
 
-def _groq_call(client, prefer=None, only=False, **kwargs):
+def _groq_call(client, prefer=None, only=False, search=False, **kwargs):
     """Call Groq, moving down the list when a model has been retired.
 
     Only a missing model is retried. A bad key, a rate limit or a network
@@ -846,6 +945,10 @@ def _groq_call(client, prefer=None, only=False, **kwargs):
     preference, not a requirement: a compound model that fails for any reason
     at all hands the turn back to the plain chat models, because an answer
     without citations still beats no answer.
+
+    `search` says the preferred model is being asked to search. A compound
+    model's name says that by itself; a GPT-OSS model is also a chat model, so
+    the call has to say it, and only that call carries the browser_search tool.
     """
     pinned = getattr(settings, 'EDDIE_GROQ_MODEL', '')
     available = _groq_live_models(client)
@@ -872,6 +975,7 @@ def _groq_call(client, prefer=None, only=False, **kwargs):
         globals().setdefault('_GROQ_LAST_TRIED', [])
         _GROQ_LAST_TRIED.append(name)
         del _GROQ_LAST_TRIED[:-6]
+        searching_here = _is_search_model(name) or (search and name == prefer)
         try:
             call = dict(kwargs)
             if _is_search_model(name):
@@ -879,15 +983,22 @@ def _groq_call(client, prefer=None, only=False, **kwargs):
                                           **_GROQ_COMPOUND_BODY)
                 call['extra_headers'] = dict(call.get('extra_headers') or {},
                                              **_GROQ_COMPOUND_HEADERS)
+            elif _is_browser_search(name, searching_here):
+                call.update(_GROQ_BROWSER_SEARCH_CALL)
             result = client.chat.completions.create(model=name, **call)
         except Exception as exc:
             last = exc
+            if searching_here:
+                globals()['_GROQ_LAST_SEARCH_ERROR'] = '%s: %s' % (
+                    type(exc).__name__, str(exc)[:500])
+                if _groq_tool_refused(exc):
+                    _groq_pause_search(_GROQ_TOOL_REFUSED_PAUSE)
             retry = _groq_is_missing_model(exc) or _groq_is_too_large(exc)
             # A searching model is an upgrade on the turn, never a dependency
             # of it, so any failure from one moves on rather than surfacing.
-            if _is_search_model(name) and len(candidates) > 1:
+            if searching_here and len(candidates) > 1:
                 retry = True
-            if retry and (not pinned or _is_search_model(name)):
+            if retry and (not pinned or searching_here):
                 import logging
                 logging.getLogger(__name__).warning(
                     'Groq model %s refused (%s), trying the next one', name,
@@ -900,8 +1011,10 @@ def _groq_call(client, prefer=None, only=False, **kwargs):
                 continue
             raise
         # Only plain chat models are remembered. Sticking on a compound model
-        # would quietly route every "hi" through a web search.
-        if not _is_search_model(name):
+        # would quietly route every "hi" through a web search, and sticking on
+        # the model a Browser Search ran on would put every "hi" on the budget
+        # the next search needs.
+        if not searching_here:
             globals()['_GROQ_WORKING'] = name
             globals()['_GROQ_WORKING_AT'] = time.time()
         return result
@@ -929,18 +1042,14 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
     # A question that needs the web gets the searching model when this key has
     # one. Everything else stays on the fast chat models it has always used.
     # Every searching model this key can reach, best first, then the plain
-    # models. compound returning nothing is not a reason to give up on
-    # searching altogether when compound-mini is sitting right there.
+    # models.
     search_models = []
     if spec.get('wants_search') and _groq_search_paused():
         globals()['_GROQ_LAST_SEARCH_ERROR'] = (
-            'search paused for another %.0fs after a 413 from Groq'
+            'search paused for another %.0fs after a 413 or a refusal from Groq'
             % (_GROQ_SEARCH_OFF_UNTIL - time.time()))
     elif spec.get('wants_search'):
-        _groq_search_model(client)                 # fills _GROQ_LIVE['search']
-        have = _GROQ_LIVE.get('search') or []
-        search_models = ([m for m in _GROQ_SEARCH_PREF if m in have]
-                         or list(have)[:2])
+        search_models = _groq_search_candidates(client)
     prefer = search_models[0] if search_models else None
     # Nothing is announced here. "Searching the web" used to be emitted at this
     # point, on the strength of having *chosen* a searching model -- and the
@@ -960,6 +1069,7 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
     # a second answer underneath the first is worse than the error.
     attempts = search_models + [None]
     began = time.time()
+    tool_refused = False
     for index, attempt in enumerate(attempts):
         last_attempt = index == len(attempts) - 1
         searching = attempt is not None
@@ -969,6 +1079,10 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
             globals()['_GROQ_LAST_SEARCH_ERROR'] = (
                 'ran out of time for %s after %.1fs' % (attempt, time.time() - began))
             continue
+        # Groq refusing the browser_search tool refuses it on every model; the
+        # next one would only wait for the same answer.
+        if searching and tool_refused:
+            continue
         # Falling back means the promise in the system prompt is no longer
         # true, so it goes with the model. Telling it that it can search when
         # it cannot is the whole family of bugs this keeps producing.
@@ -977,7 +1091,10 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
         # is not available after all" on top of every ordinary message too --
         # so "hi" and "how do I post a clip" would have been answered by a
         # model apologising for a search it had never attempted.
-        fell_back = bool(search_models) and attempt is None
+        # A turn that was promised a search and is answering without one --
+        # because every search model failed, or because search was paused
+        # between the promise and the call -- says so.
+        fell_back = bool(spec.get('wants_search')) and attempt is None
         if searching:
             this_system = spec.get('search_system') or system
         elif fell_back:
@@ -1014,6 +1131,7 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
                     client,
                     prefer=attempt,
                     only=True,
+                    search=True,
                     messages=_groq_messages(spec, this_system, searching=True),
                     max_completion_tokens=min(max_tokens, _GROQ_SEARCH_MAX_TOKENS),
                 )
@@ -1021,12 +1139,16 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
                 message = getattr(picked, 'message', None)
                 for found in _groq_executed_sources(message):
                     _add_source(found['url'], found['title'], sources, seen)
-                if sources:
+                answer, marked = _groq_strip_citation_marks(
+                    getattr(message, 'content', '') or '')
+                answer = answer.strip()
+                # Evidence a search ran: sources, a tool on the record, or the
+                # citation marks Browser Search leaves in its answer.
+                if sources or marked or (_attr(message, 'executed_tools') or []):
                     emit('searching', {'name': 'web_search'})
                     while queue:
                         yield queue.pop(0)
 
-                answer = (getattr(message, 'content', '') or '').strip()
                 globals()['_GROQ_LAST_SEARCH_ERROR'] = None if answer else (
                     'the search model returned no text (finish_reason=%s, '
                     'tools run=%d)' % (
@@ -1091,6 +1213,8 @@ def _groq_stream(spec, system, queue, emit, max_tokens):
                 while queue:
                     yield queue.pop(0)
         except Exception as exc:
+            if searching and _groq_tool_refused(exc):
+                tool_refused = True
             if searching:
                 limits = _groq_rate_headers(exc)
                 globals()['_GROQ_LAST_SEARCH_ERROR'] = '%s: %s%s' % (
@@ -1134,22 +1258,19 @@ def _groq_once(spec, system, max_tokens):
     if client is None:
         return '', []
     # Every searching model this key can reach, best first, then the plain
-    # models. compound returning nothing is not a reason to give up on
-    # searching altogether when compound-mini is sitting right there.
+    # models.
     search_models = []
     if spec.get('wants_search') and _groq_search_paused():
         globals()['_GROQ_LAST_SEARCH_ERROR'] = (
-            'search paused for another %.0fs after a 413 from Groq'
+            'search paused for another %.0fs after a 413 or a refusal from Groq'
             % (_GROQ_SEARCH_OFF_UNTIL - time.time()))
     elif spec.get('wants_search'):
-        _groq_search_model(client)                 # fills _GROQ_LIVE['search']
-        have = _GROQ_LIVE.get('search') or []
-        search_models = ([m for m in _GROQ_SEARCH_PREF if m in have]
-                         or list(have)[:2])
+        search_models = _groq_search_candidates(client)
     prefer = search_models[0] if search_models else None
     result = _groq_call(
         client,
         prefer=prefer,
+        search=bool(prefer),
         messages=_groq_messages(spec, system, searching=bool(prefer)),
         max_completion_tokens=min(max_tokens,
                                   _GROQ_SEARCH_MAX_TOKENS if prefer
@@ -1160,7 +1281,7 @@ def _groq_once(spec, system, max_tokens):
         return '', []
     message = choices[0].message
     sources = _groq_executed_sources(message) if prefer else []
-    text = (getattr(message, 'content', '') or '').strip()
+    text = _groq_strip_citation_marks(getattr(message, 'content', '') or '')[0].strip()
     if not text and prefer:
         # The searching model answered with nothing. Ask a plain one rather
         # than handing back an empty string.

@@ -1094,6 +1094,15 @@ def eddie_diag(request):
         out['groq_search_models'] = eddie_providers._GROQ_LIVE.get('search') or []
         model = eddie_providers._groq_search_model(client)
     out['search_model'] = model
+    # compound until Groq decommissioned it on 21 September 2026, Groq's
+    # browser_search tool on a GPT-OSS model since.
+    out['search_kind'] = (None if not model else
+                          'compound' if eddie_providers._is_search_model(model)
+                          else 'browser_search')
+    paused = eddie_providers._GROQ_SEARCH_OFF_UNTIL - __import__('time').time()
+    if paused > 0:
+        out['search_paused_for_seconds'] = round(paused)
+        out['last_search_error'] = eddie_providers._GROQ_LAST_SEARCH_ERROR
     out['live_search'] = bool(model)
 
     # The part that matters: run the real path and report what happens.
@@ -1183,8 +1192,19 @@ def eddie_diag(request):
                        {'role': 'user', 'content': 'Say OK.'}]
         tools = eddie_providers._GROQ_COMPOUND_BODY
         heads = eddie_providers._GROQ_COMPOUND_HEADERS
+        browser = eddie_providers._GROQ_BROWSER_SEARCH_CALL
 
         steps = [
+            ('1 plain chat model, nothing added',
+             {'model': 'openai/gpt-oss-120b', 'messages': short,
+              'max_completion_tokens': 500}),
+            ('2 %s + browser_search' % model,
+             dict({'model': model, 'messages': short,
+                   'max_completion_tokens': 1500}, **browser)),
+            ('3 as 2 with the real search prompt and 4000 tokens',
+             dict({'model': model, 'messages': long_system,
+                   'max_completion_tokens': 4000}, **browser)),
+        ] if not eddie_providers._is_search_model(model) else [
             ('1 plain chat model, nothing added',
              {'model': 'openai/gpt-oss-120b', 'messages': short,
               'max_completion_tokens': 500}),

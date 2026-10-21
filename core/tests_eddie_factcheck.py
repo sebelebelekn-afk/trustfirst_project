@@ -360,15 +360,20 @@ class _FakeGroq:
     """Just enough of the OpenAI client for the routing logic."""
 
     def __init__(self, served, failures=None, stream_fail=None,
-                 emit_before_fail=False):
+                 emit_before_fail=False, tool_failures=None):
         self.served = served
         self.failures = failures or {}
+        # Raised only by a call that names a tool, the way Groq refuses
+        # browser_search while still answering the same model without it.
+        self.tool_failures = tool_failures or {}
         # Raised while the stream is being consumed rather than when the call
         # is made -- the case that reached a user.
         self.stream_fail = stream_fail or {}
         self.emit_before_fail = emit_before_fail
         # executed_tools to hand back, so a real search can be simulated.
         self.tool_results = None
+        # The reply text per model, when a test needs more than the default.
+        self.contents = None
         self.sent = []
         self.tried = []
         self.models = type('M', (), {'list': self._list})()
@@ -384,6 +389,8 @@ class _FakeGroq:
         failure = self.failures.get(model)
         if failure:
             raise failure
+        if kwargs.get('tools') and self.tool_failures.get(model):
+            raise self.tool_failures[model]
         if kwargs.get('stream'):
             return self._stream(model)
         # A searching turn is not streamed, so its failures land here too.
@@ -391,7 +398,7 @@ class _FakeGroq:
         if boom:
             raise boom
         message = type('M', (), {
-            'content': 'answer from %s' % model,
+            'content': (self.contents or {}).get(model, 'answer from %s' % model),
             'executed_tools': (self.tool_results or {}).get(model),
         })()
         choice = type('C', (), {'message': message, 'finish_reason': 'stop'})()
@@ -417,6 +424,11 @@ class _FakeGroq:
 
 SERVED = ['llama-3.1-8b-instant', 'groq/compound', 'groq/compound-mini',
           'llama-3.3-70b-versatile', 'whisper-large-v3']
+
+# What Groq serves after 21 September 2026: no compound model at all, so web
+# search has to come from Browser Search on a GPT-OSS model.
+SERVED_NOW = ['openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b',
+              'whisper-large-v3']
 
 
 class GroqSearchModelTests(SimpleTestCase):
@@ -538,29 +550,29 @@ class GroqStickyModelTests(SimpleTestCase):
         self.assertEqual(client.tried[0], 'llama-3.1-8b-instant')
 
     def test_a_stale_sticky_model_loses_its_place(self):
-        eddie_providers._GROQ_WORKING = 'llama-3.1-8b-instant'
+        eddie_providers._GROQ_WORKING = 'qwen/qwen3.8-27b'
         eddie_providers._GROQ_WORKING_AT = (
             time.time() - eddie_providers._GROQ_WORKING_TTL - 1)
-        client = _FakeGroq(SERVED)
+        client = _FakeGroq(SERVED_NOW)
         eddie_providers._groq_call(client, messages=[])
         # Back to the order of preference, which is not where it left off.
-        self.assertEqual(client.tried[0], 'llama-3.3-70b-versatile')
+        self.assertEqual(client.tried[0], 'openai/gpt-oss-20b')
 
     def test_a_model_reached_only_because_the_good_ones_were_rate_limited(self):
         # The exact sequence that stranded Eddie: everything preferred answers
         # 413, the last one standing answers, and fifteen minutes later the
         # preferred models must get another turn.
-        served = SERVED + ['allam-2-7b']
+        served = SERVED_NOW + ['allam-2-7b']
         too_large = RuntimeError('413 Request too large')
-        client = _FakeGroq(served, failures={'llama-3.3-70b-versatile': too_large,
-                                             'llama-3.1-8b-instant': too_large})
+        client = _FakeGroq(served, failures={'openai/gpt-oss-20b': too_large,
+                                             'qwen/qwen3.8-27b': too_large})
         eddie_providers._groq_call(client, messages=[])
         self.assertEqual(eddie_providers._GROQ_WORKING, 'allam-2-7b')
 
         eddie_providers._GROQ_WORKING_AT -= eddie_providers._GROQ_WORKING_TTL + 1
         client = _FakeGroq(served)
         eddie_providers._groq_call(client, messages=[])
-        self.assertEqual(client.tried[0], 'llama-3.3-70b-versatile')
+        self.assertEqual(client.tried[0], 'openai/gpt-oss-20b')
 
     def test_a_language_specialised_model_is_never_the_first_unknown(self):
         # Both are new to us, so both land in the unknown pile, where the sort
@@ -575,6 +587,9 @@ class GroqStickyModelTests(SimpleTestCase):
         for name in eddie_providers._GROQ_FALLBACKS:
             self.assertNotIn('llama-4-scout', name)
             self.assertNotIn('qwen3-32b', name)
+            # Shut down on 16 August 2026.
+            self.assertNotIn('llama-3.3-70b-versatile', name)
+            self.assertNotIn('llama-3.1-8b-instant', name)
 
 
 class GroqCitationTests(SimpleTestCase):
@@ -865,3 +880,136 @@ class SearchFallbackTests(SimpleTestCase):
                      'payload too large', 'request too large'):
             self.assertTrue(
                 eddie_providers._groq_is_too_large(Exception(text)), text)
+
+
+class _StatusError(Exception):
+    """The shape of an openai.APIStatusError: a message and a status code."""
+
+    def __init__(self, status_code, message):
+        super().__init__('Error code: %d - %s' % (status_code, message))
+        self.status_code = status_code
+
+
+class BrowserSearchTests(SimpleTestCase):
+    """Search after 21 September 2026, when Groq decommissioned compound.
+
+    Eddie found its search model by looking for "compound" in Groq's model
+    list. From that day the list had none, can_search_live() said no, and the
+    web went away without an error anywhere. Search now runs as Groq's
+    browser_search tool on a GPT-OSS model.
+    """
+
+    def setUp(self):
+        eddie_providers._GROQ_LIVE.update({'at': 0.0, 'names': [], 'search': []})
+        eddie_providers._GROQ_WORKING = None
+        eddie_providers._GROQ_WORKING_AT = 0.0
+        eddie_providers._GROQ_SEARCH_OFF_UNTIL = 0.0
+        eddie_providers._GROQ_LAST_SEARCH_ERROR = None
+        self._real = eddie_providers._groq_client
+        self.addCleanup(setattr, eddie_providers, '_groq_client', self._real)
+        self.addCleanup(setattr, eddie_providers, '_GROQ_SEARCH_OFF_UNTIL', 0.0)
+        import logging
+        logging.disable(logging.CRITICAL)
+        self.addCleanup(logging.disable, logging.NOTSET)
+
+    def _client(self, **kw):
+        c = _FakeGroq(SERVED_NOW, **kw)
+        eddie_providers._groq_client = lambda: c
+        return c
+
+    def _run(self, wants_search=True):
+        queue, events = [], []
+
+        def emit(kind, data):
+            events.append((kind, data))
+            queue.append('frame')
+
+        spec = {'history': [], 'prompt': 'when is the iPhone out'}
+        if wants_search:
+            spec.update({'wants_search': True, 'search_system': 'SEARCH SYSTEM'})
+        list(eddie_providers._groq_stream(spec, 'SYSTEM', queue, emit, 2000))
+        return events
+
+    def test_search_is_back_without_any_compound_model(self):
+        client = self._client()
+        self.assertEqual(eddie_providers._groq_search_model(client), 'openai/gpt-oss-120b')
+        self.assertTrue(eddie_providers.can_search_live())
+
+    def test_the_written_list_is_not_evidence_of_a_search_model(self):
+        # When Groq's list cannot be read, the fallback list stands in for chat,
+        # but it is not proof that a GPT-OSS model is actually served.
+        client = self._client()
+        client.models = type('M', (), {'list': staticmethod(
+            lambda: (_ for _ in ()).throw(RuntimeError('offline')))})()
+        self.assertIsNone(eddie_providers._groq_search_model(client))
+
+    def test_a_searching_turn_names_the_tool_on_the_right_model(self):
+        client = self._client()
+        self._run()
+        self.assertEqual(client.tried[0], 'openai/gpt-oss-120b')
+        first = client.sent[0]
+        self.assertEqual(first['tools'], [{'type': 'browser_search'}])
+        self.assertEqual(first['tool_choice'], 'required')
+        self.assertEqual(first['messages'][0]['content'], 'SEARCH SYSTEM')
+
+    def test_ordinary_chat_never_carries_the_tool(self):
+        client = self._client()
+        self._run(wants_search=False)
+        self.assertNotIn('tools', client.sent[0])
+        # And keeps off the budget the searches spend.
+        self.assertNotEqual(client.tried[0], 'openai/gpt-oss-120b')
+
+    def test_a_search_does_not_become_the_chat_model(self):
+        self._client()
+        self._run()
+        self.assertNotEqual(eddie_providers._GROQ_WORKING, 'openai/gpt-oss-120b')
+
+    def test_citation_marks_come_out_and_count_as_a_search(self):
+        client = self._client()
+        client.contents = {'openai/gpt-oss-120b':
+                           'The event is in September【1†L3-L9】 this year【2†L1-L2】.'}
+        events = self._run()
+        text = ''.join(d.get('text', '') for k, d in events if k == 'text')
+        self.assertEqual(text, 'The event is in September this year.')
+        self.assertIn('searching', [k for k, _ in events])
+
+    def test_sources_from_the_tool_run_are_listed(self):
+        client = self._client()
+        client.tool_results = {'openai/gpt-oss-120b': [
+            {'type': 'browser.search', 'search_results': {'results': [
+                {'url': 'https://apple.com/newsroom/x', 'title': 'Apple Newsroom'}]}}]}
+        events = self._run()
+        sources = [d for k, d in events if k == 'sources']
+        self.assertTrue(sources)
+        self.assertEqual(sources[0]['sources'][0]['url'], 'https://apple.com/newsroom/x')
+
+    def test_a_refused_tool_pauses_search_and_the_answer_says_so(self):
+        refused = _StatusError(403, 'browser_search is not available on your plan')
+        client = self._client(tool_failures={'openai/gpt-oss-120b': refused,
+                                             'openai/gpt-oss-20b': refused})
+        events = self._run()
+        self.assertIn('text', [k for k, _ in events], 'the turn produced no answer')
+        # One refusal is enough: 20b is not asked to refuse it again.
+        with_tool = [s for s in client.sent if s.get('tools')]
+        self.assertEqual(len(with_tool), 1)
+        self.assertNotIn('tools', client.sent[-1])
+        self.assertIn('CORRECTION', client.sent[-1]['messages'][0]['content'])
+        self.assertTrue(eddie_providers._groq_search_paused())
+        self.assertGreater(eddie_providers._GROQ_SEARCH_OFF_UNTIL - time.time(), 3000)
+        # And the next turn is not promised a search at all.
+        self.assertFalse(eddie_providers.can_search_live())
+        self.assertIn('not available', eddie_providers._GROQ_LAST_SEARCH_ERROR)
+
+    def test_a_spent_budget_is_not_mistaken_for_a_refusal(self):
+        self.assertFalse(eddie_providers._groq_tool_refused(
+            _StatusError(413, 'Request Entity Too Large')))
+        self.assertFalse(eddie_providers._groq_tool_refused(
+            RuntimeError('500 upstream')))
+        self.assertTrue(eddie_providers._groq_tool_refused(
+            _StatusError(400, 'Tool browser_search is not supported for this model')))
+
+    def test_links_in_brackets_are_left_alone(self):
+        text, marked = eddie_providers._groq_strip_citation_marks(
+            'See【https://who.int/a】 for details.')
+        self.assertFalse(marked)
+        self.assertIn('【https://who.int/a】', text)
