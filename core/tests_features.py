@@ -17,9 +17,9 @@ import json
 from django.test import SimpleTestCase, override_settings
 
 ALL_OFF = {'live': False, 'wallet': False, 'coins': False, 'kids': False, 'nearby': False,
-           'eddie': False}
+           'eddie': False, 'editor': False}
 ALL_ON = {'live': True, 'wallet': True, 'coins': True, 'kids': True, 'nearby': True,
-          'eddie': True}
+          'eddie': True, 'editor': True}
 
 # Every endpoint that makes Eddie do something. His usage count, the history of
 # your own conversations and deleting them stay open: they are your data.
@@ -34,8 +34,7 @@ class ConfigTellsTheClient(SimpleTestCase):
         body = json.loads(self.client.get('/api/config/').content)
         self.assertEqual(body['features'], ALL_OFF)
 
-    @override_settings(TF_FEATURES={'live': True, 'wallet': False, 'coins': False, 'kids': False,
-                                     'nearby': False, 'eddie': False})
+    @override_settings(TF_FEATURES=dict(ALL_OFF, live=True))
     def test_config_reflects_a_switch_turned_on(self):
         body = json.loads(self.client.get('/api/config/').content)
         self.assertIs(body['features']['live'], True)
@@ -125,3 +124,26 @@ class EddieIsSwitchedOff(SimpleTestCase):
             except Exception:
                 pass        # no database here; the point is what it did not call
         once.assert_not_called()
+
+
+class TheEditorIsASwitch(SimpleTestCase):
+    """The editor has no endpoint to lock: an edit is playback instructions kept
+    with the creator's own clip. So the switch is what the app is told, and it
+    has to be off unless the host turns it on."""
+
+    def test_off_unless_the_host_turns_it_on(self):
+        import os
+        from unittest import mock
+        from core_project import settings as project_settings
+        with mock.patch.dict(os.environ):
+            os.environ.pop('TF_FEATURE_EDITOR', None)
+            self.assertIs(project_settings._feature('editor'), False)
+        with mock.patch.dict(os.environ, {'TF_FEATURE_EDITOR': 'on'}):
+            self.assertIs(project_settings._feature('editor'), True)
+
+    def test_the_app_is_told(self):
+        from django.conf import settings
+        self.assertIn('editor', settings.TF_FEATURES)
+        with self.settings(TF_FEATURES=ALL_OFF):
+            body = json.loads(self.client.get('/api/config/').content)
+            self.assertIs(body['features']['editor'], False)

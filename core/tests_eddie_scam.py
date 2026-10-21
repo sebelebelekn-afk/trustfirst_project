@@ -20,8 +20,10 @@ from django.test import SimpleTestCase, override_settings
 
 from . import eddie_links, eddie_providers, eddie_views
 
-ALL_OFF = {'live': False, 'wallet': False, 'coins': False, 'kids': False, 'nearby': False}
-ALL_ON = {'live': True, 'wallet': True, 'coins': True, 'kids': True, 'nearby': True}
+ALL_OFF = {'live': False, 'wallet': False, 'coins': False, 'kids': False, 'nearby': False,
+           'eddie': False, 'editor': False}
+ALL_ON = {'live': True, 'wallet': True, 'coins': True, 'kids': True, 'nearby': True,
+          'eddie': True, 'editor': True}
 
 
 class LinksAreTakenApart(SimpleTestCase):
@@ -75,7 +77,8 @@ class EddieKnowsWhatIsOff(SimpleTestCase):
     def test_every_switched_off_feature_is_named(self):
         s = eddie_views.eddie_system()
         self.assertIn('RIGHT NOW ON TRUSTFIRST', s)
-        for words in ('live streaming', 'the wallet:', 'coins:', 'under-18s', 'people map'):
+        for words in ('live streaming', 'the wallet:', 'coins:', 'under-18s', 'people map',
+                      'the video editor'):
             self.assertIn(words, s)
 
     @override_settings(TF_FEATURES=ALL_ON)

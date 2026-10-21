@@ -4546,6 +4546,7 @@ textarea:focus-visible,
 .tf-off-kids [data-tf-feature~="kids"],
 .tf-off-nearby [data-tf-feature~="nearby"],
 .tf-off-eddie [data-tf-feature~="eddie"],
+.tf-off-editor [data-tf-feature~="editor"],
 .tf-off-wallet [data-tf-feature~="wallet-in"],
 .tf-off-coins [data-tf-feature~="coins-in"],
 .tf-off-wallet [data-tf-feature~="wallet"] {

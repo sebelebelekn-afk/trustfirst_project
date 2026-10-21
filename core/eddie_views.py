@@ -212,6 +212,8 @@ _PAUSED_WORDING = (
     ('coins', 'coins: buying, gifting or cashing them out'),
     ('kids', 'accounts for under-18s: you must be 18 to sign up'),
     ('nearby', 'the people map and the Nearby list'),
+    ('editor', 'the video editor (trimming, text, stickers, filters, captions): '
+               'a clip posts as it was recorded or picked'),
 )
 
 

@@ -15797,7 +15797,8 @@ var TF_PAUSED_COPY = {
     coins:  'Coins are paused for now.',
     kids:   'TrustFirst is for people 18 and over for now.',
     nearby: 'The map and Nearby are switched off for now.',
-    eddie:  'Eddie is switched off for now.'
+    eddie:  'Eddie is switched off for now.',
+    editor: 'The video editor is switched off for now.'
 };
 function tfFeatureGate(name) {
     if (tfFeature(name)) return true;
@@ -33832,7 +33833,7 @@ async function gsSaveCover() {
         // and only the URL is stored. Generated presets are small SVGs and are
         // fine to keep inline.
         if (cover && cover.indexOf('data:image/svg+xml') !== 0) {
-            var blob = await (await fetch(cover)).blob();
+            var blob = await tfUrlToBlob(cover);
             var path = 'groups/' + _gsetup.groupId + '/cover_' + Date.now() + '.jpg';
             var up = await sb.storage.from('media').upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: true });
             if (!up.error && up.data) {
@@ -36068,6 +36069,9 @@ function lgRecordedNext() {
     var ov = document.getElementById('lgReview'); if (ov) ov.remove();
     var blob = window._lastRecordedBlob;
     closeLgCam();
+    // With the editor off the recording goes straight to the posting page, in
+    // the format it was recorded in.
+    if (!tfEditorOn()) { tfPostClipDirect(blob, 'camera'); return; }
     // Register the recording as the selected clip so the caption/edit screen has content.
     if (blob) {
         try {
@@ -42139,6 +42143,9 @@ function _ensureClipInput() {
 // the old "open page, then auto-click" path a dead end.
 function pickTrustclipMedia() {
     var inp = _ensureClipInput();
+    // While the editor is off a clip is one video, posted as it is.
+    inp.multiple = tfEditorOn();
+    inp.accept = tfEditorOn() ? 'image/*,video/*' : 'video/*';
     try { inp.value = ''; } catch (e) {}
     inp.click();
 }
@@ -42177,7 +42184,7 @@ function openClipSelectorGallery(noPicker) {
                 '<i class="fa-solid fa-images" style="color:#007AFF;font-size:28px;"></i>' +
             '</div>' +
             '<p style="font-size:15px;font-weight:700;color:var(--text-primary,#000);text-align:center;">Select from your gallery</p>' +
-            '<p style="font-size:13px;color:#888;text-align:center;max-width:240px;">Tap to open your camera roll and pick photos or videos</p>' +
+            '<p style="font-size:13px;color:#888;text-align:center;max-width:240px;">' + (tfEditorOn() ? 'Tap to open your camera roll and pick photos or videos' : 'Tap to open your camera roll and pick a video') + '</p>' +
             '<button onclick="pickTrustclipMedia()" style="padding:13px 32px;border-radius:50px;background:#007AFF;border:none;color:white;font-size:15px;font-weight:700;cursor:pointer;">Open Gallery</button>' +
         '</div>';
 }
@@ -42277,6 +42284,46 @@ window._tfOrigin = window._tfOrigin || {};
 function tfSetOrigin(screen, from) { window._tfOrigin[screen] = from || null; }
 function tfGetOrigin(screen) { return window._tfOrigin[screen] || null; }
 
+// ── With the editor switched off (TF_FEATURE_EDITOR) ────────────────────────
+// A clip goes from the picker or the camera straight to the posting page, as
+// it was recorded or picked. A clip is a video, so a photo is turned away and
+// told where it can go. The edit state is emptied first, because the posting
+// page reads edState too, and a clip left there from an earlier edit would be
+// posted in place of the one just chosen.
+function tfEditorOn() { return tfFeature('editor'); }
+function _edClearForDirectPost() {
+    // The editor's autosave stops too, or it would write this empty state over
+    // the editor's own saved draft.
+    if (edState.autoSaveTimer) { clearInterval(edState.autoSaveTimer); edState.autoSaveTimer = null; }
+    edState.isDirty = false;
+    edState.clips = [];
+    edState.audioTracks = [];
+    edState.textOverlays = [];
+    edState.playheadMs = 0;
+    edState.history = [];
+    edState.historyIndex = -1;
+    try {
+        var area = document.getElementById('edPreviewArea');
+        if (area) area.querySelectorAll('[data-ov="1"]').forEach(function (w) { w.remove(); });
+    } catch (e) {}
+    window._tcCoverDataUrl = null;   // a new clip starts with no custom cover
+}
+function tfPostClipDirect(file, from) {
+    if (!file) { showToast('That clip did not come through. Try again.'); return; }
+    if (/^image\//.test(file.type || '')) {
+        showToast('Pick a video. A photo can go in a post or your story.');
+        return;
+    }
+    _edClearForDirectPost();
+    try { if (window._lastPickedVideoSrc && String(window._lastPickedVideoSrc).indexOf('blob:') === 0) URL.revokeObjectURL(window._lastPickedVideoSrc); } catch (e) {}
+    window._lastRecordedBlob = file;
+    window._lastPickedVideoSrc = URL.createObjectURL(file);
+    tfSetOrigin('trustclip', from || 'clip-selector');
+    closePage('clip-selector-overlay');
+    openNewTrustClipPost();
+    hideNavBar();
+}
+
 // Back from the trustclip page.
 function tcGoBack() {
     closePage('new-trust-clip-overlay');
@@ -42292,12 +42339,22 @@ function tcGoBack() {
         if (typeof openTrustclipDraftsScreen === 'function') { openTrustclipDraftsScreen(); return; }
     }
     if (from === 'feed') { if (typeof showNavBar === 'function') showNavBar(); return; }
+    // Posted straight from the picker with the editor off: back to the pick.
+    if (from === 'clip-selector') { openPage('clip-selector-overlay'); return; }
+    // With the editor off there is no editor to go back into.
+    if (!tfEditorOn()) { if (typeof showNavBar === 'function') showNavBar(); return; }
     // Default and the 'editor' case: back into the editor it was composed in.
     openPage('preview-edit-overlay');
 }
 
 function openPreviewEditScreen() {
     if (selectedClipFiles.length === 0) return;
+    if (!tfEditorOn()) {
+        // One video per clip: publishing keeps only the first of several anyway.
+        if (selectedClipFiles.length > 1) { showToast('Pick one video. A clip is one video for now.'); return; }
+        tfPostClipDirect(_clipFileObjects[selectedClipFiles[0]], 'clip-selector');
+        return;
+    }
     closePage('clip-selector-overlay');
 
     // Reset state
@@ -46958,6 +47015,7 @@ function edStartAutoSave() {
 
 // Draft recovery
 function checkDraftRecovery() {
+    if (!tfEditorOn()) return;   // the draft stays saved for when the editor is back
     try {
         var raw = localStorage.getItem('tf_editor_draft');
         if (!raw) return;
@@ -46980,6 +47038,11 @@ function checkDraftRecovery() {
     } catch(e) { if (e) console.warn('[Suppressed error]', e); }
 }
 async function draftContinue() {
+    if (!tfFeatureGate('editor')) {
+        var _dm = document.getElementById('draftRecoveryModal');
+        if (_dm) _dm.classList.remove('active');
+        return;
+    }
     var restoredVideo = false, hadVideo = false;
     try {
         var raw = localStorage.getItem('tf_editor_draft');
@@ -47128,6 +47191,11 @@ function openNewTrustClipPost() {
     openPage('new-trust-clip-overlay');
     var tcVid = document.getElementById('tcThumbVid');
     if (tcVid) {
+        // Undo the no-video placeholder from an earlier visit; the branches
+        // below put it back if there is still nothing to show.
+        tcVid.style.display = '';
+        var _oldPh = tcVid.parentElement && tcVid.parentElement.querySelector('.tc-thumb-placeholder');
+        if (_oldPh) _oldPh.remove();
         if (window._lastRecordedBlob) {
             tcVid.src = URL.createObjectURL(window._lastRecordedBlob);
             tcVid.muted = true; tcVid.loop = true;
@@ -47158,11 +47226,33 @@ function openNewTrustClipPost() {
     }
     // Every branch above asks the video to play and swallows a refusal, so the
     // tile could end up black with nothing saying why. Seek it as well: that
-    // paints a frame even where autoplay was denied.
-    if (tcVid && tcVid.getAttribute('src') !== null) _tfShowFirstFrame(tcVid);
+    // paints a frame even where autoplay was denied. The tile is one element
+    // reused for every clip and _tfShowFirstFrame marks an element done, so the
+    // mark is cleared first; otherwise only a visit's first clip got its frame.
+    if (tcVid && tcVid.getAttribute('src') !== null) { tcVid._tfFramed = false; _tfShowFirstFrame(tcVid); }
+    _tcSyncCoverTile();
 
     // Show the "Replying to @user" banner if this clip is a comment reply.
     if (typeof applyClipReplyBanner === 'function') applyClipReplyBanner();
+}
+
+// The tile shows the chosen cover once there is one, and the clip until then.
+// Choosing a cover used to change nothing on screen, so it looked like Edit
+// cover had not worked. The image sits under the "Edit cover" label.
+function _tcSyncCoverTile() {
+    var tile = document.getElementById('tcCoverThumb');
+    if (!tile) return;
+    var img = tile.querySelector('.tc-cover-img');
+    if (!window._tcCoverDataUrl) { if (img) img.remove(); return; }
+    if (!img) {
+        img = document.createElement('img');
+        img.className = 'tc-cover-img';
+        img.alt = '';
+        img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
+        var vid = document.getElementById('tcThumbVid');
+        tile.insertBefore(img, vid ? vid.nextSibling : tile.firstChild);
+    }
+    img.src = window._tcCoverDataUrl;
 }
 
 function openMoreOptionsScreen() {
@@ -47207,7 +47297,11 @@ async function _tcMaybeCompress(blob) {
 // so it is raced against a clock.
 async function _tcFrameFromBlob(blob) {
     try {
-        if (!blob || !window.VideoCompressor) return null;
+        // VideoCompressor is a top-level const, which is not a property of
+        // window, so checking window.VideoCompressor always said no and this
+        // never made a frame. Coming through the editor, its own frame below
+        // covered for that; without the editor nothing did.
+        if (!blob || typeof VideoCompressor === 'undefined') return null;
         var frame = await Promise.race([
             VideoCompressor.generateThumbnail(blob, 1),
             new Promise(function (res) { setTimeout(function () { res(null); }, 8000); })
@@ -47217,7 +47311,7 @@ async function _tcFrameFromBlob(blob) {
     // The editor may still be showing a decoded frame.
     try {
         var dataUrl = _edCaptureThumb();
-        if (dataUrl) return await (await fetch(dataUrl)).blob();
+        if (dataUrl) return tfDataUrlToBlob(dataUrl);
     } catch (e) { /* nothing to be had */ }
     return null;
 }
@@ -47297,6 +47391,16 @@ async function submitTrustClip() {
         var _prefix = '↩️ Replying to @' + _rc.username + (_rc.text ? ': "' + _rc.text + '"' : '');
         text = text ? (_prefix + '\n\n' + text) : _prefix;
     }
+
+    // Read the cover now, not after the video upload: by then the next clip
+    // may have cleared it or chosen its own.
+    var coverAtShare = window._tcCoverDataUrl || null;
+    var postedFromEditor = tfGetOrigin('trustclip') === 'editor';
+    // Sharing ends this visit as surely as Back does, and only Back cleared
+    // the origin: the next clip opened with the last one's, and went back to
+    // wherever that one came from.
+    tfSetOrigin('trustclip', null);
+    if (postedFromEditor) tfSetOrigin('editor', null);
 
     // Close screens immediately — post in background
     _edStopMedia();
@@ -47382,9 +47486,9 @@ async function submitTrustClip() {
 
         // Upload the cover chosen in Edit cover (a frame or a picked photo) as the
         // clip's thumbnail. Without this, trustclips had no thumbnail at all.
-        if (window._tcCoverDataUrl && window.sb && currentUser) {
+        if (coverAtShare && window.sb && currentUser) {
             try {
-                var coverBlob = await (await fetch(window._tcCoverDataUrl)).blob();
+                var coverBlob = await tfUrlToBlob(coverAtShare);
                 var coverPath = currentUser.id + '/' + clipId + '_cover.jpg';
                 thumbnailUrl = await tfUploadPublicMedia(coverBlob, 'image', 'trustclips', coverPath);
             } catch (e) { console.warn('[TrustClip] cover upload failed:', e && e.message); }
@@ -47594,7 +47698,15 @@ is_demo: window._tcIsDemoClip || false,
     window._tcAudience = null;
     window._lastRecordedBlob = null;
     window._lastPickedVideoSrc = null;
-    localStorage.removeItem('tf_editor_draft');
+    // The editor's draft is this clip's only if the clip came from the editor;
+    // otherwise it stays for the editor to offer back. Its autosave stops as
+    // well: it kept running, so the posted edit was saved again as a draft
+    // seconds later and offered back on the next visit.
+    if (postedFromEditor) {
+        if (edState.autoSaveTimer) { clearInterval(edState.autoSaveTimer); edState.autoSaveTimer = null; }
+        edState.isDirty = false;
+        localStorage.removeItem('tf_editor_draft');
+    }
 }
 
 // Capture a real still frame from a video into a persistent base64 data URL
@@ -47786,6 +47898,9 @@ async function continueTrustclipDraft(draftId) {
         window._lastRecordedBlob = null;
         window._lastPickedVideoSrc = URL.createObjectURL(blob);
     }
+    // A clip left in edState from an earlier edit would otherwise be posted in
+    // place of the draft's own video.
+    _edClearForDirectPost();
     // openNewTrustClipPost() wires the video into #tcThumbVid from the globals.
     if (typeof openNewTrustClipPost === 'function') openNewTrustClipPost();
     else openPage('new-trust-clip-overlay');
@@ -50854,9 +50969,12 @@ function chatBubbleAction(action, msgEncoded) {
     }
 
     function edGoNext() {
-    var overlay = document.getElementById('preview-edit-overlay');
-    if (overlay) overlay.style.display = 'none';
-    openPage('new-trust-clip-overlay');
+    // openNewTrustClipPost is what hands the posting page this clip: the video
+    // in the cover tile, the stickers and cuts that go up with it, and where
+    // Back returns to. Opening the page directly skipped all of that, so after
+    // editing, the cover tile was blank and the edit was not posted.
+    tfSetOrigin('trustclip', 'editor');
+    openNewTrustClipPost();
     hideNavBar();
 }
 
@@ -51035,7 +51153,9 @@ function openEditCoverSuite() {
         }
         return '';
     })();
-    if (_ecSrc) { var vid = suite.querySelector('#ecPreviewVid'); if(vid){vid.src=_ecSrc;vid.play().catch(function(){});} }
+    // Seeked as well as played, so a refused autoplay still shows a frame
+    // rather than a black box until a frame in the strip is tapped.
+    if (_ecSrc) { var vid = suite.querySelector('#ecPreviewVid'); if(vid){vid.src=_ecSrc;vid.play().catch(function(){});_tfShowFirstFrame(vid);} }
     (document.getElementById('app')||document.body).appendChild(suite);
 
     // Capture REAL frames from the video for the cover filmstrip (was fake numbered cells)
@@ -51096,8 +51216,11 @@ function _ecCaptureCoverFrames(videoSrc, n) {
             finish();
         });
         setTimeout(function () { if (!why) why = 'timed out'; finish(); }, 8000);
+        var started = false;
         v.addEventListener('loadedmetadata', function() {
-            var dur = (v.duration && isFinite(v.duration)) ? v.duration : 0;
+          if (started) return;
+          started = true;
+          _tfKnownDuration(v, function (dur) {
             for (var i = 0; i < n; i++) times.push(dur > 0 ? Math.min(dur - 0.05, dur * i / n) : 0);
             var idx = 0;
             var grab = function() {
@@ -51116,9 +51239,39 @@ function _ecCaptureCoverFrames(videoSrc, n) {
                 try { v.currentTime = times[idx]; } catch(e) { v.removeEventListener('seeked', onSeek); frames.push(null); idx++; grab(); }
             };
             grab();
+          });
         });
         v.src = videoSrc;
     });
+}
+
+// Call back with a video's length in seconds, finding it first if need be.
+//
+// A recording from the in-app camera is a MediaRecorder WebM, which has no
+// length written into it, so the browser says Infinity until it has read to
+// the end. Every frame time worked out from that came to zero: the cover strip
+// was eighteen copies of the first frame, which on a phone is usually black,
+// and so was any cover picked from it. Asking for a time far past the end
+// makes the browser find the real end. Waits for that seek to land, so the
+// next seek's 'seeked' is the next seek's. 0 if the length cannot be found.
+function _tfKnownDuration(v, cb) {
+    var finished = false;
+    function known() { return isFinite(v.duration) && v.duration > 0; }
+    function check() { if (known()) done(); }
+    function done() {
+        if (finished) return;
+        finished = true;
+        v.removeEventListener('durationchange', check);
+        v.removeEventListener('seeked', check);
+        var dur = known() ? v.duration : 0;
+        if (v.seeking) v.addEventListener('seeked', function () { cb(dur); }, { once: true });
+        else cb(dur);
+    }
+    if (known()) { done(); return; }
+    v.addEventListener('durationchange', check);
+    v.addEventListener('seeked', check);
+    try { v.currentTime = 1e101; } catch (e) { done(); return; }
+    setTimeout(done, 3000);
 }
 window.switchCoverTab = function(tab) {
     var cc = document.getElementById('ecTabCover'), cg = document.getElementById('ecTabGrid');
@@ -51150,6 +51303,7 @@ window.edSaveCover = function() {
     } catch (e) { /* tainted/undecodable frame: keep whatever cover was there */ }
     var suite = document.getElementById('editCoverSuite');
     if (suite) suite.remove();
+    _tcSyncCoverTile();
     showToast(window._tcCoverDataUrl ? 'Cover saved ✅' : 'Could not capture that frame');
     triggerHaptic(15);
 };
@@ -51168,6 +51322,7 @@ window.edCoverFromCameraRoll = function() {
                 window._tcCoverDataUrl = r.result;
                 var suite = document.getElementById('editCoverSuite');
                 if (suite) suite.remove();
+                _tcSyncCoverTile();
                 showToast('Cover set ✅');
             };
             r.readAsDataURL(inp.files[0]);
@@ -53014,6 +53169,38 @@ function _tfPutToR2(url, file, headers, onProgress) {
         xhr.timeout = 10 * 60 * 1000;
         xhr.send(file);
     });
+}
+
+// An image the page made itself, as a Blob ready to upload.
+//
+// Covers are held as data: URLs (a canvas frame, or a photo read with
+// FileReader) and were turned back into bytes with fetch(). connect-src allows
+// blob: but not data:, so the browser refused every one of those fetches before
+// it started. The failure was caught and nothing said so: a chosen TrustClip
+// cover was replaced by the automatic frame, and a group cover photo was never
+// saved. Decoding it here needs no network permission at all.
+function tfDataUrlToBlob(u) {
+    u = String(u || '');
+    var comma = u.indexOf(',');
+    if (u.slice(0, 5).toLowerCase() !== 'data:' || comma < 0) return null;
+    var head = u.slice(5, comma), body = u.slice(comma + 1);
+    var b64 = /;base64$/i.test(head);
+    var mime = (b64 ? head.slice(0, -7) : head) || 'text/plain';
+    var bytes;
+    if (b64) {
+        var bin = atob(body);
+        bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    } else {
+        bytes = new TextEncoder().encode(decodeURIComponent(body));
+    }
+    return new Blob([bytes], { type: mime });
+}
+
+// Any URL the page holds, as a Blob: data: decoded here, the rest fetched.
+async function tfUrlToBlob(u) {
+    if (/^data:/i.test(u || '')) return tfDataUrlToBlob(u);
+    return await (await fetch(u)).blob();
 }
 
 /**

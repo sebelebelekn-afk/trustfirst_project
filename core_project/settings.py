@@ -105,6 +105,9 @@ CONTACT_EMAIL = (os.environ.get('CONTACT_EMAIL', '') or 'contacttrustfirst@gmail
 #                      @eddie, and the AI-written line on the algorithm page
 #   TF_FEATURE_NEARBY  the people map and the Nearby list, and with them the
 #                      upload of anyone's live location
+#   TF_FEATURE_EDITOR  the TrustClip video editor: trimming, splitting, speed,
+#                      text, stickers, filters, music and captions. While off, a
+#                      clip posts as it was recorded or picked
 #
 # The wallet and coins are off completely, withdrawals and cash-out included.
 # When each was switched off the only account holding any money or coins was an
@@ -115,12 +118,18 @@ CONTACT_EMAIL = (os.environ.get('CONTACT_EMAIL', '') or 'contacttrustfirst@gmail
 # Eddie is off because the free AI plans it ran on are meant for trying things
 # out: tight limits, models retired at short notice, and on Google's free plan,
 # chats used to improve Google's products. It comes back on a paid plan.
+#
+# The editor is off until it has been tested end to end on a phone. Unlike the
+# others it holds nothing anyone else could reach: an edit is playback
+# instructions stored with the creator's own clip, so there is no endpoint to
+# lock and hiding the way in is the whole switch.
 def _feature(name):
     return (os.environ.get('TF_FEATURE_' + name.upper(), '') or '').strip().lower() in (
         '1', 'true', 'yes', 'on')
 
 
-TF_FEATURES = {name: _feature(name) for name in ('live', 'wallet', 'coins', 'kids', 'nearby', 'eddie')}
+TF_FEATURES = {name: _feature(name) for name in (
+    'live', 'wallet', 'coins', 'kids', 'nearby', 'eddie', 'editor')}
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

@@ -239,8 +239,9 @@ function openLgComposer(files) {
                 ? '<video id="lgPreviewMedia" src="' + url + '" autoplay loop playsinline style="max-width:100%;max-height:100%;object-fit:contain;"></video>'
                 : '<img id="lgPreviewMedia" src="' + url + '" style="max-width:100%;max-height:100%;object-fit:contain;">') +
             '<div style="position:absolute;right:10px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:14px;">' +
+                // Every tool here opens the video editor, so its switch hides them all.
                 TOOLS.map(function (t) {
-                    return '<div onclick="' + t.fn + '" style="display:flex;align-items:center;gap:8px;cursor:pointer;justify-content:flex-end;">' +
+                    return '<div data-tf-feature="editor" onclick="' + t.fn + '" style="display:flex;align-items:center;gap:8px;cursor:pointer;justify-content:flex-end;">' +
                         '<span style="color:#fff;font-size:13px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,0.8);">' + t.label + '</span>' +
                         '<div style="width:36px;height:36px;border-radius:11px;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
                             '<i class="fa-solid ' + t.icon + '" style="color:#fff;font-size:15px;"></i></div>' +
@@ -388,6 +389,8 @@ function lgComposerNext() {
     if (_lgSound && _lgSound.id) window._tcSoundId = _lgSound.id;
     // Next skips the editor, so Back must return here rather than opening one.
     if (typeof tfSetOrigin === 'function') tfSetOrigin('trustclip', 'story-camera');
+    // And the posting page must not pick up a clip left in the editor earlier.
+    if (typeof _edClearForDirectPost === 'function') _edClearForDirectPost();
     closeLgComposer();
     if (typeof closeLgCam === 'function') { try { closeLgCam(); } catch (e) {} }
     if (typeof openNewTrustClipPost === 'function') openNewTrustClipPost();
@@ -396,6 +399,7 @@ function lgComposerNext() {
 
 // The Edit tool hands the media to the full editor via the normal clip flow.
 function lgToolEditor() {
+    if (typeof tfFeatureGate === 'function' && !tfFeatureGate('editor')) return;
     var files = window._lgComposerFiles || [];
     if (!files.length) return;
     window._clipFileObjects = files;
@@ -414,6 +418,7 @@ function lgToolEditor() {
 // Waits for the editor's video to be ready rather than guessing a delay, because
 // opening a panel before the clip has loaded lands on an empty editor.
 function lgTool(kind) {
+    if (typeof tfFeatureGate === 'function' && !tfFeatureGate('editor')) return;
     lgToolEditor();
     var tries = 0;
     (function waitForEditor() {
