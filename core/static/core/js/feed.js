@@ -1889,7 +1889,6 @@ function launchApp() {
     app.classList.add('authenticated');
 
     isAdmin = currentUser && currentUser.is_admin === true;
-    _tfMarkMoneyHeld();
 
     // Both banners sit above the sticky header, so they are what the status bar
     // overlaps. They had no safe-area padding, which is why the orange strip ran
@@ -14177,6 +14176,10 @@ async function _mentionSearchUsers(q, el, start, end) {
             rows = r.data || [];
         }
     } catch (e) { console.warn('[Mention]', e && e.message); }
+    // A switched-off Eddie is not offered: tagging him would get no reply.
+    if (!tfFeature('eddie')) {
+        rows = rows.filter(function (u) { return (u.username || '').toLowerCase() !== 'eddie'; });
+    }
 
     var hint = q
         ? (rows.length ? null : 'No one found for "' + q + '"')
@@ -15790,10 +15793,11 @@ function tfFeature(name) {
 }
 var TF_PAUSED_COPY = {
     live:   'Live is paused for now.',
-    wallet: 'Adding money is paused for now.',
+    wallet: 'The wallet is switched off for now.',
     coins:  'Coins are paused for now.',
     kids:   'TrustFirst is for people 18 and over for now.',
-    nearby: 'The map and Nearby are switched off for now.'
+    nearby: 'The map and Nearby are switched off for now.',
+    eddie:  'Eddie is switched off for now.'
 };
 function tfFeatureGate(name) {
     if (tfFeature(name)) return true;
@@ -15806,21 +15810,6 @@ function _tfApplyFeatureClasses() {
         document.documentElement.classList.toggle('tf-off-' + k, f[k] === false);
     });
 }
-// The wallet's way out stays reachable for anyone who still holds money,
-// because paused is not closed: the Terms promise a balance can always be
-// withdrawn. Everyone else simply does not see it.
-async function _tfMarkMoneyHeld() {
-    if (tfFeature('wallet') || !window.sb || !currentUser) return;
-    // Real money only. Coins cannot be used or cashed out while they are off,
-    // so holding some is no reason to show a wallet.
-    var held = false;
-    try {
-        var w = await sb.from('wallets').select('balance').eq('user_id', currentUser.id).maybeSingle();
-        held = !!(w && w.data && Number(w.data.balance) > 0);
-    } catch (e) { /* no wallet row: nothing held */ }
-    document.documentElement.classList.toggle('tf-has-money', held);
-}
-
 (async function loadConfig() {
     try {
         const res = await fetch('/api/config/');
@@ -29989,7 +29978,8 @@ function _eddieTagged(text) {
 // No thinking indicator: a comment thread is not a chat window, and a spinner
 // sitting in someone else's conversation is noise. The reply simply appears.
 async function _eddieAnswerMention(sourceType, sourceId, text, postId, replyingToEddie) {
-    if (!sourceId) return;
+    // Switched off, Eddie answers nobody; the server would refuse anyway.
+    if (!sourceId || !tfFeature('eddie')) return;
     if (!replyingToEddie && !_eddieTagged(text)) return;
 
     try {
@@ -48344,8 +48334,8 @@ if (videoBtn) videoBtn.style.display = isSelf ? 'none' : '';
     }
 
     function openWalletSheet(type, amount) {
-        // Paused is not closed: only money coming in stops. Withdrawing stays.
-        if (type === 'addmoney' && !tfFeatureGate('wallet')) return;
+        // The wallet is closed completely while it is off, withdrawing too.
+        if (type !== 'buycoins' && !tfFeatureGate('wallet')) return;
         if (type === 'buycoins' && !tfFeatureGate('coins')) return;
         // Withdraw needs the balance to decide what to show. If it is not known
         // yet, fetch it and open again rather than guessing.
@@ -55980,6 +55970,7 @@ function eddieCopyCode(btn) {
 }
 
 function openEddieChat() {
+    if (!tfFeatureGate('eddie')) return;
     _eddieStyles();
     var existing = document.getElementById('eddie-overlay');
     if (existing) { existing.style.display = 'flex'; return; }

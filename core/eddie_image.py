@@ -37,7 +37,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django_ratelimit.decorators import ratelimit
 
-from .api_views import _verify_supabase_jwt, _is_valid_uuid
+from .api_views import _verify_supabase_jwt, _is_valid_uuid, _feature_on
 from .eddie_views import (
     _consume, _limit_message, _sb_headers, _ensure_conversation, _save_message,
 )
@@ -543,6 +543,7 @@ def _upload_image(user_id, raw):
 @csrf_exempt
 @ratelimit(key='ip', rate='6/m', method='POST', block=True)
 @require_http_methods(["POST"])
+@_feature_on('eddie')
 def eddie_image(request):
     """Generate an image for Eddie. Counts against the daily image limit."""
     try:

@@ -353,6 +353,10 @@ def build_interest_summary(user_id, force=False):
 
     summary, ai_topics = '', []
     try:
+        # While Eddie is switched off, nothing goes to an AI provider, so the
+        # plain sentence below writes the summary instead.
+        if not (getattr(settings, 'TF_FEATURES', {}) or {}).get('eddie'):
+            raise LookupError('eddie is switched off')
         from . import eddie_providers
         spec = {'history': [], 'prompt': prompt, 'attachments': [],
                 'route_text': 'summarise interests'}

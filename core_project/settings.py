@@ -81,7 +81,7 @@ if _render_host:
 #
 # Do not bump it for a typo fix. The notice means "this changed and you should
 # look", and a notice that cries wolf is worse than none.
-TERMS_VERSION = (os.environ.get('TERMS_VERSION', '') or '2026-10-18').strip()
+TERMS_VERSION = (os.environ.get('TERMS_VERSION', '') or '2026-10-21').strip()
 
 # Where people write to us. Used in messages the server sends back, such as the
 # answer to an account that cannot be deleted from the app. One variable to
@@ -98,22 +98,29 @@ CONTACT_EMAIL = (os.environ.get('CONTACT_EMAIL', '') or 'contacttrustfirst@gmail
 # not a lock.
 #
 #   TF_FEATURE_LIVE    live streams, and the viewer gifts that only exist in them
-#   TF_FEATURE_WALLET  adding money to a wallet
+#   TF_FEATURE_WALLET  the wallet: adding money, withdrawing it, and the page itself
 #   TF_FEATURE_COINS   coins: buying them, gifts, and cashing them out
 #   TF_FEATURE_KIDS    under-18 accounts linked to a parent; while off, sign-up is 18+
+#   TF_FEATURE_EDDIE   Eddie, the AI assistant: chat, pictures, voice, replies to
+#                      @eddie, and the AI-written line on the algorithm page
 #   TF_FEATURE_NEARBY  the people map and the Nearby list, and with them the
 #                      upload of anyone's live location
 #
-# Paused is not closed. Withdrawing money from a wallet keeps working, because
-# that money is the person's and the Terms promise they can take it out. Coins
-# are off completely, cash-out included: when they were switched off the only
-# account holding any was an admin's, so nobody else's value is held up.
+# The wallet and coins are off completely, withdrawals and cash-out included.
+# When each was switched off the only account holding any money or coins was an
+# admin's own test balance (wallets checked 2026-10-21), so nobody else's value
+# is held up. If that ever changes, a balance has to be paid out before its way
+# out is closed: the Terms tell anyone affected to write to us.
+#
+# Eddie is off because the free AI plans it ran on are meant for trying things
+# out: tight limits, models retired at short notice, and on Google's free plan,
+# chats used to improve Google's products. It comes back on a paid plan.
 def _feature(name):
     return (os.environ.get('TF_FEATURE_' + name.upper(), '') or '').strip().lower() in (
         '1', 'true', 'yes', 'on')
 
 
-TF_FEATURES = {name: _feature(name) for name in ('live', 'wallet', 'coins', 'kids', 'nearby')}
+TF_FEATURES = {name: _feature(name) for name in ('live', 'wallet', 'coins', 'kids', 'nearby', 'eddie')}
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

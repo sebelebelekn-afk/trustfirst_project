@@ -273,6 +273,12 @@ async function tfDeskExcludeIds() {
     var out = [];
     if (!me || !me.id) return out;
     out.push(me.id);
+    // Eddie's account, while Eddie is switched off: following a bot that
+    // answers nobody is not a suggestion.
+    if (typeof tfFeature === 'function' && !tfFeature('eddie') &&
+            typeof _TF_EDDIE_ID !== 'undefined') {
+        out.push(_TF_EDDIE_ID);
+    }
     try {
         var f = await sb.from('follows')
             .select('following_id')

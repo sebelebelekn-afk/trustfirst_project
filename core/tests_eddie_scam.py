@@ -75,7 +75,7 @@ class EddieKnowsWhatIsOff(SimpleTestCase):
     def test_every_switched_off_feature_is_named(self):
         s = eddie_views.eddie_system()
         self.assertIn('RIGHT NOW ON TRUSTFIRST', s)
-        for words in ('live streaming', 'adding money to a wallet', 'coins:', 'under-18s', 'people map'):
+        for words in ('live streaming', 'the wallet:', 'coins:', 'under-18s', 'people map'):
             self.assertIn(words, s)
 
     @override_settings(TF_FEATURES=ALL_ON)
@@ -114,8 +114,10 @@ class LinkChecksReachTheModel(SimpleTestCase):
         self.assertIn('<<<\n' + post, prompt)
 
 
-@override_settings(RATELIMIT_ENABLE=False, TF_FEATURES=ALL_OFF)
+@override_settings(RATELIMIT_ENABLE=False, TF_FEATURES=dict(ALL_OFF, eddie=True))
 class TheChatPassesItOn(SimpleTestCase):
+    # Eddie itself switched on, everything else off: the chat has to be open to
+    # be tested, and the paused list has to have something in it.
 
     def setUp(self):
         cache.clear()

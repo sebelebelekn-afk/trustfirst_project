@@ -34,7 +34,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django_ratelimit.decorators import ratelimit
 
-from .api_views import _verify_supabase_jwt, _is_valid_uuid
+from .api_views import _verify_supabase_jwt, _is_valid_uuid, _feature_on
 from .eddie_views import _sb_headers
 
 
@@ -198,6 +198,7 @@ def _groq_tts(text):
 @csrf_exempt
 @ratelimit(key='ip', rate='30/m', method='POST', block=True)
 @require_http_methods(["POST"])
+@_feature_on('eddie')
 def eddie_speak(request):
     """Return a URL for spoken audio, synthesising only on a cache miss."""
     try:

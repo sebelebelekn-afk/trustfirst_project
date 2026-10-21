@@ -25,7 +25,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django_ratelimit.decorators import ratelimit
 
-from .api_views import _verify_supabase_jwt, _is_valid_uuid
+from .api_views import _verify_supabase_jwt, _is_valid_uuid, _feature_on
 from . import eddie_providers
 
 
@@ -208,7 +208,7 @@ MAKING IMAGES
 # is switched back on.
 _PAUSED_WORDING = (
     ('live', 'live streaming, and the gifts sent during a live'),
-    ('wallet', 'adding money to a wallet (taking out money already in one still works)'),
+    ('wallet', 'the wallet: adding money to it and withdrawing from it'),
     ('coins', 'coins: buying, gifting or cashing them out'),
     ('kids', 'accounts for under-18s: you must be 18 to sign up'),
     ('nearby', 'the people map and the Nearby list'),
@@ -518,6 +518,7 @@ def _release_mention(mention_id):
 @csrf_exempt
 @ratelimit(key='ip', rate='10/m', method='POST', block=True)
 @require_http_methods(["POST"])
+@_feature_on('eddie')
 def eddie_mention(request):
     """Answer an @eddie tag on a post or comment, as a public comment."""
     try:
@@ -773,6 +774,7 @@ def _friendly_error(exc):
 @csrf_exempt
 @ratelimit(key='ip', rate='20/m', method='POST', block=True)
 @require_http_methods(["POST"])
+@_feature_on('eddie')
 def eddie_chat(request):
     """Streaming chat with Eddie (Server-Sent Events)."""
     try:

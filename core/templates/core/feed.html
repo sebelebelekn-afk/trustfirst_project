@@ -49,7 +49,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=111">
+<link rel="stylesheet" href="{% static 'core/css/feed.css' %}?v=112">
     <!-- The laptop layout. Every rule inside is behind a min-width query,
          so a phone downloads it and applies none of it. -->
     <link rel="stylesheet" href="{% static 'core/css/desktop.css' %}?v=14">
@@ -556,7 +556,7 @@ function authenticateUser() {
      assistant and its conversations within reach without spending a column
      on either. Hidden below 1000px, so the phone never sees them. -->
 <div id="tfDock">
-    <button class="tf-dock-btn tf-dock-eddie" onclick="tfDeskCreate('eddie')"
+    <button class="tf-dock-btn tf-dock-eddie" data-tf-feature="eddie" onclick="tfDeskCreate('eddie')"
             title="Ask Eddie" aria-label="Ask Eddie">
         <svg viewBox="0 0 512 512" aria-hidden="true">
             <circle cx="256" cy="256" r="256" fill="#0a0a0a"/>
@@ -584,7 +584,7 @@ function authenticateUser() {
             <i class="fa-solid fa-pen-nib"></i> Write a post</div>
         <div class="tf-create-opt" data-tf-feature="live" onclick="tfDeskCreate('live')">
             <i class="fa-solid fa-tower-broadcast"></i> Go live</div>
-        <div class="tf-create-opt" onclick="tfDeskCreate('eddie')">
+        <div class="tf-create-opt" data-tf-feature="eddie" onclick="tfDeskCreate('eddie')">
             <i class="fa-solid fa-wand-magic-sparkles"></i> Ask Eddie</div>
         <p class="tf-create-note">Recording and editing clips happens in the
             TrustFirst app, where the camera and the editor live.</p>
@@ -629,7 +629,7 @@ function authenticateUser() {
                 <div class="add-option" onclick="togglePlusMenu(); setTimeout(openStoryPicker,50);"><i class="fa-solid fa-camera"></i> Story</div>
                 <div class="add-option" data-tf-feature="live" onclick="togglePlusMenu(); openLiveStreamFeed();"><i class="fa-solid fa-tower-broadcast"></i> Go Live</div>
                 <div class="add-option" onclick="triggerThought()"><i class="fa-regular fa-lightbulb"></i> Thoughts</div>
-                <div class="add-option" onclick="togglePlusMenu(); openEddieChat();"><i class="fa-solid fa-wand-magic-sparkles"></i> Ask Eddie</div>
+                <div class="add-option" data-tf-feature="eddie" onclick="togglePlusMenu(); openEddieChat();"><i class="fa-solid fa-wand-magic-sparkles"></i> Ask Eddie</div>
             </div>
         </div>
     </div>
@@ -4489,14 +4489,14 @@ function authenticateUser() {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.9/dist/livekit-client.umd.min.js" crossorigin="anonymous"></script>
-<script src="{% static 'core/js/feed.js' %}?v=310"></script>
+<script src="{% static 'core/js/feed.js' %}?v=311"></script>
 <script src="{% static 'core/js/feed-legal.js' %}?v=76"></script>
 <script src="{% static 'core/js/verify.js' %}?v=77"></script>
 <script src="{% static 'core/js/story-music.js' %}?v=74"></script>
 <script src="{% static 'core/js/admin.js' %}?v=81"></script>
     <!-- Loaded after feed.js because it calls navHome and navGoTo from it.
          Everything inside is gated on the window being at least 1000px. -->
-    <script src="{% static 'core/js/desktop.js' %}?v=16"></script>
+    <script src="{% static 'core/js/desktop.js' %}?v=17"></script>
     <!-- Approving a sign-in from the phone. After feed.js, because it wraps
          showAuthError and calls _tfAccessToken from it. -->
     <script src="{% static 'core/js/device-login.js' %}?v=1"></script>

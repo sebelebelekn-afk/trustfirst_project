@@ -4539,15 +4539,16 @@ textarea:focus-visible,
 
 /* Paused features (TF_FEATURE_* on the host; see tfFeature in feed.js).
    Every door to a paused feature carries data-tf-feature, and the class the
-   config puts on <html> hides it. The wallet's own door stays for anyone who
-   still holds coins or a balance (tf-has-money), so the way out is never
-   hidden from the people the Terms promise it to; only the ways in go. */
+   config puts on <html> hides it. The wallet's own door used to stay for
+   anyone still holding a balance; the wallet is closed completely now, because
+   the only balance was the owner's own test money. */
 .tf-off-live [data-tf-feature~="live"],
 .tf-off-kids [data-tf-feature~="kids"],
 .tf-off-nearby [data-tf-feature~="nearby"],
+.tf-off-eddie [data-tf-feature~="eddie"],
 .tf-off-wallet [data-tf-feature~="wallet-in"],
 .tf-off-coins [data-tf-feature~="coins-in"],
-.tf-off-wallet:not(.tf-has-money) [data-tf-feature~="wallet"] {
+.tf-off-wallet [data-tf-feature~="wallet"] {
     display: none !important;
 }
 .tf-paused-note { display: none; }

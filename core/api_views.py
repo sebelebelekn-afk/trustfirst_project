@@ -1367,6 +1367,7 @@ def _require_admin(request):
 @ratelimit(key='ip', rate='20/m', method='POST', block=True)
 @csrf_exempt
 @require_http_methods(["POST"])
+@_feature_on('eddie')
 def eddie_post(request):
     """Publish a post authored by Eddie. Admin only.
 
@@ -2016,6 +2017,7 @@ def wallet_cash_out_coins(request):
 @ratelimit(key='ip', rate='5/m', method='POST', block=True)
 @csrf_exempt
 @require_http_methods(["POST"])
+@_feature_on('wallet')
 def wallet_request_withdrawal(request):
     """Ask to be paid out. The money leaves the wallet now, not on approval."""
     try:
