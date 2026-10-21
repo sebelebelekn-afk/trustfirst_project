@@ -140,6 +140,15 @@ async function tfCheckTermsVersion() {
     } catch (e) {}
 }
 
+// What changed, in a sentence or two, for the versions where that is worth
+// saying on the sheet itself. The Terms promise to tell people in the app about
+// a change that affects them, and "we are updating our Terms" alone does not.
+var TF_TERMS_WHATS_NEW = {
+    '2026-10-21': 'Some parts of TrustFirst are switched off for now: Eddie, live streams, ' +
+                  'coins, gifts and the wallet, the video editor, the people map, and accounts ' +
+                  'for under-18s. Your posts, clips, messages and groups are not affected.'
+};
+
 function tfShowTermsSheet(version) {
     if (document.getElementById('tfTermsOverlay')) return;
 
@@ -155,10 +164,13 @@ function tfShowTermsSheet(version) {
             'box-shadow:0 -16px 50px rgba(0,0,0,0.3);">' +
             '<h2 style="font-size:30px;line-height:1.15;font-weight:800;letter-spacing:-0.02em;' +
                 'color:var(--text-primary,#000);margin:0 0 16px;">Updates to our Terms of Service</h2>' +
-            '<p style="font-size:16px;line-height:1.5;color:var(--text-secondary,#555);margin:0 0 26px;">' +
+            '<p style="font-size:16px;line-height:1.5;color:var(--text-secondary,#555);margin:0 0 ' + (TF_TERMS_WHATS_NEW[version] ? '14px' : '26px') + ';">' +
                 'We&rsquo;re updating our <a href="/terms/" target="_blank" rel="noopener" ' +
                 'style="color:#007AFF;text-decoration:none;">Terms of Service</a>. ' +
                 'Now&rsquo;s a good time to read them.</p>' +
+            (TF_TERMS_WHATS_NEW[version]
+                ? '<p style="font-size:15px;line-height:1.5;color:var(--text-secondary,#555);margin:0 0 26px;">' + TF_TERMS_WHATS_NEW[version] + '</p>'
+                : '') +
             '<button id="tfTermsOk" style="width:100%;padding:17px;border-radius:32px;border:none;' +
                 'background:var(--text-primary,#111);color:var(--card-bg,#fff);font-size:17px;' +
                 'font-weight:700;cursor:pointer;">Got it</button>' +
@@ -1535,7 +1547,7 @@ function openGoDarkModal() {
             '<div style="width:64px;height:64px;border-radius:50%;background:rgba(88,86,214,0.15);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;">' +
             '<i class="fa-solid fa-moon" style="font-size:28px;color:#5856D6;"></i></div>' +
             '<h3 style="font-size:20px;font-weight:800;color:var(--text-primary,#000);margin-bottom:6px;">You\'re in the dark</h3>' +
-            '<p style="color:#888;font-size:14px;margin-bottom:20px;line-height:1.5;">Your circle knows you\'re taking time away.<br>Back on <b>' + until.toLocaleDateString('en-ZA', {weekday:'long',month:'long',day:'numeric'}) + '</b></p>' +
+            '<p style="color:#888;font-size:14px;margin-bottom:20px;line-height:1.5;">Notifications are quiet on this device until then.<br>Back on <b>' + until.toLocaleDateString('en-ZA', {weekday:'long',month:'long',day:'numeric'}) + '</b></p>' +
             '<button onclick="cancelGoDark()" style="width:100%;padding:14px;border-radius:14px;border:none;background:rgba(255,59,48,0.1);color:#FF3B30;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:10px;">End Early &amp; Come Back</button>' +
             '</div>';
     } else {
@@ -1544,7 +1556,7 @@ function openGoDarkModal() {
             '<i class="fa-solid fa-moon" style="font-size:28px;color:#5856D6;"></i></div>' +
             '<h3 style="font-size:20px;font-weight:800;color:var(--text-primary,#000);margin-bottom:8px;">Go Dark</h3>' +
             '<p style="color:#888;font-size:13px;margin-bottom:20px;line-height:1.6;padding:0 10px;">' +
-            'Your circle gets a warm note: <i>"[Your name] is taking some time away, they\'ll be back."</i><br>No guilt. No anxiety. Just space.</p></div>' +
+            'Notifications still come in and count up, just without a sound, a buzz or a banner. It applies on this device, and nobody else is told.<br>No guilt. No anxiety. Just space.</p></div>' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">' +
             durations.map(function(d) {
                 return '<button onclick="activateGoDark(' + d.value + ')" style="padding:16px;border-radius:16px;border:1.5px solid rgba(88,86,214,0.25);background:rgba(88,86,214,0.06);color:var(--text-primary,#000);font-size:15px;font-weight:700;cursor:pointer;transition:0.2s;" onmouseover="this.style.background=\'rgba(88,86,214,0.15)\'" onmouseout="this.style.background=\'rgba(88,86,214,0.06)\'">' + d.label + '</button>';
@@ -1604,7 +1616,7 @@ function _tfShowGoDarkCard(until) {
                 '<i class="fa-solid fa-moon" style="font-size:30px;color:#5856D6;display:block;margin-bottom:14px;"></i>' +
                 '<div style="color:#fff;font-size:17px;font-weight:800;margin-bottom:7px;">You\'re going dark</div>' +
                 '<div style="color:rgba(255,255,255,0.6);font-size:13.5px;line-height:1.5;">' +
-                    'Notifications are muted and your circle knows you\'re taking space.<br>' +
+                    'Notifications are muted on this device.<br>' +
                     'See you on ' + escapeHtml(when) + '.' +
                 '</div>' +
             '</div>' +
