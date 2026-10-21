@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>TrustFirst · A social app that knows who is real</title>
-<meta name="description" content="A social app that knows who is real. Accounts can be verified against a real identity, messages are encrypted, and creators keep 80% of every gift. Free on Android and iPhone.">
+<meta name="description" content="A social app that knows who is real. Accounts can be verified against a real identity, and typed messages in a one-to-one chat are end-to-end encrypted. Free on Android and iPhone.">
 <meta name="theme-color" content="#000000">
 <!-- Four icons, not one, because Google is the fussiest reader of them.
      The SVG alone was live and correct for days and Google kept showing the
@@ -27,7 +27,7 @@
 <!-- Open Graph, so a link pasted into WhatsApp shows a card instead of a bare URL -->
 <meta property="og:site_name" content="TrustFirst">
 <meta property="og:title" content="A social app that knows who is real.">
-<meta property="og:description" content="Verified accounts, encrypted messages, and creators keep 80% of every gift.">
+<meta property="og:description" content="Verified accounts, and one-to-one messages only the two of you can read.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://gettrustfirst.co.za/">
 <!-- Absolute, and a real picture of the app. Scrapers do not resolve relative
@@ -39,7 +39,7 @@
 <meta property="og:image:alt" content="TrustFirst, with a TrustClip playing on a phone">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="A social app that knows who is real.">
-<meta name="twitter:description" content="Verified accounts, encrypted messages, and creators keep 80% of every gift.">
+<meta name="twitter:description" content="Verified accounts, and one-to-one messages only the two of you can read.">
 <meta name="twitter:image" content="https://gettrustfirst.co.za/og.jpg">
 
 <!-- What the logo actually is, said in the one format Google reads as an
@@ -66,7 +66,7 @@
         "height": 512
       },
       "image": "https://gettrustfirst.co.za/og.jpg",
-      "description": "A social app that knows who is real. Accounts can be verified against a real identity, messages are encrypted, and creators keep 80% of every gift.",
+      "description": "A social app that knows who is real. Accounts can be verified against a real identity, and typed messages in a one-to-one chat are end-to-end encrypted.",
       "areaServed": "ZA",
       "sameAs": ["https://app.gettrustfirst.co.za/"]
     },
@@ -270,45 +270,8 @@ section:first-of-type{border-top:none;}
   height:26px;display:flex;align-items:center;justify-content:center;
 }
 .phone-notch i{display:block;width:78px;height:5px;border-radius:3px;background:#2a2a2e;}
-.phone-body{padding:0 0 18px;}
 .phone-shot{max-width:280px;}
 .phone-shot img{display:block;width:100%;height:auto;}
-/* Scoped to the screenshot: a bare .phone img also caught the avatar in the
-   conversation above and outranked .avatar, blowing it up to full width. */
-
-/* the Eddie exchange, rendered rather than screenshotted --------------------
-   This is a real question somebody asked and a real answer Eddie gave, marked
-   up in the app's own styles. Not a mockup of a conversation that never
-   happened, and not a picture of one either, so it stays readable, selectable
-   and translatable. */
-.post{padding:16px 15px 6px;}
-.post-top{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
-.avatar{width:38px;height:38px;border-radius:50%;flex:none;object-fit:cover;background:#2c2c2e;}
-img.avatar{background:#000;}
-.avatar.eddie{
-  background:#0a0a0a;border:1px solid rgba(255,255,255,0.14);
-  display:flex;align-items:center;justify-content:center;
-}
-.avatar.eddie svg{width:22px;height:22px;}
-.who{min-width:0;}
-.who b{display:block;font-size:14.5px;font-weight:700;line-height:1.2;}
-.who span{font-size:12.5px;color:var(--muted);}
-.badge-ai{
-  display:inline-block;vertical-align:2px;margin-left:6px;
-  font-size:9.5px;font-weight:800;letter-spacing:0.06em;
-  background:#fff;color:#000;border-radius:4px;padding:1px 4px;
-}
-.tick{width:14px;height:14px;vertical-align:-2px;margin-left:4px;}
-.post p{margin:0;font-size:14.5px;line-height:1.5;}
-.post .meta{
-  display:flex;gap:18px;align-items:center;margin-top:12px;
-  font-size:12.5px;color:var(--muted);
-}
-.reply{
-  margin:14px 0 0;padding:14px 15px 16px;
-  border-top:1px solid rgba(255,255,255,0.08);
-  background:rgba(255,255,255,0.02);
-}
 
 /* alternating rows --------------------------------------------------------- */
 .row{display:grid;gap:26px;align-items:center;grid-template-columns:1fr;}
@@ -356,8 +319,8 @@ img.avatar{background:#000;}
     <img class="logo" src="icon.svg" alt="TrustFirst">
     <h1 translate="no">A social app that knows who is real.</h1>
     <p class="sub">
-      Accounts can be verified against a real identity, messages are encrypted,
-      and creators keep 80% of every gift they are sent.
+      Accounts can be verified against a real identity, and what you type in a
+      one&#8209;to&#8209;one chat is end&#8209;to&#8209;end encrypted.
     </p>
 
     <div class="stack">
@@ -369,85 +332,25 @@ img.avatar{background:#000;}
     <p class="note" id="heroNote"></p>
   </section>
 
-  <section id="eddie">
-    <span class="eyebrow">Ask Eddie</span>
-    <h2>There is an assistant in the feed.</h2>
-
-    <div class="row">
-      <div class="row-text">
-        <p>
-          Mention <b>@eddie</b> under any post and it answers there, in the thread,
-          where everyone can see it. No separate app, no tab to switch to.
-        </p>
-        <p>
-          It answers questions and makes pictures. Every reply is labelled
-          <b>AI</b>, because an assistant that could be mistaken for a person is a
-          strange thing to put in an app about knowing who is real.
-        </p>
-      </div>
-
-      <!-- A real exchange from the app, marked up in the app's own styles rather
-           than shipped as a screenshot: it stays sharp on every screen, can be
-           selected and translated, and weighs nothing. The wording is verbatim.
-           The person who asked is not named, because their name is theirs. -->
-      <div class="phone" aria-label="A question in the feed and Eddie's reply">
-        <div class="phone-notch"><i></i></div>
-        <div class="phone-body">
-          <article class="post">
-            <div class="post-top">
-              <img class="avatar" src="icon.svg" alt="" width="38" height="38">
-              <div class="who">
-                <b>TrustFirst<svg class="tick" viewBox="0 0 24 24" aria-label="Verified"><circle cx="12" cy="12" r="11" fill="#1d9bf0"/><path d="M17 8.5l-6.3 6.5L7 11.4" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></b>
-                <span>@trustfirst</span>
-              </div>
-            </div>
-            <p>Hey <b style="color:var(--blue);">@eddie</b> which one would you choose
-              between the Samsung Z fold 8 and the iPhone duo</p>
-            <div class="meta"><span>1 comment</span></div>
-          </article>
-
-          <div class="reply">
-            <div class="post-top">
-              <div class="avatar eddie" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round">
-                  <circle cx="8.5" cy="9.5" r="1.4" fill="#fff" stroke="none"></circle>
-                  <circle cx="15.5" cy="9.5" r="1.4" fill="#fff" stroke="none"></circle>
-                  <path d="M8 14.5c1.1 1.2 2.5 1.8 4 1.8s2.9-.6 4-1.8"></path>
-                </svg>
-              </div>
-              <div class="who">
-                <b>Eddie<span class="badge-ai">AI</span></b>
-                <span>replied in the thread</span>
-              </div>
-            </div>
-            <p>I&rsquo;d go with the Samsung Z Fold 8. Its foldable display lets you
-              multitask like a small tablet while still fitting in a pocket, and the
-              cameras and battery are strong competitors to the iPhone Duo.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <section id="what">
     <span class="eyebrow">What you get</span>
     <h2>Three things it does properly.</h2>
 
     <div class="row">
       <div class="row-text">
-        <h3>Messages only you can read</h3>
+        <h3>Messages only the two of you can read</h3>
         <p>
-          Direct messages are end&#8209;to&#8209;end encrypted. They are scrambled on
-          your phone and only unscrambled on theirs, so we cannot read them. There
-          is nothing on our side to leak or hand over.
+          What you type in a one&#8209;to&#8209;one chat is end&#8209;to&#8209;end
+          encrypted. It is scrambled on your phone and only unscrambled on theirs,
+          so we cannot read it. Group chats, photos and voice notes are kept in
+          private storage, but they are not end&#8209;to&#8209;end encrypted.
         </p>
       </div>
       <div class="row-text">
-        <h3>A wallet in Rands</h3>
+        <h3>Going dark</h3>
         <p>
-          Top up with a card, send a creator a gift, and they keep <b>80%</b> of it.
-          Card details are typed on the payment provider&rsquo;s own page and never
-          touch this app.
+          Mute notifications for a day or up to a month. They still come in and
+          count up, just without a sound, a buzz or a banner. Nobody else is told.
         </p>
       </div>
     </div>
@@ -456,14 +359,8 @@ img.avatar{background:#000;}
       <div class="row-text">
         <h3>TrustClips</h3>
         <p>
-          Short videos from people you follow, with the editor built in: trim,
-          captions, music, and a cutout tool that runs on your own phone rather
-          than on somebody&rsquo;s server.
-        </p>
-        <h3 style="margin-top:26px;">Going dark</h3>
-        <p>
-          Mute everything for a day or a month. The people who follow you are told
-          you are taking space, so silence is not mistaken for being ignored.
+          Short videos. Record one or pick one from your phone, add a caption,
+          choose the frame that shows as its cover, and post it.
         </p>
       </div>
 
