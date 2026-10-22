@@ -188,6 +188,9 @@ function tfDeskTabFor(el) {
 function tfDeskCurrentTab() {
     var app = document.getElementById('app');
     if (!app) return 'home';
+    // Saved, Archive and the rest can be opened from a Settings row; they are
+    // still Settings while they sit in its right column.
+    if (document.documentElement.classList.contains('tf-setpane')) return 'settings';
     var best = 'home', bestZ = -Infinity;
     for (var i = 0; i < app.children.length; i++) {
         var el = app.children[i];
@@ -205,6 +208,7 @@ function tfDeskCurrentTab() {
 
 function tfDeskSyncPage() {
     tfDeskWideSync();   // also takes the wide layout off when the window narrows
+    tfDeskSettingsPanes();
     if (tfIsDesktop()) tfDeskSetActive(tfDeskCurrentTab());
 }
 
@@ -773,18 +777,19 @@ function tfDeskSplitSettings() {
     split.appendChild(body);
 
     groups.forEach(function (g, idx) {
-        var box = document.createElement('div');
-        box.className = 'tf-set-group' + (idx === 0 ? ' tf-set-on' : '');
-        box.setAttribute('data-group', String(idx));
-        // The heading moves into the group: the left list already names it, and
-        // repeating it above the rows says the same thing twice.
-        g.nodes.forEach(function (n) { box.appendChild(n); });
-        body.appendChild(box);
-
         // Sentence case, except the brand, which is not a word to be lowered.
         var pretty = g.title.replace(/&amp;/g, '&');
         pretty = pretty.charAt(0).toUpperCase() + pretty.slice(1).toLowerCase();
         pretty = pretty.replace(/trustfirst/gi, 'TrustFirst');
+
+        var box = document.createElement('div');
+        box.className = 'tf-set-group' + (idx === 0 ? ' tf-set-on' : '');
+        box.setAttribute('data-group', String(idx));
+        // The stylesheet puts this at the head of the right column, in place of
+        // the small capitals title, which is removed below.
+        box.setAttribute('data-title', pretty);
+        g.nodes.forEach(function (n) { box.appendChild(n); });
+        body.appendChild(box);
 
         var cat = document.createElement('div');
         cat.className = 'tf-set-cat' + (idx === 0 ? ' tf-on' : '');
@@ -802,6 +807,7 @@ function tfDeskSplitSettings() {
     });
 
     content.appendChild(split);
+    overlay.classList.add('tf-set-has-split');
     tfDeskSettingsPrune();
 
     // Searching has to reach every group, not only the open one.
@@ -816,13 +822,77 @@ function tfDeskSplitSettings() {
 function tfDeskSettingsShow(idx) {
     var overlay = document.getElementById('settings-overlay');
     if (!overlay) return;
+    // A page opened from a row covers the rows; picking a category, the open
+    // one included, is how you get back to them.
+    tfDeskCloseSettingsDetail();
     overlay.querySelectorAll('.tf-set-group').forEach(function (g) {
         g.classList.toggle('tf-set-on', g.getAttribute('data-group') === String(idx));
     });
     overlay.querySelectorAll('.tf-set-cat').forEach(function (c) {
         c.classList.toggle('tf-on', c.getAttribute('data-group') === String(idx));
     });
+    var body = overlay.querySelector('.tf-set-body');
+    if (body) body.scrollTop = 0;
     overlay.scrollTop = 0;
+}
+
+// Pages opened from Settings go in its right column.
+//
+// About fifty rows open something: a page that is always in the document, a
+// page built on the spot, a sheet. Rather than teach every opener where to put
+// its page on a laptop, anything that opens over Settings while it is showing,
+// and is the size of a page, is moved into the right column beside the list,
+// the way a conversation sits beside the chat list in Messages. When Settings
+// closes, what it opened goes with it instead of being left at full width.
+var TF_SET_NOT_DETAIL = ['settings-overlay', 'tfTermsOverlay', 'tfMsgEmpty',
+                         'toastNotif', 'appSplashScreen', 'tfDock'];
+
+function tfDeskSettingsOpen() {
+    var set = document.getElementById('settings-overlay');
+    return !!(tfIsDesktop() && set && set.classList.contains('tf-set-has-split') &&
+              getComputedStyle(set).display !== 'none');
+}
+
+function tfDeskCloseSettingsDetail() {
+    document.querySelectorAll('.tf-set-detail, .tf-set-detail-fixed').forEach(function (el) {
+        if (getComputedStyle(el).display !== 'none') el.style.display = 'none';
+    });
+}
+
+function tfDeskSettingsPanes() {
+    var open = tfDeskSettingsOpen();
+    document.documentElement.classList.toggle('tf-setpane', open);
+    if (!open) {
+        // Narrowed to a phone width, the page just becomes the phone's page
+        // again. Settings closed on a laptop, it is put away with Settings.
+        var closed = tfIsDesktop();
+        document.querySelectorAll('.tf-set-detail, .tf-set-detail-fixed').forEach(function (el) {
+            if (closed && getComputedStyle(el).display !== 'none') el.style.display = 'none';
+            el.classList.remove('tf-set-detail', 'tf-set-detail-fixed', 'tf-set-lift');
+        });
+        return;
+    }
+    var set = document.getElementById('settings-overlay');
+    var setZ = parseInt(getComputedStyle(set).zIndex, 10) || 0;
+    var box = set.getBoundingClientRect();
+    var app = document.getElementById('app');
+    var layers = Array.prototype.slice.call(app ? app.children : [])
+        .concat(Array.prototype.slice.call(document.body.children));
+    layers.forEach(function (el) {
+        if (el === set || TF_SET_NOT_DETAIL.indexOf(el.id) !== -1) return;
+        if (el.classList.contains('tf-set-detail') || el.classList.contains('tf-set-detail-fixed')) return;
+        var cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') return;
+        if (cs.position !== 'absolute' && cs.position !== 'fixed') return;
+        // Under Settings it was not opened from it.
+        var z = parseInt(cs.zIndex, 10);
+        if (!isFinite(z) || z < setZ) return;
+        // A page covers the column; a toast, a menu or a small sheet does not.
+        var r = el.getBoundingClientRect();
+        if (r.width < box.width * 0.9 || r.height < box.height * 0.9) return;
+        el.classList.add(cs.position === 'fixed' ? 'tf-set-detail-fixed' : 'tf-set-detail');
+        if (z <= setZ) el.classList.add('tf-set-lift');
+    });
 }
 
 // Would this row actually be on screen, ignoring whether its own group is the

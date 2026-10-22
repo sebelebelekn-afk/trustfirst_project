@@ -599,65 +599,139 @@
 .tf-acct-item.tf-danger { color: #FF3B30; }
 
 /* --------------------------------------------------------------------------
-   Settings as two panes.
+   Settings as two columns.
 
    On a phone this is one long scroll of 131 rows, which is right for a thumb.
-   With a 600px column and a mouse it becomes a list of categories on the left
-   and the chosen one on the right, the way every desktop settings screen has
-   worked for thirty years.
+   On a laptop it is two columns, the way X lays its settings out: the list on
+   the left, under the title and the search, and whatever it opens on the
+   right. Picking a category shows its rows in the right column; a row that
+   opens a page of its own opens that page there too, and the list stays put.
 
-   The hiding is done here rather than in JS on purpose. The script only groups
-   the rows and marks one active; if the window is dragged narrow, these rules
-   stop applying and every group shows again, which is exactly the original
-   phone layout. Nothing has to be undone.
+   desktop.js only groups the rows (tfDeskSplitSettings) and moves pages opened
+   from Settings into the right column (tfDeskSettingsPanes). If the window is
+   dragged narrow, none of these rules apply and every group shows again,
+   which is exactly the original phone layout. Nothing has to be undone.
    -------------------------------------------------------------------------- */
 @media (min-width: 1000px) {
-    .tf-set-split {
-        display: flex;
-        align-items: flex-start;
-        gap: 18px;
+    :root {
+        --tf-set-list: 380px;   /* the list column */
+        --tf-set-head: 128px;   /* the title and the search above the list */
     }
+
+    #settings-overlay.tf-set-has-split {
+        overflow: hidden !important;
+        background: var(--bg-primary, #fff) !important;
+    }
+    #settings-overlay.tf-set-has-split > .header-container {
+        width: var(--tf-set-list);
+        height: var(--tf-set-head);
+        box-sizing: border-box;
+        border-right: 1px solid var(--border-color, #e6e8ea);
+    }
+    /* The box that held the cards lays nothing out any more: the list and the
+       rows are placed against the overlay itself. */
+    #settings-overlay.tf-set-has-split > .header-container + div { padding: 0 !important; }
 
     .tf-set-nav {
-        width: 210px;
-        flex-shrink: 0;
-        position: sticky;
-        top: 0;
+        position: absolute;
+        top: var(--tf-set-head);
+        bottom: 0;
+        left: 0;
+        width: var(--tf-set-list);
+        box-sizing: border-box;
+        overflow-y: auto;
+        padding: 4px 0 24px;
+        border-right: 1px solid var(--border-color, #e6e8ea);
+        background: var(--bg-primary, #fff);
     }
 
+    /* Full-width rows rather than pills. The open one is shaded and bold, with
+       no coloured edge: a blue border on a rounded row bent round its corner
+       and looked like blue leaking out of the button. */
     .tf-set-cat {
-        padding: 11px 13px;
-        border-radius: 10px;
-        font-size: 14px;
-        font-weight: 600;
-        color: var(--text-primary, #000);
-        cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
-        margin-bottom: 2px;
-        border-left: 3px solid transparent;
+        padding: 15px 22px;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-primary, #000);
+        cursor: pointer;
     }
-    .tf-set-cat:hover { background: var(--bg-secondary, rgba(0, 0, 0, 0.05)); }
-    .tf-set-cat.tf-on {
-        background: var(--bg-secondary, rgba(0, 0, 0, 0.05));
-        border-left-color: #007AFF;
-        font-weight: 800;
-    }
+    .tf-set-cat:hover,
+    .tf-set-cat.tf-on { background: var(--bg-secondary, rgba(0, 0, 0, 0.05)); }
+    .tf-set-cat.tf-on { font-weight: 800; }
     .tf-set-cat i { color: #c3c9d0; font-size: 12px; }
 
-    .tf-set-body { flex: 1; min-width: 0; }
+    .tf-set-body {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: var(--tf-set-list);
+        right: 0;
+        box-sizing: border-box;
+        overflow-y: auto;
+        padding: 26px 32px 80px;
+        background: var(--bg-secondary, #f2f2f7);
+    }
+    [data-theme="dark"] .tf-set-body { background: #000; }
+
+    /* The open category's name, at the head of the right column. */
+    .tf-set-group::before {
+        content: attr(data-title);
+        display: block;
+        font-size: 22px;
+        font-weight: 800;
+        color: var(--text-primary, #000);
+        margin: 0 0 18px;
+    }
 
     /* One group at a time. Searching lifts this, because a match in a group
        you are not looking at is still a match. */
     .tf-set-split:not(.tf-set-searching) .tf-set-group:not(.tf-set-on) {
         display: none;
     }
+    .tf-set-searching .tf-set-group + .tf-set-group { margin-top: 26px; }
 
-    /* The overlay scrolls as one page rather than the pane scrolling inside a
-       column that also scrolls, which traps the wheel. */
+    /* Without the split, the overlay scrolls as one page. */
     #settings-overlay { overflow-y: auto; }
+
+    /* A page opened from Settings, moved into the right column beside the
+       list. Most pages sit in the app's box; tf-set-detail-fixed is for the
+       ones pinned to the window instead, which need the sidebar counted in.
+       :is(#app, body) carries an id's weight: Saved, Archive and a few others
+       are placed by id in the wide-screen rules further down, and a plain
+       class lost to them, so those two opened 300px off to the right. */
+    .tf-setpane :is(#app, body) .tf-set-detail {
+        left: var(--tf-set-list) !important;
+        right: 0 !important;
+        width: auto !important;
+        max-width: none !important;
+        transform: none !important;
+    }
+    .tf-setpane :is(#app, body) .tf-set-detail-fixed {
+        left: calc(var(--tf-nav-w) + 44px + var(--tf-set-list)) !important;
+        right: 24px !important;
+        width: auto !important;
+        max-width: none !important;
+        transform: none !important;
+    }
+    /* A few pages share Settings' z-index and come earlier in the page, so
+       without this they would open underneath it. */
+    .tf-setpane :is(#app, body) .tf-set-lift { z-index: 6201 !important; }
+}
+
+/* --------------------------------------------------------------------------
+   The page behind the columns follows the theme.
+
+   It is black for the phone frame, and dark mode overrides that. Light mode
+   did not, so on a laptop the sidebar's black labels sat on a black page:
+   only the open row and the unread dots could be seen.
+   -------------------------------------------------------------------------- */
+@media (min-width: 1000px) {
+    html:not([data-theme="dark"]),
+    html:not([data-theme="dark"]) body { background: var(--bg-primary, #fff); }
 }
 
 /* --------------------------------------------------------------------------
@@ -708,9 +782,6 @@
         max-width: none !important;
     }
 
-    /* With the room to do it, the category list stops being a cramped strip. */
-    .tf-wide .tf-set-nav { width: 260px; }
-    .tf-wide .tf-set-split { gap: 28px; }
 }
 
 /* --------------------------------------------------------------------------
