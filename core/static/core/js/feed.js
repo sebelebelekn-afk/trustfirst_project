@@ -537,12 +537,19 @@ var TF_DEVICE_KEYS = [
     'tf_voice_translation_seen'
 ];
 
-function tfWipeAccountScopedCache() {
+// keepSession leaves Supabase's own sign-in keys. Signing out wants them gone,
+// but tfClaimCacheOwner runs once the new account has signed in, when the
+// token stored there is already the new account's. Deleting it too left that
+// account signed out of the database (every request went as a guest) and then
+// signed out of the app on its next open.
+function tfWipeAccountScopedCache(keepSession) {
     var doomed = [];
     try {
         for (var i = 0; i < localStorage.length; i++) {
             var k = localStorage.key(i);
-            if (k && TF_DEVICE_KEYS.indexOf(k) === -1) doomed.push(k);
+            if (!k || TF_DEVICE_KEYS.indexOf(k) !== -1) continue;
+            if (keepSession && /^sb-.+-auth-token/.test(k)) continue;
+            doomed.push(k);
         }
         doomed.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {} });
     } catch (e) {}
@@ -558,7 +565,7 @@ function tfClaimCacheOwner(userId) {
     var prev = null;
     try { prev = localStorage.getItem('tf_cache_owner'); } catch (e) {}
     var switched = !!prev && prev !== userId;
-    if (switched) tfWipeAccountScopedCache();
+    if (switched) tfWipeAccountScopedCache(true);
     try { localStorage.setItem('tf_cache_owner', userId); } catch (e) {}
     return switched;
 }
@@ -1267,6 +1274,10 @@ localStorage.setItem('tf_burst', JSON.stringify(burstAttempts));
                 'step-login'
             );
         }
+
+        // Sign-up and reopening the app both drop a previous account's cache
+        // before anything paints from it; signing in with a password did not.
+        tfClaimCacheOwner(authData.user.id);
 
         // The device record, the login log and the E2E key check are the same
         // bookkeeping sign-up does, and just as with sign-up none of it decides
@@ -24766,6 +24777,7 @@ async function _finishPhoneLogin(authUser) {
         }
         if (profile.is_banned) { await DB.signOut(); return showAuthError('This account has been permanently banned for policy violations.', 'step-login-phone'); }
         if (profile.is_locked) { await DB.signOut(); return showAuthError('This account is locked and frozen. Contact support to unlock.', 'step-login-phone'); }
+        tfClaimCacheOwner(profile.id);   // as the password sign-in does
         currentUser = profile;
         window.currentUser = profile;
         try { localStorage.setItem('tf_user', JSON.stringify(profile)); } catch (e) {}
