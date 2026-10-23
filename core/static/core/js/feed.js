@@ -2548,6 +2548,37 @@ async function initFeed() {
     renderParentRequests();
 }
 
+// Post cards already in a list, by post id, each with its media box (or null),
+// so a fresh render of the same posts can keep what has already loaded.
+function _tfShownCards(list) {
+    var out = {};
+    list.querySelectorAll('.post-card[data-post-id]').forEach(function (card) {
+        out[card.getAttribute('data-post-id')] = card.querySelector('.post-media-box');
+    });
+    return out;
+}
+
+function _tfMediaSig(box) {
+    if (!box) return '';
+    return Array.prototype.map.call(box.querySelectorAll('img, video'), function (m) {
+        return m.getAttribute('data-src') || m.getAttribute('src') || '';
+    }).join('|');
+}
+
+// A new card for a post that was already showing: no second fade-in, and the
+// media box it already had in place of new <img> elements that load again.
+// Only when it is the same media, so an edited post still shows its new
+// pictures, and never a box whose picture failed, which deserves a retry.
+function _tfKeepShown(card, shown) {
+    var id = card.getAttribute('data-post-id');
+    if (!id || !Object.prototype.hasOwnProperty.call(shown, id)) return;
+    card.style.animation = 'none';
+    var old = shown[id], fresh = card.querySelector('.post-media-box');
+    if (!old || !fresh || old.querySelector('.tf-img-fallback')) return;
+    if (_tfMediaSig(old) !== _tfMediaSig(fresh)) return;
+    fresh.replaceWith(old);
+}
+
 // Pull-to-refresh on feed
 (function() {
     var startY = 0, pulling = false, refreshEl = null;
@@ -20124,6 +20155,7 @@ function renderLanguageSelector() {
 var _videoFeedContext = 'feed';
 var _videoFeedList   = [];
 var _videoFeedIdx    = 0;
+var _tfNavUnderViewer = null;   // the nav bar's display before the viewer hid it
 
 // Playing a video from the feed used to overwrite #reel-overlay's markup, which
 // destroyed #reel-scroller — the element the TrustClip page renders into. That
@@ -20176,7 +20208,13 @@ function openContextualVideo(videoUrl, context, startIndex, clipArray) {
         '<div id="tfClipScroller">' + cards + '</div>';
 
     var navBar = document.querySelector('.nav-container');
-    if (navBar) navBar.style.display = 'none';
+    if (navBar) {
+        // Closing puts back what the page underneath had: the clips page,
+        // for one, has no nav bar. A viewer replacing a viewer keeps the
+        // first one's record.
+        if (!existing) _tfNavUnderViewer = navBar.style.display;
+        navBar.style.display = 'none';
+    }
     _tfSilenceUnder('tfClipViewer', ov);
     (document.getElementById('app') || document.body).appendChild(ov);
 
@@ -21328,28 +21366,21 @@ function closeReelsPage() {
         container.remove();
     }
 
-    // Restore nav bar
+    // Restore nav bar, as the page underneath had it
     var navBar = document.querySelector('.nav-container');
-    if (navBar) navBar.style.display = 'flex';
+    if (navBar) navBar.style.display = (clipViewer && _tfNavUnderViewer !== null) ? _tfNavUnderViewer : 'flex';
+    _tfNavUnderViewer = null;
 
     // Start again whatever opening the viewer silenced, and only that.
     _tfRestoreUnder('tfClipViewer');
 
-    // Navigate back to where the user came from
+    // The viewer is a layer over whatever opened it, and that page is still
+    // underneath, scrolled where it was. Closing used to go through navHome,
+    // which scrolls the feed to the top and closes every page, so watching a
+    // video sent you back to the first post, or out of Saved or a profile.
     if (_videoFeedContext === 'profile') {
         var profileOverlay = document.getElementById('profile-overlay');
         if (profileOverlay) profileOverlay.style.display = 'block';
-        return;
-    }
-
-    // Navigate back to feed
-    navHome();
-
-    // Ensure feed is visible/scrolled properly
-    var feedPanels = document.getElementById('feed-panels');
-    if (feedPanels) {
-        feedPanels.style.display = '';
-        feedPanels.scrollTop = 0;
     }
 }
 
@@ -30049,16 +30080,37 @@ initFeed = async function() {
     var feed = document.getElementById('feed-panels');
     if (!feed) return;
 
-    showSkeleton(feed, 'post', 4);
+    // Placeholders only while there is nothing to show. A refresh of a feed
+    // already on screen used to blank it to grey skeletons first.
+    if (!feed.querySelector('.post-card')) showSkeleton(feed, 'post', 4);
 
-// Show cached posts immediately while Supabase loads
+// Show cached posts immediately while Supabase loads.
+//
+// Up to a day old, not five minutes. Past five minutes an open showed only
+// skeletons until the network answered, and no photo could even start loading
+// before then, though the cached posts' photos were already on the phone. The
+// network render below replaces these within a second or two.
+//
+// Only the account that saved it reads it. Not every way of signing in clears
+// the previous account's cache first, and a feed can hold posts that only
+// that account was allowed to see.
+var feedOwner = (currentUser && currentUser.id) || null;
 var cacheEntry = null;
 try { cacheEntry = JSON.parse(localStorage.getItem('tf-cached-feed') || 'null'); } catch(e) {}
 var cacheAge = cacheEntry && cacheEntry.ts ? Date.now() - cacheEntry.ts : Infinity;
-var cachedPosts = (cacheAge < 5 * 60 * 1000 && cacheEntry && cacheEntry.posts) ? cacheEntry.posts : [];
+var cacheMine = !!(feedOwner && cacheEntry && cacheEntry.uid === feedOwner);
+var cachedPosts = (cacheMine && cacheAge < 24 * 60 * 60 * 1000 && Array.isArray(cacheEntry.posts)) ? cacheEntry.posts : [];
 if (cachedPosts.length) {
+    var shownBefore = _tfShownCards(feed);
     feed.innerHTML = '';
-    cachedPosts.forEach(function(p){ if(p) feed.appendChild(renderRealPostCard(p)); });
+    cachedPosts.forEach(function(p){
+        // Clips are left out here as they are in the network render below;
+        // otherwise a cached clip showed and then vanished.
+        if (!p || isTrustClipPost(p)) return;
+        var c = renderRealPostCard(p);
+        _tfKeepShown(c, shownBefore);
+        feed.appendChild(c);
+    });
 }
 
     currentFeedPage = 1;
@@ -30138,8 +30190,7 @@ async function notifyParentOfChildAction(actionType, details) {
 }
 
 
-if (posts.length) localStorage.setItem('tf-cached-feed', JSON.stringify({ ts: Date.now(), posts: posts }));
-    feed.innerHTML = '';
+if (posts.length && feedOwner) { try { localStorage.setItem('tf-cached-feed', JSON.stringify({ ts: Date.now(), uid: feedOwner, posts: posts })); } catch(e) {} }
 
     if (posts.length === 0 && cachedPosts.length === 0) {
         feed.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 32px;gap:16px;">' +
@@ -30149,10 +30200,20 @@ if (posts.length) localStorage.setItem('tf-cached-feed', JSON.stringify({ ts: Da
             '</div>';
         return;
     }
+    // Nothing came back but the cached posts are on screen: keep them. The
+    // feed used to be cleared before this check, which left it empty.
     if (posts.length === 0) return;
 
+    // The cached render is already on screen, usually with its photos loaded.
+    // Rebuilding every card threw each <img> away, so photos blanked and
+    // loaded again, and every card replayed its fade-in from transparent.
+    // Posts that were already showing keep both.
+    var shown = _tfShownCards(feed);
+    feed.innerHTML = '';
     posts.filter(function(post) { return !isTrustClipPost(post); }).forEach(function(post) {
-        feed.appendChild(renderRealPostCard(post));
+        var card = renderRealPostCard(post);
+        _tfKeepShown(card, shown);
+        feed.appendChild(card);
     });
 
     var _pg3 = document.getElementById('profile-grid');
@@ -34393,17 +34454,34 @@ function triggerSweep() {
 }
 
 // --- Navigation Actions ---
-function navHome() {
+// The pages navHome closes. Any of them showing means Home is being reached
+// from somewhere else, rather than tapped while already on it.
+var TF_HOME_COVERS = ['msg-overlay','profile-overlay','notif-overlay','reel-overlay',
+    'settings-overlay','activity-overlay','saved-overlay','archive-overlay',
+    'groups-overlay','group-page-overlay','drafts-overlay','scheduled-overlay',
+    'contact-profile-overlay','cp-privacy-overlay','trustAnalyticsOverlay',
+    'liveSettingsPage','user-profile-overlay'];
+
+function tfOnHomeFeed() {
+    function showing(el) { return !!el && getComputedStyle(el).display !== 'none'; }
+    if (TF_HOME_COVERS.some(function (id) { return showing(document.getElementById(id)); })) return false;
+    if (document.getElementById('tfMarketOverlay')) return false;
+    return !Array.prototype.some.call(document.querySelectorAll('.settings-sub-overlay'), showing);
+}
+
+function navHome(opts) {
+    // Tapping Home while already on it scrolls back to the top, as in every
+    // feed app. Coming back to Home from another page keeps your place: it
+    // used to scroll to the top every time, so a look at a profile or the
+    // clips page cost you where you were in the feed. The laptop sidebar
+    // closes pages before calling this, so it says which case it is.
+    var wasHome = (opts && typeof opts.wasHome === 'boolean') ? opts.wasHome : tfOnHomeFeed();
     navSetState('collapsed');
     var homeIcon = document.getElementById('nav-home');
     if (homeIcon) homeIcon.classList.add('nav-active');
 
     // Close ALL overlays including profile
-    ['msg-overlay','profile-overlay','notif-overlay','reel-overlay',
-     'settings-overlay','activity-overlay','saved-overlay','archive-overlay',
-     'groups-overlay','group-page-overlay','drafts-overlay','scheduled-overlay',
-     'contact-profile-overlay','cp-privacy-overlay','trustAnalyticsOverlay',
-     'liveSettingsPage','user-profile-overlay'].forEach(function(id){
+    TF_HOME_COVERS.forEach(function(id){
         var el = document.getElementById(id);
         if (el) el.style.display = 'none';
     });
@@ -34414,7 +34492,10 @@ function navHome() {
     if (nav) nav.style.display = 'flex';
 
     var feed = document.getElementById('feed-panels');
-    if (feed) { feed.style.display = ''; feed.scrollTo({ top:0, behavior:'smooth' }); }
+    if (feed) {
+        feed.style.display = '';
+        if (wasHome) feed.scrollTo({ top:0, behavior:'smooth' });
+    }
 
     triggerHaptic(10);
 }
@@ -38056,10 +38137,11 @@ async function submitQuoteRetweet(quotedPostId) {
     if (modal) modal.remove();
     showToast('Quoted!');
     triggerHaptic(40);
+    var _cqOwner = currentUser && currentUser.id;
     var _cqEntry = null; try { _cqEntry = JSON.parse(localStorage.getItem('tf-cached-feed') || 'null'); } catch(e) {}
-    var cached = (_cqEntry && Array.isArray(_cqEntry.posts)) ? _cqEntry.posts : (Array.isArray(_cqEntry) ? _cqEntry : []);
+    var cached = (_cqEntry && _cqEntry.uid === _cqOwner && Array.isArray(_cqEntry.posts)) ? _cqEntry.posts : [];
     if (result && result.data) cached.unshift(result.data);
-    localStorage.setItem('tf-cached-feed', JSON.stringify({ ts: Date.now(), posts: cached.slice(0,50) }));
+    if (_cqOwner) { try { localStorage.setItem('tf-cached-feed', JSON.stringify({ ts: Date.now(), uid: _cqOwner, posts: cached.slice(0,50) })); } catch(e) {} }
 }
 
 // ============================================================

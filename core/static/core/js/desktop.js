@@ -125,13 +125,17 @@ function tfDeskCloseAll() {
 }
 
 function tfDeskGo(key) {
+    // Asked before anything closes: Home scrolls to the top only when it is
+    // clicked while the feed is already what you are looking at.
+    var fromHome = tfDeskCurrentTab() === 'home' &&
+        (typeof tfOnHomeFeed !== 'function' || tfOnHomeFeed());
     tfDeskSetActive(key);
     // Home as well: navHome closes the phone's pages, and knows nothing about
     // Explore or Marketplace, which stayed on screen over the feed.
     tfDeskCloseAll();
     try {
         if (key === 'home') {
-            if (typeof navHome === 'function') navHome();
+            if (typeof navHome === 'function') navHome({ wasHome: fromHome });
             return;
         }
         var fn = TF_DESK_ROUTES[key];

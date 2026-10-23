@@ -1,8 +1,16 @@
+from urllib.parse import urlsplit
+
 from django.conf import settings
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import render
 
 from . import seo
+
+
+def _origin(url):
+    """scheme://host of a URL, or '' if it is not one."""
+    parts = urlsplit(url or '')
+    return '%s://%s' % (parts.scheme, parts.netloc) if parts.scheme and parts.netloc else ''
 
 
 def feed(request, target_id=None, username=None):
@@ -29,6 +37,12 @@ def feed(request, target_id=None, username=None):
     return render(request, 'core/feed.html', {
         'seo': tags,
         'seo_ld': seo.ld_json(tags.get('ld')),
+        # Hosts the page will need before its script is ready to ask: the
+        # database, and the media host where post photos live. Naming them in
+        # <head> lets a phone open those connections while the script loads,
+        # instead of starting each handshake only when the first photo is due.
+        'supabase_origin': _origin(settings.SUPABASE_URL),
+        'media_origin': _origin(settings.R2_PUBLIC_BASE),
     })
 
 

@@ -115,6 +115,26 @@ class SharedLinkTests(Base):
 
 
 @override_settings(APP_PUBLIC_URL='https://app.gettrustfirst.co.za',
+                   SUPABASE_URL='https://x.supabase.co/', SUPABASE_SERVICE_KEY='k',
+                   R2_PUBLIC_BASE='https://pub-abc.r2.dev/some/prefix')
+class EarlyConnectionTests(Base):
+    """The page names the hosts its photos and data come from, so a phone can
+    open those connections while the script is still loading."""
+
+    def test_the_page_asks_for_both_connections_early(self):
+        self.with_rows({})
+        html = self.client.get('/').content.decode()
+        self.assertIn('<link rel="preconnect" href="https://pub-abc.r2.dev">', html)
+        self.assertIn('<link rel="preconnect" href="https://x.supabase.co" crossorigin>', html)
+
+    @override_settings(R2_PUBLIC_BASE='')
+    def test_no_media_host_no_hint(self):
+        self.with_rows({})
+        html = self.client.get('/').content.decode()
+        self.assertNotIn('r2.dev', html)
+
+
+@override_settings(APP_PUBLIC_URL='https://app.gettrustfirst.co.za',
                    SUPABASE_URL='https://x.supabase.co', SUPABASE_SERVICE_KEY='k')
 class NothingPrivateLeaksTests(Base):
     """Each of these must describe the app, not the thing, and say noindex."""
