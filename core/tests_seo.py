@@ -134,6 +134,24 @@ class EarlyConnectionTests(Base):
         self.assertNotIn('r2.dev', html)
 
 
+class MediaHostPolicyTests(SimpleTestCase):
+    """Downloads fetch() files back from the media host, so the policy allows
+    wherever R2_PUBLIC_BASE points, a custom domain included."""
+
+    def test_a_custom_domain_is_allowed(self):
+        from core_project.settings import _media_connect_src
+        self.assertEqual(_media_connect_src('https://media.gettrustfirst.co.za/', ["'self'"]),
+                         ["'self'", 'https://media.gettrustfirst.co.za'])
+        self.assertEqual(_media_connect_src('https://media.gettrustfirst.co.za',
+                                            ["'self'", 'https://media.gettrustfirst.co.za']),
+                         ["'self'", 'https://media.gettrustfirst.co.za'])
+
+    def test_nothing_added_for_r2_dev_or_no_host(self):
+        from core_project.settings import _media_connect_src
+        for base in ('', 'https://pub-abc.r2.dev/x', 'http://media.example', 'not a url'):
+            self.assertEqual(_media_connect_src(base, ["'self'"]), ["'self'"], base)
+
+
 @override_settings(APP_PUBLIC_URL='https://app.gettrustfirst.co.za',
                    SUPABASE_URL='https://x.supabase.co', SUPABASE_SERVICE_KEY='k')
 class NothingPrivateLeaksTests(Base):

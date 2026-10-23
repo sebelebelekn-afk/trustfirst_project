@@ -4,6 +4,7 @@ Django settings for core_project project.
 
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -741,6 +742,21 @@ CONTENT_SECURITY_POLICY = {
         "frame-ancestors": ["'self'"],
     }
 }
+
+# Downloads read finished files back from R2_PUBLIC_BASE with fetch(), which
+# connect-src governs. *.r2.dev above covers the development address; a custom
+# domain (media.gettrustfirst.co.za, say) is named from the setting itself, so
+# moving to one is a change of R2_PUBLIC_BASE and nothing else.
+def _media_connect_src(base, sources):
+    parts = urlsplit(base or '')
+    if parts.scheme != 'https' or not parts.netloc or parts.netloc.endswith('.r2.dev'):
+        return sources
+    origin = 'https://' + parts.netloc
+    return sources if origin in sources else sources + [origin]
+
+
+CONTENT_SECURITY_POLICY["DIRECTIVES"]["connect-src"] = _media_connect_src(
+    R2_PUBLIC_BASE, CONTENT_SECURITY_POLICY["DIRECTIVES"]["connect-src"])
 
 # ------------------------------------------------------------------
 # LOGGING
